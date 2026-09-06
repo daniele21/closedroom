@@ -150,6 +150,15 @@ class HeavyWorkloadArbiter:
                 raise WorkloadArbiterClosed("heavy-workload arbiter is shutting down")
             if task_id in self._pending or task_id in self._active:
                 raise ValueError(f"task is already scheduled: {task_id}")
+            # A worker may have dequeued an item but still hold it in the pending
+            # state while capture owns priority. Bound the logical pending set,
+            # not only the physical Queue slots, so reservation cannot increase
+            # memory/work admission above the configured capacity.
+            if len(self._pending) >= self.queue_capacity:
+                self._rejected += 1
+                raise WorkloadQueueFull(
+                    f"heavy-workload queue is full ({self.queue_capacity} pending); retry later"
+                )
             try:
                 self._queue.put_nowait(item)
             except queue.Full as exc:
