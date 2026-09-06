@@ -1,47 +1,53 @@
 # ClosedRoom — Coding Agent Guide
 
-Repository-wide routing layer. Detailed architecture belongs in `docs/architecture.md`, feature behavior in `docs/features.md`, operations in `.engineering/commands.json`, and fidelity in `.engineering/e2e.json`.
-
-## Read only what the task requires
-
-Always read this guide, then the closest scoped `AGENTS.md`, owning code/tests and only the relevant architecture/feature/design/operating contracts. Do not ingest generated bundles, model caches, dependencies or historical plans for a local change.
-
-## Purpose and invariants
-
 ClosedRoom is a privacy-first macOS meeting workspace built around a loopback FastAPI service, native audio helpers, local AI runtimes and a React UI in WKWebView.
 
-Preserve: local-first default with no implicit cloud fallback; no sensitive content in ordinary telemetry; loopback/auth/origin restrictions; canonical persistence owners; path resolution through settings/paths; bounded/cancellable recording/job/model lifecycles; restoration of run-owned native capture state; Cocoa/WebKit main-thread mutation; truthful model/resource telemetry; deterministic fixtures before production downloads; `frontend/src/` as UI source; immutable finalized artifacts.
+## Durable invariants
 
-## Ownership routing
+- Local-first by default: no implicit cloud fallback and no sensitive meeting content in ordinary telemetry.
+- Loopback/auth/origin restrictions and canonical persistence owners remain explicit.
+- Recording/job/model/native-capture lifecycles are bounded, cancellable and restore run-owned state on every applicable exit path.
+- Paths resolve through settings/path owners; Cocoa/WebKit mutations remain on the main thread.
+- Model/resource telemetry stays truthful; deterministic fixtures never become representative MLX/Metal, TCC, physical-audio or interactive target-Mac evidence.
+- `frontend/src/` is the UI source of truth; finalized artifacts are immutable.
 
-API -> `server.py`, routers/schemas/services. Persistence -> recordings/catalog/transcriptions/jobs. ASR/LLM -> runtime/service owners. Native audio -> capture/helpers/router/permissions. Frontend -> `frontend/src/` + design contracts. Packaging -> `scripts/build_artifact.sh`, `ClosedRoom.spec`, finalizer/smoke. CI -> selector + `.github/workflows/preflight.yml`.
+## Ownership
 
-## Delivery model
+| Change | Owner | Inspect / prove |
+| --- | --- | --- |
+| API | `server.py`, routers/schemas/services | clients + API tests |
+| Persistence | recordings/catalog/transcriptions/jobs | migration/recovery tests |
+| ASR/LLM | runtime/service owners | lifecycle/resource tests |
+| Native audio | capture/helpers/router/permissions | TCC/audio lifecycle evidence |
+| Frontend | `frontend/src/` + `design/*` | browser/UI journeys |
+| Packaging | `scripts/build_artifact.sh`, `ClosedRoom.spec` | finalizer/smoke/artifact evidence |
+| CI | selector + `.github/workflows/preflight.yml` | exact-head/base evidence |
 
-ClosedRoom follows repo-template-sw **0.9.2**.
+Follow the closest scoped `AGENTS.md`. Extend one canonical owner before introducing state/policy; inspect material consumers when a shared boundary changes.
 
-- `ITERATION`: default while implementation is changing. Use focused owner-local checks; durable docs/exact-head/preflight are not required after every edit.
-- `INTEGRATION`: a coherent observable outcome is ready to converge into `dev`. Exact head, complete diff, affected durable docs and required automated risk/E2E gates must be current. Residual `REAL_ENVIRONMENT` evidence is declared and deferred; it does not block a PR into `dev`.
-- `RELEASE`: promotion is `dev -> main`. FULL validation plus release-critical artifact/E2E and every applicable blocking `REAL_ENVIRONMENT` confirmation are required before release readiness.
+## Read by task
 
-The selector maps **risk dimensions -> required gates -> LEAN/SCOPED/STRONG/FULL summary**. Profiles are shorthand, not the source of truth.
+| Task | Read now |
+| --- | --- |
+| Pure docs/copy | affected source/links; `docs/README.md` only if ownership unclear |
+| Behavior/bug/contract | `skills/structured-change/SKILL.md`, `skills/validate-change/SKILL.md`, relevant commands |
+| Material UI | above + `skills/design-product-experience/SKILL.md`, relevant `design/*` |
+| Integration/release | `skills/preflight-change/SKILL.md`, commands, affected `.engineering/e2e.json` |
+| Missing deterministic remote gate | `skills/remote-preflight/SKILL.md` |
+| Persistent multi-session work | `skills/plan-workstream/SKILL.md` + active plan; finalize with `skills/finalize-workstream/SKILL.md` |
 
-Parallel technical work should converge early around vertical outcomes. Stacked publication is exceptional; do not create sync-only PR chains.
+## Delivery and evidence
 
-## Validation and evidence
+- **ITERATION**: focused owner-local falsification; no exact-head/full-diff/docs/publication ceremony per edit.
+- **INTEGRATION** (`PR -> dev`): coherent observable outcome, exact head/base, complete diff, affected durable docs, required automated gates and affected automated E2E. Material UI/UX integration journeys require `FULL_MEDIA`. Genuine TCC, physical-audio, representative MLX/Metal or interactive target-Mac gaps are `DEFERRED_TO_RELEASE`.
+- **RELEASE** (`dev -> main`): `FULL` plus release-critical artifact/E2E and every applicable required target-Mac confirmation.
 
-`.github/workflows/preflight.yml` is the canonical remote validator. It always runs repository/governance guards, defers expensive macOS source/package jobs during draft iteration, and runs them at integration/release only when the selector requires them.
+The selector resolves risks -> concrete gates -> profile. Profiles are shorthand. `.github/workflows/preflight.yml` owns remote deterministic validation; missing local tooling never makes the user the fallback runner. Reuse evidence only when head/tree/base/gates/profile/material E2E identity remain equivalent.
 
-Successful integration evidence is reusable. Before merge use exact-head identity. After a content-preserving merge to `dev`, the workflow may reuse evidence only when Git tree, prior target/base, gates and profile are equivalent. Direct pushes without trusted evidence validate normally. Release remains FULL and does not silently inherit integration proof.
+## Context, diagnosis and completion
 
-For PRs targeting `dev`, satisfy affected deterministic and automated E2E gates only. `target-macos-real` must not be introduced as an integration blocker. Any genuine TCC, physical-audio, representative MLX/Metal or interactive target-Mac gap is reported as `DEFERRED_TO_RELEASE`.
+`.engineering/documentation-policy.json` owns bounded context routes. Use `python3 scripts/verify_agent_context.py --route bug --format json`, optionally with `--path`/`--workstream`; routes estimate context cost, not validation scope.
 
-For `dev -> main`, applicable target-environment evidence is blocking. E2E UI evidence remains risk-based: `ASSERTIONS`, `SCREENSHOTS`, `FULL_MEDIA`; material UI/UX integration journeys use `FULL_MEDIA`, while incidental UI may remain assertion-only. Hosted macOS does not prove real TCC, physical audio or interactive target-Mac behavior; `python3 scripts/real_environment_ui_evidence.py --build` owns that residual release evidence.
+For meaningful work state observable outcome, owner, invariants and proof. Classify failures before patching. Each failed repair needs a falsifiable hypothesis; after two failed repairs with the same signature, change diagnostic strategy and obtain new discriminating evidence before a third. On resume refresh head/tree/base; checkpoint evidence is a pointer, not current-source proof.
 
-## Documentation
-
-Durable documentation must be current when moving to `INTEGRATION`, not on every private edit. Keep README identity separate from README usage. `docs/current-state.md` owns integrated/blocked/next repository truth, not agent diaries. Delete completed workstreams after transferring durable truth.
-
-## Failure discipline
-
-Classify red gates before editing: change regression, baseline failure, environment, flaky, base drift or assumption. Fix the owning invariant; never weaken legitimate tests for green CI. Surface requests that would create a second owner, silently weaken privacy/auth/migration/resource cleanup, mutate finalized artifacts or overclaim evidence.
+Before integration update affected canonical docs. Transfer durable truth and deferred release obligations before deleting completed plans. Never weaken privacy/auth/migration/resource cleanup, mutate finalized artifacts, create a second owner or overclaim hosted macOS evidence as target-Mac proof.
