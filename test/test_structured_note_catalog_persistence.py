@@ -88,6 +88,7 @@ class StructuredNoteCatalogPersistenceTests(unittest.TestCase):
             self.assertIsNotNone(persisted)
             self.assertEqual(persisted["result"]["generated"]["actions"][0]["text"], "Alex validates the release")
             self.assertEqual(persisted["result"]["user_edits"][0]["fields"]["text"], "Alex validates release readiness")
+            self.assertEqual(persisted["result"]["user_edits"][0]["base_generated"]["source_refs"][0]["start"], 5.0)
 
             projected = expand_analysis_runs(reopened.list_analysis_runs(transcription_id="trans-1"))
             action_view = next(item for item in projected if item["id"] == "run-1::action_items")
@@ -123,10 +124,10 @@ class StructuredNoteCatalogPersistenceTests(unittest.TestCase):
             self.assertEqual(action_view["result"]["revision"]["supersedes_run_id"], "run-1")
             self.assertEqual(action_view["result"]["effective"]["actions"][0]["text"], "Alex validates the release with QA")
             self.assertEqual(action_view["result"]["conflicts"][0]["reason"], "generated_changed")
-            self.assertEqual(
-                action_view["result"]["conflicts"][0]["retained_edit"]["fields"]["text"],
-                "Alex validates release readiness",
-            )
+            retained = action_view["result"]["conflicts"][0]["retained_edit"]
+            self.assertEqual(retained["fields"]["text"], "Alex validates release readiness")
+            self.assertEqual(retained["base_generated"]["text"], "Alex validates the release")
+            self.assertEqual(retained["base_generated"]["source_refs"][0]["speaker"], "Alex")
 
 
 if __name__ == "__main__":
