@@ -1,12 +1,12 @@
 # ClosedRoom: useful notes, simple journeys and efficient execution
 
-Status: active — PRS-16 integration candidate
+Status: active — PRS-17 ready
 Owner: meeting product, canonical job/persistence owners and local runtime
-Baseline: dev `b0922314`, 2026-09-06.
+Baseline: dev `eb92df6d`, 2026-09-06.
 
 ## Outcome and invariants
 
-Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-15 are integrated; PRS-16 is the current candidate. No production performance or memory gain is claimed without representative evidence.
+Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-16 are integrated; PRS-17 is the next ready slice. No production performance or memory gain is claimed without representative evidence.
 
 - Meeting is primary; normal recording requires no technical choice.
 - `Prepare notes` is explicit after Stop; `Transcript only` is secondary.
@@ -24,8 +24,8 @@ Record, prepare useful notes, verify decisions and find them later while the Mac
 | PRS-13 | Consistent notes with less repeated inference | analysis templates/jobs/service/catalog reads | PRS-12 | DONE |
 | PRS-14 | Verify/edit actions and decisions | notes schema/catalog, transcript, Meeting UI | PRS-13 | DONE |
 | PRS-15 | Search complete local archive | CatalogStore, workspace/API/UI | — | DONE |
-| PRS-16 | Record safely while AI is busy | resource policy/arbiter, capture admission, recording UI | — | INTEGRATION |
-| PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | BLOCKED |
+| PRS-16 | Record safely while AI is busy | resource policy/arbiter, capture admission, recording UI | — | DONE |
+| PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | READY |
 | PRS-18 | Measured release | current-state, benchmarks, target-Mac evidence | selected increments | BLOCKED |
 
 Default sequence: 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17. Shared schema/service/UI edits remain serialized into coherent outcome PRs.
@@ -52,11 +52,10 @@ Actions/decisions have stable source-anchored identity, immutable generated cont
 
 Every persisted Meeting is discoverable without loading the whole archive into React. `CatalogStore` owns an FTS5 projection inside `closedroom.db`; canonical mutations mark affected ids dirty and search refreshes them incrementally. `GET /v1/meetings?q=...` provides bounded paging/exact project filtering; `⌘K` owns global archive search. FTS5 absence fails explicitly. PR #39 integrated source/frontend tests, `meeting-archive-search` FULL_MEDIA and packaged FTS5 smoke at `dev@3604ffbe`.
 
-## PRS-16 — recording while AI is busy — integration candidate
+### PRS-16 — recording while AI is busy
 
-Goal: make Start meeting win the next safe resource boundary without killing useful AI work, losing queued work or pretending capture has started before it has.
+Start meeting now wins the next safe resource boundary without killing useful AI work, losing queued work or pretending capture has started before it has.
 
-Implementation candidate:
 - `HeavyWorkloadArbiter` remains the single heavy-work owner and owns one ephemeral capture reservation; no new scheduler, store or model-lifecycle owner;
 - reservation is `waiting` while managed heavy work is active and becomes `granted` only after active work reaches normal completion; no thread/process kill;
 - while reserved, pending work stays in the existing bounded queue and cannot become active; work submitted during reserved capture queues within existing capacity;
@@ -67,18 +66,9 @@ Implementation candidate:
 - New Meeting shows truthful preparation while AI finishes, keeps the timer stopped and offers `Annulla`; real recording state starts only after capture does;
 - external runtimes remain caller-owned.
 
-Acceptance before merge:
-- AI-active -> Start cannot let queued heavy work overtake capture or force-kill active work;
-- capture-active -> new managed heavy work remains bounded and resumes after release;
-- reservation/cancellation races preserve queue and cancellation semantics;
-- duplicate reservation is rejected; stale/missing client release is safe;
-- UI distinguishes preparing/waiting from recording and provides cancellation without false instant-start;
-- `record-while-ai-busy` FULL_MEDIA proves Ready -> waiting/cancel -> recording -> Stop -> release/resume with synthetic data;
-- source-contract tests independently prove scheduler ordering.
+PR #41 integrated at `dev@eb92df6d`. The authoritative STRONG preflight on the exact candidate tree passed governance, frontend checks, 406 Python tests, all five declared Meeting browser FULL_MEDIA journeys and packaged-app build/lifecycle smoke. The post-merge preflight reused that tree-equivalent evidence and completed successfully. Physical audio, TCC/WKWebView and representative MLX/Metal/thermal behavior remain release-only REAL_ENVIRONMENT evidence.
 
-Checks: workload-arbiter/capture-admission tests, frontend contract/lint/typecheck, affected Meeting browser FULL_MEDIA including `record-while-ai-busy`, packaged-app lifecycle and selector-owned STRONG validation. Physical audio, TCC/WKWebView and representative MLX/Metal/thermal behavior remain release-only REAL_ENVIRONMENT evidence.
-
-## PRS-17 — coherent macOS workspace
+## PRS-17 — coherent macOS workspace — ready
 
 Unify hierarchy across Today, Meeting, Projects, themes and supported window sizes. Keep one dominant action per state, advanced tools discoverable, async navigation stable and focus/keyboard/reduced-motion semantics intact. Component/routing checks plus complete journey FULL_MEDIA; SCOPED expected unless contracts expand.
 
