@@ -60,7 +60,7 @@ class CatalogMeetingSearch:
 
             if terms:
                 match = " AND ".join(f'"{term}"*' for term in terms)
-                project_clause = "AND project_name = ?" if project else ""
+                project_clause = "AND recordings.project_name = ?" if project else ""
                 params: list[Any] = [match]
                 if project:
                     params.append(project)
@@ -69,6 +69,7 @@ class CatalogMeetingSearch:
                         f"""
                         SELECT COUNT(*)
                         FROM meeting_search_fts
+                        JOIN recordings ON recordings.id = meeting_search_fts.recording_id
                         WHERE meeting_search_fts MATCH ? {project_clause}
                         """,
                         params,
@@ -76,10 +77,12 @@ class CatalogMeetingSearch:
                 )
                 rows = conn.execute(
                     f"""
-                    SELECT recording_id
+                    SELECT meeting_search_fts.recording_id
                     FROM meeting_search_fts
+                    JOIN recordings ON recordings.id = meeting_search_fts.recording_id
                     WHERE meeting_search_fts MATCH ? {project_clause}
-                    ORDER BY bm25(meeting_search_fts), created_at DESC, recording_id ASC
+                    ORDER BY bm25(meeting_search_fts), meeting_search_fts.created_at DESC,
+                             meeting_search_fts.recording_id ASC
                     LIMIT ? OFFSET ?
                     """,
                     [*params, limit, offset],
