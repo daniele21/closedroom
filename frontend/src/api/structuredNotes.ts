@@ -27,6 +27,7 @@ export interface StructuredNoteEdit {
   item_id: string;
   base_generated_hash: string;
   base_run_id: string;
+  base_generated?: StructuredNoteItem | null;
   fields: Record<string, string | null>;
   updated_at: number;
 }
