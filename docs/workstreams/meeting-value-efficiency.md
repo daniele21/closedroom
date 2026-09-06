@@ -1,19 +1,19 @@
 # ClosedRoom: useful notes, simple journeys and efficient execution
 
-Status: active — PRS-15 integration candidate
+Status: active — PRS-16 integration candidate
 Owner: meeting product, canonical job/persistence owners and local runtime
-Baseline: dev `a3902f3c`, 2026-09-06.
+Baseline: dev `3604ffbe`, 2026-09-06.
 
 ## Outcome and invariants
 
-Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-14 are integrated; PRS-15 is the current integration candidate. No production-model performance or memory gain is claimed without representative evidence.
+Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-15 are integrated; PRS-16 is the current integration candidate. No production-model performance or memory gain is claimed without representative evidence.
 
 - Meeting is primary; normal recording requires no technical choice.
 - `Prepare notes` is explicit after Stop; `Transcript only` is secondary.
 - Reuse valid transcript, then existing notes analysis. Ready notes open first; explicit tab selection wins.
 - Audio/transcript survive enrichment failure/cancel. Local-first and explicit cloud opt-in remain unchanged.
 - Canonical owners stay unchanged: RecordingStore capture, JobStore durable jobs, CatalogStore persisted runs/indexes, HeavyWorkloadArbiter heavy-work scheduling, runtime services managed cleanup.
-- Excluded: rewrite, second scheduler/runtime/index owner, implicit cloud, mandatory visuals, unproven audio strategy.
+- Excluded: rewrite, second scheduler/runtime/index owner, implicit cloud, mandatory visuals, unsafe thread/process kill, unproven audio strategy.
 
 ## Work graph
 
@@ -23,12 +23,12 @@ Record, prepare useful notes, verify decisions and find them later while the Mac
 | PRS-12 | One recoverable Prepare notes action | jobs, analysis/transcription services, Meeting UI | PRS-11 | DONE |
 | PRS-13 | Consistent notes with less repeated inference | analysis templates/jobs/service/catalog reads | PRS-12 | DONE |
 | PRS-14 | Verify/edit actions and decisions | notes schema/catalog, transcript, Meeting UI | PRS-13 | DONE |
-| PRS-15 | Search complete local archive | CatalogStore, workspace/API/UI | — | INTEGRATION |
-| PRS-16 | Record safely while AI is busy | RecordingStore, resource policy/arbiter/runtime | — | READY |
+| PRS-15 | Search complete local archive | CatalogStore, workspace/API/UI | — | DONE |
+| PRS-16 | Record safely while AI is busy | resource policy/arbiter, capture admission, recording UI | — | INTEGRATION |
 | PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | BLOCKED |
 | PRS-18 | Measured release | current-state, benchmarks, target-Mac evidence | selected increments | BLOCKED |
 
-Default sequence: 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17. PRS-15/16 may advance earlier, but shared schema/service/UI edits remain serialized into coherent outcome PRs.
+Default sequence: 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17. Shared schema/service/UI edits remain serialized into coherent outcome PRs.
 
 ## PRS-11 — integrated
 
@@ -54,36 +54,41 @@ Actions and decisions now carry stable source-anchored identity, immutable gener
 
 Integration evidence included domain identity/overlay/revision tests, real CatalogStore reopen persistence, API stale-generation/rebase/discard coverage, frontend contract checks, the `meeting-note-edit-revision` FULL_MEDIA journey and packaged-app validation. Target WKWebView focus/accessibility and production-model behavior remain release confirmation when material.
 
-## PRS-15 — complete search, bounded archive — integration candidate
+## PRS-15 — integrated complete bounded archive search
 
-Goal: make every persisted Meeting discoverable from the normal search surface without loading the whole archive or relying on compact preview text in React.
+Every persisted Meeting is discoverable from the normal search surface without loading the whole archive or relying on compact preview text in React.
+
+`CatalogStore` remains the canonical persistence owner. `CatalogMeetingSearch` uses a derived FTS5 projection inside the same `closedroom.db`; canonical recording/transcription/analysis mutations mark affected recording ids dirty through SQLite triggers and search refreshes only those rows transactionally. First search backfills existing data once, with schema metadata and row-count healing for restored/copied databases.
+
+`GET /v1/meetings` stays backward-compatible without `q`; a supplied query uses bounded paged archive search with exact project filtering. Today no longer owns global-search state; `⌘K` opens a dedicated archive dialog with bounded server pages, stale-request cancellation, loading/error/empty/load-more states and query restoration across source navigation. FTS5 absence fails explicitly instead of falling back to an unbounded scan.
+
+Integration evidence covered catalog/API/frontend tests, `meeting-archive-search` FULL_MEDIA, bundled FTS5 capability in packaged lifecycle smoke and selector-owned STRONG validation before PR #39 was squash-merged to `dev@3604ffbe`.
+
+## PRS-16 — recording while AI is busy — integration candidate
+
+Goal: make Start meeting win the next safe resource boundary without killing useful AI work, losing queued work or pretending capture has started before it really has.
 
 Implementation candidate:
-- `CatalogStore` remains the canonical persistence owner. `CatalogMeetingSearch` creates a derived FTS5 projection inside the same `closedroom.db`; there is no second database, scheduler or archive owner;
-- SQLite triggers on canonical recording, transcription and analysis-run tables only mark affected recording ids dirty. Before a search, dirty ids are refreshed transactionally from current canonical rows, including the latest visible transcript and latest completed analysis revision per type;
-- the first search backfills the existing catalog once. A schema marker plus row-count healing handles restored/copied databases; subsequent mutations stay incremental through the dirty set;
-- user query text is tokenized as plain bounded text rather than accepted as raw FTS syntax. Search is capped at 12 terms, 64 characters per term and 50 results per page;
-- `GET /v1/meetings` keeps the legacy recent-list response when `q` is omitted. Supplying `q` (including an empty string) opts into complete paged archive search with stable `page`, `limit`, `total`, `has_more` and optional exact project filtering;
-- search result ordering is relevance then creation time/id for text queries, and creation time/id for blank archive paging;
-- the Today page no longer filters its compact recent data when the user searches. `⌘K` opens a dedicated archive dialog that requests bounded pages, handles stale requests/loading/error/empty states, and preserves the query across source navigation;
-- demo mode remains local to deterministic demo fixtures; production search remains server-side and local-only;
-- FTS5 absence is an explicit 503 capability failure, never a fallback to whole-archive Python/React scanning. Packaged-app smoke probes the authenticated search endpoint inside the frozen runtime so hosted source Python cannot hide a packaging gap.
+- `HeavyWorkloadArbiter` remains the single process-wide owner for heavy-work scheduling and now owns one ephemeral capture reservation; no new scheduler, persistence store or model-lifecycle owner is introduced;
+- a reservation is `waiting` while a managed heavy workload is active and becomes `granted` only after active work reaches its normal completion/safe boundary. Active work is never thread-killed or force-stopped;
+- while a reservation exists, pending work remains in the same bounded queue and no queued item becomes active. Work submitted during reserved/active capture is queued within the existing capacity rather than being failed only because capture is active;
+- the queue cap is enforced against the logical pending set as well as the physical `queue.Queue`, including the case where a worker already dequeued an item but is holding it behind capture priority;
+- legacy/unreserved capture remains fail-safe through the existing `ResourcePolicy(capture_active)` admission guard;
+- `/v1/capture/reservations` exposes a loopback/authenticated transient handshake. Reservation ids are ephemeral capability tokens, never persisted in RecordingStore or emitted through resource telemetry;
+- `useRecorder` obtains the reservation before creating/starting capture, keeps the token locally through the recording, releases it after Stop/failure/recovery and ignores duplicate Start while a handshake is already running;
+- New Meeting shows `Preparazione registrazione` while an active AI phase finishes, explicitly says that recording has not started yet, keeps the timer stopped and offers `Annulla` while waiting. Once granted it moves through source setup to the existing real recording state;
+- external runtimes remain caller-owned. The reservation coordinates ClosedRoom managed heavy work only and does not claim authority to suspend arbitrary external services.
 
 Acceptance before merge:
-- a meeting outside the old recent/preview limits is found by title, project, full transcript or current notes;
-- blank-query paging and project filtering are stable, bounded and non-overlapping;
-- title/project, transcript, analysis edit/revision and deletion mutations refresh search without manual reindexing;
-- reopen preserves search and copied/restored databases heal the derived projection;
-- Today remains independent from global-search state and never extracts the whole archive into React;
-- stale frontend responses cannot replace a newer query, and loading/error/empty/load-more states are explicit and keyboard reachable;
-- `meeting-archive-search` FULL_MEDIA proves recent Today -> `⌘K` -> archive-only hit -> source open -> Back -> restored query;
-- packaged `.app` lifecycle smoke proves the bundled SQLite runtime can execute the FTS5 archive endpoint.
+- AI-active -> Start cannot allow a queued heavy job to overtake capture and cannot force-kill the active job;
+- capture-active -> new managed heavy work stays bounded and resumes after Stop/release;
+- reservation and pending cancellation races preserve the existing bounded queue and cancellation semantics;
+- duplicate capture reservation is rejected deterministically and stale/missing release is safe at the client boundary;
+- the UI distinguishes ready / preparing / waiting / recording / finalizing and exposes cancellation while waiting without a false instant-start promise;
+- `record-while-ai-busy` FULL_MEDIA proves Ready -> Start -> truthful waiting/cancel -> granted recording -> Stop -> reservation release/AI resume with synthetic content only;
+- source-contract tests prove the actual scheduler ordering independently of the browser fixture.
 
-Checks: `test_catalog_meeting_search.py`, `test_meeting_archive_search_api.py`, `test_frontend_archive_search.py`, existing catalog/workspace/frontend suites, frontend lint/typecheck, browser FULL_MEDIA including `meeting-archive-search`, packaged-app FTS5/lifecycle smoke and selector-owned STRONG validation. Target-WKWebView focus/accessibility remains release confirmation when material.
-
-## PRS-16 — recording while AI is busy
-
-Resolve atomic capture/heavy-work admission for both orderings. Managed work may yield/cancel only at safe supported boundaries; no unsafe thread kill or false instant-start promise. Preserve data on wait/cancel/retry and keep external services caller-owned. Controlled worker/lifecycle races plus busy-AI -> record/stop -> resume FULL_MEDIA; physical capture/thermal evidence is release-only. STRONG expected.
+Checks: workload-arbiter/capture-admission tests, recording/frontend contract tests, frontend lint/typecheck, all affected Meeting browser FULL_MEDIA journeys including `record-while-ai-busy`, packaged-app lifecycle and selector-owned STRONG validation. Physical microphone/system-audio, TCC/WKWebView, representative MLX/Metal contention and thermal behavior remain release-only REAL_ENVIRONMENT evidence.
 
 ## PRS-17 — coherent macOS workspace
 
