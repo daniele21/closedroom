@@ -6,6 +6,7 @@ import unittest
 
 from local_asr_server.runtime.resource_policy import ResourcePolicyBlocked
 from local_asr_server.runtime.workload_arbiter import (
+    CaptureReservationConflict,
     HeavyWorkloadArbiter,
     WorkloadAdmissionRejected,
     WorkloadQueueFull,
@@ -101,6 +102,102 @@ class HeavyWorkloadArbiterTests(unittest.TestCase):
             self.assertEqual(arbiter.snapshot()["cancelled_pending"], 1)
         finally:
             release_first.set()
+            arbiter.shutdown()
+
+    def test_capture_reservation_waits_for_active_work_then_blocks_queued_work(self) -> None:
+        arbiter = HeavyWorkloadArbiter(max_concurrent=1, queue_capacity=2)
+        first_started = threading.Event()
+        release_first = threading.Event()
+        second_started = threading.Event()
+
+        def first() -> None:
+            first_started.set()
+            release_first.wait(timeout=2.0)
+
+        try:
+            arbiter.submit(task_id="one", workload_type="analysis", run=first)
+            self.assertTrue(first_started.wait(timeout=1.0))
+            reservation = arbiter.reserve_capture("capture-one")
+            self.assertEqual(reservation["status"], "waiting")
+
+            arbiter.submit(task_id="two", workload_type="transcription", run=second_started.set)
+            self.assertEqual(arbiter.snapshot()["queue_depth"], 1)
+
+            release_first.set()
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                if arbiter.capture_reservation("capture-one")["status"] == "granted":
+                    break
+                time.sleep(0.01)
+
+            self.assertEqual(arbiter.capture_reservation("capture-one")["status"], "granted")
+            self.assertFalse(second_started.wait(timeout=0.05))
+            self.assertTrue(arbiter.release_capture("capture-one"))
+            self.assertTrue(second_started.wait(timeout=1.0))
+        finally:
+            release_first.set()
+            arbiter.release_capture("capture-one")
+            arbiter.shutdown()
+
+    def test_work_submitted_during_reserved_capture_waits_instead_of_failing_admission(self) -> None:
+        capture_active = False
+        started = threading.Event()
+
+        def guard(_workload_type: str) -> None:
+            if capture_active:
+                raise ResourcePolicyBlocked("capture_active")
+
+        arbiter = HeavyWorkloadArbiter(
+            max_concurrent=1,
+            queue_capacity=2,
+            admission_guard=guard,
+        )
+        try:
+            self.assertEqual(arbiter.reserve_capture("capture-one")["status"], "granted")
+            capture_active = True
+            arbiter.submit(task_id="queued", workload_type="analysis", run=started.set)
+            self.assertEqual(arbiter.snapshot()["queue_depth"], 1)
+            self.assertFalse(started.wait(timeout=0.05))
+
+            capture_active = False
+            self.assertTrue(arbiter.release_capture("capture-one"))
+            self.assertTrue(started.wait(timeout=1.0))
+            self.assertEqual(arbiter.snapshot()["rejected"], 0)
+        finally:
+            arbiter.release_capture("capture-one")
+            arbiter.shutdown()
+
+    def test_pending_cancel_remains_effective_while_capture_is_reserved(self) -> None:
+        arbiter = HeavyWorkloadArbiter(max_concurrent=1, queue_capacity=2)
+        cancelled = threading.Event()
+        ran = threading.Event()
+        try:
+            self.assertEqual(arbiter.reserve_capture("capture-one")["status"], "granted")
+            arbiter.submit(
+                task_id="queued",
+                workload_type="analysis",
+                run=ran.set,
+                on_cancel=lambda _reason: cancelled.set(),
+            )
+            self.assertTrue(arbiter.cancel_pending("queued"))
+            self.assertTrue(cancelled.wait(timeout=1.0))
+            self.assertFalse(ran.is_set())
+            self.assertEqual(arbiter.snapshot()["cancelled_pending"], 1)
+        finally:
+            arbiter.release_capture("capture-one")
+            arbiter.shutdown()
+
+    def test_only_one_capture_reservation_can_be_active(self) -> None:
+        arbiter = HeavyWorkloadArbiter(max_concurrent=1, queue_capacity=2)
+        try:
+            first = arbiter.reserve_capture("capture-one")
+            self.assertEqual(first["status"], "granted")
+            with self.assertRaises(CaptureReservationConflict):
+                arbiter.reserve_capture("capture-two")
+            self.assertTrue(arbiter.release_capture("capture-one"))
+            self.assertEqual(arbiter.reserve_capture("capture-two")["status"], "granted")
+        finally:
+            arbiter.release_capture("capture-two")
             arbiter.shutdown()
 
     def test_resource_policy_rejects_submission_while_capture_is_active(self) -> None:
