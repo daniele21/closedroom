@@ -2,45 +2,44 @@
 
 ## Engineering baseline
 
-ClosedRoom follows `daniele21/repo-template-sw` **0.9.2** at maturity **L2** with `python`, `typescript`, `macos`, `local-ai`, `product-ui`. Changes integrate through `dev`; `dev -> main` is RELEASE. PRs into `dev` require selector-owned deterministic/E2E evidence, while applicable target-Mac `REAL_ENVIRONMENT` evidence is `DEFERRED_TO_RELEASE`.
+ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, with `python`, `typescript`, `macos`, `local-ai`, `product-ui`. Changes integrate through `dev`; `dev -> main` is RELEASE. PRs into `dev` require selector-owned deterministic/E2E evidence; applicable target-Mac `REAL_ENVIRONMENT` evidence is deferred to release.
 
 ## Integrated baseline
 
 - Exact-head/tree-equivalent remote preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
-- Product/runtime PRS-5..8 are integrated: Meeting-first defaults, visual intelligence on demand, bounded managed model residency and persisted SSE job progress with 512-event/job retention.
-- PRS-9 benchmark tooling is integrated; dual-track audio remains canonical until representative release evidence supports a change.
-- PRS-11 / PR #35: saved Meeting core content opens independently from diagnostics/visual routes, with local accessory recovery and browser FULL_MEDIA evidence.
-- PRS-12 / PR #36: `Prepare notes` is one durable Meeting workflow backed by a persisted `meeting_preparation` parent, reuse/cancel/restart/resume contracts and `meeting-preparation-recovery` FULL_MEDIA. Existing transcription/analysis managers and `HeavyWorkloadArbiter` remain execution owners.
-- PRS-13 / PR #37: implicit default notes use one shared structured v2 analysis instead of four overlapping physical jobs, with source-aware bounded extraction, virtual legacy projections and exact cache identity.
-- PRS-14 / PR #38 merged to `dev` at `a3902f3cd5620ace3550ec6d4e48aab1ab620a2f`: actions/decisions are source-verifiable and editable through a persisted overlay/revision model; regeneration conflicts are explicit and the `meeting-note-edit-revision` FULL_MEDIA journey is integrated.
-- Canonical target-Mac runner: `python3 scripts/real_environment_ui_evidence.py --build`. Production signing/notarization, subjective VoiceOver usability and representative MLX/Metal performance remain release claims.
+- PRS-5..9 are integrated: Meeting-first defaults, on-demand visual intelligence, bounded managed-model residency, persisted SSE job progress and audio-strategy benchmark tooling; dual-track audio stays canonical pending representative release evidence.
+- PRS-11 / #35: saved Meeting core content opens independently from diagnostics/visual routes.
+- PRS-12 / #36: `Prepare notes` is one durable recoverable Meeting workflow; existing execution owners remain canonical.
+- PRS-13 / #37: implicit default notes use one source-aware structured v2 analysis instead of four overlapping physical jobs.
+- PRS-14 / #38: source-verifiable editable actions/decisions persist through explicit revision/conflict semantics.
+- PRS-15 / #39 merged at `dev@3604ffbe`: complete local Meeting archive search is bounded, server-side and FTS5-backed; `meeting-archive-search` FULL_MEDIA and packaged FTS5 smoke are integrated.
+- Repository governance baseline 0.10.0 / #40 is integrated at `dev@b0922314` with bounded agent reporting, schema-2 context routes and refreshed preflight/validation skills.
+- Canonical target-Mac runner: `python3 scripts/real_environment_ui_evidence.py --build`.
 
 ## Current integration candidate
 
-PRS-15 is implemented on `feat/prs-15-complete-archive-search` from `dev@a3902f3c`. It replaces the old global-search behavior that depended on at most the recent RecordingStore window and compact transcript previews in React.
+PRS-16 on `feat/prs-16-record-while-ai-busy`, replayed onto `dev@b0922314`, closes the race between starting a meeting and managed heavy AI work without unsafe kill, a second scheduler or false instant-recording state.
 
-The candidate keeps `CatalogStore` as the persistence owner and adds a derived FTS5 projection inside the same SQLite database. Canonical recording/transcription/analysis mutations mark recording ids dirty through SQLite triggers; search refreshes only affected rows before serving results. First use backfills the existing catalog once, while schema metadata and row-count healing cover restored/copied databases.
+`HeavyWorkloadArbiter` remains the sole heavy-work owner. One ephemeral capture reservation waits for already-active managed work to finish normally, then prevents queued heavy work from starting for the recording lifetime. Work submitted during reserved capture stays in the same bounded queue and resumes after release; capacity is enforced against logical pending work even when a worker has dequeued an item behind capture priority.
 
-`GET /v1/meetings` remains backward-compatible when `q` is omitted. Supplying `q` opts into complete bounded archive paging with stable `page`, `limit`, `total`, `has_more` and optional exact project filtering. Text queries are interpreted as bounded plain text rather than raw FTS syntax; pages are capped at 50.
+`ResourcePolicy(capture_active)` remains the fail-safe for legacy/unreserved capture. `RecordingStore` remains the only recording persistence owner; reservation ids are transient and external runtimes remain caller-owned.
 
-The Today page is now independent from global-search state. `⌘K` opens a dedicated archive dialog that requests 25-item server pages, cancels/ignores stale responses, shows loading/error/empty/load-more states and preserves the query across source navigation. Demo-mode search stays local to synthetic demo fixtures.
+The frontend reserves capture before start, shows a truthful cancellable preparation state while AI finishes, starts the timer only with real capture, and releases priority on Stop/failure/recovery. Python tests cover ordering, bounds, cancellation and resume; `record-while-ai-busy` FULL_MEDIA covers the visible Ready -> waiting -> recording -> Stop -> resume sequence with synthetic data.
 
-FTS5 availability is fail-closed: there is no whole-archive fallback scan. The packaged-app lifecycle smoke probes the authenticated archive endpoint inside the frozen runtime, so integration evidence must prove the bundled SQLite runtime actually supports the capability.
-
-Expected integration depth is **STRONG** because the change touches persistence projection, API paging, material Meeting search UI, `.engineering/e2e.json` and packaged behavior. Required automated evidence includes catalog/API/frontend tests, all affected Meeting browser FULL_MEDIA journeys including `meeting-archive-search`, packaged-app FTS5/lifecycle smoke and repository validation on exact HEAD/base.
+Expected integration depth is **STRONG**: governance, source tests, affected browser FULL_MEDIA and packaged-app validation must pass on exact HEAD/base. Physical audio/TCC/WKWebView behavior and representative MLX/Metal/thermal contention remain release evidence.
 
 ## Release evidence still pending
 
-Representative CPU/RSS/Metal/thermal evidence, target-Mac UX/TCC/native-audio confirmation, PRS-9 representative audio comparison and any material production ASR/LLM quality/latency claim remain release work. PRS-15 does not claim a production performance improvement; it claims bounded archive behavior and packaged FTS5 capability only after automated evidence passes.
+Target-Mac UX/TCC/native audio, CPU/RSS/Metal/thermal evidence, PRS-9 representative audio comparison, production signing/notarization, subjective VoiceOver usability and material production ASR/LLM quality/latency claims remain release work. PRS-16 claims safe priority at the next supported managed-work boundary, not instant model pre-emption.
 
 ## Active workstreams
 
-- [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..14 integrated; PRS-15 integration candidate; PRS-16 ready.
+- [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..15 integrated; PRS-16 integration candidate; PRS-17 blocked on PRS-16.
 - [`product-runtime-simplification.md`](workstreams/product-runtime-simplification.md): PRS-10 convergence remains open.
 - [`ux-simplification.md`](workstreams/ux-simplification.md): deterministic work integrated; target-Mac confirmation remains a release gate.
 
 ## Next highest-value work
 
-1. Complete exact-head INTEGRATION validation for PRS-15; merge only if selector-required source/FULL_MEDIA/package gates agree.
-2. Advance PRS-16 recording-while-AI-busy on the integrated PRS-15 base.
-3. Then converge PRS-17 workspace UX and collect representative resource/audio/target-Mac evidence for PRS-18 / `dev -> main` release acceptance.
+1. Complete exact-head STRONG validation and integrate PRS-16 only if required gates agree.
+2. Advance PRS-17 coherent macOS workspace from fresh `dev`.
+3. Collect release evidence for PRS-18 / `dev -> main`.

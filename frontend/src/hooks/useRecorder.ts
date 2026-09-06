@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ApiClient, Recording } from '../api/apiClient';
+import {
+  createCaptureReservation,
+  getCaptureReservation,
+  releaseCaptureReservation,
+  releaseCaptureReservationOnUnload,
+} from '../api/captureAdmission';
 import { RECORDING_CHUNK_INTERVAL_MS } from '../api/config';
 import { useTranslation } from '../i18n/i18n';
 import { useToast } from '../context/ToastContext';
@@ -13,6 +19,8 @@ const AUDIO_METER_RENDER_INTERVAL_MS = 80;
 const AUDIO_METER_REACT_INTERVAL_MS = 250;
 const RECORDING_TIMER_INTERVAL_MS = 1000;
 const OVERLAY_STATUS_INTERVAL_MS = 500;
+const CAPTURE_RESERVATION_POLL_MS = 200;
+const CAPTURE_RESERVATION_STORAGE_KEY = 'closedroom-capture-reservation-id';
 
 export const openBrowserPopup = () => {
   const width = 295;
@@ -33,6 +41,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const { showToast } = useToast();
 
   const [isRecording, setIsRecording] = useState(false);
+  const [isPreparingRecording, setIsPreparingRecording] = useState(false);
+  const [isWaitingForAi, setIsWaitingForAi] = useState(false);
   const [timer, setTimer] = useState('00:00');
   const [signalLevel, setSignalLevel] = useState('-∞ dB');
   const [signalLevelMic, setSignalLevelMic] = useState('-∞ dB');
@@ -95,6 +105,10 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const startedAtRef = useRef(0);
   const routeActivatedRef = useRef(false);
   const captureBackendRef = useRef<'browser' | 'native'>('browser');
+  const captureReservationIdRef = useRef<string | null>(null);
+  const captureLeaseCommittedRef = useRef(false);
+  const startInFlightRef = useRef(false);
+  const cancelStartRequestedRef = useRef(false);
   const broadcastIntervalRef = useRef<any>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const currentMicDbRef = useRef<number>(-120);
@@ -126,9 +140,33 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     return normalized.includes('aggregate') || normalized.includes('combinat') || normalized.includes('local asr input');
   };
 
+  const releaseCaptureLease = useCallback(async () => {
+    const reservationId = captureReservationIdRef.current
+      || localStorage.getItem(CAPTURE_RESERVATION_STORAGE_KEY);
+    if (!reservationId) return;
+    try {
+      await releaseCaptureReservation(reservationId);
+      captureReservationIdRef.current = null;
+      captureLeaseCommittedRef.current = false;
+      localStorage.removeItem(CAPTURE_RESERVATION_STORAGE_KEY);
+    } catch (error) {
+      // Keep the token locally so a later recovery/mount can retry cleanup.
+      console.warn('Unable to release capture reservation:', error);
+      throw error;
+    }
+  }, []);
+
   // Interrupted recording session cleanup & recovery check
   useEffect(() => {
     const storedId = localStorage.getItem('asr-active-recording-id');
+    const storedReservationId = localStorage.getItem(CAPTURE_RESERVATION_STORAGE_KEY);
+    if (storedReservationId) captureReservationIdRef.current = storedReservationId;
+
+    const releaseRecoveredLease = () => {
+      if (!storedReservationId) return;
+      void releaseCaptureLease().catch(() => {});
+    };
+
     if (storedId) {
       ApiClient.getRecording(storedId).then(async (recording: Recording) => {
         if (['recording', 'finalizing', 'recoverable'].includes(recording.status)) {
@@ -142,9 +180,11 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         localStorage.removeItem('asr-active-recording-id');
       }).catch(() => {
         localStorage.removeItem('asr-active-recording-id');
-      });
+      }).finally(releaseRecoveredLease);
+    } else {
+      releaseRecoveredLease();
     }
-  }, [t]);
+  }, [t, releaseCaptureLease]);
 
 
   const stopAudioMeter = useCallback((closeContext = true) => {
@@ -211,29 +251,6 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       setSignalLevel(levelCombined);
     }
   }, []);
-
-  const startAudioMeter = useCallback((streamOrNode: AudioNode | MediaStream) => {
-    // startAudioMeter is kept for compatibility, but we now manually connect in startRecording
-    stopAudioMeter(false);
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    
-    if (streamOrNode instanceof AudioNode) {
-      audioContextRef.current = streamOrNode.context as AudioContext;
-      micAnalyserRef.current = audioContextRef.current.createAnalyser();
-      micAnalyserRef.current.fftSize = 512;
-      micAnalyserRef.current.smoothingTimeConstant = 0.78;
-      streamOrNode.connect(micAnalyserRef.current);
-    } else {
-      audioContextRef.current = new AudioContextClass();
-      micAnalyserRef.current = audioContextRef.current.createAnalyser();
-      micAnalyserRef.current.fftSize = 512;
-      micAnalyserRef.current.smoothingTimeConstant = 0.78;
-      audioContextRef.current.createMediaStreamSource(streamOrNode).connect(micAnalyserRef.current);
-    }
-
-    drawAudioMeter();
-  }, [drawAudioMeter, stopAudioMeter]);
 
   const releaseMedia = useCallback(() => {
     stopAudioMeter();
@@ -352,6 +369,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
           setProgressText(t('recording.audioCompleteSaved'));
         }
         setIsRecording(false);
+        await releaseCaptureLease().catch(() => {});
         if (onSaved) onSaved(recording);
       }
     } catch (error: any) {
@@ -361,9 +379,11 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     } finally {
       browserUploadBacklogRef.current.reset();
       browserBackpressureTriggeredRef.current = false;
+      captureLeaseCommittedRef.current = false;
       await restoreAudioRoute();
+      await releaseCaptureLease().catch(() => {});
     }
-  }, [t, onSaved, releaseMedia, restoreAudioRoute, showToast]);
+  }, [t, onSaved, releaseMedia, restoreAudioRoute, showToast, releaseCaptureLease]);
 
   // Listen for remote overlay command and status requests and hold persistent BroadcastChannel
   useEffect(() => {
@@ -439,6 +459,18 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     }
   };
 
+  const cancelPendingStart = useCallback(async () => {
+    if (!isPreparingRecording || captureLeaseCommittedRef.current) return;
+    cancelStartRequestedRef.current = true;
+    setIsWaitingForAi(false);
+    setIsPreparingRecording(false);
+    setIsVerifying(false);
+    await releaseCaptureLease().catch(() => {});
+    setStatusText(t('recording.statusReady'));
+    setStatusState('ready');
+    setProgressText(t('recording.progressNone'));
+  }, [isPreparingRecording, releaseCaptureLease, setIsVerifying, t]);
+
   const startRecording = useCallback(async (
     title: string,
     projectName = '',
@@ -447,22 +479,57 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     visualWindowId?: number,
     visualCaptureLabel = '',
   ) => {
+    if (startInFlightRef.current || isRecordingRef.current) return;
     if (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia) {
       showToast(t('recording.unsupportedBrowser'), 'error');
       return;
     }
 
+    startInFlightRef.current = true;
+    cancelStartRequestedRef.current = false;
+    captureLeaseCommittedRef.current = false;
+    setIsPreparingRecording(true);
+    setIsWaitingForAi(false);
+    setIsVerifying(true);
     setPermissionsErrorDetails(null);
     setFallbackNotice(null);
     setStatusText(t('recording.audioSetupTitle'));
     setStatusState('working');
+    setProgressText(t('recording.audioSetupStatus'));
     visualCaptureLabelRef.current = visualWindowId !== undefined ? visualCaptureLabel : '';
+
+    const cancelled = () => cancelStartRequestedRef.current;
+
     try {
       let capabilityCheckFailed = false;
       const capabilities = captureCapabilities || await ApiClient.captureCapabilities().catch(() => {
         capabilityCheckFailed = true;
         return null;
       });
+
+      const initialReservation = await createCaptureReservation();
+      captureReservationIdRef.current = initialReservation.reservation_id;
+      localStorage.setItem(CAPTURE_RESERVATION_STORAGE_KEY, initialReservation.reservation_id);
+      let reservation = initialReservation;
+      if (reservation.status === 'waiting') {
+        setIsWaitingForAi(true);
+      }
+      while (reservation.status === 'waiting') {
+        await new Promise((resolve) => setTimeout(resolve, CAPTURE_RESERVATION_POLL_MS));
+        if (cancelled()) {
+          await releaseCaptureLease().catch(() => {});
+          startInFlightRef.current = false;
+          return;
+        }
+        reservation = await getCaptureReservation(reservation.reservation_id);
+      }
+      setIsWaitingForAi(false);
+      if (cancelled()) {
+        await releaseCaptureLease().catch(() => {});
+        startInFlightRef.current = false;
+        return;
+      }
+
       if (capabilities?.default_backend === 'native' && capabilities.native.available) {
         const permissionMode = visualWindowId !== undefined && mode === 'mic_only' ? 'both' : mode;
         const permissionResult = await ApiClient.ensureCapturePermissions(permissionMode);
@@ -509,6 +576,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         localStorage.setItem('asr-active-recording-id', session.id);
         
         await ApiClient.startNativeCapture(session.id, mode, visualWindowId);
+        captureLeaseCommittedRef.current = true;
         
         // Connect EventSource to receive real-time levels and capture status
         currentMicDbRef.current = -120;
@@ -557,6 +625,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                 openBrowserPopup();
               });
 
+              setIsPreparingRecording(false);
+              setIsVerifying(false);
               setIsRecording(true);
               setStatusState('recording');
               setStatusText(t('recording.statusRecording'));
@@ -574,8 +644,13 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
               ApiClient.cancelNativeCapture(session.id).catch(() => {});
               localStorage.removeItem('asr-active-recording-id');
               sessionIdRef.current = null;
+              captureLeaseCommittedRef.current = false;
+              setIsPreparingRecording(false);
+              setIsWaitingForAi(false);
+              setIsVerifying(false);
               setStatusState('error');
               setIsRecording(false);
+              void releaseCaptureLease().catch(() => {});
 
               if (data.reason === 'permissions_missing') {
                 setPermissionsErrorDetails({
@@ -625,14 +700,20 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
             ApiClient.cancelNativeCapture(session.id).catch(() => {});
             localStorage.removeItem('asr-active-recording-id');
             sessionIdRef.current = null;
+            captureLeaseCommittedRef.current = false;
+            setIsPreparingRecording(false);
+            setIsWaitingForAi(false);
+            setIsVerifying(false);
             setStatusState('error');
             setStatusText(t('recording.startFailed'));
             showToast(t('recording.startFailed'), 'error');
+            void releaseCaptureLease().catch(() => {});
           }
         };
 
         stopAudioMeter(false);
         drawAudioMeter();
+        startInFlightRef.current = false;
         return;
       }
 
@@ -833,6 +914,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       };
 
       recorderInputs.forEach(({ trackId, stream }) => startTrackRecorder(trackId, stream));
+      captureLeaseCommittedRef.current = true;
 
       // 6. Timer and state
       startedAtRef.current = Date.now();
@@ -870,12 +952,29 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         openBrowserPopup();
       });
 
+      setIsPreparingRecording(false);
+      setIsWaitingForAi(false);
+      setIsVerifying(false);
       setIsRecording(true);
       setStatusText(t('recording.statusRecording'));
       setStatusState('recording');
       setProgressText(t('recording.progressSaving'));
+      startInFlightRef.current = false;
 
     } catch (error: any) {
+      startInFlightRef.current = false;
+      setIsPreparingRecording(false);
+      setIsWaitingForAi(false);
+      setIsVerifying(false);
+      if (!captureLeaseCommittedRef.current) {
+        await releaseCaptureLease().catch(() => {});
+      }
+      if (cancelled()) {
+        setStatusText(t('recording.statusReady'));
+        setStatusState('ready');
+        setProgressText(t('recording.progressNone'));
+        return;
+      }
       visualCaptureLabelRef.current = '';
       releaseMedia();
       await restoreAudioRoute();
@@ -883,7 +982,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       setStatusState('error');
       showToast(t('recording.startFailed', { error: error.message }), 'error');
     }
-  }, [t, selectedMicrophone, selectedSystemDevice, captureCapabilities, setCapturePermissions, startAudioMeter, loadDevices, releaseMedia, restoreAudioRoute, showToast, stopRecording]);
+  }, [t, selectedMicrophone, selectedSystemDevice, captureCapabilities, setCapturePermissions, loadDevices, releaseMedia, restoreAudioRoute, showToast, stopRecording, drawAudioMeter, stopAudioMeter, releaseCaptureLease, setIsVerifying]);
 
   const toggleTestAudioRoute = async () => {
     setIsVerifying(true);
@@ -936,6 +1035,10 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       if (routeActivatedRef.current) {
         navigator.sendBeacon?.('/v1/system/audio/restore');
       }
+      const reservationId = captureReservationIdRef.current;
+      if (reservationId && !captureLeaseCommittedRef.current) {
+        releaseCaptureReservationOnUnload(reservationId);
+      }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -949,6 +1052,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
 
   return {
     isRecording,
+    isPreparingRecording,
+    isWaitingForAi,
     timer,
     signalLevel,
     signalLevelMic,
@@ -972,6 +1077,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     setSelectedMicrophone,
     setSelectedSystemDevice,
     startRecording,
+    cancelPendingStart,
     stopRecording,
     toggleTestAudioRoute,
     verifyAudioSetup,

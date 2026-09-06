@@ -34,7 +34,17 @@ from local_asr_server.routers.helpers import (
     _parse_allowed_origins,
     _extract_bearer_token,
 )
-from local_asr_server.routers import analysis, demo, recordings, settings, transcriptions, system, visual_jobs, workspace
+from local_asr_server.routers import (
+    analysis,
+    capture_admission,
+    demo,
+    recordings,
+    settings,
+    transcriptions,
+    system,
+    visual_jobs,
+    workspace,
+)
 
 PUBLIC_AUTH_PATHS = {
     "/",
@@ -214,6 +224,7 @@ def create_app(
 
     # Include routers
     app.include_router(analysis.router)
+    app.include_router(capture_admission.router)
     app.include_router(demo.router)
     app.include_router(recordings.router)
     app.include_router(settings.router)

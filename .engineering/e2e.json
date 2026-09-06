@@ -59,7 +59,7 @@
       "automation": "automated",
       "platform": "GitHub-hosted macOS arm64 with headless Chrome",
       "command": "node scripts/browser_meeting_ui_e2e.mjs",
-      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for saved-Meeting, preparation-recovery, verified-note-edit revision and complete archive-search journeys, ChromeDriver browser interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
+      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for saved-Meeting, preparation-recovery, verified-note-edit revision, complete archive-search and busy-AI recording-priority journeys, ChromeDriver browser interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
       "target_environment_refs": ["closedroom-macos-apple-silicon"],
       "known_gaps": ["does not exercise the packaged WKWebView process boundary", "deterministic API fixtures do not prove the assembled FastAPI persistence/runtime path", "does not prove TCC, native capture, physical audio devices or production MLX/Metal behavior"]
     },
@@ -185,6 +185,19 @@
       "real_environment_confirmation": "conditional",
       "real_environment_runner": "target-macos-real",
       "residual_gaps": ["browser fixtures do not prove the assembled SQLite projection, which is covered by source-contract and packaged FTS5 evidence", "packaged WKWebView focus behavior remains release confirmation when material"],
+      "automation_gap_reason": ""
+    },
+    {
+      "id": "record-while-ai-busy",
+      "claim": "When managed AI work is already active, starting a meeting reserves capture priority without force-killing the active phase, shows a truthful cancellable preparation state, starts capture only after the safe boundary, holds queued heavy work during recording, and releases priority on Stop so queued work can resume.",
+      "ui_surface": true,
+      "minimum_ui_evidence_mode": "full_media",
+      "target_environment_refs": ["closedroom-macos-apple-silicon"],
+      "automated_environment_refs": ["browser-macos-arm64-ci", "source-contract-suite"],
+      "minimum_automated_fidelity": "simulated_or_emulated",
+      "real_environment_confirmation": "required",
+      "real_environment_runner": "target-macos-real",
+      "residual_gaps": ["browser fixtures prove user-visible ordering but not physical microphone/system-audio capture", "source-contract tests prove scheduler ordering but not representative MLX/Metal pressure or thermal behavior", "packaged WKWebView and TCC-backed capture remain target-Mac release evidence"],
       "automation_gap_reason": ""
     },
     {

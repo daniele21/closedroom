@@ -80,6 +80,7 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
   const storageReady = storageConfigured && recordingsDir.trim().length > 0;
   const readyToRecord = micReady && computerReady && storageReady;
   const selectedVisualWindow = captureWindows.find((window) => String(window.id) === visualWindowId);
+  const recordingFlowLocked = recorder.isRecording || recorder.isPreparingRecording;
 
   const captureModeOptions = [
     { value: 'both', label: t('recording.captureModeBoth') },
@@ -187,6 +188,24 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
     if (recorder.isRecording) {
       return { tone: 'recording', title: t('recording.statusRecording'), detail: recorder.progressText };
     }
+    if (recorder.isWaitingForAi) {
+      return {
+        tone: 'working',
+        title: lang === 'it' ? 'Preparazione registrazione' : 'Preparing recording',
+        detail: lang === 'it'
+          ? 'Un’attività AI è già in corso. ClosedRoom la lascia terminare in sicurezza e avvia la registrazione appena le risorse sono libere.'
+          : 'AI work is already running. ClosedRoom lets it finish safely and starts recording as soon as resources are free.',
+      };
+    }
+    if (recorder.isPreparingRecording) {
+      return {
+        tone: 'working',
+        title: lang === 'it' ? 'Avvio registrazione' : 'Starting recording',
+        detail: lang === 'it'
+          ? 'ClosedRoom sta verificando le sorgenti e preparando la registrazione. Il timer partirà solo quando la registrazione è davvero attiva.'
+          : 'ClosedRoom is checking sources and preparing capture. The timer starts only when recording is actually active.',
+      };
+    }
     if (recorder.statusState === 'error') {
       return {
         tone: 'blocked',
@@ -263,7 +282,7 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
             label={t('recording.titleLabel')}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            disabled={recorder.isRecording}
+            disabled={recordingFlowLocked}
             placeholder={t('recording.titlePlaceholder')}
           />
           <div className="flex flex-col gap-1.5">
@@ -275,7 +294,7 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
               list="new-meeting-projects"
               value={projectName}
               onChange={(event) => setProjectName(event.target.value)}
-              disabled={recorder.isRecording}
+              disabled={recordingFlowLocked}
               placeholder={t('recording.projectPlaceholder')}
               className="h-10 w-full rounded-lg border border-border-subtle bg-bg-surface px-3 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-border-focus disabled:cursor-not-allowed disabled:opacity-60"
             />
@@ -291,7 +310,9 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
               ? 'border-success/30 bg-success/10'
               : statusSummary.tone === 'recording'
                 ? 'border-danger/30 bg-danger/10'
-                : 'border-warning/30 bg-warning/10'
+                : statusSummary.tone === 'working'
+                  ? 'border-accent/30 bg-accent-soft'
+                  : 'border-warning/30 bg-warning/10'
           }`}
           role="status"
           aria-live="polite"
@@ -302,6 +323,8 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
                 <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-hidden="true" />
               ) : statusSummary.tone === 'recording' ? (
                 <Mic className="mt-0.5 h-5 w-5 shrink-0 text-danger" aria-hidden="true" />
+              ) : statusSummary.tone === 'working' ? (
+                <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-accent" aria-hidden="true" />
               ) : (
                 <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden="true" />
               )}
@@ -313,18 +336,18 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
               </div>
             </div>
 
-            {!recorder.isRecording && !readyToRecord && nativeCaptureReady && storageReady && (
+            {!recordingFlowLocked && !readyToRecord && nativeCaptureReady && storageReady && (
               <Button type="button" size="sm" onClick={handleAuthorizeCapture} isLoading={permissionLoading} className="shrink-0">
                 {lang === 'it' ? 'Consenti accesso' : 'Allow access'}
               </Button>
             )}
-            {!recorder.isRecording && !storageReady && (
+            {!recordingFlowLocked && !storageReady && (
               <Button type="button" size="sm" variant="secondary" onClick={handleBrowseDir} isLoading={storageSaving} className="shrink-0">
                 <FolderOpen className="h-4 w-4" />
                 {t('settings.btnBrowse')}
               </Button>
             )}
-            {!recorder.isRecording && !nativeCaptureReady && nativeCaptureChecked && !readyToRecord && storageReady && (
+            {!recordingFlowLocked && !nativeCaptureReady && nativeCaptureChecked && !readyToRecord && storageReady && (
               <Button type="button" size="sm" variant="secondary" onClick={() => setShowAudioRecovery(true)} className="shrink-0">
                 <SlidersHorizontal className="h-4 w-4" />
                 {lang === 'it' ? 'Recupero audio' : 'Audio recovery'}
@@ -333,7 +356,7 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
           </div>
         </section>
 
-        {!storageReady && (
+        {!storageReady && !recordingFlowLocked && (
           <section className="rounded-xl border border-border-subtle bg-bg-surface/30 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="min-w-0 flex-1">
@@ -389,16 +412,34 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
 
         <div className="flex flex-col gap-3 sm:flex-row">
           {!recorder.isRecording ? (
-            <Button
-              type="button"
-              size="lg"
-              onClick={start}
-              disabled={recorder.isVerifying || !readyToRecord}
-              className="min-h-12 flex-1 shadow-cta"
-            >
-              <Mic className="h-5 w-5" />
-              {t('recording.btnStart')}
-            </Button>
+            <>
+              <Button
+                type="button"
+                size="lg"
+                onClick={start}
+                isLoading={recorder.isPreparingRecording}
+                disabled={recorder.isPreparingRecording || recorder.isVerifying || !readyToRecord}
+                className="min-h-12 flex-1 shadow-cta"
+              >
+                <Mic className="h-5 w-5" />
+                {recorder.isWaitingForAi
+                  ? (lang === 'it' ? 'In attesa dell’AI…' : 'Waiting for AI…')
+                  : recorder.isPreparingRecording
+                    ? (lang === 'it' ? 'Avvio registrazione…' : 'Starting recording…')
+                    : t('recording.btnStart')}
+              </Button>
+              {recorder.isWaitingForAi && (
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="secondary"
+                  onClick={() => recorder.cancelPendingStart()}
+                  className="min-h-12"
+                >
+                  {lang === 'it' ? 'Annulla' : 'Cancel'}
+                </Button>
+              )}
+            </>
           ) : (
             <Button type="button" size="lg" variant="danger" onClick={() => recorder.stopRecording()} className="min-h-12 flex-1">
               <Square className="h-5 w-5" />
@@ -414,7 +455,7 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
           )}
         </div>
 
-        {nativeCaptureReady && !recorder.isRecording && (
+        {nativeCaptureReady && !recordingFlowLocked && (
           <section className="rounded-xl border border-border-subtle bg-bg-surface/20">
             <button
               type="button"
@@ -472,7 +513,7 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
           </section>
         )}
 
-        {!nativeCaptureReady && nativeCaptureChecked && (
+        {!nativeCaptureReady && nativeCaptureChecked && !recordingFlowLocked && (
           <section className="rounded-xl border border-border-subtle bg-bg-surface/20">
             <button
               type="button"
