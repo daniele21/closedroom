@@ -71,7 +71,7 @@ Acceptance before merge:
 - after discard on a later revision, reload does not inherit the old edit again;
 - source evidence remains directly reachable from generated and retained-conflict items;
 - old v2 runs without edit metadata upgrade read-time without migration and v1 runs remain unchanged;
-- the automated `meeting-note-edit-revision` FULL_MEDIA journey proves evidence -> edit -> reload -> regenerate -> conflict -> explicit recovery.
+- the automated `meeting-note-edit-revision` FULL_MEDIA journey proves evidence -> edit -> reload -> regenerate changed-item conflict -> explicit rebase recovery; deterministic domain/API/frontend tests separately cover the removed-item conflict because synthetic recreation is intentionally forbidden.
 
 Checks: `test_structured_note_edits.py`, `test_structured_note_projection_edits.py`, `test_structured_note_catalog_persistence.py`, `test_structured_note_api.py`, `test_frontend_structured_notes_editor.py`, existing shared-notes/preparation suites, frontend lint/typecheck, browser FULL_MEDIA `meeting-note-edit-revision` plus existing Meeting journeys, and selector-owned STRONG packaged-app validation. Packaged WKWebView focus/accessibility and production-model behavior remain release confirmation when material.
 
