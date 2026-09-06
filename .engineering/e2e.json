@@ -59,7 +59,7 @@
       "automation": "automated",
       "platform": "GitHub-hosted macOS arm64 with headless Chrome",
       "command": "node scripts/browser_meeting_ui_e2e.mjs",
-      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for saved-Meeting, preparation-recovery and verified-note-edit revision journeys, ChromeDriver browser interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
+      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for saved-Meeting, preparation-recovery, verified-note-edit revision and complete archive-search journeys, ChromeDriver browser interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
       "target_environment_refs": ["closedroom-macos-apple-silicon"],
       "known_gaps": ["does not exercise the packaged WKWebView process boundary", "deterministic API fixtures do not prove the assembled FastAPI persistence/runtime path", "does not prove TCC, native capture, physical audio devices or production MLX/Metal behavior"]
     },
@@ -68,7 +68,7 @@
       "fidelity_class": "representative_virtual",
       "automation": "automated",
       "platform": "GitHub-hosted macOS arm64",
-      "artifact_surface": "finalized ad-hoc-signed ClosedRoom .app serving bundled FastAPI runtime and static frontend through the real bundle layout",
+      "artifact_surface": "finalized ad-hoc-signed ClosedRoom .app serving bundled FastAPI runtime and static frontend through the real bundle layout; lifecycle smoke also probes the authenticated meeting-search path to verify bundled SQLite FTS5 availability",
       "target_environment_refs": ["closedroom-macos-apple-silicon"],
       "known_gaps": ["non-Cocoa smoke does not assert interactive WKWebView rendering or window behavior", "hosted macOS does not prove user TCC prompts or physical audio devices", "ad-hoc signing does not prove production signing/notarization", "production MLX/Metal quality and representative performance remain separate evidence"]
     },
@@ -124,7 +124,7 @@
     },
     {
       "id": "packaged-app-lifecycle",
-      "claim": "A finalized ClosedRoom .app is runnable, reaches loopback readiness and stops without leaking its listener or observed child processes.",
+      "claim": "A finalized ClosedRoom .app is runnable, reaches loopback readiness, exposes the archive-search endpoint with bundled SQLite FTS5, and stops without leaking its listener or observed child processes.",
       "ui_surface": false,
       "minimum_ui_evidence_mode": "assertions",
       "target_environment_refs": ["closedroom-macos-apple-silicon"],
@@ -172,6 +172,19 @@
       "real_environment_confirmation": "conditional",
       "real_environment_runner": "target-macos-real",
       "residual_gaps": ["deterministic browser fixtures do not prove the assembled FastAPI/CatalogStore restart path, which remains source-contract evidence at integration", "packaged WKWebView focus and accessibility remain release confirmation when material", "production LLM quality and revision frequency are outside this journey"],
+      "automation_gap_reason": ""
+    },
+    {
+      "id": "meeting-archive-search",
+      "claim": "A user can search the complete local meeting archive beyond the Today preview, open a matching source meeting, navigate back and recover the query without loading the whole archive into React.",
+      "ui_surface": true,
+      "minimum_ui_evidence_mode": "full_media",
+      "target_environment_refs": ["closedroom-macos-apple-silicon"],
+      "automated_environment_refs": ["browser-macos-arm64-ci", "source-contract-suite", "packaged-macos-arm64-ci"],
+      "minimum_automated_fidelity": "simulated_or_emulated",
+      "real_environment_confirmation": "conditional",
+      "real_environment_runner": "target-macos-real",
+      "residual_gaps": ["browser fixtures do not prove the assembled SQLite projection, which is covered by source-contract and packaged FTS5 evidence", "packaged WKWebView focus behavior remains release confirmation when material"],
       "automation_gap_reason": ""
     },
     {
