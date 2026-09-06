@@ -37,6 +37,14 @@ const journeys = [
         || path.join(canonicalEvidenceRoot, 'archive-search'),
     },
   },
+  {
+    script: 'scripts/browser_record_while_ai_busy_e2e.mjs',
+    env: {
+      CLOSEDROOM_RECORD_WHILE_AI_BUSY_E2E_EVIDENCE:
+        process.env.CLOSEDROOM_RECORD_WHILE_AI_BUSY_E2E_EVIDENCE
+        || path.join(canonicalEvidenceRoot, 'record-while-ai-busy'),
+    },
+  },
 ];
 
 async function runJourney({ script, env }) {
