@@ -20,6 +20,14 @@ class WorkloadAdmissionRejected(RuntimeError):
     """Raised when resource policy forbids a heavy workload from starting."""
 
 
+class CaptureReservationConflict(RuntimeError):
+    """Raised when a second capture reservation is requested concurrently."""
+
+
+class CaptureReservationNotFound(RuntimeError):
+    """Raised when a capture reservation token is no longer active."""
+
+
 @dataclass(frozen=True, slots=True)
 class _WorkItem:
     task_id: str
@@ -37,10 +45,14 @@ class HeavyWorkloadArbiter:
     active heavy workload protects Apple unified memory until representative
     hardware evidence justifies a higher profile.
 
-    An optional admission guard may reject a workload based on current product
-    resource policy. The guard is checked both before queue admission and again
-    immediately before execution so capture that begins while work is queued
-    still has priority. The guard does not own scheduling or waiting semantics.
+    Capture reservation is also coordinated here so starting a meeting and
+    starting heavy AI cannot cross in a race. A reservation never force-kills
+    active work: already-running work reaches its normal safe boundary, queued
+    work remains pending, and the reservation becomes granted only when no heavy
+    work is active. While the reservation is held, no queued work starts.
+
+    The optional admission guard remains the fail-safe for capture that exists
+    outside the reservation protocol. It is checked immediately before execution.
     """
 
     DEFAULT_MAX_CONCURRENT = 1
@@ -62,9 +74,13 @@ class HeavyWorkloadArbiter:
         self._admission_guard = admission_guard
         self._queue: queue.Queue[_WorkItem] = queue.Queue(maxsize=queue_capacity)
         self._lock = threading.RLock()
+        self._state_changed = threading.Condition(self._lock)
         self._pending: dict[str, str] = {}
         self._active: dict[str, str] = {}
         self._cancelled: set[str] = set()
+        self._capture_reservation_id: str | None = None
+        self._capture_reservation_state: str | None = None
+        self._capture_requested_at: float | None = None
         self._closed = False
         self._submitted = 0
         self._completed = 0
@@ -113,7 +129,15 @@ class HeavyWorkloadArbiter:
             raise ValueError("task_id must be non-empty")
         if not workload_type.strip():
             raise ValueError("workload_type must be non-empty")
-        self._assert_admitted(workload_type)
+
+        # A reservation intentionally turns capture-active admission from a
+        # failure into bounded waiting. Legacy/unreserved capture still uses the
+        # guard and therefore fails safe as before.
+        with self._lock:
+            reservation_active = self._capture_reservation_id is not None
+        if not reservation_active:
+            self._assert_admitted(workload_type)
+
         item = _WorkItem(
             task_id=task_id,
             workload_type=workload_type,
@@ -121,7 +145,7 @@ class HeavyWorkloadArbiter:
             on_cancel=on_cancel,
             on_reject=on_reject,
         )
-        with self._lock:
+        with self._state_changed:
             if self._closed:
                 raise WorkloadArbiterClosed("heavy-workload arbiter is shutting down")
             if task_id in self._pending or task_id in self._active:
@@ -135,17 +159,55 @@ class HeavyWorkloadArbiter:
                 ) from exc
             self._pending[task_id] = workload_type
             self._submitted += 1
+            self._state_changed.notify_all()
+
+    def reserve_capture(self, reservation_id: str) -> dict[str, object]:
+        """Reserve capture priority without interrupting already-running work."""
+        if not reservation_id.strip():
+            raise ValueError("reservation_id must be non-empty")
+        with self._state_changed:
+            if self._closed:
+                raise WorkloadArbiterClosed("heavy-workload arbiter is shutting down")
+            if self._capture_reservation_id not in {None, reservation_id}:
+                raise CaptureReservationConflict("another capture reservation is already active")
+            if self._capture_reservation_id is None:
+                self._capture_reservation_id = reservation_id
+                self._capture_requested_at = time.monotonic()
+                self._capture_reservation_state = "waiting" if self._active else "granted"
+            self._refresh_capture_reservation_locked()
+            self._state_changed.notify_all()
+            return self._capture_reservation_public_locked(reservation_id)
+
+    def capture_reservation(self, reservation_id: str) -> dict[str, object]:
+        with self._state_changed:
+            if self._capture_reservation_id != reservation_id:
+                raise CaptureReservationNotFound("capture reservation is not active")
+            self._refresh_capture_reservation_locked()
+            return self._capture_reservation_public_locked(reservation_id)
+
+    def release_capture(self, reservation_id: str) -> bool:
+        """Release capture priority and allow queued heavy work to resume."""
+        with self._state_changed:
+            if self._capture_reservation_id != reservation_id:
+                return False
+            self._capture_reservation_id = None
+            self._capture_reservation_state = None
+            self._capture_requested_at = None
+            self._state_changed.notify_all()
+            return True
 
     def cancel_pending(self, task_id: str) -> bool:
         """Mark queued work for cancellation without interrupting active execution."""
-        with self._lock:
+        with self._state_changed:
             if task_id not in self._pending:
                 return False
             self._cancelled.add(task_id)
+            self._state_changed.notify_all()
             return True
 
     def snapshot(self) -> dict[str, object]:
         with self._lock:
+            self._refresh_capture_reservation_locked()
             return {
                 "max_concurrent": self.max_concurrent,
                 "queue_capacity": self.queue_capacity,
@@ -153,6 +215,10 @@ class HeavyWorkloadArbiter:
                 "active_count": len(self._active),
                 "pending": dict(self._pending),
                 "active": dict(self._active),
+                "capture_reservation": {
+                    "active": self._capture_reservation_id is not None,
+                    "status": self._capture_reservation_state,
+                },
                 "submitted": self._submitted,
                 "completed": self._completed,
                 "failed": self._failed,
@@ -168,10 +234,14 @@ class HeavyWorkloadArbiter:
         boundary is responsible for safe cancellation. Worker threads are daemon
         threads so process shutdown cannot be held indefinitely by a model job.
         """
-        with self._lock:
+        with self._state_changed:
             self._closed = True
+            self._capture_reservation_id = None
+            self._capture_reservation_state = None
+            self._capture_requested_at = None
             if cancel_pending:
                 self._cancelled.update(self._pending)
+            self._state_changed.notify_all()
         deadline = time.monotonic() + max(0.0, wait_timeout)
         for worker in self._workers:
             remaining = max(0.0, deadline - time.monotonic())
@@ -188,6 +258,27 @@ class HeavyWorkloadArbiter:
             reason = str(exc) or exc.__class__.__name__
             raise WorkloadAdmissionRejected(reason) from exc
 
+    def _refresh_capture_reservation_locked(self) -> None:
+        if (
+            self._capture_reservation_id is not None
+            and self._capture_reservation_state == "waiting"
+            and not self._active
+        ):
+            self._capture_reservation_state = "granted"
+
+    def _capture_reservation_public_locked(self, reservation_id: str) -> dict[str, object]:
+        if self._capture_reservation_id != reservation_id:
+            raise CaptureReservationNotFound("capture reservation is not active")
+        requested_at = self._capture_requested_at
+        waited = max(0.0, time.monotonic() - requested_at) if requested_at is not None else 0.0
+        return {
+            "reservation_id": reservation_id,
+            "status": self._capture_reservation_state or "waiting",
+            "active_workloads": len(self._active),
+            "queued_workloads": len(self._pending),
+            "waited_seconds": round(waited, 3),
+        }
+
     def _worker(self) -> None:
         while True:
             try:
@@ -200,16 +291,42 @@ class HeavyWorkloadArbiter:
 
             cancelled = False
             rejection_reason: str | None = None
-            with self._lock:
-                cancelled = item.task_id in self._cancelled
 
-            if not cancelled and self._admission_guard is not None:
-                try:
-                    self._admission_guard(item.workload_type)
-                except Exception as exc:
-                    rejection_reason = str(exc) or exc.__class__.__name__
+            while True:
+                with self._state_changed:
+                    while (
+                        self._capture_reservation_id is not None
+                        and item.task_id not in self._cancelled
+                        and not self._closed
+                    ):
+                        self._refresh_capture_reservation_locked()
+                        self._state_changed.wait(timeout=0.1)
 
-            with self._lock:
+                    cancelled = item.task_id in self._cancelled
+                    if cancelled:
+                        rejection_reason = None
+                        break
+
+                rejection_reason = None
+                if self._admission_guard is not None:
+                    try:
+                        self._admission_guard(item.workload_type)
+                    except Exception as exc:
+                        rejection_reason = str(exc) or exc.__class__.__name__
+
+                # A capture reservation may have arrived while the external
+                # admission guard was running. Re-check under the scheduler lock
+                # before converting pending work into active work.
+                with self._state_changed:
+                    if item.task_id in self._cancelled:
+                        cancelled = True
+                        rejection_reason = None
+                        break
+                    if self._capture_reservation_id is not None:
+                        continue
+                    break
+
+            with self._state_changed:
                 self._pending.pop(item.task_id, None)
                 if item.task_id in self._cancelled:
                     self._cancelled.discard(item.task_id)
@@ -220,6 +337,8 @@ class HeavyWorkloadArbiter:
                     self._rejected += 1
                 else:
                     self._active[item.task_id] = item.workload_type
+                self._refresh_capture_reservation_locked()
+                self._state_changed.notify_all()
 
             try:
                 if cancelled:
@@ -241,8 +360,10 @@ class HeavyWorkloadArbiter:
                     with self._lock:
                         self._completed += 1
             finally:
-                with self._lock:
+                with self._state_changed:
                     self._active.pop(item.task_id, None)
+                    self._refresh_capture_reservation_locked()
+                    self._state_changed.notify_all()
                 self._queue.task_done()
 
 
