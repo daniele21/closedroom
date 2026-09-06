@@ -29,6 +29,14 @@ const journeys = [
         || path.join(canonicalEvidenceRoot, 'note-edit'),
     },
   },
+  {
+    script: 'scripts/browser_archive_search_e2e.mjs',
+    env: {
+      CLOSEDROOM_ARCHIVE_SEARCH_E2E_EVIDENCE:
+        process.env.CLOSEDROOM_ARCHIVE_SEARCH_E2E_EVIDENCE
+        || path.join(canonicalEvidenceRoot, 'archive-search'),
+    },
+  },
 ];
 
 async function runJourney({ script, env }) {
