@@ -28,7 +28,11 @@ class NewMeetingSimplicityContractTests(unittest.TestCase):
         self.assertIn("showScreenContext", self.source)
         self.assertIn("useState('')", self.source)
         self.assertIn("ApiClient.captureWindows()", self.source)
-        self.assertIn("nativeCaptureReady && !recorder.isRecording", self.source)
+        self.assertIn(
+            "recordingFlowLocked = recorder.isRecording || recorder.isPreparingRecording",
+            self.source,
+        )
+        self.assertIn("nativeCaptureReady && !recordingFlowLocked", self.source)
         self.assertIn("Screen context (optional)", self.source)
         self.assertIn("Off by default", self.source)
         self.assertIn("No visual AI runs while recording", self.source)
