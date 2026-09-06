@@ -1,12 +1,12 @@
 # ClosedRoom: useful notes, simple journeys and efficient execution
 
-Status: active — PRS-13 integration candidate
+Status: active — PRS-14 integration candidate
 Owner: meeting product, canonical job/persistence owners and local runtime
-Baseline: dev `8075b366`, 2026-09-05.
+Baseline: dev `90c4e314`, 2026-09-06.
 
 ## Outcome and invariants
 
-Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 and PRS-12 are integrated; PRS-13 is the current integration candidate. No production-model performance or memory gain is claimed without representative evidence.
+Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11, PRS-12 and PRS-13 are integrated; PRS-14 is the current integration candidate. No production-model performance or memory gain is claimed without representative evidence.
 
 - Meeting is primary; normal recording requires no technical choice.
 - `Prepare notes` is explicit after Stop; `Transcript only` is secondary.
@@ -21,8 +21,8 @@ Record, prepare useful notes, verify decisions and find them later while the Mac
 | --- | --- | --- | --- | --- |
 | PRS-11 | Fast saved Meeting open | MeetingDetailPage, API client, visual hook | — | DONE |
 | PRS-12 | One recoverable Prepare notes action | jobs, analysis/transcription services, Meeting UI | PRS-11 | DONE |
-| PRS-13 | Consistent notes with less repeated inference | analysis templates/jobs/service/catalog reads | PRS-12 | INTEGRATION |
-| PRS-14 | Verify/edit actions and decisions | notes schema/catalog, transcript, Meeting UI | PRS-13 | BLOCKED |
+| PRS-13 | Consistent notes with less repeated inference | analysis templates/jobs/service/catalog reads | PRS-12 | DONE |
+| PRS-14 | Verify/edit actions and decisions | notes schema/catalog, transcript, Meeting UI | PRS-13 | INTEGRATION |
 | PRS-15 | Search complete local archive | CatalogStore, workspace/API/UI | — | READY |
 | PRS-16 | Record safely while AI is busy | RecordingStore, resource policy/arbiter/runtime | — | READY |
 | PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | BLOCKED |
@@ -38,34 +38,42 @@ Saved Meeting core content loads independently from diagnostics and visual servi
 
 `Prepare notes` is a durable `meeting_preparation` JobStore parent that composes the existing transcription and analysis jobs. Durable identity covers recording source, effective ASR options and analysis/template identity; valid transcripts skip ASR. Cancel prevents future stages including admission races, restart interrupts incomplete work and explicit resume starts from the first missing stage. Meeting follows the parent SSE, exposes transcript before notes finish and does not promote output from failed/interrupted/cancelled preparation pipelines. Existing expert transcription/analysis APIs remain compatible. Integration evidence included owner/API/persistence tests plus `meeting-preparation-recovery` FULL_MEDIA and packaged-app smoke.
 
-## PRS-13 — shared structured notes — integration candidate
+## PRS-13 — integrated shared structured notes
 
-Goal: reduce overlapping default inference without degrading useful output. Version summary/actions/decisions/risks with source references, separate generated content from future edits and preserve legacy reads.
+The default notes path now reduces overlapping inference without degrading the logical note views. `meeting_default` with no explicit `analysis_types` executes one internal `meeting_notes_shared` v2 analysis job instead of four overlapping physical jobs; `meeting_deep`, explicit analysis types and expert single analyses remain unchanged.
+
+The canonical result is `closedroom.meeting_notes` schema v2 with a `generated` boundary containing summary, actions, decisions and risks. Every non-empty generated claim requires a canonical transcript segment reference with timing/speaker metadata when available. One persisted v2 run is projected at read time into stable `meeting_brief`, `action_items`, `decisions` and `risks_blockers` views without synthetic jobs or rows; old persisted v1 runs continue to read unchanged.
+
+Structured cache identity includes transcript segment ids/timing/speaker/text. Short inputs use one extraction; long inputs use bounded source-aware chunks plus bounded aggregation, and oversize input fails explicitly rather than truncating. Source refs cannot escape the chunk/aggregation evidence supplied to the inference. The internal shared template remains hidden from the public template picker and `HeavyWorkloadArbiter` remains the only heavy-work scheduler.
+
+Integration evidence covered schema/projection/cache/long-input/source-boundary tests, existing analysis/preparation suites, frontend deterministic checks, `meeting-preparation-recovery` FULL_MEDIA and selector-owned STRONG/package gates. Production model quality/latency/RSS and target WKWebView/TCC fidelity remain release deltas unless a comparable integration baseline exists.
+
+## PRS-14 — verifiable, editable notes — integration candidate
+
+Goal: let users verify generated actions/decisions against the meeting, correct them without destroying model output, and carry those corrections safely across restart and regeneration.
 
 Implementation candidate:
-- `meeting_default` with no explicit `analysis_types` executes one internal `meeting_notes_shared` v2 analysis job instead of four overlapping physical jobs; `meeting_deep`, explicit analysis types and expert single analyses remain unchanged.
-- The canonical result is `closedroom.meeting_notes` schema v2 with a `generated` boundary containing summary, actions, decisions and risks. Every non-empty generated claim requires a canonical transcript segment reference with timing/speaker metadata when available.
-- One real persisted v2 run is projected at read time into stable `meeting_brief`, `action_items`, `decisions` and `risks_blockers` views. No synthetic jobs or database rows are created; old persisted v1 runs continue to be read unchanged.
-- Structured cache identity includes transcript segment ids/timing/speaker/text so source-reference changes cannot reuse stale cached output.
-- Short inputs use one extraction. Long inputs use bounded source-aware chunks plus bounded aggregation. A source chunk can cite only segment ids supplied to that chunk; aggregation can cite only refs present in its partials. Inputs beyond the configured bound fail explicitly instead of truncating.
-- The internal shared template is hidden from the public template picker, and PRS-12 still composes whatever physical analysis jobs the existing `AnalysisJobManager` returns. `HeavyWorkloadArbiter` remains the only heavy-work scheduler.
-
-Decision gate: the deterministic rubric records schema validity, factual support, action/decision recall, attribution, latency, inference count/tokens and peak-memory status. Representative short/long fixtures must preserve expected facts and source attribution while the short default reduces physical inference count from four to one. Comparable production MLX peak-memory/resource data remains release evidence; missing comparable data stays explicitly `unknown`, never inferred.
+- actions, decisions and risks receive deterministic item identity derived from kind + canonical source anchors + occurrence; identity is independent from generated wording, while each generated item also carries a content/source fingerprint;
+- actions and decisions are editable in place in Meeting Analysis. Generated content remains immutable under `generated`; user corrections are stored as a distinct `user_edits` overlay and exposed through `effective` reads;
+- each edit retains the generated item snapshot it was based on, including source refs, so an item removed by regeneration still has verifiable prior evidence rather than becoming an unanchored text fragment;
+- `CatalogStore` analysis runs remain the only persistence owner. Overlay, revision metadata and conflict state live inside the canonical run result JSON; no second notes store or SQLite migration is introduced;
+- analysis-run history is the revision chain. A later structured run inherits prior edits only when that revision has no explicit overlay state. An explicit empty `user_edits` set therefore prevents discarded corrections from being re-inherited;
+- unchanged generated items safely reapply the prior correction. If wording/metadata changed, the generated value wins by default and the retained edit becomes `generated_changed`; if the item disappeared, it becomes `item_missing`. Neither case is silently remapped;
+- for `generated_changed`, the user can explicitly rebase the retained edit onto the new generated fingerprint or use the regenerated version. For `item_missing`, ClosedRoom shows the previous generated text, retained correction and source timestamp but does not recreate removed content automatically; the safe recovery is explicit discard or a later regeneration;
+- PATCH `/v1/analysis-runs/{run}/items/{action|decision}/{item}` requires the current generated fingerprint and returns 409 after a stale regeneration. DELETE of the item edit resolves/discards the overlay on the current revision;
+- v2 Meeting views use `StructuredNotesEditor`; legacy/non-v2 analysis remains markdown. Evidence chips seek the saved recording to the referenced timestamp. Transcript, speakers, custom/deep analysis and runtime scheduling are unchanged.
 
 Acceptance before merge:
-- default preparation creates one physical analysis child and still exposes all four logical default note views;
-- explicit deep/custom analysis behavior remains compatible;
-- source refs cannot cross source-chunk/aggregation boundaries;
-- cache keys invalidate when source-reference metadata changes even if transcript text is unchanged;
-- old v1 runs and virtual v2 projection reads coexist;
-- long input is bounded and never silently truncated;
-- existing preparation partial-failure/retry journey remains green in FULL_MEDIA.
+- user edits never mutate `generated`, survive CatalogStore reopen and appear in the logical action/decision projections;
+- generated/source changes create a new revision and an explicit conflict rather than applying the old correction silently;
+- a removed generated item retains the prior correction plus source snapshot until explicit discard, without being synthetically re-created;
+- stale PATCH after regeneration returns 409; explicit rebase/discard updates only the current canonical run;
+- after discard on a later revision, reload does not inherit the old edit again;
+- source evidence remains directly reachable from generated and retained-conflict items;
+- old v2 runs without edit metadata upgrade read-time without migration and v1 runs remain unchanged;
+- the automated `meeting-note-edit-revision` FULL_MEDIA journey proves evidence -> edit -> reload -> regenerate changed-item conflict -> explicit rebase recovery; deterministic domain/API/frontend tests separately cover the removed-item conflict because synthetic recreation is intentionally forbidden.
 
-Checks: schema/projection/cache/long-input/source-boundary tests, existing analysis/preparation suites, frontend deterministic checks, `meeting-preparation-recovery` FULL_MEDIA and selector-owned STRONG gates. Production model quality/latency/RSS and target WKWebView/TCC fidelity remain release deltas unless an integration-comparable baseline exists.
-
-## PRS-14 — verifiable, editable notes
-
-Add stable item identity, source references and user-edit overlay. Corrections must survive restart; regeneration creates a revision, retains edits and surfaces conflicts rather than silently remapping. Evidence -> edit -> restart -> regenerate is the critical FULL_MEDIA journey; STRONG expected.
+Checks: `test_structured_note_edits.py`, `test_structured_note_projection_edits.py`, `test_structured_note_catalog_persistence.py`, `test_structured_note_api.py`, `test_frontend_structured_notes_editor.py`, existing shared-notes/preparation suites, frontend lint/typecheck, browser FULL_MEDIA `meeting-note-edit-revision` plus existing Meeting journeys, and selector-owned STRONG packaged-app validation. Packaged WKWebView focus/accessibility and production-model behavior remain release confirmation when material.
 
 ## PRS-15 — complete search, bounded archive
 

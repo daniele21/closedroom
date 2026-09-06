@@ -59,7 +59,7 @@
       "automation": "automated",
       "platform": "GitHub-hosted macOS arm64 with headless Chrome",
       "command": "node scripts/browser_meeting_ui_e2e.mjs",
-      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for saved-Meeting and preparation-recovery journeys, ChromeDriver browser interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
+      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for saved-Meeting, preparation-recovery and verified-note-edit revision journeys, ChromeDriver browser interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
       "target_environment_refs": ["closedroom-macos-apple-silicon"],
       "known_gaps": ["does not exercise the packaged WKWebView process boundary", "deterministic API fixtures do not prove the assembled FastAPI persistence/runtime path", "does not prove TCC, native capture, physical audio devices or production MLX/Metal behavior"]
     },
@@ -159,6 +159,19 @@
       "real_environment_confirmation": "conditional",
       "real_environment_runner": "target-macos-real",
       "residual_gaps": ["deterministic browser fixtures do not prove production ASR/LLM quality or latency", "packaged WKWebView rendering remains a release confirmation when this journey is release-critical"],
+      "automation_gap_reason": ""
+    },
+    {
+      "id": "meeting-note-edit-revision",
+      "claim": "A user can open source evidence for generated notes, edit an action or decision, keep that correction across reload/restart, regenerate notes as a new revision, see ambiguous carry as an explicit conflict and resolve it deliberately without silent remapping.",
+      "ui_surface": true,
+      "minimum_ui_evidence_mode": "full_media",
+      "target_environment_refs": ["closedroom-macos-apple-silicon"],
+      "automated_environment_refs": ["browser-macos-arm64-ci"],
+      "minimum_automated_fidelity": "simulated_or_emulated",
+      "real_environment_confirmation": "conditional",
+      "real_environment_runner": "target-macos-real",
+      "residual_gaps": ["deterministic browser fixtures do not prove the assembled FastAPI/CatalogStore restart path, which remains source-contract evidence at integration", "packaged WKWebView focus and accessibility remain release confirmation when material", "production LLM quality and revision frequency are outside this journey"],
       "automation_gap_reason": ""
     },
     {

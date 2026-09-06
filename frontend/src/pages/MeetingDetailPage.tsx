@@ -32,6 +32,7 @@ import { cn } from '../utils/cn';
 import { formatJobProgress } from '../utils/jobs';
 import { VisualIntelligencePanel } from '../components/meeting/VisualIntelligencePanel';
 import { VisualDebugPanel } from '../components/meeting/VisualDebugPanel';
+import { StructuredNotesEditor } from '../components/meeting/StructuredNotesEditor';
 import { useMeetingJobEvents } from '../hooks/useMeetingJobEvents';
 import { useVisualIntelligence } from '../hooks/useVisualIntelligence';
 import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
@@ -1000,9 +1001,20 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
 
                 <div className="p-5 sm:p-6 bg-bg-elevated min-h-[220px]">
                   {selectedRun ? (
-                    <div className="max-w-none prose prose-invert prose-sm animate-in fade-in duration-200">
-                      {renderMarkdown(runMarkdown(selectedRun))}
-                    </div>
+                    selectedRun.result?.schema?.id === 'closedroom.meeting_notes' && selectedRun.result?.schema?.version === 2 ? (
+                      <StructuredNotesEditor
+                        run={selectedRun}
+                        analysisType={selectedAnalysisType}
+                        lang={lang}
+                        onSeek={handleTimestampClick}
+                        onChanged={async () => { await load(); }}
+                        readOnly={demoMode}
+                      />
+                    ) : (
+                      <div className="max-w-none prose prose-invert prose-sm animate-in fade-in duration-200">
+                        {renderMarkdown(runMarkdown(selectedRun))}
+                      </div>
+                    )
                   ) : (
                     <div className="text-center py-12">
                       <Sparkles className="w-8 h-8 mx-auto text-text-muted mb-3" aria-hidden="true" />

@@ -21,6 +21,14 @@ const journeys = [
         || path.join(canonicalEvidenceRoot, 'preparation'),
     },
   },
+  {
+    script: 'scripts/browser_meeting_note_edit_e2e.mjs',
+    env: {
+      CLOSEDROOM_NOTE_EDIT_E2E_EVIDENCE:
+        process.env.CLOSEDROOM_NOTE_EDIT_E2E_EVIDENCE
+        || path.join(canonicalEvidenceRoot, 'note-edit'),
+    },
+  },
 ];
 
 async function runJourney({ script, env }) {
