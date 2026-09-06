@@ -277,6 +277,7 @@ def edit_structured_note_item(
         "item_id": item_id,
         "base_generated_hash": current["generated_hash"],
         "base_run_id": run_id,
+        "base_generated": copy.deepcopy(current),
         "fields": patch,
         "updated_at": time.time() if now is None else now,
     })
