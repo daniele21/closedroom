@@ -2,7 +2,7 @@
 
 ## Engineering baseline
 
-ClosedRoom follows `daniele21/repo-template-sw` **0.9.2**, maturity **L2**, with `python`, `typescript`, `macos`, `local-ai`, `product-ui`. Changes integrate through `dev`; `dev -> main` is RELEASE. PRs into `dev` require selector-owned deterministic/E2E evidence; applicable target-Mac `REAL_ENVIRONMENT` evidence is deferred to release.
+ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, with `python`, `typescript`, `macos`, `local-ai`, `product-ui`. Changes integrate through `dev`; `dev -> main` is RELEASE. PRs into `dev` require selector-owned deterministic/E2E evidence; applicable target-Mac `REAL_ENVIRONMENT` evidence is deferred to release.
 
 ## Integrated baseline
 
@@ -13,11 +13,12 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.9.2**, maturity **L2**, with
 - PRS-13 / #37: implicit default notes use one source-aware structured v2 analysis instead of four overlapping physical jobs.
 - PRS-14 / #38: source-verifiable editable actions/decisions persist through explicit revision/conflict semantics.
 - PRS-15 / #39 merged at `dev@3604ffbe`: complete local Meeting archive search is bounded, server-side and FTS5-backed; `meeting-archive-search` FULL_MEDIA and packaged FTS5 smoke are integrated.
+- Repository governance baseline 0.10.0 / #40 is integrated at `dev@b0922314` with bounded agent reporting, schema-2 context routes and refreshed preflight/validation skills.
 - Canonical target-Mac runner: `python3 scripts/real_environment_ui_evidence.py --build`.
 
 ## Current integration candidate
 
-PRS-16 on `feat/prs-16-record-while-ai-busy` closes the race between starting a meeting and managed heavy AI work without unsafe kill, a second scheduler or false instant-recording state.
+PRS-16 on `feat/prs-16-record-while-ai-busy`, replayed onto `dev@b0922314`, closes the race between starting a meeting and managed heavy AI work without unsafe kill, a second scheduler or false instant-recording state.
 
 `HeavyWorkloadArbiter` remains the sole heavy-work owner. One ephemeral capture reservation waits for already-active managed work to finish normally, then prevents queued heavy work from starting for the recording lifetime. Work submitted during reserved capture stays in the same bounded queue and resumes after release; capacity is enforced against logical pending work even when a worker has dequeued an item behind capture priority.
 
