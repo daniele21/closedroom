@@ -60,10 +60,13 @@ class StructuredNoteEditTests(unittest.TestCase):
         self.assertEqual(edited["effective"]["actions"][0]["due"], "Monday")
         self.assertTrue(edited["effective"]["actions"][0]["user_edited"])
         self.assertEqual(edited["conflicts"], [])
+        self.assertEqual(edited["user_edits"][0]["base_generated"]["text"], "Alex validates the release")
+        self.assertEqual(edited["user_edits"][0]["base_generated"]["source_refs"][0]["start"], 5.0)
 
         reloaded = ensure_editable_structured_notes(edited, run_id="run-1")
         self.assertEqual(reloaded["effective"]["actions"][0]["text"], "Alex validates release readiness")
         self.assertEqual(reloaded["user_edits"][0]["updated_at"], 10.0)
+        self.assertEqual(reloaded["user_edits"][0]["base_generated"]["source_refs"][0]["speaker"], "Alex")
 
     def test_regeneration_reapplies_edit_when_generated_item_is_unchanged(self) -> None:
         first = ensure_editable_structured_notes(structured_result(), run_id="run-1")
@@ -140,6 +143,10 @@ class StructuredNoteEditTests(unittest.TestCase):
         self.assertEqual(second["effective"]["actions"], [])
         self.assertEqual(second["conflicts"][0]["reason"], "item_missing")
         self.assertEqual(second["conflicts"][0]["item_id"], action["item_id"])
+        retained = second["conflicts"][0]["retained_edit"]
+        self.assertEqual(retained["fields"]["text"], "Alex validates release readiness")
+        self.assertEqual(retained["base_generated"]["text"], "Alex validates the release")
+        self.assertEqual(retained["base_generated"]["source_refs"][0]["start"], 5.0)
 
     def test_stale_edit_is_rejected_and_discard_restores_generated_value(self) -> None:
         current = ensure_editable_structured_notes(structured_result(), run_id="run-1")
