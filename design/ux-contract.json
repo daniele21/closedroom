@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract_version": "0.8.0",
+  "contract_version": "0.8.1",
   "applicable": true,
   "design_source_of_truth": {
     "type": "code-first",
@@ -128,7 +128,7 @@
     "normal_path_rule": "A configured user completes the golden path without choosing capture backend, source device, diarization, visual enrichment, provider, model, runtime, helper, process, port, model path or routing concepts.",
     "surface_hierarchy": {
       "today": "understand what happened, what needs attention and what to open or do next",
-      "new_meeting": "optionally add meeting context, see readiness and start recording",
+      "new_meeting": "optionally add meeting context, see readiness and start recording; if managed AI is already active, show truthful cancellable preparation rather than pretending recording has started",
       "record": "understand capture status and safely stop with minimal live UI work",
       "meeting": "use the saved meeting as the canonical workspace with one primary Prepare notes action and secondary Transcript only recovery/power action",
       "prepare_notes": "coordinate transcript then notes as one recoverable user task, expose the transcript as soon as it is ready, and preserve completed work across cancel, failure, reconnect and explicit resume",
@@ -151,9 +151,10 @@
   },
   "resource_experience": {
     "recording_priority": "While recording is active, ClosedRoom prioritizes capture and persistence and does not start heavy ASR, LLM or VLM work.",
-    "heavy_work_admission": "One canonical runtime policy and the existing bounded workload owner decide when heavy work may start; meeting preparation composes existing child jobs and never owns a second heavy-work queue.",
+    "recording_start_priority": "When Start meeting races with managed heavy work, one capture reservation in the canonical workload owner closes the admission boundary atomically. Already-active managed work reaches its normal safe boundary without force-kill; queued work stays bounded and resumes after Stop. The UI calls the waiting state preparation, never recording, and offers cancellation while it is waiting for the active AI phase.",
+    "heavy_work_admission": "One canonical runtime policy and the existing bounded workload owner decide when heavy work may start; meeting preparation and recording admission never own a second heavy-work queue.",
     "model_residency": "Managed AI residency is phase-scoped and reclaimed after work; external runtimes remain caller-owned.",
-    "background_activity": "Stable UI state must not require display-rate React updates or avoidable polling loops."
+    "background_activity": "Stable UI state must not require display-rate React updates or avoidable polling loops; bounded short-interval polling is allowed only for the transient capture-reservation handshake and stops when it grants, cancels or fails."
   },
   "critical_states": [
     "loading",
@@ -162,6 +163,7 @@
     "disabled",
     "permission-denied",
     "processing",
+    "waiting-for-safe-boundary",
     "partial",
     "interrupted"
   ],
@@ -219,7 +221,7 @@
     ]
   },
   "critical_journeys": [
-    {"id": "record-meeting", "name": "Start, monitor and safely stop a local meeting recording without technical setup", "e2e": "required"},
+    {"id": "record-meeting", "name": "Start, monitor and safely stop a local meeting recording without technical setup, including truthful safe-boundary preparation when managed AI is already active", "e2e": "required"},
     {"id": "prepare-meeting-notes", "name": "Prepare transcript and notes with one durable action, reconnect safely and resume only missing work after failure", "e2e": "required"},
     {"id": "transcribe-meeting", "name": "Create or replace only the transcript through the secondary/expert path and recover from processing failure", "e2e": "recommended"},
     {"id": "review-meeting", "name": "Review transcript, speakers, notes and derived meeting evidence", "e2e": "recommended"},
