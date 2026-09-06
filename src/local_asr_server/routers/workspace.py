@@ -6,6 +6,7 @@ from typing import Any, Callable
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from local_asr_server.app_services import get_services
+from local_asr_server.catalog_search import CatalogMeetingSearch, MeetingSearchUnavailable
 from local_asr_server.meeting_diagnostics import build_meeting_diagnostic_report
 from local_asr_server.meeting_preparation import MeetingPreparationManager
 from local_asr_server.recordings import RecordingConflict, RecordingNotFound
@@ -23,8 +24,47 @@ def list_projects(request: Request):
 
 
 @router.get("/v1/meetings")
-def list_meetings(request: Request, limit: int = Query(default=50, ge=1, le=200)):
-    return _build_meetings(request.app, limit=limit)
+def list_meetings(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    page: int = Query(default=1, ge=1),
+    q: str | None = Query(default=None, max_length=512),
+    project_name: str | None = Query(default=None, max_length=200),
+):
+    # Keep the existing recent-meetings response untouched for current consumers.
+    # Passing q (including q="") opts into the complete, paged archive projection.
+    if q is None and page == 1 and project_name is None:
+        return _build_meetings(request.app, limit=limit)
+
+    services = get_services(request.app)
+    try:
+        result = CatalogMeetingSearch(services.catalog).search(
+            query=q or "",
+            page=page,
+            limit=min(limit, 50),
+            project_name=project_name,
+        )
+    except MeetingSearchUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    items = []
+    for recording_id in result.recording_ids:
+        try:
+            recording = services.recordings.get(recording_id, include_result=False)
+        except RecordingNotFound:
+            # Catalog reconciliation is canonical at RecordingStore startup. A missing
+            # file here is treated as a stale local artifact rather than expanding the
+            # request into an unbounded filesystem recovery scan.
+            continue
+        items.append(_build_meeting(request.app, recording, compact=True))
+
+    return {
+        "items": items,
+        "total": result.total,
+        "page": result.page,
+        "limit": result.limit,
+        "has_more": result.has_more,
+    }
 
 
 @router.get("/v1/meetings/{recording_id}")
