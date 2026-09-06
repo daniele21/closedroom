@@ -8,8 +8,19 @@ from typing import Any
 from local_asr_server.catalog import CatalogStore
 
 
-SEARCH_SCHEMA_VERSION = "1"
+SEARCH_SCHEMA_VERSION = "2"
 _TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
+_TRIGGER_NAMES = (
+    "meeting_search_recording_insert",
+    "meeting_search_recording_update",
+    "meeting_search_recording_delete",
+    "meeting_search_transcription_insert",
+    "meeting_search_transcription_update",
+    "meeting_search_transcription_delete",
+    "meeting_search_analysis_insert",
+    "meeting_search_analysis_update",
+    "meeting_search_analysis_delete",
+)
 
 
 class MeetingSearchUnavailable(RuntimeError):
@@ -128,7 +139,11 @@ class CatalogMeetingSearch:
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         try:
-            conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS meeting_search_fts USING fts5(recording_id UNINDEXED, title, project_name, transcript_text, notes_text, created_at UNINDEXED, tokenize='unicode61 remove_diacritics 2')")
+            conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS meeting_search_fts USING "
+                "fts5(recording_id UNINDEXED, title, project_name, transcript_text, "
+                "notes_text, created_at UNINDEXED, tokenize='unicode61 remove_diacritics 2')"
+            )
         except sqlite3.OperationalError as exc:
             raise MeetingSearchUnavailable(
                 "This ClosedRoom build does not provide the required SQLite FTS5 support"
@@ -143,69 +158,97 @@ class CatalogMeetingSearch:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
-
-            CREATE TRIGGER IF NOT EXISTS meeting_search_recording_insert
-            AFTER INSERT ON recordings BEGIN
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id) VALUES (NEW.id);
-            END;
-            CREATE TRIGGER IF NOT EXISTS meeting_search_recording_update
-            AFTER UPDATE ON recordings BEGIN
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id) VALUES (OLD.id);
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id) VALUES (NEW.id);
-            END;
-            CREATE TRIGGER IF NOT EXISTS meeting_search_recording_delete
-            AFTER DELETE ON recordings BEGIN
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id) VALUES (OLD.id);
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS meeting_search_transcription_insert
-            AFTER INSERT ON transcriptions WHEN NEW.recording_id IS NOT NULL AND NEW.recording_id != '' BEGIN
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id) VALUES (NEW.recording_id);
-            END;
-            CREATE TRIGGER IF NOT EXISTS meeting_search_transcription_update
-            AFTER UPDATE ON transcriptions BEGIN
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id)
-                    SELECT OLD.recording_id WHERE OLD.recording_id IS NOT NULL AND OLD.recording_id != '';
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id)
-                    SELECT NEW.recording_id WHERE NEW.recording_id IS NOT NULL AND NEW.recording_id != '';
-            END;
-            CREATE TRIGGER IF NOT EXISTS meeting_search_transcription_delete
-            AFTER DELETE ON transcriptions WHEN OLD.recording_id IS NOT NULL AND OLD.recording_id != '' BEGIN
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id) VALUES (OLD.recording_id);
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS meeting_search_analysis_insert
-            AFTER INSERT ON analysis_runs BEGIN
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id)
-                    SELECT COALESCE(NULLIF(NEW.recording_id, ''), CASE WHEN NEW.scope_type = 'recording' THEN NEW.scope_id END)
-                    WHERE COALESCE(NULLIF(NEW.recording_id, ''), CASE WHEN NEW.scope_type = 'recording' THEN NEW.scope_id END) IS NOT NULL;
-            END;
-            CREATE TRIGGER IF NOT EXISTS meeting_search_analysis_update
-            AFTER UPDATE ON analysis_runs BEGIN
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id)
-                    SELECT COALESCE(NULLIF(OLD.recording_id, ''), CASE WHEN OLD.scope_type = 'recording' THEN OLD.scope_id END)
-                    WHERE COALESCE(NULLIF(OLD.recording_id, ''), CASE WHEN OLD.scope_type = 'recording' THEN OLD.scope_id END) IS NOT NULL;
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id)
-                    SELECT COALESCE(NULLIF(NEW.recording_id, ''), CASE WHEN NEW.scope_type = 'recording' THEN NEW.scope_id END)
-                    WHERE COALESCE(NULLIF(NEW.recording_id, ''), CASE WHEN NEW.scope_type = 'recording' THEN NEW.scope_id END) IS NOT NULL;
-            END;
-            CREATE TRIGGER IF NOT EXISTS meeting_search_analysis_delete
-            AFTER DELETE ON analysis_runs BEGIN
-                INSERT OR IGNORE INTO meeting_search_dirty(recording_id)
-                    SELECT COALESCE(NULLIF(OLD.recording_id, ''), CASE WHEN OLD.scope_type = 'recording' THEN OLD.scope_id END)
-                    WHERE COALESCE(NULLIF(OLD.recording_id, ''), CASE WHEN OLD.scope_type = 'recording' THEN OLD.scope_id END) IS NOT NULL;
-            END;
             """
         )
 
         current = conn.execute(
             "SELECT value FROM meeting_search_meta WHERE key = 'schema_version'"
         ).fetchone()
-        if current is None or str(current["value"]) != SEARCH_SCHEMA_VERSION:
+        schema_changed = current is None or str(current["value"]) != SEARCH_SCHEMA_VERSION
+        if schema_changed:
+            for trigger_name in _TRIGGER_NAMES:
+                conn.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
+
+        # Use an explicit UPSERT conflict clause rather than INSERT OR IGNORE. The
+        # latter can inherit the conflict policy of the outer CatalogStore UPSERT when
+        # executed from a trigger, turning an idempotent dirty mark into a UNIQUE error.
+        conn.executescript(
+            """
+            CREATE TRIGGER IF NOT EXISTS meeting_search_recording_insert
+            AFTER INSERT ON recordings BEGIN
+                INSERT INTO meeting_search_dirty(recording_id) VALUES (NEW.id)
+                ON CONFLICT(recording_id) DO NOTHING;
+            END;
+            CREATE TRIGGER IF NOT EXISTS meeting_search_recording_update
+            AFTER UPDATE ON recordings BEGIN
+                INSERT INTO meeting_search_dirty(recording_id) VALUES (OLD.id)
+                ON CONFLICT(recording_id) DO NOTHING;
+                INSERT INTO meeting_search_dirty(recording_id) VALUES (NEW.id)
+                ON CONFLICT(recording_id) DO NOTHING;
+            END;
+            CREATE TRIGGER IF NOT EXISTS meeting_search_recording_delete
+            AFTER DELETE ON recordings BEGIN
+                INSERT INTO meeting_search_dirty(recording_id) VALUES (OLD.id)
+                ON CONFLICT(recording_id) DO NOTHING;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS meeting_search_transcription_insert
+            AFTER INSERT ON transcriptions WHEN NEW.recording_id IS NOT NULL AND NEW.recording_id != '' BEGIN
+                INSERT INTO meeting_search_dirty(recording_id) VALUES (NEW.recording_id)
+                ON CONFLICT(recording_id) DO NOTHING;
+            END;
+            CREATE TRIGGER IF NOT EXISTS meeting_search_transcription_update
+            AFTER UPDATE ON transcriptions BEGIN
+                INSERT INTO meeting_search_dirty(recording_id)
+                    SELECT OLD.recording_id WHERE OLD.recording_id IS NOT NULL AND OLD.recording_id != ''
+                    ON CONFLICT(recording_id) DO NOTHING;
+                INSERT INTO meeting_search_dirty(recording_id)
+                    SELECT NEW.recording_id WHERE NEW.recording_id IS NOT NULL AND NEW.recording_id != ''
+                    ON CONFLICT(recording_id) DO NOTHING;
+            END;
+            CREATE TRIGGER IF NOT EXISTS meeting_search_transcription_delete
+            AFTER DELETE ON transcriptions WHEN OLD.recording_id IS NOT NULL AND OLD.recording_id != '' BEGIN
+                INSERT INTO meeting_search_dirty(recording_id) VALUES (OLD.recording_id)
+                ON CONFLICT(recording_id) DO NOTHING;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS meeting_search_analysis_insert
+            AFTER INSERT ON analysis_runs BEGIN
+                INSERT INTO meeting_search_dirty(recording_id)
+                    SELECT COALESCE(NULLIF(NEW.recording_id, ''), CASE WHEN NEW.scope_type = 'recording' THEN NEW.scope_id END)
+                    WHERE COALESCE(NULLIF(NEW.recording_id, ''), CASE WHEN NEW.scope_type = 'recording' THEN NEW.scope_id END) IS NOT NULL
+                    ON CONFLICT(recording_id) DO NOTHING;
+            END;
+            CREATE TRIGGER IF NOT EXISTS meeting_search_analysis_update
+            AFTER UPDATE ON analysis_runs BEGIN
+                INSERT INTO meeting_search_dirty(recording_id)
+                    SELECT COALESCE(NULLIF(OLD.recording_id, ''), CASE WHEN OLD.scope_type = 'recording' THEN OLD.scope_id END)
+                    WHERE COALESCE(NULLIF(OLD.recording_id, ''), CASE WHEN OLD.scope_type = 'recording' THEN OLD.scope_id END) IS NOT NULL
+                    ON CONFLICT(recording_id) DO NOTHING;
+                INSERT INTO meeting_search_dirty(recording_id)
+                    SELECT COALESCE(NULLIF(NEW.recording_id, ''), CASE WHEN NEW.scope_type = 'recording' THEN NEW.scope_id END)
+                    WHERE COALESCE(NULLIF(NEW.recording_id, ''), CASE WHEN NEW.scope_type = 'recording' THEN NEW.scope_id END) IS NOT NULL
+                    ON CONFLICT(recording_id) DO NOTHING;
+            END;
+            CREATE TRIGGER IF NOT EXISTS meeting_search_analysis_delete
+            AFTER DELETE ON analysis_runs BEGIN
+                INSERT INTO meeting_search_dirty(recording_id)
+                    SELECT COALESCE(NULLIF(OLD.recording_id, ''), CASE WHEN OLD.scope_type = 'recording' THEN OLD.scope_id END)
+                    WHERE COALESCE(NULLIF(OLD.recording_id, ''), CASE WHEN OLD.scope_type = 'recording' THEN OLD.scope_id END) IS NOT NULL
+                    ON CONFLICT(recording_id) DO NOTHING;
+            END;
+            """
+        )
+
+        if schema_changed:
             conn.execute("DELETE FROM meeting_search_fts")
             conn.execute("DELETE FROM meeting_search_dirty")
             conn.execute(
-                "INSERT OR IGNORE INTO meeting_search_dirty(recording_id) SELECT id FROM recordings"
+                """
+                INSERT INTO meeting_search_dirty(recording_id)
+                SELECT id FROM recordings WHERE 1
+                ON CONFLICT(recording_id) DO NOTHING
+                """
             )
             conn.execute(
                 """
@@ -221,7 +264,11 @@ class CatalogMeetingSearch:
         dirty = int(conn.execute("SELECT COUNT(*) FROM meeting_search_dirty").fetchone()[0])
         if indexed + dirty < recordings:
             conn.execute(
-                "INSERT OR IGNORE INTO meeting_search_dirty(recording_id) SELECT id FROM recordings"
+                """
+                INSERT INTO meeting_search_dirty(recording_id)
+                SELECT id FROM recordings WHERE 1
+                ON CONFLICT(recording_id) DO NOTHING
+                """
             )
 
     def _refresh_dirty(self, conn: sqlite3.Connection) -> None:
