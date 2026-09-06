@@ -208,9 +208,9 @@ export function StructuredNotesEditor({
                   {lang === 'it' ? 'La rigenerazione ha cambiato questa voce' : 'Regeneration changed this item'}
                 </p>
                 <p className="mt-1 text-[11px] leading-relaxed text-text-secondary">
-                  {conflict.reason === 'item_missing'
-                    ? (lang === 'it' ? 'La voce non è più presente nelle note generate. La tua correzione è conservata finché non scegli di scartarla.' : 'The item is no longer present in generated notes. Your correction is retained until you discard it.')
-                    : (lang === 'it' ? 'La tua correzione non è stata applicata automaticamente. Confrontala con la nuova versione e scegli esplicitamente.' : 'Your correction was not applied automatically. Compare it with the new version and choose explicitly.')}
+                  {lang === 'it'
+                    ? 'La tua correzione non è stata applicata automaticamente. Confrontala con la nuova versione e scegli esplicitamente.'
+                    : 'Your correction was not applied automatically. Compare it with the new version and choose explicitly.'}
                 </p>
                 {conflict.retained_edit?.fields?.text && (
                   <div className="mt-2 rounded-md bg-bg-elevated px-2.5 py-2 text-[11px] text-text-secondary">
@@ -239,9 +239,7 @@ export function StructuredNotesEditor({
                     isLoading={busyKey === `${conflict.item_kind}:${conflict.item_id}:discard`}
                   >
                     <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                    {conflict.reason === 'item_missing'
-                      ? (lang === 'it' ? 'Scarta la correzione' : 'Discard edit')
-                      : (lang === 'it' ? 'Usa la nuova versione' : 'Use regenerated')}
+                    {lang === 'it' ? 'Usa la nuova versione' : 'Use regenerated'}
                   </Button>
                 </div>
               </div>
@@ -344,6 +342,10 @@ export function StructuredNotesEditor({
   const showActions = analysisType === 'meeting_brief' || analysisType === 'action_items';
   const showDecisions = analysisType === 'meeting_brief' || analysisType === 'decisions';
   const showRisks = analysisType === 'meeting_brief' || analysisType === 'risks_blockers';
+  const missingConflicts = conflicts.filter((conflict) => (
+    conflict.reason === 'item_missing'
+    && ((conflict.item_kind === 'action' && showActions) || (conflict.item_kind === 'decision' && showDecisions))
+  ));
 
   return (
     <div className="flex flex-col gap-5" data-structured-notes="v2">
@@ -403,6 +405,67 @@ export function StructuredNotesEditor({
                 {lang === 'it' ? 'Nessuna decisione identificata.' : 'No decisions identified.'}
               </p>
             )}
+          </div>
+        </section>
+      )}
+
+      {missingConflicts.length > 0 && (
+        <section data-note-conflict="item-missing">
+          <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-warning">
+            {lang === 'it' ? 'Correzioni da verificare' : 'Edits to review'}
+          </h4>
+          <div className="flex flex-col gap-2">
+            {missingConflicts.map((conflict) => {
+              const sourceItem = conflict.retained_edit.base_generated;
+              const editedText = conflict.retained_edit.fields?.text;
+              const key = `${conflict.item_kind}:${conflict.item_id}:discard`;
+              return (
+                <div
+                  key={`${conflict.item_kind}:${conflict.item_id}`}
+                  className="rounded-xl border border-warning/40 bg-warning/10 p-4"
+                  role="status"
+                >
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-text-primary">
+                        {lang === 'it' ? 'Voce rimossa dalla rigenerazione' : 'Item removed by regeneration'}
+                      </p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-text-secondary">
+                        {lang === 'it'
+                          ? 'La nuova revisione non contiene più questa voce. ClosedRoom conserva la tua correzione e la fonte, ma non ricrea automaticamente contenuto che il modello ha rimosso.'
+                          : 'The new revision no longer contains this item. ClosedRoom retains your edit and its evidence, but does not automatically recreate content the model removed.'}
+                      </p>
+                      {sourceItem?.text && (
+                        <div className="mt-2 rounded-md bg-bg-elevated px-2.5 py-2 text-[11px] text-text-secondary">
+                          <span className="font-semibold text-text-primary">{lang === 'it' ? 'Versione precedente: ' : 'Previous generated: '}</span>
+                          {sourceItem.text}
+                        </div>
+                      )}
+                      {editedText && (
+                        <div className="mt-2 rounded-md bg-bg-elevated px-2.5 py-2 text-[11px] text-text-secondary">
+                          <span className="font-semibold text-text-primary">{lang === 'it' ? 'Tua modifica: ' : 'Your edit: '}</span>
+                          {editedText}
+                        </div>
+                      )}
+                      <EvidenceRefs refs={sourceItem?.source_refs} onSeek={onSeek} />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={readOnly || busyKey !== null}
+                          onClick={() => resolveConflict(conflict, false)}
+                          isLoading={busyKey === key}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                          {lang === 'it' ? 'Scarta la correzione' : 'Discard edit'}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
