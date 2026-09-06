@@ -22,7 +22,6 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
-  X,
 } from 'lucide-react';
 import { ApiClient, Meeting } from '../api/apiClient';
 import { getDemoMeetings } from '../features/demo/demoData';
@@ -33,6 +32,7 @@ import { Dialog, DialogContent, DialogHeader, DialogBody } from '../components/u
 import { TaskProcessingLoader } from '../components/workspace/TaskProcessingLoader';
 import { InsightDetailDialog, InsightTab } from '../components/workspace/InsightDetailDialog';
 import { MeetingListDialog } from '../components/workspace/MeetingListDialog';
+import { MeetingSearchDialog } from '../components/workspace/MeetingSearchDialog';
 import {
   DigestPanel,
   EmptyState,
@@ -109,7 +109,6 @@ export default function DashboardPage({
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [query, setQuery] = useState('');
   const [timeRange, setTimeRange] = useState<TimeRangeState>({ mode: 'today' });
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -210,18 +209,9 @@ export default function DashboardPage({
 
   const resolvedRange = useMemo(() => resolveTimeRange(timeRange), [timeRange]);
   const rangeLabel = useMemo(() => formatTimeRangeLabel(timeRange, lang), [timeRange, lang]);
-
-  const searchedMeetings = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return meetings;
-    return meetings.filter((m) =>
-      [meetingTitle(m), m.project_name, m.transcription?.text?.slice(0, 800)].join(' ').toLowerCase().includes(needle),
-    );
-  }, [meetings, query]);
-
   const periodMeetings = useMemo(
-    () => searchedMeetings.filter((m) => isWithinTimeRange(m.created_at, resolvedRange)),
-    [searchedMeetings, resolvedRange],
+    () => meetings.filter((meeting) => isWithinTimeRange(meeting.created_at, resolvedRange)),
+    [meetings, resolvedRange],
   );
 
   const sources = useMemo(() => periodMeetings.map(sourceFromMeeting), [periodMeetings]);
@@ -482,23 +472,6 @@ export default function DashboardPage({
               )}
             </div>
 
-            {query && (
-              <div className="flex items-center justify-between rounded-xl border border-border-subtle bg-bg-elevated p-3">
-                <span className="text-xs text-text-secondary">
-                  {lang === 'it' ? 'Filtro:' : 'Filter:'}{' '}
-                  <strong className="text-text-primary">"{query}"</strong>{' '}
-                  ({periodMeetings.length} {lang === 'it' ? 'risultati' : 'results'})
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setQuery('')}
-                  className="text-xs font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                >
-                  {lang === 'it' ? 'Azzera' : 'Clear'}
-                </button>
-              </div>
-            )}
-
             {periodMeetings.length === 0 ? (
               <EmptyState
                 icon={Mic}
@@ -686,75 +659,13 @@ export default function DashboardPage({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
-        <DialogContent size="lg" dataTour="dashboard-search-dialog-content" className="max-h-[78vh]">
-          <DialogHeader
-            title={t('dashboard.searchPlaceholder')}
-            description={t('dashboard.meetingsDesc')}
-          />
-          <div className="flex items-center gap-3 border-b border-border-subtle bg-bg-elevated px-4 py-3 pr-12">
-            <Search className="h-5 w-5 shrink-0 text-text-muted" aria-hidden="true" />
-            <label htmlFor="dashboard-meeting-search" className="sr-only">
-              {t('dashboard.searchPlaceholder')}
-            </label>
-            <input
-              id="dashboard-meeting-search"
-              autoFocus
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('dashboard.searchPlaceholder')}
-              className="w-full bg-transparent text-base text-text-primary outline-none placeholder:text-text-muted"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery('')}
-                aria-label={lang === 'it' ? 'Azzera ricerca' : 'Clear search'}
-                className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            )}
-          </div>
-          <DialogBody noScroll className="max-h-[58vh] overflow-y-auto p-2">
-            <div aria-live="polite" className="sr-only">
-              {searchedMeetings.length} {lang === 'it' ? 'risultati' : 'results'}
-            </div>
-            {searchedMeetings.length === 0 ? (
-              <div className="py-8 text-center text-sm text-text-muted">
-                {lang === 'it' ? 'Nessun meeting trovato' : 'No meetings found'}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-1.5">
-                <div className="px-3 py-1.5 text-xs font-semibold uppercase text-text-muted">
-                  {lang === 'it' ? 'Risultati' : 'Results'} ({searchedMeetings.length})
-                </div>
-                {searchedMeetings.map((meeting) => (
-                  <button
-                    key={meeting.id}
-                    type="button"
-                    onClick={() => { navigateTo('meeting', meeting.id); setIsSearchOpen(false); }}
-                    className="group flex w-full items-center justify-between rounded-xl border border-transparent p-3 text-left transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold text-text-primary transition-colors group-hover:text-accent">
-                        {meetingTitle(meeting)}
-                      </div>
-                      <div className="mt-0.5 truncate text-xs text-text-muted">
-                        {meeting.project_name || (lang === 'it' ? 'Nessun Progetto' : 'No Project')}
-                      </div>
-                    </div>
-                    <div className="ml-4 shrink-0 text-xs text-text-muted">
-                      {new Date(meeting.created_at).toLocaleDateString(lang)}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </DialogBody>
-        </DialogContent>
-      </Dialog>
+      <MeetingSearchDialog
+        open={isSearchOpen}
+        onOpenChange={setIsSearchOpen}
+        onOpenMeeting={(id) => navigateTo('meeting', id)}
+        lang={lang}
+        demoMeetings={demoMode ? meetings : undefined}
+      />
     </div>
   );
 }
