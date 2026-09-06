@@ -1,12 +1,12 @@
 # ClosedRoom: useful notes, simple journeys and efficient execution
 
-Status: active — PRS-14 integration candidate
+Status: active — PRS-15 integration candidate
 Owner: meeting product, canonical job/persistence owners and local runtime
-Baseline: dev `90c4e314`, 2026-09-06.
+Baseline: dev `a3902f3c`, 2026-09-06.
 
 ## Outcome and invariants
 
-Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11, PRS-12 and PRS-13 are integrated; PRS-14 is the current integration candidate. No production-model performance or memory gain is claimed without representative evidence.
+Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-14 are integrated; PRS-15 is the current integration candidate. No production-model performance or memory gain is claimed without representative evidence.
 
 - Meeting is primary; normal recording requires no technical choice.
 - `Prepare notes` is explicit after Stop; `Transcript only` is secondary.
@@ -22,8 +22,8 @@ Record, prepare useful notes, verify decisions and find them later while the Mac
 | PRS-11 | Fast saved Meeting open | MeetingDetailPage, API client, visual hook | — | DONE |
 | PRS-12 | One recoverable Prepare notes action | jobs, analysis/transcription services, Meeting UI | PRS-11 | DONE |
 | PRS-13 | Consistent notes with less repeated inference | analysis templates/jobs/service/catalog reads | PRS-12 | DONE |
-| PRS-14 | Verify/edit actions and decisions | notes schema/catalog, transcript, Meeting UI | PRS-13 | INTEGRATION |
-| PRS-15 | Search complete local archive | CatalogStore, workspace/API/UI | — | READY |
+| PRS-14 | Verify/edit actions and decisions | notes schema/catalog, transcript, Meeting UI | PRS-13 | DONE |
+| PRS-15 | Search complete local archive | CatalogStore, workspace/API/UI | — | INTEGRATION |
 | PRS-16 | Record safely while AI is busy | RecordingStore, resource policy/arbiter/runtime | — | READY |
 | PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | BLOCKED |
 | PRS-18 | Measured release | current-state, benchmarks, target-Mac evidence | selected increments | BLOCKED |
@@ -48,36 +48,38 @@ Structured cache identity includes transcript segment ids/timing/speaker/text. S
 
 Integration evidence covered schema/projection/cache/long-input/source-boundary tests, existing analysis/preparation suites, frontend deterministic checks, `meeting-preparation-recovery` FULL_MEDIA and selector-owned STRONG/package gates. Production model quality/latency/RSS and target WKWebView/TCC fidelity remain release deltas unless a comparable integration baseline exists.
 
-## PRS-14 — verifiable, editable notes — integration candidate
+## PRS-14 — integrated verifiable, editable notes
 
-Goal: let users verify generated actions/decisions against the meeting, correct them without destroying model output, and carry those corrections safely across restart and regeneration.
+Actions and decisions now carry stable source-anchored identity, immutable generated content and a persisted user-edit overlay. Corrections survive restart; regeneration creates a new revision and carries edits only when safe. Changed or removed generated items surface explicit `generated_changed` / `item_missing` conflicts rather than silent remapping. PATCH uses the generated fingerprint for optimistic concurrency, discard is explicit, and source evidence remains reachable from current and retained conflict items.
+
+Integration evidence included domain identity/overlay/revision tests, real CatalogStore reopen persistence, API stale-generation/rebase/discard coverage, frontend contract checks, the `meeting-note-edit-revision` FULL_MEDIA journey and packaged-app validation. Target WKWebView focus/accessibility and production-model behavior remain release confirmation when material.
+
+## PRS-15 — complete search, bounded archive — integration candidate
+
+Goal: make every persisted Meeting discoverable from the normal search surface without loading the whole archive or relying on compact preview text in React.
 
 Implementation candidate:
-- actions, decisions and risks receive deterministic item identity derived from kind + canonical source anchors + occurrence; identity is independent from generated wording, while each generated item also carries a content/source fingerprint;
-- actions and decisions are editable in place in Meeting Analysis. Generated content remains immutable under `generated`; user corrections are stored as a distinct `user_edits` overlay and exposed through `effective` reads;
-- each edit retains the generated item snapshot it was based on, including source refs, so an item removed by regeneration still has verifiable prior evidence rather than becoming an unanchored text fragment;
-- `CatalogStore` analysis runs remain the only persistence owner. Overlay, revision metadata and conflict state live inside the canonical run result JSON; no second notes store or SQLite migration is introduced;
-- analysis-run history is the revision chain. A later structured run inherits prior edits only when that revision has no explicit overlay state. An explicit empty `user_edits` set therefore prevents discarded corrections from being re-inherited;
-- unchanged generated items safely reapply the prior correction. If wording/metadata changed, the generated value wins by default and the retained edit becomes `generated_changed`; if the item disappeared, it becomes `item_missing`. Neither case is silently remapped;
-- for `generated_changed`, the user can explicitly rebase the retained edit onto the new generated fingerprint or use the regenerated version. For `item_missing`, ClosedRoom shows the previous generated text, retained correction and source timestamp but does not recreate removed content automatically; the safe recovery is explicit discard or a later regeneration;
-- PATCH `/v1/analysis-runs/{run}/items/{action|decision}/{item}` requires the current generated fingerprint and returns 409 after a stale regeneration. DELETE of the item edit resolves/discards the overlay on the current revision;
-- v2 Meeting views use `StructuredNotesEditor`; legacy/non-v2 analysis remains markdown. Evidence chips seek the saved recording to the referenced timestamp. Transcript, speakers, custom/deep analysis and runtime scheduling are unchanged.
+- `CatalogStore` remains the canonical persistence owner. `CatalogMeetingSearch` creates a derived FTS5 projection inside the same `closedroom.db`; there is no second database, scheduler or archive owner;
+- SQLite triggers on canonical recording, transcription and analysis-run tables only mark affected recording ids dirty. Before a search, dirty ids are refreshed transactionally from current canonical rows, including the latest visible transcript and latest completed analysis revision per type;
+- the first search backfills the existing catalog once. A schema marker plus row-count healing handles restored/copied databases; subsequent mutations stay incremental through the dirty set;
+- user query text is tokenized as plain bounded text rather than accepted as raw FTS syntax. Search is capped at 12 terms, 64 characters per term and 50 results per page;
+- `GET /v1/meetings` keeps the legacy recent-list response when `q` is omitted. Supplying `q` (including an empty string) opts into complete paged archive search with stable `page`, `limit`, `total`, `has_more` and optional exact project filtering;
+- search result ordering is relevance then creation time/id for text queries, and creation time/id for blank archive paging;
+- the Today page no longer filters its compact recent data when the user searches. `⌘K` opens a dedicated archive dialog that requests bounded pages, handles stale requests/loading/error/empty states, and preserves the query across source navigation;
+- demo mode remains local to deterministic demo fixtures; production search remains server-side and local-only;
+- FTS5 absence is an explicit 503 capability failure, never a fallback to whole-archive Python/React scanning. Packaged-app smoke probes the authenticated search endpoint inside the frozen runtime so hosted source Python cannot hide a packaging gap.
 
 Acceptance before merge:
-- user edits never mutate `generated`, survive CatalogStore reopen and appear in the logical action/decision projections;
-- generated/source changes create a new revision and an explicit conflict rather than applying the old correction silently;
-- a removed generated item retains the prior correction plus source snapshot until explicit discard, without being synthetically re-created;
-- stale PATCH after regeneration returns 409; explicit rebase/discard updates only the current canonical run;
-- after discard on a later revision, reload does not inherit the old edit again;
-- source evidence remains directly reachable from generated and retained-conflict items;
-- old v2 runs without edit metadata upgrade read-time without migration and v1 runs remain unchanged;
-- the automated `meeting-note-edit-revision` FULL_MEDIA journey proves evidence -> edit -> reload -> regenerate changed-item conflict -> explicit rebase recovery; deterministic domain/API/frontend tests separately cover the removed-item conflict because synthetic recreation is intentionally forbidden.
+- a meeting outside the old recent/preview limits is found by title, project, full transcript or current notes;
+- blank-query paging and project filtering are stable, bounded and non-overlapping;
+- title/project, transcript, analysis edit/revision and deletion mutations refresh search without manual reindexing;
+- reopen preserves search and copied/restored databases heal the derived projection;
+- Today remains independent from global-search state and never extracts the whole archive into React;
+- stale frontend responses cannot replace a newer query, and loading/error/empty/load-more states are explicit and keyboard reachable;
+- `meeting-archive-search` FULL_MEDIA proves recent Today -> `⌘K` -> archive-only hit -> source open -> Back -> restored query;
+- packaged `.app` lifecycle smoke proves the bundled SQLite runtime can execute the FTS5 archive endpoint.
 
-Checks: `test_structured_note_edits.py`, `test_structured_note_projection_edits.py`, `test_structured_note_catalog_persistence.py`, `test_structured_note_api.py`, `test_frontend_structured_notes_editor.py`, existing shared-notes/preparation suites, frontend lint/typecheck, browser FULL_MEDIA `meeting-note-edit-revision` plus existing Meeting journeys, and selector-owned STRONG packaged-app validation. Packaged WKWebView focus/accessibility and production-model behavior remain release confirmation when material.
-
-## PRS-15 — complete search, bounded archive
-
-Extend CatalogStore projection with bounded server-side search/pagination after verifying bundled SQLite full-text support. Search must reach content beyond preview/page limits, maintain stable paging/filtering, preserve index freshness across mutations and avoid whole-archive React extraction. Synthetic large-archive tests plus search -> source -> back FULL_MEDIA; STRONG expected.
+Checks: `test_catalog_meeting_search.py`, `test_meeting_archive_search_api.py`, `test_frontend_archive_search.py`, existing catalog/workspace/frontend suites, frontend lint/typecheck, browser FULL_MEDIA including `meeting-archive-search`, packaged-app FTS5/lifecycle smoke and selector-owned STRONG validation. Target-WKWebView focus/accessibility remains release confirmation when material.
 
 ## PRS-16 — recording while AI is busy
 
