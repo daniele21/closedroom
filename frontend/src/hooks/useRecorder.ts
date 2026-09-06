@@ -252,29 +252,6 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     }
   }, []);
 
-  const startAudioMeter = useCallback((streamOrNode: AudioNode | MediaStream) => {
-    // startAudioMeter is kept for compatibility, but we now manually connect in startRecording
-    stopAudioMeter(false);
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    
-    if (streamOrNode instanceof AudioNode) {
-      audioContextRef.current = streamOrNode.context as AudioContext;
-      micAnalyserRef.current = audioContextRef.current.createAnalyser();
-      micAnalyserRef.current.fftSize = 512;
-      micAnalyserRef.current.smoothingTimeConstant = 0.78;
-      streamOrNode.connect(micAnalyserRef.current);
-    } else {
-      audioContextRef.current = new AudioContextClass();
-      micAnalyserRef.current = audioContextRef.current.createAnalyser();
-      micAnalyserRef.current.fftSize = 512;
-      micAnalyserRef.current.smoothingTimeConstant = 0.78;
-      audioContextRef.current.createMediaStreamSource(streamOrNode).connect(micAnalyserRef.current);
-    }
-
-    drawAudioMeter();
-  }, [drawAudioMeter, stopAudioMeter]);
-
   const releaseMedia = useCallback(() => {
     stopAudioMeter();
     sourceStreamsRef.current.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
