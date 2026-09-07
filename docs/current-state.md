@@ -23,20 +23,22 @@ PRS-16 is integrated. `HeavyWorkloadArbiter` remains the sole heavy-work owner: 
 
 `ResourcePolicy(capture_active)` remains the fail-safe for legacy/unreserved capture. `RecordingStore` remains the only recording persistence owner; reservation ids are transient and external runtimes remain caller-owned.
 
-The frontend reserves capture before start, shows a truthful cancellable preparation state while AI finishes, starts the timer only with real capture, and releases priority on Stop/failure/recovery. PRS-17 coherent macOS workspace is now the next ready slice; no PRS-17 implementation is integrated yet.
+The frontend reserves capture before start, shows a truthful cancellable preparation state while AI finishes, starts the timer only with real capture, and releases priority on Stop/failure/recovery.
+
+PRS-17 is the current integration candidate from fresh `dev@d0ab9399`. It converges Today, saved Meeting and Projects under one adaptive macOS workspace shell without changing routing, persistence or runtime ownership. The desktop layout uses one stable workspace rail; compact/narrow windows reflow the same destinations and persistent New Meeting action into one bounded sticky toolbar. Settings/theme/language/tour/demo/runtime status remain utilities rather than peer product destinations. The new `coherent-macos-workspace` browser FULL_MEDIA journey verifies Today -> Meeting -> Projects hierarchy, theme continuity and 1440/780/560px resize behavior with no page-wide horizontal overflow. Integration readiness still requires exact-head selector-owned automated evidence; target-Mac WKWebView/window/focus/VoiceOver confirmation remains release evidence.
 
 ## Release evidence still pending
 
-Target-Mac UX/TCC/native audio, CPU/RSS/Metal/thermal evidence, PRS-9 representative audio comparison, production signing/notarization, subjective VoiceOver usability and material production ASR/LLM quality/latency claims remain release work. PRS-16 claims safe priority at the next supported managed-work boundary, not instant model pre-emption.
+Target-Mac UX/TCC/native audio, CPU/RSS/Metal/thermal evidence, PRS-9 representative audio comparison, production signing/notarization, subjective VoiceOver usability and material production ASR/LLM quality/latency claims remain release work. PRS-16 claims safe priority at the next supported managed-work boundary, not instant model pre-emption. PRS-17 does not claim headless Chrome proves packaged WKWebView/window chrome or subjective accessibility quality.
 
 ## Active workstreams
 
-- [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..16 integrated; PRS-17 ready.
+- [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..16 integrated; PRS-17 integration candidate.
 - [`product-runtime-simplification.md`](workstreams/product-runtime-simplification.md): PRS-10 convergence remains open.
 - [`ux-simplification.md`](workstreams/ux-simplification.md): deterministic work integrated; target-Mac confirmation remains a release gate.
 
 ## Next highest-value work
 
-1. Advance PRS-17 coherent macOS workspace from fresh `dev@eb92df6d`.
-2. Preserve the existing product/runtime ownership boundaries while converging the workspace UX.
-3. Collect release evidence for PRS-18 / `dev -> main`.
+1. Close PRS-17 on exact `dev@d0ab9399` with selector-owned source/frontend, browser FULL_MEDIA and any escalated packaged gates.
+2. Preserve the existing product/runtime ownership boundaries while proving adaptive workspace coherence and accessibility semantics.
+3. After PRS-17 integration, advance PRS-18 measured release and collect blocking target-Mac evidence for `dev -> main`.
