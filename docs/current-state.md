@@ -25,7 +25,7 @@ PRS-16 is integrated. `HeavyWorkloadArbiter` remains the sole heavy-work owner: 
 
 The frontend reserves capture before start, shows a truthful cancellable preparation state while AI finishes, starts the timer only with real capture, and releases priority on Stop/failure/recovery.
 
-PRS-17 is the current integration candidate from fresh `dev@d0ab9399`. It converges Today, saved Meeting and Projects under one adaptive macOS workspace shell without changing routing, persistence or runtime ownership. The desktop layout uses one stable workspace rail; compact/narrow windows reflow the same destinations and persistent New Meeting action into one bounded sticky toolbar. Settings/theme/language/tour/demo/runtime status remain utilities rather than peer product destinations. The new `coherent-macos-workspace` browser FULL_MEDIA journey verifies Today -> Meeting -> Projects hierarchy, theme continuity and 1440/780/560px resize behavior with no page-wide horizontal overflow. Integration readiness still requires exact-head selector-owned automated evidence; target-Mac WKWebView/window/focus/VoiceOver confirmation remains release evidence.
+PRS-17 is the current integration candidate from fresh `dev@580fe6a7`. It converges Today, saved Meeting and Projects under one adaptive macOS workspace shell without changing routing, persistence or runtime ownership. The desktop layout uses one stable workspace rail; compact/narrow windows reflow the same destinations and persistent New Meeting action into one bounded sticky toolbar. Settings/theme/language/tour/demo/runtime status remain utilities rather than peer product destinations. The new `coherent-macos-workspace` browser FULL_MEDIA journey verifies Today -> Meeting -> Projects hierarchy, theme continuity and 1440/780/560px resize behavior with no page-wide horizontal overflow. Integration readiness still requires exact-head selector-owned automated evidence; target-Mac WKWebView/window/focus/VoiceOver confirmation remains release evidence.
 
 ## Release evidence still pending
 
@@ -39,6 +39,6 @@ Target-Mac UX/TCC/native audio, CPU/RSS/Metal/thermal evidence, PRS-9 representa
 
 ## Next highest-value work
 
-1. Close PRS-17 on exact `dev@d0ab9399` with selector-owned source/frontend, browser FULL_MEDIA and any escalated packaged gates.
+1. Close PRS-17 on exact `dev@580fe6a7` with selector-owned source/frontend, browser FULL_MEDIA and any escalated packaged gates.
 2. Preserve the existing product/runtime ownership boundaries while proving adaptive workspace coherence and accessibility semantics.
 3. After PRS-17 integration, advance PRS-18 measured release and collect blocking target-Mac evidence for `dev -> main`.
