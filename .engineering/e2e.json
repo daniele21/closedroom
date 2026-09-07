@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract_version": "0.2.1",
+  "contract_version": "0.2.2",
   "applicability": {
     "status": "recommended",
     "reason": "ClosedRoom crosses FastAPI, persisted meeting state, a React/WKWebView UI, macOS native capture helpers and local AI runtimes; lower-level tests alone cannot prove every critical assembled workflow."
@@ -59,9 +59,9 @@
       "automation": "automated",
       "platform": "GitHub-hosted macOS arm64 with headless Chrome",
       "command": "node scripts/browser_meeting_ui_e2e.mjs",
-      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for saved-Meeting, preparation-recovery, verified-note-edit revision, complete archive-search and busy-AI recording-priority journeys, ChromeDriver browser interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
+      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for saved-Meeting, preparation-recovery, verified-note-edit revision, complete archive-search and busy-AI recording-priority journeys, plus a synthetic demo-mode coherent-workspace journey across Today, Meeting and Projects with wide/compact/narrow resize assertions; ChromeDriver interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
       "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "known_gaps": ["does not exercise the packaged WKWebView process boundary", "deterministic API fixtures do not prove the assembled FastAPI persistence/runtime path", "does not prove TCC, native capture, physical audio devices or production MLX/Metal behavior"]
+      "known_gaps": ["does not exercise the packaged WKWebView process boundary", "deterministic API/demo fixtures do not prove the assembled FastAPI persistence/runtime path", "does not prove TCC, native capture, physical audio devices or production MLX/Metal behavior"]
     },
     {
       "id": "packaged-macos-arm64-ci",
@@ -198,6 +198,19 @@
       "real_environment_confirmation": "required",
       "real_environment_runner": "target-macos-real",
       "residual_gaps": ["browser fixtures prove user-visible ordering but not physical microphone/system-audio capture", "source-contract tests prove scheduler ordering but not representative MLX/Metal pressure or thermal behavior", "packaged WKWebView and TCC-backed capture remain target-Mac release evidence"],
+      "automation_gap_reason": ""
+    },
+    {
+      "id": "coherent-macos-workspace",
+      "claim": "Today, a saved Meeting and Projects share one stable application hierarchy across wide, compact and narrow windows: Meeting remains a child of Today, Projects is the second peer destination, New Meeting remains the persistent primary action, utility controls remain secondary, theme continuity survives navigation and the layout does not introduce page-wide horizontal overflow.",
+      "ui_surface": true,
+      "minimum_ui_evidence_mode": "full_media",
+      "target_environment_refs": ["closedroom-macos-apple-silicon"],
+      "automated_environment_refs": ["browser-macos-arm64-ci"],
+      "minimum_automated_fidelity": "simulated_or_emulated",
+      "real_environment_confirmation": "required",
+      "real_environment_runner": "target-macos-real",
+      "residual_gaps": ["headless Chrome proves responsive hierarchy and interaction semantics but not the packaged WKWebView process boundary", "window chrome, keyboard/focus behavior, reduced-motion behavior and VoiceOver quality require target-macos-real release evidence", "this journey uses synthetic demo data and does not claim persistence/runtime fidelity"],
       "automation_gap_reason": ""
     },
     {
