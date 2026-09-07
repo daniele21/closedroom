@@ -4,7 +4,7 @@
   "applicable": true,
   "design_source_of_truth": {
     "type": "code-first",
-    "location": "frontend/src, frontend/src/index.css and frontend/public logo assets"
+    "location": "frontend/src, frontend/src/index.css, frontend/src/workspace.css and frontend/public logo assets"
   },
   "experience_context": {
     "primary_users": [
@@ -115,6 +115,15 @@
       "merge, split and raw transcript tools"
     ]
   },
+  "workspace_navigation": {
+    "primary_destinations": ["today", "projects"],
+    "meeting_parent": "today",
+    "persistent_primary_action": "new_meeting",
+    "utility_destinations": ["settings", "theme", "language", "tour", "demo", "runtime_status"],
+    "desktop_pattern": "one stable left workspace rail",
+    "compact_pattern": "the same destinations and action hierarchy reflow into one sticky top toolbar; compact width must not introduce a second navigation model",
+    "rule": "Today, Meeting and Projects share one workspace chrome. Meeting is opened from Today/search/project context but does not become a third peer destination. Advanced transcription, analysis and diagnostics remain contextual or utility routes."
+  },
   "golden_path": {
     "steps": [
       "today",
@@ -182,6 +191,11 @@
       "primary resizable macOS WKWebView window",
       "compact floating recording overlay",
       "browser development viewport"
+    ],
+    "workspace_rules": [
+      "wide windows keep one stable workspace rail and bounded content column",
+      "compact windows reflow the same primary destinations and New Meeting action into one sticky top toolbar",
+      "narrow windows may collapse labels but must preserve semantic destinations, visible focus, utility access and avoid page-wide horizontal overflow"
     ]
   },
   "design_system": {
@@ -223,6 +237,7 @@
   "critical_journeys": [
     {"id": "record-meeting", "name": "Start, monitor and safely stop a local meeting recording without technical setup, including truthful safe-boundary preparation when managed AI is already active", "e2e": "required"},
     {"id": "prepare-meeting-notes", "name": "Prepare transcript and notes with one durable action, reconnect safely and resume only missing work after failure", "e2e": "required"},
+    {"id": "coherent-macos-workspace", "name": "Move between Today, a Meeting and Projects with one stable hierarchy across wide, compact and narrow windows while keeping New Meeting primary and utilities secondary", "e2e": "required"},
     {"id": "transcribe-meeting", "name": "Create or replace only the transcript through the secondary/expert path and recover from processing failure", "e2e": "recommended"},
     {"id": "review-meeting", "name": "Review transcript, speakers, notes and derived meeting evidence", "e2e": "recommended"},
     {"id": "analyze-meeting", "name": "Run additional meeting analyses with automatic defaults and optional advanced overrides", "e2e": "recommended"},
