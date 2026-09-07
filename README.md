@@ -6,11 +6,7 @@
 
 <p align="center">
   <strong>Private meeting intelligence for macOS.</strong><br>
-  Record, transcribe, understand, and remember meetings with Local AI as the default boundary.
-</p>
-
-<p align="center">
-  ClosedRoom turns meeting audio into <strong>speaker-aware transcripts, actions, decisions, risks, editable notes, and project memory</strong> without making cloud APIs the default home for sensitive meeting data.
+  Record, transcribe, identify speakers, extract decisions and actions, and build project memory — with Local AI as the default boundary.
 </p>
 
 <p align="center">
@@ -22,13 +18,13 @@
 </p>
 
 <p align="center">
+  <a href="#why-closedroom-is-different">Why ClosedRoom</a> ·
   <a href="#what-closedroom-does">Features</a> ·
   <a href="#how-you-use-it">How to use it</a> ·
   <a href="#run-closedroom">Run it</a> ·
   <a href="#local-first-by-default">Privacy model</a> ·
   <a href="#architecture">Architecture</a> ·
-  <a href="docs/features.md">Feature registry</a> ·
-  <a href="https://daniele21.github.io/">Mission</a>
+  <a href="docs/features.md">Feature registry</a>
 </p>
 
 <p align="center">
@@ -37,11 +33,17 @@
   </a>
 </p>
 
-## What ClosedRoom does
+## Why ClosedRoom is different
 
-Most meeting tools stop at a transcript or send the meeting to a remote service by default. ClosedRoom is built around a different product idea:
+| **Private by default** | **Intelligence, not just transcripts** | **Memory across meetings** |
+| --- | --- | --- |
+| Sensitive meeting data stays on your Mac by default. Cloud providers are explicit choices, never silent fallbacks. | ClosedRoom turns conversations into speaker-aware transcripts, actions, decisions, risks, questions and editable notes. | Meeting outputs become reusable project context instead of disappearing inside isolated transcripts. |
 
 > **A meeting should become useful memory, while the default trust boundary stays on your Mac.**
+
+## What ClosedRoom does
+
+ClosedRoom is built around the full path from capture to reusable operational memory rather than transcription alone.
 
 ### Core product capabilities
 
@@ -58,36 +60,13 @@ ClosedRoom can also add optional enrichment without making the core workflow dep
 
 ## From meeting to operational memory
 
-The main product flow is deliberately simple:
+The user mental model is deliberately simple:
 
-```text
-New Meeting
-    │
-    ▼
-Record locally
-    │
-    ▼
-Save the meeting first
-    │
-    ▼
-Transcribe
-    │
-    ▼
-Enrich speakers / context
-    │
-    ▼
-Prepare structured notes
-    │
-    ▼
-Review and edit
-    │
-    ▼
-Reuse in Today / Project memory
-```
+**Record → Transcribe → Understand → Remember**
 
-![ClosedRoom meeting-to-memory workflow: new meeting, recording, local transcript, prepared notes, review, and project memory](docs/assets/closedroom-meeting-to-memory-workflow.png)
+Under that simple flow, ClosedRoom saves the meeting before expensive AI work, enriches the transcript without making optional stages mandatory, keeps generated notes reviewable, and carries useful outputs into Today and Project memory.
 
-_Audio becomes a local transcript, the transcript becomes reviewable decisions and actions, and those outputs become reusable project context._
+> **Image placeholder:** A compact four-stage product journey showing **Record → Transcribe → Understand → Remember**. Use real ClosedRoom UI fragments for each stage rather than an abstract architecture diagram. The final stage should visibly connect multiple meetings into Project memory.
 
 ## See the product
 
@@ -128,14 +107,11 @@ _Audio becomes a local transcript, the transcript becomes reviewable decisions a
 
 A normal ClosedRoom workflow does not require choosing models, audio devices or inference parameters before every meeting.
 
-1. **Start a new meeting.** Add a title or project if useful; both can remain lightweight.
-2. **Grant the macOS permissions needed for capture.** ClosedRoom prefers native microphone + system-audio capture where supported.
-3. **Record.** Audio is written progressively so the meeting can be recovered even if later processing fails.
-4. **Stop the meeting.** ClosedRoom finalizes the recording before starting expensive AI work.
-5. **Transcribe.** The default path uses local ASR; transcription runs as a persisted, observable job.
-6. **Prepare notes.** ClosedRoom creates one structured meeting-intelligence result that feeds the main summary, action, decision and risk views.
-7. **Review and edit.** Generated items remain human-reviewable; corrections are persisted instead of being silently replaced on refresh or regeneration.
-8. **Reuse the result.** Today and Project workspaces surface context across meetings rather than treating each transcript as an isolated file.
+1. **Start and record a meeting.** Add a title or project if useful, grant the required macOS capture permissions, and let ClosedRoom write audio progressively so the meeting remains recoverable.
+2. **Stop and transcribe.** ClosedRoom finalizes the recording first, then runs the default local ASR path as a persisted, observable job.
+3. **Turn the transcript into meeting intelligence.** Structured analysis produces the summary, actions, decisions, risks and other reusable outputs shown in the main workspace.
+4. **Review and edit.** Generated items stay human-reviewable; corrections are persisted instead of being silently replaced on refresh or regeneration.
+5. **Reuse the result.** Today and Project workspaces carry decisions, commitments, risks and context across meetings instead of treating each transcript as an isolated file.
 
 Optional visual intelligence can be enabled for a specifically selected macOS window. It may contribute evidence for naming existing speaker clusters, but **audio diarization remains the source of who spoke when and uncertain identity mappings abstain rather than pretending certainty**.
 
@@ -154,7 +130,7 @@ The default product path keeps the sensitive meeting workflow on the Mac. Cloud 
 | Recording | Local macOS capture | — |
 | Speech-to-text | Local MLX Whisper / Nemotron | Speechmatics when explicitly selected |
 | Speaker diarization | Local FluidAudio on supported Macs | Speechmatics when explicitly selected |
-| Meeting analysis | Local `local-llm-server` | Gemini when explicitly selected |
+| Meeting analysis | Local [Korgis](https://github.com/daniele21/korgis) runtime | Gemini when explicitly selected |
 | Visual speaker evidence | Local selected-window frames + local VLM path | Disabled unless explicitly enabled |
 | Persistence | Local filesystem + SQLite | No implicit remote persistence |
 
@@ -166,7 +142,7 @@ _The default trust boundary stays on the user's Mac; cloud providers sit outside
 
 ## Architecture
 
-ClosedRoom separates the **meeting product** from reusable local model runtime concerns.
+ClosedRoom separates the **meeting product** from reusable Local AI runtime concerns.
 
 ```text
 ClosedRoom macOS app / React workspace
@@ -182,9 +158,9 @@ ClosedRoom macOS app / React workspace
               │
      ┌────────┴─────────┐
      │                  │
- Local ASR / diarization   local-llm-server
+ Local ASR / diarization      Korgis
      │                  │
- transcript + speakers   text / vision inference
+ transcript + speakers   LLM / VLM runtime
      └──────────┬────────┘
                 ▼
       Meeting / Project memory
@@ -193,7 +169,7 @@ ClosedRoom macOS app / React workspace
 The key ownership split is:
 
 - **ClosedRoom owns the user problem:** capture, meetings, transcripts, speaker state, structured notes, user edits, project memory, persistence and product UX.
-- **`local-llm-server` owns reusable local LLM/VLM runtime infrastructure:** model loading, backend selection, runtime lifecycle, inference modes, logs and diagnostics.
+- **[Korgis](https://github.com/daniele21/korgis) owns reusable Local AI runtime infrastructure:** model loading, backend selection, runtime lifecycle, text/vision inference, logs and diagnostics. The current integration still uses the internal `local-llm-server` package/runtime identity where required by the implementation.
 - **Native helpers own platform-specific capture and diarization work** behind explicit process boundaries.
 
 ![ClosedRoom detailed technical architecture](docs/assets/closedroom-detailed-technical-architecture.png)
@@ -213,7 +189,7 @@ ClosedRoom therefore distinguishes the core meeting artifact from optional stage
 - jobs are persistent, cancellable and recoverable where the workflow requires it;
 - invalid or stale structured-note edits are surfaced as explicit conflicts instead of being silently remapped.
 
-This is one of the main engineering goals of the project: **local AI should behave like a product system, not like a successful-demo-only pipeline**.
+This is one of the main engineering goals of the project: **Local AI should behave like a product system, not like a successful-demo-only pipeline**.
 
 ## Run ClosedRoom
 
@@ -301,7 +277,7 @@ ClosedRoom is not a guarantee of perfect transcription, speaker identity or meet
 | Recording / capture | `recordings.py`, native helpers, `audio_router.py` | Progressive capture, recovery, macOS audio and optional visual frames |
 | Transcription / diarization | `transcriptions.py`, `asr_provider.py`, `speaker_diarization_helper/` | ASR providers, transcript persistence and speaker clustering |
 | Meeting intelligence | analysis jobs, templates, structured notes | Structured meeting outputs, source references, edits and revisions |
-| Local model runtime | `local-llm-server` dependency + runtime manager | Local LLM/VLM lifecycle and inference |
+| Local model runtime | [Korgis](https://github.com/daniele21/korgis) + internal `local-llm-server` integration | Local LLM/VLM lifecycle and inference |
 | Persistence | `catalog.py`, settings and paths | SQLite catalog, artifacts, configuration and durable state |
 | macOS app | `menubar.py`, `window.py`, `ClosedRoom.spec`, build scripts | WKWebView shell, menu bar, bundling and packaging |
 
@@ -346,6 +322,8 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development and validation mode
 ## Project context
 
 ClosedRoom is part of [Daniele Moltisanti's Local AI work](https://daniele21.github.io/): build real products on top of reusable Local AI infrastructure, measure what works, and keep **Local, Hybrid and Cloud** as explicit architectural choices rather than accidental dependencies.
+
+Within that ecosystem, **ClosedRoom applies Local AI to a real sensitive workflow**, while **[Korgis](https://github.com/daniele21/korgis) provides reusable execution and control infrastructure**.
 
 Its role in that mission is concrete: **prove that sensitive meeting workflows can become useful, persistent AI-assisted memory while keeping the default data boundary under the user's control.**
 
