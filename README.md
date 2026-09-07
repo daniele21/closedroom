@@ -31,22 +31,11 @@
   <a href="https://daniele21.github.io/">Mission</a>
 </p>
 
-<table>
-<tr>
-<td align="center">
-
-### 🖼️ IMAGE PLACEHOLDER — HERO PRODUCT DEMO
-
-**Target asset:** 20–30 second looping GIF or short video.
-
-**What it should show:**  
-`New Meeting → Record microphone + system audio → Stop → Local transcription → Prepare notes → Review actions/decisions → Project memory`
-
-Use the real macOS application, one synthetic meeting, readable UI and no debug overlays. The viewer should understand in a few seconds that ClosedRoom is **more than transcription: it converts a meeting into reusable operational memory**.
-
-</td>
-</tr>
-</table>
+<p align="center">
+  <a href="docs/assets/closedroom-product-overview.png">
+    <img src="docs/assets/closedroom-product-overview.png" alt="ClosedRoom product workflow from a new meeting through recording, transcription, structured notes, review, and project memory">
+  </a>
+</p>
 
 ## What ClosedRoom does
 
@@ -96,22 +85,9 @@ Review and edit
 Reuse in Today / Project memory
 ```
 
-<table>
-<tr>
-<td align="center">
+![ClosedRoom meeting-to-memory workflow: new meeting, recording, local transcript, prepared notes, review, and project memory](docs/assets/closedroom-meeting-to-memory-workflow.png)
 
-### 🖼️ IMAGE PLACEHOLDER — MEETING → MEMORY PRODUCT JOURNEY
-
-**Target asset:** horizontal 6-frame walkthrough built from real ClosedRoom screens.
-
-**Required sequence:**  
-`New Meeting → Recording → Transcript → Prepare notes → Review / edit → Project memory`
-
-Use the same synthetic meeting throughout. Make the transformation visually obvious: **audio becomes transcript; transcript becomes decisions and actions; those outputs become reusable project context**.
-
-</td>
-</tr>
-</table>
+_Audio becomes a local transcript, the transcript becomes reviewable decisions and actions, and those outputs become reusable project context._
 
 ## See the product
 
@@ -163,22 +139,9 @@ A normal ClosedRoom workflow does not require choosing models, audio devices or 
 
 Optional visual intelligence can be enabled for a specifically selected macOS window. It may contribute evidence for naming existing speaker clusters, but **audio diarization remains the source of who spoke when and uncertain identity mappings abstain rather than pretending certainty**.
 
-<table>
-<tr>
-<td align="center">
+![ClosedRoom speaker intelligence: audio diarization produces stable speaker clusters, while optional visual evidence can support conservative names or abstain](docs/assets/closedroom-speaker-intelligence.png)
 
-### 🖼️ IMAGE PLACEHOLDER — SPEAKER INTELLIGENCE
-
-**Target asset:** compact 3-stage technical/product visual.
-
-**What it should show:**  
-`Audio diarization → stable speaker clusters → optional visual evidence → conservative human-readable names`
-
-The image must make the boundary clear: **visual intelligence does not replace diarization and does not turn uncertain evidence into a claimed identity**. Show an explicit “abstain / unknown” path when confidence is insufficient.
-
-</td>
-</tr>
-</table>
+_Visual evidence may support naming an existing speaker cluster; it never replaces audio diarization, and low-confidence mappings remain unknown._
 
 ## Local-first by default
 
