@@ -461,9 +461,13 @@
   }
 
   .workspace-rail {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
     margin-inline: -10px;
     padding-inline: 10px;
+  }
+
+  .workspace-brand {
+    grid-column: 1;
   }
 
   .workspace-brand-copy {
@@ -471,6 +475,7 @@
   }
 
   .workspace-primary-nav {
+    grid-column: 2;
     justify-content: flex-start;
     overflow-x: auto;
   }
@@ -486,7 +491,7 @@
   }
 
   .workspace-new-meeting {
-    grid-column: 2;
+    grid-column: 3;
     justify-self: end;
   }
 
@@ -500,7 +505,7 @@
   }
 
   .workspace-utility-wrap {
-    grid-column: 3;
+    grid-column: 4;
   }
 
   .workspace-content {
