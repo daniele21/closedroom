@@ -382,15 +382,31 @@ try {
   observations.narrow = await browser.execute(`
     const nav = document.querySelector('.workspace-primary-nav');
     const newMeeting = document.querySelector('[data-tour="new-meeting-btn"]');
+    const settings = document.querySelector('.workspace-settings-trigger');
+    const navRect = nav?.getBoundingClientRect();
+    const newMeetingRect = newMeeting?.getBoundingClientRect();
+    const settingsRect = settings?.getBoundingClientRect();
+    const overlaps = (left, right) => Boolean(left && right)
+      && left.left < right.right
+      && left.right > right.left
+      && left.top < right.bottom
+      && left.bottom > right.top;
     return {
       width: window.innerWidth,
       navOverflow: nav ? getComputedStyle(nav).overflowX : '',
-      newMeetingWidth: newMeeting?.getBoundingClientRect().width || 0,
+      newMeetingWidth: newMeetingRect?.width || 0,
       hasHorizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      navNewMeetingOverlap: overlaps(navRect, newMeetingRect),
+      newMeetingSettingsOverlap: overlaps(newMeetingRect, settingsRect),
     };
   `);
-  if (observations.narrow.hasHorizontalOverflow || observations.narrow.newMeetingWidth > 60) {
-    throw new Error(`narrow workspace is not bounded: ${JSON.stringify(observations.narrow)}`);
+  if (
+    observations.narrow.hasHorizontalOverflow
+    || observations.narrow.newMeetingWidth > 60
+    || observations.narrow.navNewMeetingOverlap
+    || observations.narrow.newMeetingSettingsOverlap
+  ) {
+    throw new Error(`narrow workspace is not bounded and non-overlapping: ${JSON.stringify(observations.narrow)}`);
   }
   await checkpoint(browser, '06-narrow-window');
 
