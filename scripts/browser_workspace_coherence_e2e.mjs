@@ -169,9 +169,9 @@ class Browser {
 
   async clickMenuItemContaining(labels) {
     const clicked = await this.execute(`
-      const labels = ${JSON.stringify(labels)};
+      const labels = ${JSON.stringify(labels)}.map((label) => label.toLocaleLowerCase());
       const node = Array.from(document.querySelectorAll('#app-settings-menu [role="menuitem"]')).find((candidate) => {
-        const text = (candidate.innerText || candidate.textContent || '').trim();
+        const text = (candidate.innerText || candidate.textContent || '').trim().toLocaleLowerCase();
         return labels.some((label) => text.includes(label));
       });
       if (!node) return false;
@@ -367,6 +367,7 @@ try {
       railPosition: rail ? getComputedStyle(rail).position : '',
       newMeetingVisible: Boolean(document.querySelector('[data-tour="new-meeting-btn"]')),
       settingsVisible: Boolean(document.querySelector('.workspace-settings-trigger')),
+      theme: document.documentElement.getAttribute('data-theme'),
     };
   `);
   if (observations.compact.width > 800 || observations.compact.railHeight > 100 || observations.compact.railPosition !== 'sticky') {
@@ -374,6 +375,9 @@ try {
   }
   if (!observations.compact.newMeetingVisible || !observations.compact.settingsVisible) {
     throw new Error(`compact workspace lost primary/utility actions: ${JSON.stringify(observations.compact)}`);
+  }
+  if (observations.compact.theme !== themeAfter) {
+    throw new Error(`compact resize lost theme continuity: ${JSON.stringify(observations.compact)}`);
   }
   await checkpoint(browser, '05-compact-window');
 
@@ -398,6 +402,7 @@ try {
       hasHorizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
       navNewMeetingOverlap: overlaps(navRect, newMeetingRect),
       newMeetingSettingsOverlap: overlaps(newMeetingRect, settingsRect),
+      theme: document.documentElement.getAttribute('data-theme'),
     };
   `);
   if (
@@ -407,6 +412,9 @@ try {
     || observations.narrow.newMeetingSettingsOverlap
   ) {
     throw new Error(`narrow workspace is not bounded and non-overlapping: ${JSON.stringify(observations.narrow)}`);
+  }
+  if (observations.narrow.theme !== themeAfter) {
+    throw new Error(`narrow resize lost theme continuity: ${JSON.stringify(observations.narrow)}`);
   }
   await checkpoint(browser, '06-narrow-window');
 
