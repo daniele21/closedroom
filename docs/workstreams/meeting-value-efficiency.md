@@ -2,7 +2,7 @@
 
 Status: active — PRS-17 integration candidate
 Owner: meeting product, canonical job/persistence owners and local runtime
-Baseline: dev `d0ab9399`, 2026-09-07.
+Baseline: dev `580fe6a7`, 2026-09-07.
 
 ## Outcome and invariants
 
