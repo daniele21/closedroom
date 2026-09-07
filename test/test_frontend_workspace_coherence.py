@@ -41,10 +41,14 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertIn('workspace-runtime-status', self.app)
         self.assertIn('workspace-settings-trigger', self.app)
 
-    def test_shell_has_explicit_wide_compact_and_reduced_motion_behavior(self) -> None:
+    def test_shell_has_explicit_wide_compact_narrow_and_reduced_motion_behavior(self) -> None:
         self.assertIn('grid-template-columns: 236px minmax(0, 1fr)', self.css)
         self.assertIn('@media (max-width: 980px)', self.css)
         self.assertIn('@media (max-width: 640px)', self.css)
+        self.assertIn('grid-template-columns: auto auto minmax(0, 1fr) auto', self.css)
+        self.assertIn('.workspace-primary-nav {\n    grid-column: 2;', self.css)
+        self.assertIn('.workspace-new-meeting {\n    grid-column: 3;', self.css)
+        self.assertIn('.workspace-utility-wrap {\n    grid-column: 4;', self.css)
         self.assertIn('@media (prefers-reduced-motion: reduce)', self.css)
         self.assertIn('position: sticky', self.css)
         self.assertIn('workspace-settings-menu', self.css)
