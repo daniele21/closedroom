@@ -1,12 +1,12 @@
 # ClosedRoom: useful notes, simple journeys and efficient execution
 
-Status: active — PRS-17 ready
+Status: active — PRS-17 integration candidate
 Owner: meeting product, canonical job/persistence owners and local runtime
-Baseline: dev `eb92df6d`, 2026-09-06.
+Baseline: dev `d0ab9399`, 2026-09-07.
 
 ## Outcome and invariants
 
-Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-16 are integrated; PRS-17 is the next ready slice. No production performance or memory gain is claimed without representative evidence.
+Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-16 are integrated; PRS-17 is the current integration candidate. No production performance or memory gain is claimed without representative evidence.
 
 - Meeting is primary; normal recording requires no technical choice.
 - `Prepare notes` is explicit after Stop; `Transcript only` is secondary.
@@ -25,7 +25,7 @@ Record, prepare useful notes, verify decisions and find them later while the Mac
 | PRS-14 | Verify/edit actions and decisions | notes schema/catalog, transcript, Meeting UI | PRS-13 | DONE |
 | PRS-15 | Search complete local archive | CatalogStore, workspace/API/UI | — | DONE |
 | PRS-16 | Record safely while AI is busy | resource policy/arbiter, capture admission, recording UI | — | DONE |
-| PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | READY |
+| PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | INTEGRATION |
 | PRS-18 | Measured release | current-state, benchmarks, target-Mac evidence | selected increments | BLOCKED |
 
 Default sequence: 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17. Shared schema/service/UI edits remain serialized into coherent outcome PRs.
@@ -68,9 +68,22 @@ Start meeting now wins the next safe resource boundary without killing useful AI
 
 PR #41 integrated at `dev@eb92df6d`. The authoritative STRONG preflight on the exact candidate tree passed governance, frontend checks, 406 Python tests, all five declared Meeting browser FULL_MEDIA journeys and packaged-app build/lifecycle smoke. The post-merge preflight reused that tree-equivalent evidence and completed successfully. Physical audio, TCC/WKWebView and representative MLX/Metal/thermal behavior remain release-only REAL_ENVIRONMENT evidence.
 
-## PRS-17 — coherent macOS workspace — ready
+## PRS-17 — coherent macOS workspace — integration candidate
 
-Unify hierarchy across Today, Meeting, Projects, themes and supported window sizes. Keep one dominant action per state, advanced tools discoverable, async navigation stable and focus/keyboard/reduced-motion semantics intact. Component/routing checks plus complete journey FULL_MEDIA; SCOPED expected unless contracts expand.
+Observable outcome: Today, a saved Meeting and Projects now share one stable product hierarchy rather than page-specific chrome. Meeting remains a child of Today, Projects is the second peer destination, New Meeting remains the persistent primary action, and Settings/theme/language/tour/demo/runtime status remain utilities.
+
+Implementation boundary:
+
+- `App.tsx` owns one adaptive workspace shell; desktop uses a stable left rail and compact/narrow windows reflow the same semantic destinations into one sticky top toolbar rather than introducing a second navigation model;
+- existing page routing, persistence, preparation, recording, search and runtime owners are unchanged;
+- `workspace.css` owns the adaptive shell/layout behavior and reduced-motion accommodation without creating a second token/design source;
+- `design/ux-contract.json` records navigation hierarchy and adaptive window rules;
+- `test_frontend_workspace_coherence.py` protects shell hierarchy, active-state semantics and compact/narrow CSS contracts;
+- `browser_workspace_coherence_e2e.mjs` provides FULL_MEDIA evidence for Today -> Meeting -> Projects, theme continuity and 1440 -> 780 -> 560px resize with no page-wide horizontal overflow;
+- `browser_meeting_ui_e2e.mjs` runs the new journey alongside all existing Meeting FULL_MEDIA journeys so integration cannot pass by validating only the new shell in isolation;
+- `.engineering/e2e.json` declares `coherent-macos-workspace` with required target-Mac release confirmation for packaged WKWebView/window/focus/reduced-motion/VoiceOver fidelity.
+
+Integration proof is still pending on the exact candidate head/base. Because the E2E contract and material UI integration harness changed, use selector `auto`; STRONG/FULL escalation is authoritative if selected. Physical TCC/audio, real WKWebView window behavior, keyboard/focus/VoiceOver quality and representative MLX/Metal remain release-only REAL_ENVIRONMENT evidence.
 
 ## Evidence and release
 
