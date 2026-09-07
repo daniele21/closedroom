@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract_version": "0.2.2",
+  "contract_version": "0.2.1",
   "applicability": {
     "status": "recommended",
     "reason": "ClosedRoom crosses FastAPI, persisted meeting state, a React/WKWebView UI, macOS native capture helpers and local AI runtimes; lower-level tests alone cannot prove every critical assembled workflow."
