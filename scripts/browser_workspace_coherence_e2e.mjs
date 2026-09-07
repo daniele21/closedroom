@@ -135,10 +135,6 @@ class Browser {
     return await webdriver(this.port, 'POST', this.p('/execute/sync'), { script, args: [] });
   }
 
-  async text() {
-    return String(await this.execute("return document.body ? document.body.innerText : '';"));
-  }
-
   async setWindow(width, height) {
     await webdriver(this.port, 'POST', this.p('/window/rect'), { width, height });
   }
@@ -153,17 +149,36 @@ class Browser {
     if (clicked !== true) throw new Error(`element not found: ${selector}`);
   }
 
-  async clickButtonContaining(label) {
+  async clickMeetingCardContaining(titleFragment) {
     const clicked = await this.execute(`
-      const label = ${JSON.stringify(label)};
-      const node = Array.from(document.querySelectorAll('button')).find((candidate) =>
-        (candidate.innerText || candidate.textContent || '').includes(label)
+      const titleFragment = ${JSON.stringify(titleFragment)};
+      const article = Array.from(document.querySelectorAll('article')).find((candidate) =>
+        (candidate.innerText || candidate.textContent || '').includes(titleFragment)
       );
+      if (!article) return false;
+      const buttons = Array.from(article.querySelectorAll('button')).filter((button) => !button.disabled);
+      const action = buttons.find((button) => /apri|open|analizza|analyze|trascrivi|transcribe/i.test(
+        (button.innerText || button.textContent || '').trim(),
+      )) || buttons.at(-1);
+      if (!action) return false;
+      action.click();
+      return true;
+    `);
+    if (clicked !== true) throw new Error(`meeting card action not found: ${titleFragment}`);
+  }
+
+  async clickMenuItemContaining(labels) {
+    const clicked = await this.execute(`
+      const labels = ${JSON.stringify(labels)};
+      const node = Array.from(document.querySelectorAll('#app-settings-menu [role="menuitem"]')).find((candidate) => {
+        const text = (candidate.innerText || candidate.textContent || '').trim();
+        return labels.some((label) => text.includes(label));
+      });
       if (!node) return false;
       node.click();
       return true;
     `);
-    if (clicked !== true) throw new Error(`button not found: ${label}`);
+    if (clicked !== true) throw new Error(`menu item not found: ${labels.join(', ')}`);
   }
 
   async screenshot(destination) {
@@ -291,7 +306,7 @@ try {
   }
   await checkpoint(browser, '01-wide-today');
 
-  await browser.clickButtonContaining('Product sync');
+  await browser.clickMeetingCardContaining('Product sync');
   await waitUntil(
     browser,
     'Meeting workspace',
@@ -335,7 +350,7 @@ try {
   const themeBefore = await browser.execute("return document.documentElement.getAttribute('data-theme');");
   await browser.click('.workspace-settings-trigger');
   await waitUntil(browser, 'workspace utility menu', "return Boolean(document.querySelector('#app-settings-menu'));", 5000);
-  await browser.clickButtonContaining('Tema');
+  await browser.clickMenuItemContaining(['Tema', 'Theme']);
   const themeAfter = await browser.execute("return document.documentElement.getAttribute('data-theme');");
   if (themeBefore === themeAfter) throw new Error(`theme utility did not change theme: ${themeBefore}`);
   await checkpoint(browser, '04-theme-continuity');
