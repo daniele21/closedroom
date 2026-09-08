@@ -2,7 +2,7 @@
 
 Status: active — PRS-11..17 integrated; PRS-18 measured release in progress
 Owner: meeting product, canonical job/persistence owners and local runtime
-Baseline: dev `37f46af1`, 2026-09-08.
+Integration checkpoint: PRS-18 tooling merged on `dev` at `94fa3d3`, 2026-09-08; final release candidate not yet frozen.
 
 ## Outcome and invariants
 
@@ -38,6 +38,8 @@ PRS-15 added bounded server-side FTS5 archive search inside canonical `closedroo
 PRS-16 kept `HeavyWorkloadArbiter` as the sole heavy-work scheduler and added one transient capture reservation. Active managed work finishes normally; queued work remains bounded and waits during capture; the frontend shows preparation until real capture starts. PR #41 integrated STRONG source/browser/package evidence. Physical audio/TCC and representative MLX/thermal behavior remained release-only.
 
 PRS-17 converged Today, saved Meeting and Projects into one adaptive macOS workspace without changing routing/data/runtime ownership. PR #43 integrated on `dev`; exact candidate `c1c79f31` passed FULL preflight #306 with guards, frontend checks, 411 Python tests, every declared Meeting browser FULL_MEDIA journey and packaged lifecycle validation.
+
+PRS-18 release tooling integrated through PR #48. Exact source head `9bfd7efc` passed INTEGRATION/FULL preflight #329; squash merge `94fa3d3` preserved the validated source tree. The integrated tooling owns production signing/notarization, measured target-Mac release evidence and the physical PRS-16 AI-busy contention confirmation. This proves tooling integration only: production authority and target-environment evidence remain pending and blocking for stable promotion.
 
 ## PRS-18 — measured release
 
@@ -81,7 +83,7 @@ One exact production `.app` must prove:
 5. bounded privacy-safe CPU/RSS/runtime scheduler samples and a macOS thermal/performance observation (`pmset -g therm`); missing data stays `unknown`, never zero;
 6. local MLX completion rather than a cloud fallback;
 7. PRS-9 `dual_track_vs_mixed_asr` benchmark on that same representative recording, using its real schema/repeat count and retaining no transcript text;
-8. the PRS-16 physical contention boundary: navigate to a ready New Meeting, start a real local MLX transcription on an existing recording, observe `HeavyWorkloadArbiter` active before pressing Start, retain ClosedRoom-window FULL_MEDIA for the truthful `Preparing recording` → active recording transition, require absence of active capture while AI runs, then require real native `both` capture with non-empty mic/system tracks after that workload reaches its normal boundary.
+8. the PRS-16 physical contention boundary: navigate to a ready New Meeting, start a real local MLX transcription on an existing recording, observe `HeavyWorkloadArbiter` active before pressing Start and still active while the packaged UI visibly waits in `Preparing recording`, retain ClosedRoom-window FULL_MEDIA for the truthful waiting → active recording transition, require absence of active capture while AI runs, then require real native `both` capture with non-empty mic/system tracks after that workload reaches its normal boundary.
 
 No numeric performance threshold is invented without a comparable baseline. The evidence runner records observations and completion truth; a later product/architecture change is required if benchmark evidence justifies changing the canonical dual-track strategy. Source/browser tests remain the primary proof for bounded queue ordering/cancellation; target-Mac contention evidence confirms the packaged WKWebView/TCC/physical-audio/MLX boundary instead of replacing those lower-level tests.
 
@@ -91,11 +93,11 @@ VoiceOver spoken-output quality and subjective usability remain human judgement 
 
 ### Promotion
 
-After tooling is integrated:
+After tooling integration:
 
-1. freeze exact `dev` candidate and live `main` base;
-2. run selector-owned RELEASE/FULL automation for `dev -> main`;
-3. build production artifact from that exact source;
+1. finish durable-state closeout, freeze the exact `dev` candidate and live `main` base, and keep/open the canonical `dev -> main` release PR;
+2. run selector-owned RELEASE/FULL automation on that exact candidate/base;
+3. build the production artifact from that exact source;
 4. run both measured target-Mac evidence runners against the exact notarized artifact;
 5. record any genuinely required subjective VoiceOver observation;
 6. recheck candidate/base freshness and full diff;
