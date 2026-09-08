@@ -543,8 +543,20 @@ try {
 
   await browser.clickButton(['Prepare notes', 'Prepara note']);
   await waitCount('prepare', 1);
-  await waitText(browser, ['Preparing transcript', 'Preparazione trascrizione'], 5000, true);
-  await checkpoint(browser, '02-transcribing');
+  await waitText(
+    browser,
+    [
+      'Preparing transcript',
+      'Preparazione trascrizione',
+      'Preparing notes',
+      'Preparazione note',
+      'Transcript ready · preparing notes',
+      'Trascrizione pronta · preparazione note',
+    ],
+    5000,
+    true,
+  );
+  await checkpoint(browser, '02-preparation-in-progress');
 
   await waitText(browser, ['Transcript ready before notes.'], 5000, true);
   await waitText(browser, ['Transcript ready · preparing notes', 'Trascrizione pronta · preparazione note']);

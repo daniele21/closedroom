@@ -55,10 +55,12 @@ function meeting(id, title, createdAt, transcript = '') {
   };
 }
 
+const fixtureNow = Date.now();
+const recentTimestamp = (hoursAgo) => new Date(fixtureNow - hoursAgo * 60 * 60 * 1000).toISOString();
 const recentMeetings = [
-  meeting('recent-1', 'Weekly planning', '2026-09-06T08:00:00Z'),
-  meeting('recent-2', 'Product sync', '2026-09-05T08:00:00Z'),
-  meeting('recent-3', 'Hiring review', '2026-09-04T08:00:00Z'),
+  meeting('recent-1', 'Weekly planning', recentTimestamp(0)),
+  meeting('recent-2', 'Product sync', recentTimestamp(2)),
+  meeting('recent-3', 'Hiring review', recentTimestamp(4)),
 ];
 const archiveMeeting = meeting(
   ARCHIVE_ID,

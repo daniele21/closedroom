@@ -45,6 +45,14 @@ const journeys = [
         || path.join(canonicalEvidenceRoot, 'record-while-ai-busy'),
     },
   },
+  {
+    script: 'scripts/browser_workspace_coherence_e2e.mjs',
+    env: {
+      CLOSEDROOM_WORKSPACE_COHERENCE_E2E_EVIDENCE:
+        process.env.CLOSEDROOM_WORKSPACE_COHERENCE_E2E_EVIDENCE
+        || path.join(canonicalEvidenceRoot, 'workspace-coherence'),
+    },
+  },
 ];
 
 async function runJourney({ script, env }) {
