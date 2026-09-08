@@ -89,6 +89,7 @@ const counts = {
 const checkpoints = [];
 let frameIndex = 0;
 let firstParentConnectionCount = 0;
+let releaseFirstParentFailure = false;
 
 function parentJob(id, status, currentStep, progress, error = null) {
   return {
@@ -266,8 +267,12 @@ function fixtureServer(port) {
         sse(res, notesParent, 2);
         return;
       }
-      await sleep(650);
-      if (res.destroyed) return;
+      const failureDeadline = Date.now() + 10000;
+      while (!releaseFirstParentFailure && Date.now() < failureDeadline) {
+        if (res.destroyed) return;
+        await sleep(50);
+      }
+      if (!releaseFirstParentFailure || res.destroyed) return;
       const failed = parentJob(
         'prepare-parent-1',
         'failed',
@@ -576,6 +581,7 @@ try {
     throw new Error(`reconnect duplicated preparation: ${JSON.stringify(counts)}`);
   }
   await checkpoint(browser, '04-reconnected-same-parent');
+  releaseFirstParentFailure = true;
 
   await waitText(browser, ['Resume preparation', 'Riprendi la preparazione'], 5000, true);
   await waitText(browser, ['Synthetic notes model failure'], 5000);
