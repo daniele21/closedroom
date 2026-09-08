@@ -1,12 +1,12 @@
 # ClosedRoom: useful notes, simple journeys and efficient execution
 
-Status: active — PRS-17 integration candidate
+Status: active — PRS-17 integrated; PRS-18 measured release next
 Owner: meeting product, canonical job/persistence owners and local runtime
-Baseline: dev `580fe6a7`, 2026-09-07.
+Baseline: dev `19b15b0f`, 2026-09-08.
 
 ## Outcome and invariants
 
-Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-16 are integrated; PRS-17 is the current integration candidate. No production performance or memory gain is claimed without representative evidence.
+Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-17 are integrated; PRS-18 is now the next release slice. No production performance or memory gain is claimed without representative evidence.
 
 - Meeting is primary; normal recording requires no technical choice.
 - `Prepare notes` is explicit after Stop; `Transcript only` is secondary.
@@ -25,8 +25,8 @@ Record, prepare useful notes, verify decisions and find them later while the Mac
 | PRS-14 | Verify/edit actions and decisions | notes schema/catalog, transcript, Meeting UI | PRS-13 | DONE |
 | PRS-15 | Search complete local archive | CatalogStore, workspace/API/UI | — | DONE |
 | PRS-16 | Record safely while AI is busy | resource policy/arbiter, capture admission, recording UI | — | DONE |
-| PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | INTEGRATION |
-| PRS-18 | Measured release | current-state, benchmarks, target-Mac evidence | selected increments | BLOCKED |
+| PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | DONE |
+| PRS-18 | Measured release | current-state, benchmarks, target-Mac evidence | selected increments | READY |
 
 Default sequence: 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17. Shared schema/service/UI edits remain serialized into coherent outcome PRs.
 
@@ -68,9 +68,9 @@ Start meeting now wins the next safe resource boundary without killing useful AI
 
 PR #41 integrated at `dev@eb92df6d`. The authoritative STRONG preflight on the exact candidate tree passed governance, frontend checks, 406 Python tests, all five declared Meeting browser FULL_MEDIA journeys and packaged-app build/lifecycle smoke. The post-merge preflight reused that tree-equivalent evidence and completed successfully. Physical audio, TCC/WKWebView and representative MLX/Metal/thermal behavior remain release-only REAL_ENVIRONMENT evidence.
 
-## PRS-17 — coherent macOS workspace — integration candidate
+### PRS-17 — coherent macOS workspace
 
-Observable outcome: Today, a saved Meeting and Projects now share one stable product hierarchy rather than page-specific chrome. Meeting remains a child of Today, Projects is the second peer destination, New Meeting remains the persistent primary action, and Settings/theme/language/tour/demo/runtime status remain utilities.
+Today, a saved Meeting and Projects share one stable product hierarchy rather than page-specific chrome. Meeting remains a child of Today, Projects is the second peer destination, New Meeting remains the persistent primary action, and Settings/theme/language/tour/demo/runtime status remain utilities.
 
 Implementation boundary:
 
@@ -83,7 +83,7 @@ Implementation boundary:
 - `browser_meeting_ui_e2e.mjs` runs the new journey alongside all existing Meeting FULL_MEDIA journeys so integration cannot pass by validating only the new shell in isolation;
 - `.engineering/e2e.json` declares `coherent-macos-workspace` with required target-Mac release confirmation for packaged WKWebView/window/focus/reduced-motion/VoiceOver fidelity.
 
-Integration proof is still pending on the exact candidate head/base. Because the E2E contract and material UI integration harness changed, use selector `auto`; STRONG/FULL escalation is authoritative if selected. Physical TCC/audio, real WKWebView window behavior, keyboard/focus/VoiceOver quality and representative MLX/Metal remain release-only REAL_ENVIRONMENT evidence.
+PR #43 integrated at `dev@19b15b0f`. The authoritative FULL preflight #306 validated exact candidate `c1c79f31` against `dev@580fe6a7`: repository/contract guards, frontend deterministic checks, 411 Python tests, every declared Meeting FULL_MEDIA browser journey, packaged-app build/lifecycle smoke, repository validation and reusable evidence publication all passed. The browser harness was also hardened so archive recency is execution-relative, theme lookup is locale/case stable and preparation progress asserts monotonic advancement rather than requiring observation of a transient intermediate label. Physical TCC/audio, real WKWebView window behavior, keyboard/focus/VoiceOver quality and representative MLX/Metal remain release-only REAL_ENVIRONMENT evidence.
 
 ## Evidence and release
 
