@@ -349,6 +349,23 @@ def main() -> int:
             0.2,
         )
         check("truthful_waiting_state_observed", waiting_seen)
+        waiting_job = api.json(f"/v1/jobs/{job_id}", timeout=10)
+        waiting_sample = sample_state(
+            api, app_process.pid, waiting_job, started
+        )
+        report["resource_samples"].append(waiting_sample)
+        waiting_runtime = waiting_sample["runtime"]
+        check(
+            "managed_ai_still_active_while_waiting",
+            waiting_job.get("status") not in TERMINAL
+            and int(waiting_runtime.get("heavy_active_count") or 0) > 0,
+            {
+                "job": measured.summarize_job(waiting_job),
+                "heavy_active_count": waiting_runtime.get("heavy_active_count"),
+                "heavy_active_by_type": waiting_runtime.get("heavy_active_by_type")
+                or {},
+            },
+        )
         check(
             "capture_not_active_while_ai_busy",
             not smoke.exists(app_process.pid, smoke.LABELS["stop"]),
