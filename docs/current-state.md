@@ -15,6 +15,7 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - PRS-15 / #39 merged at `dev@3604ffbe`: complete local Meeting archive search is bounded, server-side and FTS5-backed; `meeting-archive-search` FULL_MEDIA and packaged FTS5 smoke are integrated.
 - Repository governance baseline 0.10.0 / #40 is integrated at `dev@b0922314` with bounded agent reporting, schema-2 context routes and refreshed preflight/validation skills.
 - PRS-16 / #41 merged at `dev@eb92df6d`: capture now receives atomic priority at the next safe managed-work boundary without force-killing active AI, losing bounded queued work or presenting recording before capture is real. Exact-tree STRONG evidence covered 406 source tests, all declared Meeting browser FULL_MEDIA journeys and packaged-app build/lifecycle smoke.
+- PRS-17 / #43 merged at `dev@19b15b0f`: Today, saved Meeting and Projects now share one adaptive macOS workspace hierarchy. The exact candidate `c1c79f31` passed FULL remote preflight #306: repository/contract guards, frontend deterministic checks, 411 Python tests, all declared Meeting browser FULL_MEDIA journeys, packaged-app build/lifecycle smoke, repository validation and reusable evidence publication.
 - Canonical target-Mac runner: `python3 scripts/real_environment_ui_evidence.py --build`.
 
 ## Current integration state
@@ -25,7 +26,7 @@ PRS-16 is integrated. `HeavyWorkloadArbiter` remains the sole heavy-work owner: 
 
 The frontend reserves capture before start, shows a truthful cancellable preparation state while AI finishes, starts the timer only with real capture, and releases priority on Stop/failure/recovery.
 
-PRS-17 is the current integration candidate from fresh `dev@580fe6a7`. It converges Today, saved Meeting and Projects under one adaptive macOS workspace shell without changing routing, persistence or runtime ownership. The desktop layout uses one stable workspace rail; compact/narrow windows reflow the same destinations and persistent New Meeting action into one bounded sticky toolbar. Settings/theme/language/tour/demo/runtime status remain utilities rather than peer product destinations. The new `coherent-macos-workspace` browser FULL_MEDIA journey verifies Today -> Meeting -> Projects hierarchy, theme continuity and 1440/780/560px resize behavior with no page-wide horizontal overflow. Integration readiness still requires exact-head selector-owned automated evidence; target-Mac WKWebView/window/focus/VoiceOver confirmation remains release evidence.
+PRS-17 is integrated at `dev@19b15b0f`. `App.tsx` owns one adaptive workspace shell: desktop uses one stable left rail, compact/narrow windows reflow the same Today/Projects hierarchy and persistent New Meeting action into one bounded sticky toolbar, and a saved Meeting remains a child of Today rather than a third peer destination. Settings/theme/language/tour/demo/runtime status remain utilities. `workspace.css` owns the responsive shell behavior while routing, persistence, capture, preparation and runtime owners remain unchanged. The integrated `coherent-macos-workspace` FULL_MEDIA journey proves Today -> Meeting -> Projects hierarchy, theme continuity and 1440/780/560px resize behavior without page-wide horizontal overflow; archive-search and preparation fixtures were also hardened against execution-date and transient-progress timing assumptions.
 
 ## Release evidence still pending
 
@@ -33,12 +34,12 @@ Target-Mac UX/TCC/native audio, CPU/RSS/Metal/thermal evidence, PRS-9 representa
 
 ## Active workstreams
 
-- [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..16 integrated; PRS-17 integration candidate.
+- [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured release is next.
 - [`product-runtime-simplification.md`](workstreams/product-runtime-simplification.md): PRS-10 convergence remains open.
 - [`ux-simplification.md`](workstreams/ux-simplification.md): deterministic work integrated; target-Mac confirmation remains a release gate.
 
 ## Next highest-value work
 
-1. Close PRS-17 on exact `dev@580fe6a7` with selector-owned source/frontend, browser FULL_MEDIA and any escalated packaged gates.
-2. Preserve the existing product/runtime ownership boundaries while proving adaptive workspace coherence and accessibility semantics.
-3. After PRS-17 integration, advance PRS-18 measured release and collect blocking target-Mac evidence for `dev -> main`.
+1. Advance PRS-18 measured release from `dev@19b15b0f` using the repository release contract and FULL validation.
+2. Collect blocking target-Mac REAL_ENVIRONMENT evidence for WKWebView/window/focus/VoiceOver, TCC/native capture, representative resources/thermal behavior and the PRS-9 audio comparison.
+3. Keep production signing/notarization and any material ASR/LLM quality/latency claims evidence-backed before `dev -> main` promotion.
