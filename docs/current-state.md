@@ -22,7 +22,7 @@ The frontend reserves before capture, shows truthful cancellable preparation and
 PRS-18 release tooling is being integrated around two canonical commands:
 
 - `release_build`: build the exact clean candidate with Developer ID + secure timestamp, notarize/staple the `.app`, build and notarize/staple the DMG, verify Gatekeeper, then write immutable manifest/checksums;
-- `release_evidence`: run that exact production `.app` on the target Mac, compose WKWebView/TCC recording FULL_MEDIA, execute a real local MLX transcription while sampling bounded CPU/RSS/scheduler/thermal evidence, then run the PRS-9 dual-vs-mixed benchmark on the captured meeting.
+- `release_evidence`: run that exact production `.app` on the target Mac through the normal WKWebView/TCC recording FULL_MEDIA + local MLX/resource/thermal + PRS-9 benchmark protocol, then run a dedicated PRS-16 contention confirmation that requires real managed MLX to be active when Start is pressed, observes the truthful waiting state, proves capture is not active while AI owns the safe boundary, and finally verifies TCC-backed native `both` capture with non-empty mic/system tracks after the workload completes.
 
 ## Release evidence still pending
 
@@ -32,7 +32,8 @@ Required remaining evidence:
 
 - actual Developer-ID/notary authority producing the exact production artifact;
 - target-Mac WKWebView/window/accessibility-tree/keyboard-focus + TCC-backed native `both` capture with non-empty mic/system tracks and clean lifecycle;
-- representative managed-AI CPU/RSS/thermal observation and local MLX completion;
+- real PRS-16 contention confirmation: local MLX active before Start, waiting UI observed, no premature capture, capture starts only after the safe boundary, and physical mic/system persistence succeeds;
+- representative managed-AI/capture CPU/RSS/thermal observations and local MLX completion;
 - PRS-9 representative dual-track vs mixed-track benchmark; changing the canonical strategy requires a separately validated change;
 - subjective VoiceOver/usability observation where materially required;
 - representative evidence for any material production ASR/LLM quality or latency claim.
@@ -46,5 +47,5 @@ PRS-16 proves safe priority at the next supported boundary, not instant pre-empt
 ## Next highest-value work
 
 1. Integrate the PRS-18 release tooling into `dev` with selector-owned exact-head validation.
-2. Create the exact production artifact from the final `dev` candidate and collect blocking target-Mac measured-release evidence.
+2. Create the exact production artifact from the final `dev` candidate and collect both normal measured-release and AI-busy capture target-Mac evidence.
 3. Open `dev -> main` only after live `main` freshness, RELEASE/FULL automation and the matching REAL_ENVIRONMENT evidence are all complete.
