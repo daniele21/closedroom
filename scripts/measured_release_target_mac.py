@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Collect PRS-18 target-Mac release evidence from one exact production app.
+"""Collect PRS-18 target-Mac evidence from one exact production artifact.
 
-The runner composes the existing packaged WKWebView/TCC journey, then executes
-one real local transcription job while sampling privacy-safe process/resource
-and thermal state. Finally it runs the existing read-only PRS-9 dual-vs-mixed
-audio benchmark on the recording produced by the UI journey.
+The runner composes the packaged WKWebView/TCC recording journey, executes one
+real local transcription job while sampling privacy-safe resource and thermal
+state, then runs the existing read-only PRS-9 dual-vs-mixed audio benchmark on
+the recording produced by that same journey.
 """
 from __future__ import annotations
 
@@ -23,12 +23,17 @@ from pathlib import Path
 from typing import Any
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
+BENCHMARK_ID = "dual_track_vs_mixed_asr"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
-    parser.add_argument("--app", required=True, help="Exact Developer-ID/notarized .app to validate")
+    parser.add_argument(
+        "--app",
+        required=True,
+        help="Exact Developer-ID signed, notarized and stapled .app to validate",
+    )
     parser.add_argument("--record-seconds", type=float, default=8.0)
     parser.add_argument("--sample-interval", type=float, default=0.75)
     parser.add_argument("--job-timeout", type=float, default=900.0)
@@ -43,7 +48,9 @@ def load_smoke_module(root: Path):
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
     path = root / "scripts" / "real_environment_smoke.py"
-    spec = importlib.util.spec_from_file_location("closedroom_real_environment_smoke", path)
+    spec = importlib.util.spec_from_file_location(
+        "closedroom_real_environment_smoke", path
+    )
     if spec is None or spec.loader is None:
         raise RuntimeError("cannot load real_environment_smoke.py")
     module = importlib.util.module_from_spec(spec)
@@ -55,6 +62,28 @@ def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def revisions_match(left: str, right: str) -> bool:
+    return bool(left and right and (left.startswith(right) or right.startswith(left)))
+
+
+def git_state(root: Path) -> tuple[str, list[str]]:
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return revision, [line for line in status.splitlines() if line.strip()]
+
+
 def production_manifest_for(app: Path) -> tuple[Path, dict[str, Any]]:
     manifest_path = app.parent / "build-manifest.json"
     if not manifest_path.is_file():
@@ -62,10 +91,30 @@ def production_manifest_for(app: Path) -> tuple[Path, dict[str, Any]]:
     manifest = read_json(manifest_path)
     signing = str((manifest.get("configuration") or {}).get("signing") or "")
     if signing != "developer-id-notarized":
-        raise RuntimeError(f"production app signing is not release-ready: {signing or 'unknown'}")
+        raise RuntimeError(
+            f"production app signing is not release-ready: {signing or 'unknown'}"
+        )
+
     evidence_path = app.parent / "production-release-evidence.json"
-    if not evidence_path.is_file() or read_json(evidence_path).get("status") != "pass":
+    if not evidence_path.is_file():
         raise RuntimeError("production-release-evidence.json is missing or not PASS")
+    evidence = read_json(evidence_path)
+    required = {
+        "status": "pass",
+        "app_notarization": "accepted",
+        "app_stapler_validation": "pass",
+        "app_gatekeeper_assessment": "pass",
+        "dmg_notarization": "accepted",
+        "dmg_stapler_validation": "pass",
+        "dmg_gatekeeper_assessment": "pass",
+    }
+    if any(evidence.get(key) != expected for key, expected in required.items()):
+        raise RuntimeError("production-release-evidence.json is missing release proof")
+    manifest_revision = str((manifest.get("source") or {}).get("revision") or "")
+    if not revisions_match(
+        manifest_revision, str(evidence.get("source_revision") or "")
+    ):
+        raise RuntimeError("production release evidence does not match build manifest")
     return manifest_path, manifest
 
 
@@ -82,17 +131,27 @@ def process_table() -> dict[int, tuple[int, float, int]]:
         if len(parts) != 4:
             continue
         try:
-            table[int(parts[0])] = (int(parts[1]), float(parts[2]), int(parts[3]) * 1024)
+            table[int(parts[0])] = (
+                int(parts[1]),
+                float(parts[2]),
+                int(parts[3]) * 1024,
+            )
         except ValueError:
             continue
     return table
 
 
-def family_pids(root_pid: int, table: dict[int, tuple[int, float, int]]) -> set[int]:
+def family_pids(
+    root_pid: int, table: dict[int, tuple[int, float, int]]
+) -> set[int]:
     found = {root_pid}
     frontier = {root_pid}
     while frontier:
-        children = {pid for pid, (ppid, _, _) in table.items() if ppid in frontier and pid not in found}
+        children = {
+            pid
+            for pid, (ppid, _, _) in table.items()
+            if ppid in frontier and pid not in found
+        }
         found.update(children)
         frontier = children
     return found
@@ -110,24 +169,61 @@ def process_family_sample(root_pid: int) -> dict[str, Any]:
 
 
 def thermal_sample() -> dict[str, Any]:
+    """Return one bounded macOS thermal/performance snapshot.
+
+    pmset may report numeric scheduler/speed limits, or explicitly report that
+    no thermal warning has been recorded. Both are useful observations. Missing
+    or unsupported output remains unknown rather than being represented as zero.
+    """
     try:
         completed = subprocess.run(
-            ["pmset", "-g", "thermlog"],
+            ["pmset", "-g", "therm"],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
         )
-        text = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+        text = "\n".join(
+            part for part in (completed.stdout, completed.stderr) if part
+        )
     except (OSError, subprocess.SubprocessError):
-        return {"status": "unknown", "source": "pmset-thermlog", "metrics": {}}
+        return {
+            "status": "unknown",
+            "source": "pmset-therm",
+            "state": None,
+            "metrics": {},
+        }
+
     metrics: dict[str, int] = {}
-    for key, value in re.findall(r"([A-Za-z][A-Za-z0-9_ ]{1,48})\s*=\s*(\d+)", text):
+    for key, value in re.findall(
+        r"([A-Za-z][A-Za-z0-9_ ]{1,48})\s*=\s*(\d+)", text
+    ):
         normalized = re.sub(r"\s+", "_", key.strip().lower())
         metrics[normalized] = int(value)
+
+    normalized_text = text.lower()
+    explicit_nominal = (
+        "no thermal warning" in normalized_text
+        or "no performance warning" in normalized_text
+    )
+    if metrics:
+        constrained = any(
+            value < 100
+            for key, value in metrics.items()
+            if "limit" in key
+        )
+        state = "constrained" if constrained else "observed"
+        status = "available"
+    elif explicit_nominal:
+        state = "nominal"
+        status = "available"
+    else:
+        state = None
+        status = "unknown"
     return {
-        "status": "available" if metrics else "unknown",
-        "source": "pmset-thermlog",
+        "status": status,
+        "source": "pmset-therm",
+        "state": state,
         "metrics": metrics,
     }
 
@@ -135,10 +231,24 @@ def thermal_sample() -> dict[str, Any]:
 def sanitize_runtime_resources(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {"status": "unknown"}
-    app = payload.get("app_process") if isinstance(payload.get("app_process"), dict) else {}
-    llm = payload.get("llm_sidecar") if isinstance(payload.get("llm_sidecar"), dict) else {}
-    workloads = payload.get("heavy_workloads") if isinstance(payload.get("heavy_workloads"), dict) else {}
-    machine = payload.get("machine") if isinstance(payload.get("machine"), dict) else {}
+    app = (
+        payload.get("app_process")
+        if isinstance(payload.get("app_process"), dict)
+        else {}
+    )
+    llm = (
+        payload.get("llm_sidecar")
+        if isinstance(payload.get("llm_sidecar"), dict)
+        else {}
+    )
+    workloads = (
+        payload.get("heavy_workloads")
+        if isinstance(payload.get("heavy_workloads"), dict)
+        else {}
+    )
+    machine = (
+        payload.get("machine") if isinstance(payload.get("machine"), dict) else {}
+    )
     return {
         "app_current_rss_bytes": app.get("current_rss_bytes"),
         "app_peak_rss_bytes": app.get("peak_rss_bytes"),
@@ -156,9 +266,15 @@ def locate_session(recordings_root: Path, recording_id: str) -> Path:
     direct = recordings_root / recording_id
     if direct.is_dir():
         return direct
-    matches = [path for path in recordings_root.rglob(recording_id) if path.is_dir() and path.name == recording_id]
+    matches = [
+        path
+        for path in recordings_root.rglob(recording_id)
+        if path.is_dir() and path.name == recording_id
+    ]
     if len(matches) != 1:
-        raise RuntimeError(f"could not uniquely locate recording session {recording_id}")
+        raise RuntimeError(
+            f"could not uniquely locate recording session {recording_id}"
+        )
     return matches[0]
 
 
@@ -178,17 +294,47 @@ def summarize_job(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_audio_benchmark(root: Path, session: Path, model: str, language: str, repeats: int, output: Path) -> dict[str, Any]:
+def run_audio_benchmark(
+    root: Path,
+    session: Path,
+    model: str,
+    language: str,
+    repeats: int,
+    output: Path,
+) -> dict[str, Any]:
     command = [
-        "uv", "run", "--frozen", "--python", "3.12", "python",
-        "scripts/benchmark_audio_strategy.py", str(session),
-        "--model", model,
-        "--language", language,
-        "--repeats", str(repeats),
-        "--output", str(output),
+        "uv",
+        "run",
+        "--frozen",
+        "--python",
+        "3.12",
+        "python",
+        "scripts/benchmark_audio_strategy.py",
+        str(session),
+        "--model",
+        model,
+        "--language",
+        language,
+        "--repeats",
+        str(repeats),
+        "--output",
+        str(output),
     ]
     subprocess.run(command, cwd=root, check=True, timeout=3600)
     return read_json(output)
+
+
+def audio_benchmark_complete(report: Any, repeats: int) -> bool:
+    if not isinstance(report, dict) or report.get("benchmark") != BENCHMARK_ID:
+        return False
+    summary = report.get("summary")
+    runs = report.get("runs")
+    return (
+        isinstance(summary, dict)
+        and int(summary.get("repeat_count") or 0) == repeats
+        and isinstance(runs, list)
+        and len(runs) == repeats
+    )
 
 
 def main() -> int:
@@ -196,18 +342,42 @@ def main() -> int:
     root = Path(args.root).resolve()
     app = Path(args.app).expanduser().resolve()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
-        raise SystemExit("measured release evidence requires a target Apple-Silicon Mac")
-    if args.sample_interval <= 0 or args.job_timeout <= 0 or not 1 <= args.benchmark_repeats <= 9:
+        raise SystemExit(
+            "measured release evidence requires a target Apple-Silicon Mac"
+        )
+    if (
+        args.sample_interval <= 0
+        or args.job_timeout <= 0
+        or not 1 <= args.benchmark_repeats <= 9
+    ):
         raise SystemExit("invalid sampling/timeout/repeat arguments")
     if shutil.which("uv") is None:
         raise SystemExit("uv is required for the representative audio benchmark")
     if not app.is_dir():
         raise SystemExit(f"app not found: {app}")
 
+    checkout_revision, dirty_entries = git_state(root)
+    if dirty_entries:
+        raise SystemExit(
+            "measured release evidence requires a clean checkout: "
+            + " | ".join(dirty_entries)
+        )
     manifest_path, manifest = production_manifest_for(app)
     source_revision = str((manifest.get("source") or {}).get("revision") or "")
-    evidence_root = root / "dist" / "evidence" / "measured-release" / source_revision
-    output = Path(args.output).expanduser().resolve() if args.output else evidence_root / "measured-release-evidence.json"
+    if not revisions_match(checkout_revision, source_revision):
+        raise SystemExit(
+            f"production artifact does not match checkout: "
+            f"{source_revision or 'unknown'} != {checkout_revision}"
+        )
+
+    evidence_root = (
+        root / "dist" / "evidence" / "measured-release" / source_revision
+    )
+    output = (
+        Path(args.output).expanduser().resolve()
+        if args.output
+        else evidence_root / "measured-release-evidence.json"
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     ui_report = output.parent / "ui-target-mac-report.json"
     benchmark_path = output.parent / "audio-strategy-benchmark.json"
@@ -218,8 +388,11 @@ def main() -> int:
         "execution_environment": "target-macos-real",
         "fidelity_class": "target_environment",
         "source_revision": source_revision,
+        "checkout_revision": checkout_revision,
         "app": str(app),
         "build_manifest": str(manifest_path),
+        "ui_evidence_report": str(ui_report),
+        "audio_benchmark_report": str(benchmark_path),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "checks": [],
         "resource_samples": [],
@@ -231,7 +404,9 @@ def main() -> int:
     }
 
     def check(name: str, ok: bool, detail: Any = None) -> None:
-        report["checks"].append({"name": name, "status": "pass" if ok else "fail", "detail": detail})
+        report["checks"].append(
+            {"name": name, "status": "pass" if ok else "fail", "detail": detail}
+        )
         if not ok:
             raise RuntimeError(f"check failed: {name}")
 
@@ -242,40 +417,90 @@ def main() -> int:
     executable = ""
     try:
         ui_command = [
-            sys.executable, "scripts/real_environment_ui_evidence.py",
-            "--root", str(root), "--app", str(app),
-            "--record-seconds", str(args.record_seconds),
-            "--keep-sandbox", "--evidence", str(ui_report),
+            sys.executable,
+            "scripts/real_environment_ui_evidence.py",
+            "--root",
+            str(root),
+            "--app",
+            str(app),
+            "--record-seconds",
+            str(args.record_seconds),
+            "--keep-sandbox",
+            "--evidence",
+            str(ui_report),
         ]
-        ui_result = subprocess.run(ui_command, cwd=root, check=False, timeout=600)
+        ui_result = subprocess.run(
+            ui_command, cwd=root, check=False, timeout=600
+        )
         ui = read_json(ui_report) if ui_report.is_file() else {}
-        check("target_mac_recording_ui", ui_result.returncode == 0 and ui.get("status") == "pass", {"status": ui.get("status")})
-        created = ui.get("created_recording") if isinstance(ui.get("created_recording"), dict) else {}
+        check(
+            "target_mac_recording_ui",
+            ui_result.returncode == 0 and ui.get("status") == "pass",
+            {"status": ui.get("status")},
+        )
+        created = (
+            ui.get("created_recording")
+            if isinstance(ui.get("created_recording"), dict)
+            else {}
+        )
         recording_id = str(created.get("id") or "")
         recordings_root = Path(str(ui.get("isolated_recordings_dir") or ""))
         sandbox = Path(str(ui.get("isolated_home") or ""))
-        check("native_both_capture", created.get("capture_backend") == "native" and created.get("capture_mode") == "both", created)
-        check("mic_system_persisted", {"mic", "system"}.issubset(set(created.get("nonempty_track_sources") or [])), created.get("nonempty_track_sources"))
-        check("isolated_recording_available", bool(recording_id and recordings_root.is_dir() and sandbox.is_dir()))
+        check(
+            "native_both_capture",
+            created.get("capture_backend") == "native"
+            and created.get("capture_mode") == "both",
+            created,
+        )
+        check(
+            "mic_system_persisted",
+            {"mic", "system"}.issubset(
+                set(created.get("nonempty_track_sources") or [])
+            ),
+            created.get("nonempty_track_sources"),
+        )
+        check(
+            "isolated_recording_available",
+            bool(recording_id and recordings_root.is_dir() and sandbox.is_dir()),
+        )
         session = locate_session(recordings_root, recording_id)
 
         info = smoke.bundle_info(app)
         executable = str(info["executable"])
         env = os.environ.copy()
         env["HOME"] = str(sandbox)
-        app_process = subprocess.Popen([executable], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        check("resource_probe_app_started", smoke.wait(lambda: app_process.poll() is None, 3), {"pid": app_process.pid})
-        port, _ = smoke.discover_server(app_process.pid, info["bundle_id"], info["version"], 90)
+        app_process = subprocess.Popen(
+            [executable],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        check(
+            "resource_probe_app_started",
+            smoke.wait(lambda: app_process.poll() is None, 3),
+            {"pid": app_process.pid},
+        )
+        port, _ = smoke.discover_server(
+            app_process.pid, info["bundle_id"], info["version"], 90
+        )
         api = smoke.Api(port)
         settings = api.json("/v1/settings")
-        model = str(settings.get("default_model") or api.health().get("default_model") or "")
+        model = str(
+            settings.get("default_model")
+            or api.health().get("default_model")
+            or ""
+        )
         language = str(settings.get("default_language") or "it")
         check("local_asr_model_resolved", bool(model), {"model": model})
 
         job = api.json(
             f"/v1/recordings/{recording_id}/transcription-jobs",
             "POST",
-            {"asr_provider": "local", "diarization_provider": "disabled", "visual_intelligence_enabled": False},
+            {
+                "asr_provider": "local",
+                "diarization_provider": "disabled",
+                "visual_intelligence_enabled": False,
+            },
             20,
         )
         job_id = str(job.get("id") or "")
@@ -286,19 +511,27 @@ def main() -> int:
         terminal: dict[str, Any] = {}
         while time.monotonic() - started < args.job_timeout:
             current = api.json(f"/v1/jobs/{job_id}", timeout=10)
-            runtime = sanitize_runtime_resources(api.json("/v1/runtime/resources", timeout=10))
+            runtime = sanitize_runtime_resources(
+                api.json("/v1/runtime/resources", timeout=10)
+            )
             family = process_family_sample(app_process.pid)
             thermal = thermal_sample()
-            active_seen = active_seen or int(runtime.get("heavy_active_count") or 0) > 0
-            thermal_seen = thermal_seen or thermal.get("status") == "available"
-            report["resource_samples"].append({
-                "elapsed_seconds": round(time.monotonic() - started, 3),
-                "job_status": current.get("status"),
-                "job_step": current.get("current_step"),
-                "process_family": family,
-                "runtime": runtime,
-                "thermal": thermal,
-            })
+            active_seen = active_seen or int(
+                runtime.get("heavy_active_count") or 0
+            ) > 0
+            thermal_seen = (
+                thermal_seen or thermal.get("status") == "available"
+            )
+            report["resource_samples"].append(
+                {
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
+                    "job_status": current.get("status"),
+                    "job_step": current.get("current_step"),
+                    "process_family": family,
+                    "runtime": runtime,
+                    "thermal": thermal,
+                }
+            )
             if current.get("status") in TERMINAL:
                 terminal = current
                 break
@@ -306,21 +539,45 @@ def main() -> int:
 
         summary = summarize_job(terminal)
         report["managed_ai_job"] = summary
-        check("managed_transcription_completed", summary.get("status") == "completed", summary)
+        check(
+            "managed_transcription_completed",
+            summary.get("status") == "completed",
+            summary,
+        )
         check("arbiter_active_observed", active_seen)
-        check("resource_samples_recorded", len(report["resource_samples"]) >= 2, {"samples": len(report["resource_samples"])})
+        check(
+            "resource_samples_recorded",
+            len(report["resource_samples"]) >= 2,
+            {"samples": len(report["resource_samples"])},
+        )
         check("thermal_observation_available", thermal_seen)
         backend = str(summary.get("backend") or "").lower()
-        check("local_mlx_backend", str(summary.get("asr_provider") or "local").lower() == "local" and "mlx" in backend, {"backend": backend})
+        check(
+            "local_mlx_backend",
+            str(summary.get("asr_provider") or "local").lower() == "local"
+            and "mlx" in backend,
+            {"backend": backend},
+        )
 
         cleanup = smoke.quit_app(app_process.pid, executable, port)
         report["managed_ai_cleanup"] = cleanup
         check("managed_ai_app_cleanup", bool(cleanup.get("process_gone")), cleanup)
         app_process = None
 
-        benchmark = run_audio_benchmark(root, session, model, language, args.benchmark_repeats, benchmark_path)
+        benchmark = run_audio_benchmark(
+            root,
+            session,
+            model,
+            language,
+            args.benchmark_repeats,
+            benchmark_path,
+        )
         report["audio_strategy_benchmark"] = benchmark
-        check("audio_strategy_benchmark_completed", benchmark.get("status") in {"pass", "completed", "ok"} or bool(benchmark.get("strategies") or benchmark.get("results")), {"output": str(benchmark_path)})
+        check(
+            "audio_strategy_benchmark_completed",
+            audio_benchmark_complete(benchmark, args.benchmark_repeats),
+            {"output": str(benchmark_path)},
+        )
 
         report["status"] = "pass"
     except Exception as exc:
@@ -328,19 +585,33 @@ def main() -> int:
     finally:
         if app_process is not None and executable:
             try:
-                report["cleanup_after_failure"] = smoke.quit_app(app_process.pid, executable, port)
+                report["cleanup_after_failure"] = smoke.quit_app(
+                    app_process.pid, executable, port
+                )
             except Exception as exc:
                 report["errors"].append(f"cleanup:{exc}")
-        if sandbox is not None and sandbox.is_dir() and not args.keep_sandbox:
+        if (
+            sandbox is not None
+            and sandbox.is_dir()
+            and not args.keep_sandbox
+        ):
             shutil.rmtree(sandbox, ignore_errors=True)
             report["sandbox_removed"] = not sandbox.exists()
             if report["status"] == "pass" and sandbox.exists():
                 report["status"] = "fail"
                 report["errors"].append("isolated HOME survived cleanup")
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
-        output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        output.write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
-    print(json.dumps({"status": report["status"], "evidence": str(output)}, indent=2))
+    print(
+        json.dumps(
+            {"status": report["status"], "evidence": str(output)},
+            indent=2,
+        )
+    )
     return 0 if report["status"] == "pass" else 1
 
 
