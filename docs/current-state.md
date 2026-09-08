@@ -8,36 +8,37 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 
 - Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
 - PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio-strategy benchmark tooling; dual-track audio remains canonical pending representative release evidence.
-- PRS-11..14 integrated fast saved-Meeting open, durable `Prepare notes`, one structured default notes run and source-verifiable editable actions/decisions.
-- PRS-15 / #39 integrated bounded FTS5-backed local archive search.
-- Governance baseline 0.10.0 / #40 is integrated.
-- PRS-16 / #41 integrated capture priority at the next safe managed-work boundary without force-killing active AI or losing bounded queued work; its STRONG evidence passed source, browser FULL_MEDIA and packaged lifecycle gates.
-- PRS-17 / #43 integrated one adaptive Today/Meeting/Projects workspace. Candidate `c1c79f31` passed FULL preflight #306: guards, frontend, 411 Python tests, all declared Meeting FULL_MEDIA journeys, packaged lifecycle and repository validation.
+- PRS-11..17 integrated the saved-Meeting/Prepare-notes flow, structured verifiable notes, bounded archive search, safe capture priority and one adaptive Today/Meeting/Projects workspace.
+- PRS-17 candidate `c1c79f31` passed FULL preflight #306: guards, frontend, 411 Python tests, all declared Meeting FULL_MEDIA journeys, packaged lifecycle and repository validation.
 - The MIT `LICENSE` already on stable `main` was restored to the release line through PR #46.
-- Product/runtime convergence and UX simplification are complete for development integration; their release obligations are consolidated below.
-- Target-Mac runner: `python3 scripts/real_environment_ui_evidence.py --build`.
+- Product/runtime convergence and UX simplification development workstreams are finalized; PRS-18 is the only active workstream.
 
 ## Current integration state
 
-`HeavyWorkloadArbiter` remains the sole heavy-work owner. A transient capture reservation waits for active managed work to finish normally, blocks queued heavy work during capture and releases it afterward; `ResourcePolicy(capture_active)` remains the fail-safe for unreserved capture. `RecordingStore` remains the persistence owner and external runtimes remain caller-owned.
+`HeavyWorkloadArbiter` remains the sole heavy-work owner. Capture waits for the next safe managed-work boundary, holds bounded queued work during recording and releases it afterward; `ResourcePolicy` remains the unreserved-capture fail-safe. `RecordingStore` remains the persistence owner and external runtimes remain caller-owned.
 
-The frontend reserves before capture, shows truthful cancellable preparation, starts the timer only with real capture and releases priority on Stop/failure/recovery. `App.tsx` + `workspace.css` own one adaptive shell: Meeting remains under Today, Projects is the peer destination, New Meeting stays primary and Settings/theme/language/tour/demo/runtime status remain utilities. Routing, persistence, capture, preparation and runtime owners are unchanged.
+The frontend reserves before capture, shows truthful cancellable preparation and starts the timer only with real capture. `App.tsx` + `workspace.css` own one adaptive shell with Meeting under Today, Projects as the peer destination and New Meeting as the persistent primary action.
+
+PRS-18 release tooling is being integrated around two canonical commands:
+
+- `release_build`: build the exact clean candidate with Developer ID + secure timestamp, notarize/staple the `.app`, build and notarize/staple the DMG, verify Gatekeeper, then write immutable manifest/checksums;
+- `release_evidence`: run that exact production `.app` on the target Mac through the normal WKWebView/TCC recording FULL_MEDIA + local MLX/resource/thermal + PRS-9 benchmark protocol, then run a dedicated PRS-16 contention confirmation that requires real managed MLX to be active when Start is pressed, captures bounded window FULL_MEDIA for the truthful waiting → recording transition, proves capture is not active while AI owns the safe boundary, and finally verifies TCC-backed native `both` capture with non-empty mic/system tracks after the workload completes.
 
 ## Release evidence still pending
 
-PRS-18 is the only active workstream. Stable promotion is blocked until **RELEASE / FULL** automation and every applicable target-environment confirmation agree on the exact candidate.
+Stable promotion remains blocked until **RELEASE / FULL** automation and every applicable target-environment confirmation agree on the exact candidate.
 
-Required release evidence:
+Required remaining evidence:
 
-- target-Mac packaged WKWebView/window/accessibility-tree/keyboard-focus behavior plus recording FULL_MEDIA;
-- TCC-backed native `both` capture with non-empty mic + system-audio persistence and clean lifecycle;
-- representative CPU/RSS/Metal/thermal behavior under capture and managed AI;
+- actual Developer-ID/notary authority producing the exact production artifact;
+- target-Mac WKWebView/window/accessibility-tree/keyboard-focus + TCC-backed native `both` capture with non-empty mic/system tracks and clean lifecycle;
+- real PRS-16 contention confirmation: local MLX active before Start, waiting UI FULL_MEDIA captured, no premature capture, capture starts only after the safe boundary, and physical mic/system persistence succeeds;
+- representative managed-AI/capture CPU/RSS/thermal observations and local MLX completion;
 - PRS-9 representative dual-track vs mixed-track benchmark; changing the canonical strategy requires a separately validated change;
-- production signing/notarization before distributing a production artifact;
 - subjective VoiceOver/usability observation where materially required;
 - representative evidence for any material production ASR/LLM quality or latency claim.
 
-PRS-16 proves safe priority at the next supported boundary, not instant pre-emption. Browser UI evidence does not substitute for packaged target-Mac or subjective accessibility proof.
+PRS-16 proves safe priority at the next supported boundary, not instant pre-emption. Hosted/browser evidence does not substitute for target-Mac or subjective accessibility proof.
 
 ## Active workstreams
 
@@ -45,6 +46,6 @@ PRS-16 proves safe priority at the next supported boundary, not instant pre-empt
 
 ## Next highest-value work
 
-1. Prepare exact `dev -> main` PRS-18 and run selector-owned **RELEASE / FULL** automation against live `main`.
-2. Collect blocking target-Mac UI/TCC, representative resource/thermal and PRS-9 audio evidence.
-3. Verify the production-signed/notarized artifact before stable promotion; keep `main` unchanged while any required release gate is missing.
+1. Integrate the PRS-18 release tooling into `dev` with selector-owned exact-head validation.
+2. Create the exact production artifact from the final `dev` candidate and collect both normal measured-release and AI-busy capture target-Mac evidence.
+3. Open `dev -> main` only after live `main` freshness, RELEASE/FULL automation and the matching REAL_ENVIRONMENT evidence are all complete.
