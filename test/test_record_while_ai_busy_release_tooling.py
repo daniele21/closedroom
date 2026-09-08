@@ -33,11 +33,16 @@ class RecordWhileAiBusyReleaseToolingTests(unittest.TestCase):
         source = SCRIPT.read_text(encoding="utf-8")
         ast.parse(source)
         self.assertIn('"journey_id": "record-while-ai-busy"', source)
+        self.assertIn('"ui_evidence_mode": "full_media"', source)
         self.assertIn('"truthful_waiting_state_observed"', source)
         self.assertIn('"capture_not_active_while_ai_busy"', source)
         self.assertIn('"capture_started_after_safe_boundary"', source)
         self.assertIn('"managed_ai_is_local_mlx"', source)
         self.assertIn('"contention_native_both_tracks"', source)
+        self.assertIn('"contention_full_media_complete"', source)
+        self.assertIn("01-ai-busy-waiting.png", source)
+        self.assertIn("02-recording-after-boundary.png", source)
+        self.assertIn("contention-journey.mov", source)
         self.assertIn("measured.existing_directory", source)
 
     def test_native_both_requires_mic_and_system_tracks(self) -> None:
