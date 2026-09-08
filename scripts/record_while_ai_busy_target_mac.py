@@ -5,7 +5,8 @@ This release-only runner deliberately composes real local managed ASR with the
 packaged WKWebView and TCC-backed native capture path. It requires an observable
 waiting state while managed AI is active, then verifies that capture starts only
 after the active workload reaches its normal boundary and persists non-empty
-microphone plus system-audio tracks.
+microphone plus system-audio tracks. The physical contention transition is
+retained as bounded ClosedRoom-window screenshots plus video evidence.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import json
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -54,6 +56,52 @@ def native_both_with_tracks(recording: Any) -> bool:
         and recording.get("capture_mode") == "both"
         and {"mic", "system"}.issubset(sources)
     )
+
+
+def capture_window(rect: str, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["screencapture", "-x", "-R", rect, str(destination)],
+        check=True,
+        timeout=15,
+    )
+
+
+def start_video(rect: str, destination: Path) -> subprocess.Popen[bytes]:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return subprocess.Popen(
+        [
+            "screencapture",
+            "-v",
+            "-V",
+            "900",
+            "-R",
+            rect,
+            "-x",
+            str(destination),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def finish_video(process: subprocess.Popen[bytes] | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.send_signal(signal.SIGINT)
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+def file_nonempty(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
 
 
 def sample_state(
@@ -118,6 +166,10 @@ def main() -> int:
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     seed_report = output.parent / "contention-seed-ui-report.json"
+    media_root = output.parent / "ui-media" / "record-while-ai-busy"
+    waiting_shot = media_root / "screenshots" / "01-ai-busy-waiting.png"
+    recording_shot = media_root / "screenshots" / "02-recording-after-boundary.png"
+    video_path = media_root / "video" / "contention-journey.mov"
 
     report: dict[str, Any] = {
         "schema_version": 1,
@@ -125,15 +177,22 @@ def main() -> int:
         "journey_id": "record-while-ai-busy",
         "execution_environment": "target-macos-real",
         "fidelity_class": "target_environment",
+        "ui_evidence_mode": "full_media",
         "source_revision": source_revision,
         "checkout_revision": checkout_revision,
         "app": str(app),
         "build_manifest": str(manifest_path),
         "seed_ui_report": str(seed_report),
+        "screenshots": [str(waiting_shot), str(recording_shot)],
+        "video": str(video_path),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "checks": [],
         "resource_samples": [],
         "errors": [],
+        "privacy_boundary": (
+            "UI media is restricted to the ClosedRoom application window; "
+            "resource evidence contains bounded process/runtime metrics and no transcript text."
+        ),
         "residual_gaps": [
             "Source/browser tests remain the primary proof for bounded queue ordering and cancellation; this target-Mac run confirms the physical TCC/WKWebView/MLX contention boundary.",
             "No numeric thermal or performance threshold is inferred without a comparable baseline.",
@@ -150,6 +209,7 @@ def main() -> int:
     smoke = measured.load_smoke_module(root)
     sandbox: Path | None = None
     app_process: subprocess.Popen[Any] | None = None
+    video: subprocess.Popen[bytes] | None = None
     executable = ""
     port: int | None = None
     try:
@@ -237,6 +297,8 @@ def main() -> int:
                 lambda: smoke.exists(app_process.pid, smoke.LABELS["ready"]), 30
             ),
         )
+        rect = smoke.UI_DRIVER.window_rect(app_process.pid)
+        video = start_video(rect, video_path)
 
         before_ids = {
             str(item.get("id") or "")
@@ -291,6 +353,7 @@ def main() -> int:
             "capture_not_active_while_ai_busy",
             not smoke.exists(app_process.pid, smoke.LABELS["stop"]),
         )
+        capture_window(rect, waiting_shot)
 
         terminal: dict[str, Any] = {}
         deadline = time.monotonic() + args.job_timeout
@@ -323,6 +386,20 @@ def main() -> int:
             smoke.wait(
                 lambda: smoke.exists(app_process.pid, smoke.LABELS["stop"]), 90
             ),
+        )
+        capture_window(rect, recording_shot)
+        finish_video(video)
+        video = None
+        check(
+            "contention_full_media_complete",
+            file_nonempty(waiting_shot)
+            and file_nonempty(recording_shot)
+            and file_nonempty(video_path),
+            {
+                "waiting_screenshot": str(waiting_shot),
+                "recording_screenshot": str(recording_shot),
+                "video": str(video_path),
+            },
         )
 
         capture_started = time.monotonic()
@@ -377,6 +454,7 @@ def main() -> int:
     except Exception as exc:
         report["errors"].append(str(exc))
     finally:
+        finish_video(video)
         if app_process is not None and executable:
             try:
                 report["cleanup_after_failure"] = smoke.quit_app(
