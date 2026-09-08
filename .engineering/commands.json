@@ -12,7 +12,7 @@
     "smoke": {"status": "recommended", "run": "python3 scripts/smoke_packaged_app.py"},
     "package": {"status": "optional", "run": "bash scripts/build_artifact.sh --dmg"},
     "release_build": {"status": "required", "run": "python3 scripts/build_production_artifact.py"},
-    "release_evidence": {"status": "required", "run": "python3 scripts/measured_release_target_mac.py --app <exact-production-app>"},
+    "release_evidence": {"status": "required", "run": "python3 scripts/measured_release_target_mac.py --app <exact-production-app> && python3 scripts/record_while_ai_busy_target_mac.py --app <exact-production-app>"},
     "stop": {"status": "n/a", "run": "n/a"},
     "clean": {"status": "required", "run": "python3 scripts/clean_build_state.py"}
   },
