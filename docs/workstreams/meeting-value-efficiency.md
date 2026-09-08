@@ -68,7 +68,8 @@ Required properties:
 Canonical command:
 
 ```bash
-python3 scripts/measured_release_target_mac.py --app <exact-production-app>
+python3 scripts/measured_release_target_mac.py --app <exact-production-app> && \
+python3 scripts/record_while_ai_busy_target_mac.py --app <exact-production-app>
 ```
 
 One exact production `.app` must prove:
@@ -79,9 +80,10 @@ One exact production `.app` must prove:
 4. a real local transcription job on the captured meeting, with `HeavyWorkloadArbiter` activity observed;
 5. bounded privacy-safe CPU/RSS/runtime scheduler samples and a macOS thermal/performance observation (`pmset -g therm`); missing data stays `unknown`, never zero;
 6. local MLX completion rather than a cloud fallback;
-7. PRS-9 `dual_track_vs_mixed_asr` benchmark on that same representative recording, using its real schema/repeat count and retaining no transcript text.
+7. PRS-9 `dual_track_vs_mixed_asr` benchmark on that same representative recording, using its real schema/repeat count and retaining no transcript text;
+8. the PRS-16 physical contention boundary: navigate to a ready New Meeting, start a real local MLX transcription on an existing recording, observe `HeavyWorkloadArbiter` active before pressing Start, require the truthful `Preparing recording` state and absence of active capture while AI runs, then require real native `both` capture with non-empty mic/system tracks after that workload reaches its normal boundary.
 
-No numeric performance threshold is invented without a comparable baseline. The evidence runner records observations and completion truth; a later product/architecture change is required if benchmark evidence justifies changing the canonical dual-track strategy.
+No numeric performance threshold is invented without a comparable baseline. The evidence runner records observations and completion truth; a later product/architecture change is required if benchmark evidence justifies changing the canonical dual-track strategy. Source/browser tests remain the primary proof for bounded queue ordering/cancellation; target-Mac contention evidence confirms the packaged WKWebView/TCC/physical-audio/MLX boundary instead of replacing those lower-level tests.
 
 ### Human evidence
 
@@ -94,7 +96,7 @@ After tooling is integrated:
 1. freeze exact `dev` candidate and live `main` base;
 2. run selector-owned RELEASE/FULL automation for `dev -> main`;
 3. build production artifact from that exact source;
-4. run measured target-Mac evidence against the exact notarized artifact;
+4. run both measured target-Mac evidence runners against the exact notarized artifact;
 5. record any genuinely required subjective VoiceOver observation;
 6. recheck candidate/base freshness and full diff;
 7. promote to `main` only if all blocking evidence matches the candidate.
