@@ -22,7 +22,7 @@ The frontend reserves before capture, shows truthful cancellable preparation and
 PRS-18 release tooling is being integrated around two canonical commands:
 
 - `release_build`: build the exact clean candidate with Developer ID + secure timestamp, notarize/staple the `.app`, build and notarize/staple the DMG, verify Gatekeeper, then write immutable manifest/checksums;
-- `release_evidence`: run that exact production `.app` on the target Mac through the normal WKWebView/TCC recording FULL_MEDIA + local MLX/resource/thermal + PRS-9 benchmark protocol, then run a dedicated PRS-16 contention confirmation that requires real managed MLX to be active when Start is pressed, observes the truthful waiting state, proves capture is not active while AI owns the safe boundary, and finally verifies TCC-backed native `both` capture with non-empty mic/system tracks after the workload completes.
+- `release_evidence`: run that exact production `.app` on the target Mac through the normal WKWebView/TCC recording FULL_MEDIA + local MLX/resource/thermal + PRS-9 benchmark protocol, then run a dedicated PRS-16 contention confirmation that requires real managed MLX to be active when Start is pressed, captures bounded window FULL_MEDIA for the truthful waiting → recording transition, proves capture is not active while AI owns the safe boundary, and finally verifies TCC-backed native `both` capture with non-empty mic/system tracks after the workload completes.
 
 ## Release evidence still pending
 
@@ -32,7 +32,7 @@ Required remaining evidence:
 
 - actual Developer-ID/notary authority producing the exact production artifact;
 - target-Mac WKWebView/window/accessibility-tree/keyboard-focus + TCC-backed native `both` capture with non-empty mic/system tracks and clean lifecycle;
-- real PRS-16 contention confirmation: local MLX active before Start, waiting UI observed, no premature capture, capture starts only after the safe boundary, and physical mic/system persistence succeeds;
+- real PRS-16 contention confirmation: local MLX active before Start, waiting UI FULL_MEDIA captured, no premature capture, capture starts only after the safe boundary, and physical mic/system persistence succeeds;
 - representative managed-AI/capture CPU/RSS/thermal observations and local MLX completion;
 - PRS-9 representative dual-track vs mixed-track benchmark; changing the canonical strategy requires a separately validated change;
 - subjective VoiceOver/usability observation where materially required;
