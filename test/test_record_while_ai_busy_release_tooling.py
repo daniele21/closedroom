@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 
@@ -37,6 +38,7 @@ class RecordWhileAiBusyReleaseToolingTests(unittest.TestCase):
         self.assertIn('"capture_started_after_safe_boundary"', source)
         self.assertIn('"managed_ai_is_local_mlx"', source)
         self.assertIn('"contention_native_both_tracks"', source)
+        self.assertIn("measured.existing_directory", source)
 
     def test_native_both_requires_mic_and_system_tracks(self) -> None:
         module = load_contention()
@@ -56,6 +58,21 @@ class RecordWhileAiBusyReleaseToolingTests(unittest.TestCase):
                 {**complete, "capture_backend": "browser"}
             )
         )
+
+    def test_missing_sandbox_paths_never_resolve_to_working_directory(self) -> None:
+        module = load_contention()
+        self.assertIsNone(module.measured.existing_directory(None))
+        self.assertIsNone(module.measured.existing_directory(""))
+        self.assertIsNone(
+            module.measured.existing_directory(
+                "/definitely/missing/closedroom-release-sandbox"
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(
+                module.measured.existing_directory(tmp),
+                Path(tmp).resolve(),
+            )
 
     def test_canonical_release_evidence_runs_measured_and_contention(self) -> None:
         commands = json.loads(
