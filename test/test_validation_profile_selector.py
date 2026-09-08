@@ -28,10 +28,22 @@ class ValidationProfileSelectorTests(unittest.TestCase):
         self.assertIn("meeting_ui_integration", result["risk_dimensions"])
         self.assertIn("browser-e2e", result["required_gates"])
 
-    def test_saved_meeting_browser_harness_selects_its_own_gate(self):
-        result = selector.select_profile(["scripts/browser_meeting_ui_e2e.mjs"])
-        self.assertEqual(result["profile"], "scoped")
-        self.assertIn("browser-e2e", result["required_gates"])
+    def test_saved_meeting_browser_harnesses_select_their_own_gate(self):
+        harnesses = (
+            "scripts/browser_archive_search_e2e.mjs",
+            "scripts/browser_meeting_note_edit_e2e.mjs",
+            "scripts/browser_meeting_preparation_e2e.mjs",
+            "scripts/browser_meeting_ui_e2e.mjs",
+            "scripts/browser_record_while_ai_busy_e2e.mjs",
+            "scripts/browser_saved_meeting_e2e.mjs",
+            "scripts/browser_workspace_coherence_e2e.mjs",
+        )
+        for path in harnesses:
+            with self.subTest(path=path):
+                result = selector.select_profile([path])
+                self.assertEqual(result["profile"], "scoped")
+                self.assertIn("meeting_ui_integration", result["risk_dimensions"])
+                self.assertIn("browser-e2e", result["required_gates"])
 
     def test_preparation_backend_change_preserves_depth_and_adds_browser_e2e(self):
         expected_profiles = {
