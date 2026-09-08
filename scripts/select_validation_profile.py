@@ -37,7 +37,13 @@ MEETING_BROWSER_E2E_EXACT = {
     "frontend/src/pages/MeetingDetailPage.tsx",
     "frontend/src/hooks/useMeetingJobEvents.ts",
     "frontend/src/hooks/useVisualIntelligence.ts",
+    "scripts/browser_archive_search_e2e.mjs",
+    "scripts/browser_meeting_note_edit_e2e.mjs",
+    "scripts/browser_meeting_preparation_e2e.mjs",
     "scripts/browser_meeting_ui_e2e.mjs",
+    "scripts/browser_record_while_ai_busy_e2e.mjs",
+    "scripts/browser_saved_meeting_e2e.mjs",
+    "scripts/browser_workspace_coherence_e2e.mjs",
 }
 MEETING_BROWSER_E2E_RELEVANT_EXACT = MEETING_BROWSER_E2E_EXACT | {
     "src/local_asr_server/analysis_jobs.py",
