@@ -1,12 +1,12 @@
 # ClosedRoom: useful notes, simple journeys and efficient execution
 
-Status: active — PRS-17 integrated; PRS-18 measured release next
+Status: active — PRS-11..17 integrated; PRS-18 measured release in progress
 Owner: meeting product, canonical job/persistence owners and local runtime
-Baseline: dev `19b15b0f`, 2026-09-08.
+Baseline: dev `37f46af1`, 2026-09-08.
 
 ## Outcome and invariants
 
-Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. PRS-11 through PRS-17 are integrated; PRS-18 is now the next release slice. No production performance or memory gain is claimed without representative evidence.
+Record, prepare useful notes, verify decisions and find them later while the Mac stays usable. No production performance, memory, audio-strategy or release-readiness claim is accepted without representative evidence.
 
 - Meeting is primary; normal recording requires no technical choice.
 - `Prepare notes` is explicit after Stop; `Transcript only` is secondary.
@@ -14,81 +14,97 @@ Record, prepare useful notes, verify decisions and find them later while the Mac
 - Audio/transcript survive enrichment failure/cancel; local-first and explicit cloud opt-in remain unchanged.
 - Canonical owners remain RecordingStore, JobStore, CatalogStore, HeavyWorkloadArbiter and runtime services.
 - Excluded: rewrite, second scheduler/runtime/index owner, implicit cloud, mandatory visuals, unsafe kill, unproven audio strategy.
+- Stable promotion is `dev -> main`, always RELEASE/FULL, and applicable REAL_ENVIRONMENT evidence is blocking.
 
 ## Work graph
 
-| ID | Observable outcome | Owner paths/contracts | Depends on | State |
-| --- | --- | --- | --- | --- |
-| PRS-11 | Fast saved Meeting open | MeetingDetailPage, API client, visual hook | — | DONE |
-| PRS-12 | One recoverable Prepare notes action | jobs, analysis/transcription services, Meeting UI | PRS-11 | DONE |
-| PRS-13 | Consistent notes with less repeated inference | analysis templates/jobs/service/catalog reads | PRS-12 | DONE |
-| PRS-14 | Verify/edit actions and decisions | notes schema/catalog, transcript, Meeting UI | PRS-13 | DONE |
-| PRS-15 | Search complete local archive | CatalogStore, workspace/API/UI | — | DONE |
-| PRS-16 | Record safely while AI is busy | resource policy/arbiter, capture admission, recording UI | — | DONE |
-| PRS-17 | Coherent macOS workspace | App/pages/components/design contracts | PRS-12,14,15,16 | DONE |
-| PRS-18 | Measured release | current-state, benchmarks, target-Mac evidence | selected increments | READY |
-
-Default sequence: 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17. Shared schema/service/UI edits remain serialized into coherent outcome PRs.
+| ID | Observable outcome | State |
+| --- | --- | --- |
+| PRS-11 | Fast saved Meeting open | DONE |
+| PRS-12 | One recoverable Prepare notes action | DONE |
+| PRS-13 | Consistent notes with less repeated inference | DONE |
+| PRS-14 | Verify/edit actions and decisions | DONE |
+| PRS-15 | Search complete local archive | DONE |
+| PRS-16 | Record safely while AI is busy | DONE |
+| PRS-17 | Coherent macOS workspace | DONE |
+| PRS-18 | Measured production release | IN PROGRESS |
 
 ## Integrated slices
 
-### PRS-11 — fast saved Meeting open
+PRS-11..14 established independent saved-Meeting loading, one durable recoverable `meeting_preparation` parent, one structured default notes analysis and source-anchored editable actions/decisions with revision/conflict semantics.
 
-Core transcript content loads independently from diagnostics/visual routes; accessory failures stay local, stale responses are ignored and reloads are bounded. Evidence: focused tests plus `saved-meeting-fast-open` FULL_MEDIA.
+PRS-15 added bounded server-side FTS5 archive search inside canonical `closedroom.db`; PR #39 integrated source/frontend tests, `meeting-archive-search` FULL_MEDIA and packaged FTS5 smoke.
 
-### PRS-12 — one recoverable Prepare notes action
+PRS-16 kept `HeavyWorkloadArbiter` as the sole heavy-work scheduler and added one transient capture reservation. Active managed work finishes normally; queued work remains bounded and waits during capture; the frontend shows preparation until real capture starts. PR #41 integrated STRONG source/browser/package evidence. Physical audio/TCC and representative MLX/thermal behavior remained release-only.
 
-A durable `meeting_preparation` parent composes existing transcription and analysis jobs. Valid transcript reuse, cancel/restart/resume semantics and parent SSE preserve completed work and keep expert APIs compatible. Evidence includes `meeting-preparation-recovery` FULL_MEDIA and packaged smoke.
+PRS-17 converged Today, saved Meeting and Projects into one adaptive macOS workspace without changing routing/data/runtime ownership. PR #43 integrated on `dev`; exact candidate `c1c79f31` passed FULL preflight #306 with guards, frontend checks, 411 Python tests, every declared Meeting browser FULL_MEDIA journey and packaged lifecycle validation.
 
-### PRS-13 — shared structured notes
+## PRS-18 — measured release
 
-Implicit `meeting_default` runs one internal `meeting_notes_shared` v2 analysis instead of four overlapping jobs. Summary/actions/decisions/risks carry source refs, long input is bounded and legacy projections remain compatible. `HeavyWorkloadArbiter` stays the only scheduler. Evidence covered schema/cache/source-boundary tests, FULL_MEDIA and STRONG/package gates.
+### Outcome
 
-### PRS-14 — verifiable editable notes
+Promote only an exact production candidate that is fully validated automatically and on representative Apple-Silicon hardware. Final-environment evidence confirms the candidate; it must not discover basic deterministic regressions that belonged in integration.
 
-Actions/decisions have stable source-anchored identity, immutable generated content and persisted user overlays. Regeneration creates revisions; changed/missing items surface explicit conflicts instead of silent remapping. Evidence includes persistence/API/frontend tests, `meeting-note-edit-revision` FULL_MEDIA and packaged validation.
+### Production artifact owner
 
-### PRS-15 — complete bounded archive search
+Canonical command:
 
-Every persisted Meeting is discoverable without loading the whole archive into React. `CatalogStore` owns an FTS5 projection inside `closedroom.db`; canonical mutations mark affected ids dirty and search refreshes them incrementally. `GET /v1/meetings?q=...` provides bounded paging/exact project filtering; `⌘K` owns global archive search. FTS5 absence fails explicitly. PR #39 integrated source/frontend tests, `meeting-archive-search` FULL_MEDIA and packaged FTS5 smoke at `dev@3604ffbe`.
+```bash
+python3 scripts/build_production_artifact.py
+```
 
-### PRS-16 — recording while AI is busy
+Required properties:
 
-Start meeting now wins the next safe resource boundary without killing useful AI work, losing queued work or pretending capture has started before it has.
+- clean Apple-Silicon checkout and full source revision identity;
+- Developer ID Application signing with hardened runtime and secure timestamp;
+- notarize the signed `.app` archive, staple/validate the `.app`, and pass Gatekeeper execution assessment;
+- build the DMG from that stapled app, notarize/staple/validate the DMG and pass Gatekeeper open assessment;
+- restore only generated frontend source output after packaging and fail if the checkout is otherwise dirty or moves;
+- write production release evidence before immutable build manifest/checksums, with no post-finalization artifact mutation;
+- missing signing identity, notary profile, tools or Apple acceptance fails closed.
 
-- `HeavyWorkloadArbiter` remains the single heavy-work owner and owns one ephemeral capture reservation; no new scheduler, store or model-lifecycle owner;
-- reservation is `waiting` while managed heavy work is active and becomes `granted` only after active work reaches normal completion; no thread/process kill;
-- while reserved, pending work stays in the existing bounded queue and cannot become active; work submitted during reserved capture queues within existing capacity;
-- capacity is enforced against logical pending work even when a worker dequeued an item but holds it behind capture priority;
-- legacy/unreserved capture stays fail-safe through `ResourcePolicy(capture_active)`;
-- `/v1/capture/reservations` is a loopback/authenticated transient handshake; tokens are not recording persistence or telemetry;
-- `useRecorder` reserves before capture, keeps the token through recording, releases on Stop/failure/recovery and ignores duplicate Start during the handshake;
-- New Meeting shows truthful preparation while AI finishes, keeps the timer stopped and offers `Annulla`; real recording state starts only after capture does;
-- external runtimes remain caller-owned.
+### Target-Mac evidence owner
 
-PR #41 integrated at `dev@eb92df6d`. The authoritative STRONG preflight on the exact candidate tree passed governance, frontend checks, 406 Python tests, all five declared Meeting browser FULL_MEDIA journeys and packaged-app build/lifecycle smoke. The post-merge preflight reused that tree-equivalent evidence and completed successfully. Physical audio, TCC/WKWebView and representative MLX/Metal/thermal behavior remain release-only REAL_ENVIRONMENT evidence.
+Canonical command:
 
-### PRS-17 — coherent macOS workspace
+```bash
+python3 scripts/measured_release_target_mac.py --app <exact-production-app>
+```
 
-Today, a saved Meeting and Projects share one stable product hierarchy rather than page-specific chrome. Meeting remains a child of Today, Projects is the second peer destination, New Meeting remains the persistent primary action, and Settings/theme/language/tour/demo/runtime status remain utilities.
+One exact production `.app` must prove:
 
-Implementation boundary:
+1. packaged WKWebView/window/accessibility-tree/keyboard-focus journey with FULL_MEDIA;
+2. TCC-backed native `both` capture and non-empty persisted `mic` + `system` tracks;
+3. clean application/runtime lifecycle;
+4. a real local transcription job on the captured meeting, with `HeavyWorkloadArbiter` activity observed;
+5. bounded privacy-safe CPU/RSS/runtime scheduler samples and a macOS thermal/performance observation (`pmset -g therm`); missing data stays `unknown`, never zero;
+6. local MLX completion rather than a cloud fallback;
+7. PRS-9 `dual_track_vs_mixed_asr` benchmark on that same representative recording, using its real schema/repeat count and retaining no transcript text.
 
-- `App.tsx` owns one adaptive workspace shell; desktop uses a stable left rail and compact/narrow windows reflow the same semantic destinations into one sticky top toolbar rather than introducing a second navigation model;
-- existing page routing, persistence, preparation, recording, search and runtime owners are unchanged;
-- `workspace.css` owns the adaptive shell/layout behavior and reduced-motion accommodation without creating a second token/design source;
-- `design/ux-contract.json` records navigation hierarchy and adaptive window rules;
-- `test_frontend_workspace_coherence.py` protects shell hierarchy, active-state semantics and compact/narrow CSS contracts;
-- `browser_workspace_coherence_e2e.mjs` provides FULL_MEDIA evidence for Today -> Meeting -> Projects, theme continuity and 1440 -> 780 -> 560px resize with no page-wide horizontal overflow;
-- `browser_meeting_ui_e2e.mjs` runs the new journey alongside all existing Meeting FULL_MEDIA journeys so integration cannot pass by validating only the new shell in isolation;
-- `.engineering/e2e.json` declares `coherent-macos-workspace` with required target-Mac release confirmation for packaged WKWebView/window/focus/reduced-motion/VoiceOver fidelity.
+No numeric performance threshold is invented without a comparable baseline. The evidence runner records observations and completion truth; a later product/architecture change is required if benchmark evidence justifies changing the canonical dual-track strategy.
 
-PR #43 integrated at `dev@19b15b0f`. The authoritative FULL preflight #306 validated exact candidate `c1c79f31` against `dev@580fe6a7`: repository/contract guards, frontend deterministic checks, 411 Python tests, every declared Meeting FULL_MEDIA browser journey, packaged-app build/lifecycle smoke, repository validation and reusable evidence publication all passed. The browser harness was also hardened so archive recency is execution-relative, theme lookup is locale/case stable and preparation progress asserts monotonic advancement rather than requiring observation of a transient intermediate label. Physical TCC/audio, real WKWebView window behavior, keyboard/focus/VoiceOver quality and representative MLX/Metal remain release-only REAL_ENVIRONMENT evidence.
+### Human evidence
 
-## Evidence and release
+VoiceOver spoken-output quality and subjective usability remain human judgement when materially required. Accessibility tree, focus and keyboard paths are automated and do not need to be reclassified as human work.
 
-INTEGRATION requires fresh `dev`, reviewed diff/current contracts, selector `auto` and affected deterministic/E2E gates; material UI uses FULL_MEDIA. Missing deterministic automation is `AUTOMATION_CAPABILITY_GAP`, not user work.
+### Promotion
 
-RELEASE `dev -> main` requires FULL automation plus applicable target-Mac TCC/audio/WKWebView/VoiceOver, representative MLX/resources and PRS-9 audio evidence. Canonical runner: `python3 scripts/real_environment_ui_evidence.py --build`. Numeric budgets require comparable baselines; missing data stays unknown.
+After tooling is integrated:
 
-Durable owners: `design/ux-contract.json`, `docs/features.md`, `docs/architecture.md`, tests and `docs/current-state.md`. Complete a slice only when code, consumers, recovery, docs and evidence agree.
+1. freeze exact `dev` candidate and live `main` base;
+2. run selector-owned RELEASE/FULL automation for `dev -> main`;
+3. build production artifact from that exact source;
+4. run measured target-Mac evidence against the exact notarized artifact;
+5. record any genuinely required subjective VoiceOver observation;
+6. recheck candidate/base freshness and full diff;
+7. promote to `main` only if all blocking evidence matches the candidate.
+
+A candidate/base move, material source edit, build/signing mutation or artifact rebuild invalidates affected evidence.
+
+## Evidence policy
+
+INTEGRATION requires fresh `dev`, reviewed diff/current contracts, selector `auto` and affected deterministic/E2E gates. Missing deterministic automation is `AUTOMATION_CAPABILITY_GAP`, not user work.
+
+RELEASE requires FULL automation plus applicable target-Mac evidence. Hosted CI is never relabeled as physical TCC/audio/WKWebView/MLX proof.
+
+Durable owners: `.engineering/commands.json`, `.engineering/e2e.json`, `docs/current-state.md`, `design/ux-contract.json`, `docs/features.md`, `docs/architecture.md`, tests and this active workstream. Complete PRS-18 only when source, artifact, automation, target-Mac evidence, docs and stable branch state agree.
