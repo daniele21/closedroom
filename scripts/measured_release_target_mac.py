@@ -62,6 +62,14 @@ def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def existing_directory(value: Any) -> Path | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    path = Path(text).expanduser().resolve()
+    return path if path.is_dir() else None
+
+
 def revisions_match(left: str, right: str) -> bool:
     return bool(left and right and (left.startswith(right) or right.startswith(left)))
 
@@ -444,8 +452,8 @@ def main() -> int:
             else {}
         )
         recording_id = str(created.get("id") or "")
-        recordings_root = Path(str(ui.get("isolated_recordings_dir") or ""))
-        sandbox = Path(str(ui.get("isolated_home") or ""))
+        recordings_root = existing_directory(ui.get("isolated_recordings_dir"))
+        sandbox = existing_directory(ui.get("isolated_home"))
         check(
             "native_both_capture",
             created.get("capture_backend") == "native"
@@ -461,8 +469,10 @@ def main() -> int:
         )
         check(
             "isolated_recording_available",
-            bool(recording_id and recordings_root.is_dir() and sandbox.is_dir()),
+            bool(recording_id and recordings_root is not None and sandbox is not None),
         )
+        assert recordings_root is not None
+        assert sandbox is not None
         session = locate_session(recordings_root, recording_id)
 
         info = smoke.bundle_info(app)
@@ -590,11 +600,7 @@ def main() -> int:
                 )
             except Exception as exc:
                 report["errors"].append(f"cleanup:{exc}")
-        if (
-            sandbox is not None
-            and sandbox.is_dir()
-            and not args.keep_sandbox
-        ):
+        if sandbox is not None and sandbox.is_dir() and not args.keep_sandbox:
             shutil.rmtree(sandbox, ignore_errors=True)
             report["sandbox_removed"] = not sandbox.exists()
             if report["status"] == "pass" and sandbox.exists():
