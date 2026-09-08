@@ -35,6 +35,7 @@ class RecordWhileAiBusyReleaseToolingTests(unittest.TestCase):
         self.assertIn('"journey_id": "record-while-ai-busy"', source)
         self.assertIn('"ui_evidence_mode": "full_media"', source)
         self.assertIn('"truthful_waiting_state_observed"', source)
+        self.assertIn('"managed_ai_still_active_while_waiting"', source)
         self.assertIn('"capture_not_active_while_ai_busy"', source)
         self.assertIn('"capture_started_after_safe_boundary"', source)
         self.assertIn('"managed_ai_is_local_mlx"', source)
