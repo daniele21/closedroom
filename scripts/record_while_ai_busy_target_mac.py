@@ -46,7 +46,9 @@ def native_both_with_tracks(recording: Any) -> bool:
         return False
     sources = set(recording.get("nonempty_track_sources") or [])
     if not sources:
-        sources = measured.load_smoke_module(Path(__file__).parents[1]).source_tracks_with_data(recording)
+        sources = measured.load_smoke_module(
+            Path(__file__).parents[1]
+        ).source_tracks_with_data(recording)
     return (
         recording.get("capture_backend") == "native"
         and recording.get("capture_mode") == "both"
@@ -78,7 +80,9 @@ def main() -> int:
     root = Path(args.root).resolve()
     app = Path(args.app).expanduser().resolve()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
-        raise SystemExit("capture-contention evidence requires a target Apple-Silicon Mac")
+        raise SystemExit(
+            "capture-contention evidence requires a target Apple-Silicon Mac"
+        )
     if (
         args.seed_record_seconds < 10
         or args.capture_seconds <= 0
@@ -100,10 +104,13 @@ def main() -> int:
     source_revision = str((manifest.get("source") or {}).get("revision") or "")
     if not measured.revisions_match(checkout_revision, source_revision):
         raise SystemExit(
-            f"production artifact does not match checkout: {source_revision or 'unknown'} != {checkout_revision}"
+            "production artifact does not match checkout: "
+            f"{source_revision or 'unknown'} != {checkout_revision}"
         )
 
-    evidence_root = root / "dist" / "evidence" / "measured-release" / source_revision
+    evidence_root = (
+        root / "dist" / "evidence" / "measured-release" / source_revision
+    )
     output = (
         Path(args.output).expanduser().resolve()
         if args.output
@@ -159,22 +166,40 @@ def main() -> int:
             "--evidence",
             str(seed_report),
         ]
-        seed_result = subprocess.run(seed_command, cwd=root, check=False, timeout=900)
-        seed = json.loads(seed_report.read_text(encoding="utf-8")) if seed_report.is_file() else {}
+        seed_result = subprocess.run(
+            seed_command, cwd=root, check=False, timeout=900
+        )
+        seed = (
+            json.loads(seed_report.read_text(encoding="utf-8"))
+            if seed_report.is_file()
+            else {}
+        )
         check(
             "seed_target_mac_recording_ui",
             seed_result.returncode == 0 and seed.get("status") == "pass",
             {"status": seed.get("status")},
         )
-        created = seed.get("created_recording") if isinstance(seed.get("created_recording"), dict) else {}
+        created = (
+            seed.get("created_recording")
+            if isinstance(seed.get("created_recording"), dict)
+            else {}
+        )
         recording_id = str(created.get("id") or "")
-        recordings_root = Path(str(seed.get("isolated_recordings_dir") or ""))
-        sandbox = Path(str(seed.get("isolated_home") or ""))
+        recordings_root = measured.existing_directory(
+            seed.get("isolated_recordings_dir")
+        )
+        sandbox = measured.existing_directory(seed.get("isolated_home"))
         check("seed_native_both_capture", native_both_with_tracks(created), created)
         check(
             "seed_recording_available",
-            bool(recording_id and recordings_root.is_dir() and sandbox.is_dir()),
+            bool(
+                recording_id
+                and recordings_root is not None
+                and sandbox is not None
+            ),
         )
+        assert recordings_root is not None
+        assert sandbox is not None
 
         info = smoke.bundle_info(app)
         executable = str(info["executable"])
@@ -201,12 +226,16 @@ def main() -> int:
         )
         check(
             "new_meeting_action_visible",
-            smoke.wait(lambda: smoke.exists(app_process.pid, smoke.LABELS["new"]), 30),
+            smoke.wait(
+                lambda: smoke.exists(app_process.pid, smoke.LABELS["new"]), 30
+            ),
         )
         smoke.ui(app_process.pid, "press", smoke.LABELS["new"])
         check(
             "new_meeting_ready_before_contention",
-            smoke.wait(lambda: smoke.exists(app_process.pid, smoke.LABELS["ready"]), 30),
+            smoke.wait(
+                lambda: smoke.exists(app_process.pid, smoke.LABELS["ready"]), 30
+            ),
         )
 
         before_ids = {
@@ -270,7 +299,9 @@ def main() -> int:
             current = api.json(f"/v1/jobs/{job_id}", timeout=10)
             sample = sample_state(api, app_process.pid, current, started)
             report["resource_samples"].append(sample)
-            thermal_seen = thermal_seen or sample["thermal"].get("status") == "available"
+            thermal_seen = (
+                thermal_seen or sample["thermal"].get("status") == "available"
+            )
             if current.get("status") in TERMINAL:
                 terminal = current
                 break
@@ -282,25 +313,41 @@ def main() -> int:
         backend = str(summary.get("backend") or "").lower()
         check(
             "managed_ai_is_local_mlx",
-            str(summary.get("asr_provider") or "local").lower() == "local" and "mlx" in backend,
+            str(summary.get("asr_provider") or "local").lower() == "local"
+            and "mlx" in backend,
             {"backend": backend},
         )
         check("thermal_observation_available", thermal_seen)
         check(
             "capture_started_after_safe_boundary",
-            smoke.wait(lambda: smoke.exists(app_process.pid, smoke.LABELS["stop"]), 90),
+            smoke.wait(
+                lambda: smoke.exists(app_process.pid, smoke.LABELS["stop"]), 90
+            ),
         )
 
         capture_started = time.monotonic()
         while time.monotonic() - capture_started < args.capture_seconds:
-            pseudo_job = {"status": "capture_active", "current_step": "recording"}
+            pseudo_job = {
+                "status": "capture_active",
+                "current_step": "recording",
+            }
             sample = sample_state(api, app_process.pid, pseudo_job, started)
             report["resource_samples"].append(sample)
-            time.sleep(min(args.sample_interval, max(0.2, args.capture_seconds / 4)))
+            time.sleep(
+                min(
+                    args.sample_interval,
+                    max(0.2, args.capture_seconds / 4),
+                )
+            )
         smoke.ui(app_process.pid, "press", smoke.LABELS["stop"])
         check(
             "contention_recording_persisted_ui",
-            smoke.wait(lambda: smoke.exists(app_process.pid, smoke.LABELS["transcribe"]), 60),
+            smoke.wait(
+                lambda: smoke.exists(
+                    app_process.pid, smoke.LABELS["transcribe"]
+                ),
+                60,
+            ),
         )
 
         after = api.recordings()
@@ -316,7 +363,11 @@ def main() -> int:
             "capture_mode": persisted.get("capture_mode"),
             "nonempty_track_sources": sorted(sources),
         }
-        check("contention_native_both_tracks", native_both_with_tracks(persisted), report["contention_recording"])
+        check(
+            "contention_native_both_tracks",
+            native_both_with_tracks(persisted),
+            report["contention_recording"],
+        )
 
         cleanup = smoke.quit_app(app_process.pid, executable, port)
         report["cleanup"] = cleanup
@@ -345,7 +396,12 @@ def main() -> int:
             encoding="utf-8",
         )
 
-    print(json.dumps({"status": report["status"], "evidence": str(output)}, indent=2))
+    print(
+        json.dumps(
+            {"status": report["status"], "evidence": str(output)},
+            indent=2,
+        )
+    )
     return 0 if report["status"] == "pass" else 1
 
 
