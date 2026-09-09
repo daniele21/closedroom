@@ -12,6 +12,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -30,6 +31,9 @@ class UIAutomationTimeout(UIAutomationError):
 
 class UIAutomationUnavailable(UIAutomationError):
     """Required target-Mac UI automation tooling is unavailable."""
+
+
+TRANSIENT_WINDOW_ERROR = "closedroom_window_missing"
 
 
 class MacOSUIDriver:
@@ -117,23 +121,39 @@ class MacOSUIDriver:
     def _invoke(self, pid: int, action: str, labels: Iterable[str] = ()) -> str:
         binary = self._ensure_binary()
         command = [str(binary), str(pid), action, *[str(label) for label in labels]]
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=self.action_timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise UIAutomationTimeout(f"ui_automation_timeout:{action}:{self.action_timeout:g}s") from exc
+        deadline = time.monotonic() + self.action_timeout
 
-        output = (result.stdout or "").strip()
-        error = (result.stderr or "").strip()
-        if result.returncode == 77 or "accessibility_permission_required" in error.lower():
-            raise AccessibilityPermissionRequired("terminal_accessibility_permission_required")
-        if result.returncode:
-            raise UIAutomationError(error or output or f"ui_automation_failed:{action}:{result.returncode}")
-        return output
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise UIAutomationError(TRANSIENT_WINDOW_ERROR)
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=remaining,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise UIAutomationTimeout(
+                    f"ui_automation_timeout:{action}:{self.action_timeout:g}s"
+                ) from exc
+
+            output = (result.stdout or "").strip()
+            error = (result.stderr or "").strip()
+            if result.returncode == 77 or "accessibility_permission_required" in error.lower():
+                raise AccessibilityPermissionRequired("terminal_accessibility_permission_required")
+            if result.returncode and error == TRANSIENT_WINDOW_ERROR:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise UIAutomationError(TRANSIENT_WINDOW_ERROR)
+                time.sleep(min(0.1, remaining))
+                continue
+            if result.returncode:
+                raise UIAutomationError(
+                    error or output or f"ui_automation_failed:{action}:{result.returncode}"
+                )
+            return output
 
     def window_accessible(self, pid: int) -> bool:
         return self._invoke(pid, "window").lower() == "true"
