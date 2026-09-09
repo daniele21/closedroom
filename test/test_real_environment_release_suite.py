@@ -16,7 +16,9 @@ ROOT = Path(__file__).parents[1]
 
 def load_suite():
     path = ROOT / "scripts" / "run_real_environment_release_suite.py"
-    spec = importlib.util.spec_from_file_location("run_real_environment_release_suite", path)
+    spec = importlib.util.spec_from_file_location(
+        "run_real_environment_release_suite", path
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -55,7 +57,10 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
             arguments(keep_sandbox=True),
         )
 
-        self.assertEqual([item[0] for item in commands], ["measured_release", "record_while_ai_busy"])
+        self.assertEqual(
+            [item[0] for item in commands],
+            ["measured_release", "record_while_ai_busy"],
+        )
         for _, command, _, _ in commands:
             self.assertIn(str(app), command)
             self.assertIn(str(root), command)
@@ -63,7 +68,7 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
         self.assertIn(str(measured_output), commands[0][1])
         self.assertIn(str(contention_output), commands[1][1])
 
-    def test_child_summary_is_bounded_and_does_not_copy_check_details(self) -> None:
+    def test_child_summary_never_copies_check_details_or_error_payloads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             evidence = Path(tmp) / "child.json"
             evidence.write_text(
@@ -77,7 +82,7 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
                                 "detail": {"transcript": "private meeting text"},
                             }
                         ],
-                        "errors": ["capture failed"],
+                        "errors": ["private meeting text in child error"],
                     }
                 ),
                 encoding="utf-8",
@@ -85,7 +90,7 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
             summary = suite.child_summary(evidence, 1)
 
         self.assertEqual(summary["failed_checks"], ["mic_system_persisted"])
-        self.assertEqual(summary["errors"], ["capture failed"])
+        self.assertEqual(summary["error_count"], 1)
         self.assertNotIn("private meeting text", json.dumps(summary))
         self.assertFalse(suite.child_passed(summary))
 
@@ -94,7 +99,9 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
         self.assertFalse(suite.child_passed({"returncode": 1, "status": "pass"}))
         self.assertFalse(suite.child_passed({"returncode": 0, "status": "fail"}))
 
-    def _run_main(self, second_status: str = "pass") -> tuple[int, dict[str, object]]:
+    def _run_main(
+        self, second_status: str = "pass"
+    ) -> tuple[int, dict[str, object]]:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -104,27 +111,38 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
 
         call_index = 0
 
-        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        def fake_run(
+            command: list[str], **_: object
+        ) -> subprocess.CompletedProcess[str]:
             nonlocal call_index
             call_index += 1
             output = Path(command[command.index("--output") + 1])
             output.parent.mkdir(parents=True, exist_ok=True)
             status = "pass" if call_index == 1 else second_status
+            checks = []
+            errors = []
+            if status != "pass":
+                checks = [
+                    {
+                        "name": "contention_native_both_tracks",
+                        "status": "fail",
+                        "detail": {"transcript": "private meeting text"},
+                    }
+                ]
+                errors = ["private meeting text in child error"]
             output.write_text(
                 json.dumps(
                     {
                         "status": status,
-                        "checks": (
-                            []
-                            if status == "pass"
-                            else [{"name": "contention_native_both_tracks", "status": "fail"}]
-                        ),
-                        "errors": [] if status == "pass" else ["physical capture evidence failed"],
+                        "checks": checks,
+                        "errors": errors,
                     }
                 ),
                 encoding="utf-8",
             )
-            return subprocess.CompletedProcess(command, 0 if status == "pass" else 1)
+            return subprocess.CompletedProcess(
+                command, 0 if status == "pass" else 1
+            )
 
         argv = [
             "run_real_environment_release_suite.py",
@@ -139,7 +157,11 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
             patch.object(sys, "argv", argv),
             patch.object(suite.platform, "system", return_value="Darwin"),
             patch.object(suite.platform, "machine", return_value="arm64"),
-            patch.object(suite.measured, "git_state", return_value=("abc123", [])),
+            patch.object(
+                suite.measured,
+                "git_state",
+                return_value=("abc123", []),
+            ),
             patch.object(
                 suite.measured,
                 "production_manifest_for",
@@ -159,19 +181,30 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["source_revision"], "abc123")
-        self.assertEqual(report["tests"]["measured_release"]["status"], "pass")
-        self.assertEqual(report["tests"]["record_while_ai_busy"]["status"], "pass")
+        self.assertEqual(
+            report["tests"]["measured_release"]["status"],
+            "pass",
+        )
+        self.assertEqual(
+            report["tests"]["record_while_ai_busy"]["status"],
+            "pass",
+        )
         self.assertEqual(
             report["non_automated_evidence"][0]["id"],
             "voiceover_subjective_usability",
         )
 
-    def test_main_fails_and_surfaces_failed_child_check(self) -> None:
+    def test_main_fails_and_surfaces_failed_child_check_without_payload(self) -> None:
         result, report = self._run_main(second_status="fail")
         self.assertEqual(result, 1)
         self.assertEqual(report["status"], "fail")
         contention = report["tests"]["record_while_ai_busy"]
-        self.assertEqual(contention["failed_checks"], ["contention_native_both_tracks"])
+        self.assertEqual(
+            contention["failed_checks"],
+            ["contention_native_both_tracks"],
+        )
+        self.assertEqual(contention["error_count"], 1)
+        self.assertNotIn("private meeting text", json.dumps(report))
 
 
 if __name__ == "__main__":
