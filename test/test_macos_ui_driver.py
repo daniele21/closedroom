@@ -52,6 +52,51 @@ class MacOSUIDriverTest(unittest.TestCase):
             with self.assertRaises(self.driver_module.AccessibilityPermissionRequired):
                 driver._invoke(123, "window")
 
+    def test_transient_window_gap_is_retried_before_success(self) -> None:
+        driver = self.driver_module.MacOSUIDriver(source=SWIFT_HELPER, action_timeout=1.0)
+        driver._ensure_binary = lambda: Path("/tmp/closedroom-ax-helper")
+        missing = subprocess.CompletedProcess(
+            args=["helper"],
+            returncode=69,
+            stdout="",
+            stderr="closedroom_window_missing\n",
+        )
+        ready = subprocess.CompletedProcess(
+            args=["helper"],
+            returncode=0,
+            stdout="true\n",
+            stderr="",
+        )
+        with (
+            mock.patch.object(
+                self.driver_module.subprocess,
+                "run",
+                side_effect=[missing, missing, ready],
+            ) as run,
+            mock.patch.object(self.driver_module.time, "sleep"),
+        ):
+            self.assertTrue(driver.window_accessible(123))
+        self.assertEqual(run.call_count, 3)
+
+    def test_non_transient_ui_failure_is_not_retried(self) -> None:
+        driver = self.driver_module.MacOSUIDriver(source=SWIFT_HELPER)
+        driver._ensure_binary = lambda: Path("/tmp/closedroom-ax-helper")
+        failed = subprocess.CompletedProcess(
+            args=["helper"],
+            returncode=69,
+            stdout="",
+            stderr="ax_press_failed\n",
+        )
+        with mock.patch.object(
+            self.driver_module.subprocess,
+            "run",
+            return_value=failed,
+        ) as run:
+            with self.assertRaises(self.driver_module.UIAutomationError) as caught:
+                driver._invoke(123, "press", ("Start Recording",))
+        self.assertEqual(str(caught.exception), "ax_press_failed")
+        self.assertEqual(run.call_count, 1)
+
     def test_window_rect_rejects_invalid_bounds(self) -> None:
         driver = self.driver_module.MacOSUIDriver(source=SWIFT_HELPER)
         driver._invoke = lambda *_args, **_kwargs: "10,20,0,500"
