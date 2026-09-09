@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract_version": "0.7.1",
+  "contract_version": "0.7.0",
   "commands": {
     "setup": {"status": "required", "run": "./setup.sh && (cd frontend && pnpm install --frozen-lockfile)"},
     "doctor": {"status": "recommended", "run": "UV_CACHE_DIR=.cache/uv uv run local-asr doctor"},
