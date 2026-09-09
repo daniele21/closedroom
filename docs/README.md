@@ -7,7 +7,8 @@ Use documentation by ownership, not chronology.
 - `architecture.md` — current detailed architecture, ownership and system boundaries.
 - `features.md` — existing aggregate registry of current product behavior and verification hints.
 - `current-state.md` — short operational/maturity ledger and current gaps.
-- `real-environment-release.md` — operator runbook for the frozen PRS-18 Apple-Silicon candidate and automated target-Mac evidence.
+- `real-environment-release.md` — operator runbook for the frozen PRS-18 Apple-Silicon candidate and automated target-Mac release evidence.
+- `local-real-environment.md` — one-command target-Mac evidence path for a finalized ad-hoc artifact when Apple Developer distribution authority is unavailable.
 - `features/` — bounded feature documents only when splitting durable behavior reduces context or duplication.
 - `adr/` — accepted durable decisions whose rationale remains useful.
 - `workstreams/` — active implementation plans only; completed plans are deleted by default after durable truth is transferred.
