@@ -69,6 +69,8 @@ The local suite executes the same physical evidence owners used by the release w
    - waiting -> recording FULL_MEDIA transition;
    - native microphone + system-audio persistence after the safe boundary.
 
+The Accessibility driver treats the helper signal `closedroom_window_missing` as a bounded transient condition because WKWebView/window transitions can briefly expose no AX window. It retries only that exact condition within the existing action timeout; permission failures, action failures, invalid bounds and other UI automation errors remain terminal.
+
 ## Result
 
 A successful run ends with:
