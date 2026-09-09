@@ -94,6 +94,14 @@ class RealEnvironmentSmokeHelpersTest(unittest.TestCase):
         self.assertFalse(self.smoke.search_focus_exposed("AXButton | Search meeting"))
         self.assertFalse(self.smoke.search_focus_exposed("unknown"))
 
+    def test_wait_still_rejects_terminal_ui_automation_errors(self) -> None:
+        with self.assertRaises(self.smoke.UIAutomationError):
+            self.smoke.wait(
+                lambda: (_ for _ in ()).throw(self.smoke.UIAutomationError("ax_press_failed")),
+                timeout=0.1,
+                interval=0.01,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
