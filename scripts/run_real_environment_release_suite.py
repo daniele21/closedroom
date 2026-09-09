@@ -55,19 +55,18 @@ def read_json(path: Path) -> dict[str, Any]:
 def child_summary(path: Path, returncode: int) -> dict[str, Any]:
     payload = read_json(path)
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
+    errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
     failed_checks = [
         str(item.get("name") or "unknown")
         for item in checks
         if isinstance(item, dict) and item.get("status") == "fail"
     ]
-    errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
-    status = str(payload.get("status") or "missing")
     return {
-        "status": status,
+        "status": str(payload.get("status") or "missing"),
         "returncode": returncode,
         "evidence": str(path),
         "failed_checks": failed_checks,
-        "errors": [str(value)[:500] for value in errors],
+        "error_count": len(errors),
     }
 
 
@@ -142,8 +141,10 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
         failed = child.get("failed_checks") or []
         if failed:
             print(f"  failed checks: {', '.join(failed)}")
-        for error in child.get("errors") or []:
-            print(f"  error: {error}")
+        if child.get("error_count"):
+            print(f"  child errors: {child['error_count']} (see child evidence)")
+        if child.get("timeout_seconds"):
+            print(f"  timeout: {child['timeout_seconds']} seconds")
     print("VoiceOver subjective usability..... NOT AUTOMATED")
     print(f"report: {output}")
     print(f"AUTOMATED REAL_ENVIRONMENT: {str(report.get('status')).upper()}")
@@ -168,8 +169,8 @@ def main() -> int:
         "tests": {},
         "errors": [],
         "privacy_boundary": (
-            "The aggregate contains status, bounded check names, resource evidence paths "
-            "and errors only; transcript and meeting text are not copied into this report."
+            "The aggregate contains status, bounded check names and evidence paths only; "
+            "child error payloads, transcript and meeting text are not copied into it."
         ),
         "non_automated_evidence": [
             {
@@ -233,7 +234,7 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 summary = child_summary(child_output, 124)
                 summary["status"] = "timeout"
-                summary["errors"].append(f"{name} exceeded {int(timeout)} seconds")
+                summary["timeout_seconds"] = int(timeout)
             report["tests"][name] = summary
 
         report["status"] = (
