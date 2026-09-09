@@ -70,7 +70,7 @@ Successful automated evidence prints a summary ending with:
 AUTOMATED REAL_ENVIRONMENT: PASS
 ```
 
-A failure returns a non-zero exit code and the aggregate JSON lists the failed child runner/check names and bounded errors. It does not copy transcript or meeting text into the aggregate.
+A failure returns a non-zero exit code. The aggregate JSON lists the failed child runner/check names, child error counts and local child-evidence paths; detailed child error payloads remain only in their local reports. Transcript and meeting text are never copied into the aggregate.
 
 A PASS proves only the automated REAL_ENVIRONMENT portion for that exact source/artifact identity. Before stable promotion, still record any materially required subjective VoiceOver/usability observation and recheck candidate/base freshness plus the full `dev -> main` diff.
 
