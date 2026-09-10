@@ -8,13 +8,14 @@ which can block indefinitely on large WKWebView accessibility trees.
 from __future__ import annotations
 
 import atexit
+import json
 import platform
 import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 
 class UIAutomationError(RuntimeError):
@@ -34,6 +35,25 @@ class UIAutomationUnavailable(UIAutomationError):
 
 
 TRANSIENT_WINDOW_ERROR = "closedroom_window_missing"
+DIAGNOSTIC_KEYS = (
+    "running_application_present",
+    "running_application_terminated",
+    "running_application_active",
+    "running_application_hidden",
+    "activation_policy",
+    "ax_windows_result",
+    "ax_windows_count",
+    "ax_windows_positive_bounds_count",
+    "ax_windows_minimized_count",
+    "ax_main_window_result",
+    "ax_main_window_present",
+    "ax_focused_window_result",
+    "ax_focused_window_present",
+    "cg_window_count",
+    "cg_onscreen_window_count",
+    "cg_normal_window_count",
+    "cg_onscreen_normal_window_count",
+)
 
 
 class MacOSUIDriver:
@@ -118,6 +138,50 @@ class MacOSUIDriver:
         self._binary = binary
         return binary
 
+    def diagnostics(self, pid: int) -> dict[str, Any]:
+        """Return bounded process/window metadata without labels, titles or meeting text."""
+        binary = self._ensure_binary()
+        try:
+            result = subprocess.run(
+                [str(binary), str(pid), "diagnose"],
+                capture_output=True,
+                text=True,
+                timeout=min(max(self.action_timeout, 0.1), 2.0),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise UIAutomationTimeout("ui_window_diagnostic_timeout") from exc
+
+        output = (result.stdout or "").strip()
+        error = (result.stderr or "").strip()
+        if result.returncode == 77 or "accessibility_permission_required" in error.lower():
+            raise AccessibilityPermissionRequired("terminal_accessibility_permission_required")
+        if result.returncode:
+            raise UIAutomationError("ui_window_diagnostic_unavailable")
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError as exc:
+            raise UIAutomationError("ui_window_diagnostic_invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise UIAutomationError("ui_window_diagnostic_invalid_payload")
+        return {key: payload.get(key) for key in DIAGNOSTIC_KEYS}
+
+    def _window_missing_error(self, pid: int) -> UIAutomationError:
+        try:
+            snapshot = self.diagnostics(pid)
+        except Exception:
+            return UIAutomationError(f"{TRANSIENT_WINDOW_ERROR}|diagnostic=unavailable")
+        fields = [TRANSIENT_WINDOW_ERROR]
+        for key in DIAGNOSTIC_KEYS:
+            value = snapshot.get(key)
+            if isinstance(value, bool):
+                rendered = "true" if value else "false"
+            elif isinstance(value, int):
+                rendered = str(value)
+            else:
+                rendered = "unknown"
+            fields.append(f"{key}={rendered}")
+        return UIAutomationError("|".join(fields))
+
     def _invoke(self, pid: int, action: str, labels: Iterable[str] = ()) -> str:
         binary = self._ensure_binary()
         command = [str(binary), str(pid), action, *[str(label) for label in labels]]
@@ -126,7 +190,7 @@ class MacOSUIDriver:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise UIAutomationError(TRANSIENT_WINDOW_ERROR)
+                raise self._window_missing_error(pid)
             try:
                 result = subprocess.run(
                     command,
@@ -146,7 +210,7 @@ class MacOSUIDriver:
             if result.returncode and error == TRANSIENT_WINDOW_ERROR:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise UIAutomationError(TRANSIENT_WINDOW_ERROR)
+                    raise self._window_missing_error(pid)
                 time.sleep(min(0.1, remaining))
                 continue
             if result.returncode:
