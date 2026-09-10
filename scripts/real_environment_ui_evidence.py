@@ -19,7 +19,10 @@ GENERATED_FRONTEND = Path("src/local_asr_server/static")
 CHECKPOINTS = [
     ("01-ready-to-record", ("Ready to record", "Pronto per registrare")),
     ("02-recording", ("Stop and Save", "Termina e salva")),
-    ("03-meeting-persisted", ("Transcribe", "Trascrivi")),
+    (
+        "03-meeting-persisted",
+        ("Prepare notes", "Prepara note", "Transcript only", "Solo trascrizione"),
+    ),
 ]
 
 
