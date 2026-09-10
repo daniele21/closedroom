@@ -11,6 +11,7 @@
     "build": {"status": "required", "run": "bash scripts/build_artifact.sh --no-dmg"},
     "smoke": {"status": "recommended", "run": "python3 scripts/smoke_packaged_app.py"},
     "package": {"status": "optional", "run": "bash scripts/build_artifact.sh --dmg"},
+    "local_real_environment": {"status": "recommended", "run": "python3 scripts/run_local_real_environment_suite.py"},
     "release_build": {"status": "required", "run": "python3 scripts/build_production_artifact.py"},
     "release_evidence": {"status": "required", "run": "python3 scripts/measured_release_target_mac.py --app <exact-production-app> && python3 scripts/record_while_ai_busy_target_mac.py --app <exact-production-app>"},
     "stop": {"status": "n/a", "run": "n/a"},

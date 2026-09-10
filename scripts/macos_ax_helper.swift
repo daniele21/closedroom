@@ -12,9 +12,17 @@ private func fail(_ message: String, code: Int32 = 1) -> Never {
     exit(code)
 }
 
-private func attribute(_ element: AXUIElement, _ name: CFString) -> CFTypeRef? {
+private func copyAttributeResult(
+    _ element: AXUIElement,
+    _ name: CFString
+) -> (AXError, CFTypeRef?) {
     var value: CFTypeRef?
     let result = AXUIElementCopyAttributeValue(element, name, &value)
+    return (result, value)
+}
+
+private func attribute(_ element: AXUIElement, _ name: CFString) -> CFTypeRef? {
+    let (result, value) = copyAttributeResult(element, name)
     return result == .success ? value : nil
 }
 
@@ -27,6 +35,12 @@ private func stringValue(_ element: AXUIElement, _ name: CFString) -> String? {
     guard let value = attribute(element, name) else { return nil }
     if let text = value as? String { return text }
     if let number = value as? NSNumber { return number.stringValue }
+    return nil
+}
+
+private func boolValue(_ element: AXUIElement, _ name: CFString) -> Bool? {
+    guard let value = attribute(element, name) else { return nil }
+    if let number = value as? NSNumber { return number.boolValue }
     return nil
 }
 
@@ -140,6 +154,92 @@ private func focusedDescription(_ app: AXUIElement) -> String {
     return "\(role) | \(detail)"
 }
 
+private func windowServerCounts(pid: pid_t) -> [String: Int] {
+    guard let windowInfo = CGWindowListCopyWindowInfo(
+        [.optionAll, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [[String: Any]] else {
+        return [
+            "cg_window_count": -1,
+            "cg_onscreen_window_count": -1,
+            "cg_normal_window_count": -1,
+            "cg_onscreen_normal_window_count": -1,
+        ]
+    }
+
+    var total = 0
+    var onscreen = 0
+    var normal = 0
+    var onscreenNormal = 0
+    for item in windowInfo {
+        guard let owner = item[kCGWindowOwnerPID as String] as? NSNumber,
+              owner.int32Value == pid else {
+            continue
+        }
+        total += 1
+        let isOnscreen = (item[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true
+        let isNormal = (item[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
+        if isOnscreen { onscreen += 1 }
+        if isNormal { normal += 1 }
+        if isOnscreen && isNormal { onscreenNormal += 1 }
+    }
+    return [
+        "cg_window_count": total,
+        "cg_onscreen_window_count": onscreen,
+        "cg_normal_window_count": normal,
+        "cg_onscreen_normal_window_count": onscreenNormal,
+    ]
+}
+
+private func diagnosticSnapshot(_ app: AXUIElement, pid: pid_t) -> String {
+    let (windowsResult, windowsValue) = copyAttributeResult(
+        app,
+        kAXWindowsAttribute as CFString
+    )
+    let windows = windowsValue as? [AXUIElement] ?? []
+    let (mainResult, mainValue) = copyAttributeResult(
+        app,
+        kAXMainWindowAttribute as CFString
+    )
+    let (focusedResult, focusedValue) = copyAttributeResult(
+        app,
+        kAXFocusedWindowAttribute as CFString
+    )
+    let running = NSRunningApplication(processIdentifier: pid)
+    let positiveBounds = windows.filter { windowBounds($0) != nil }.count
+    let minimized = windows.filter {
+        boolValue($0, kAXMinimizedAttribute as CFString) == true
+    }.count
+
+    var payload: [String: Any] = [
+        "schema_version": 1,
+        "pid": Int(pid),
+        "running_application_present": running != nil,
+        "running_application_terminated": running?.isTerminated ?? true,
+        "running_application_active": running?.isActive ?? false,
+        "running_application_hidden": running?.isHidden ?? false,
+        "activation_policy": running.map { Int($0.activationPolicy.rawValue) } ?? -1,
+        "ax_windows_result": Int(windowsResult.rawValue),
+        "ax_windows_count": windows.count,
+        "ax_windows_positive_bounds_count": positiveBounds,
+        "ax_windows_minimized_count": minimized,
+        "ax_main_window_result": Int(mainResult.rawValue),
+        "ax_main_window_present": mainValue != nil,
+        "ax_focused_window_result": Int(focusedResult.rawValue),
+        "ax_focused_window_present": focusedValue != nil,
+    ]
+    for (key, value) in windowServerCounts(pid: pid) {
+        payload[key] = value
+    }
+
+    guard JSONSerialization.isValidJSONObject(payload),
+          let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+          let json = String(data: data, encoding: .utf8) else {
+        fail("window_diagnostic_serialization_failed", code: unavailableExit)
+    }
+    return json
+}
+
 private func postKey(code: CGKeyCode, command: Bool = false) {
     guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
           let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else {
@@ -178,6 +278,8 @@ case "rect":
     print(windowRect(mainWindow(app)))
 case "focused":
     print(focusedDescription(app))
+case "diagnose":
+    print(diagnosticSnapshot(app, pid: pid))
 case "exists", "press":
     if wanted.isEmpty {
         fail("labels_required", code: 64)
