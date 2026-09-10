@@ -71,6 +71,8 @@ The local suite executes the same physical evidence owners used by the release w
 
 The Accessibility driver treats the helper signal `closedroom_window_missing` as a bounded transient condition because WKWebView/window transitions can briefly expose no AX window. It retries only that exact condition within the existing action timeout; permission failures, action failures, invalid bounds and other UI automation errors remain terminal.
 
+If that bounded retry is exhausted, the helper collects a privacy-safe diagnostic snapshot before failing. The snapshot compares raw AX window availability with WindowServer process-window counts plus running/active/hidden state. Only numeric/boolean process-window metadata is whitelisted into the aggregate: no window titles, UI labels, meeting text or transcript content is collected. This distinguishes an AX exposure gap from a genuinely hidden/closed window or missing process without weakening the failing gate.
+
 ## Result
 
 A successful run ends with:
@@ -89,7 +91,7 @@ The aggregate JSON is written under:
 dist/evidence/local-real-environment/<source-revision>/local-real-environment-suite.json
 ```
 
-The same directory contains the two detailed child reports and bounded media evidence. The aggregate never copies transcript text or child error payloads.
+The same directory contains the two detailed child reports and bounded media evidence. The aggregate never copies arbitrary child error payloads, transcript or meeting text. For an exhausted `closedroom_window_missing` failure only, it may include the explicitly whitelisted non-content `ui_failure_diagnostic` process/window fields described above.
 
 When a physical check fails the command returns non-zero and prints the failed check names. Rerun with `--keep-sandbox` only when diagnosing a failure.
 
