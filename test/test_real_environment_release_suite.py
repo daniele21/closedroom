@@ -68,7 +68,7 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
         self.assertIn(str(measured_output), commands[0][1])
         self.assertIn(str(contention_output), commands[1][1])
 
-    def test_child_summary_never_copies_check_details_or_error_payloads(self) -> None:
+    def test_child_summary_never_copies_check_details_or_arbitrary_error_payloads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             evidence = Path(tmp) / "child.json"
             evidence.write_text(
@@ -91,8 +91,42 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
 
         self.assertEqual(summary["failed_checks"], ["mic_system_persisted"])
         self.assertEqual(summary["error_count"], 1)
+        self.assertNotIn("ui_failure_diagnostic", summary)
         self.assertNotIn("private meeting text", json.dumps(summary))
         self.assertFalse(suite.child_passed(summary))
+
+    def test_child_summary_surfaces_only_whitelisted_window_gap_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "child.json"
+            evidence.write_text(
+                json.dumps(
+                    {
+                        "status": "fail",
+                        "checks": [{"name": "target_mac_recording_ui", "status": "fail"}],
+                        "errors": [
+                            "closedroom_window_missing|running_application_present=true|"
+                            "ax_windows_result=-25204|ax_windows_count=0|"
+                            "cg_onscreen_normal_window_count=1|"
+                            "window_title=private meeting title"
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            summary = suite.child_summary(evidence, 1)
+
+        self.assertEqual(
+            summary["ui_failure_diagnostic"],
+            {
+                "code": "closedroom_window_missing",
+                "running_application_present": True,
+                "ax_windows_result": -25204,
+                "ax_windows_count": 0,
+                "cg_onscreen_normal_window_count": 1,
+            },
+        )
+        self.assertNotIn("window_title", json.dumps(summary))
+        self.assertNotIn("private meeting title", json.dumps(summary))
 
     def test_child_pass_requires_zero_exit_and_pass_report(self) -> None:
         self.assertTrue(suite.child_passed({"returncode": 0, "status": "pass"}))
