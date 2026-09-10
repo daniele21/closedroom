@@ -97,20 +97,62 @@ class MacOSUIDriverTest(unittest.TestCase):
         self.assertEqual(str(caught.exception), "ax_press_failed")
         self.assertEqual(run.call_count, 1)
 
+    def test_diagnostics_whitelists_only_bounded_process_window_metadata(self) -> None:
+        driver = self.driver_module.MacOSUIDriver(source=SWIFT_HELPER)
+        driver._ensure_binary = lambda: Path("/tmp/closedroom-ax-helper")
+        completed = subprocess.CompletedProcess(
+            args=["helper"],
+            returncode=0,
+            stdout=(
+                '{"running_application_present":true,"ax_windows_result":0,'
+                '"ax_windows_count":0,"cg_onscreen_normal_window_count":1,'
+                '"window_title":"private meeting title"}\n'
+            ),
+            stderr="",
+        )
+        with mock.patch.object(self.driver_module.subprocess, "run", return_value=completed):
+            diagnostic = driver.diagnostics(123)
+        self.assertTrue(diagnostic["running_application_present"])
+        self.assertEqual(diagnostic["ax_windows_count"], 0)
+        self.assertEqual(diagnostic["cg_onscreen_normal_window_count"], 1)
+        self.assertNotIn("window_title", diagnostic)
+        self.assertNotIn("private meeting title", str(diagnostic))
+
+    def test_exhausted_window_gap_reports_only_whitelisted_diagnostic_fields(self) -> None:
+        driver = self.driver_module.MacOSUIDriver(source=SWIFT_HELPER)
+        driver.diagnostics = lambda _pid: {
+            "running_application_present": True,
+            "ax_windows_result": 0,
+            "ax_windows_count": 0,
+            "cg_onscreen_normal_window_count": 1,
+            "window_title": "private meeting title",
+        }
+        message = str(driver._window_missing_error(123))
+        self.assertIn("closedroom_window_missing", message)
+        self.assertIn("running_application_present=true", message)
+        self.assertIn("ax_windows_count=0", message)
+        self.assertIn("cg_onscreen_normal_window_count=1", message)
+        self.assertNotIn("window_title", message)
+        self.assertNotIn("private meeting title", message)
+
     def test_window_rect_rejects_invalid_bounds(self) -> None:
         driver = self.driver_module.MacOSUIDriver(source=SWIFT_HELPER)
         driver._invoke = lambda *_args, **_kwargs: "10,20,0,500"
         with self.assertRaises(self.driver_module.UIAutomationError):
             driver.window_rect(123)
 
-    def test_swift_helper_handles_main_window_and_recording_overlay(self) -> None:
+    def test_swift_helper_handles_main_window_overlay_and_bounded_diagnostics(self) -> None:
         source = SWIFT_HELPER.read_text(encoding="utf-8")
         self.assertIn("private func orderedWindows", source)
         self.assertIn("private func windowArea", source)
+        self.assertIn("private func diagnosticSnapshot", source)
+        self.assertIn("CGWindowListCopyWindowInfo", source)
+        self.assertIn('case "diagnose"', source)
         self.assertIn("print(windowRect(mainWindow(app)))", source)
         self.assertIn("for window in orderedWindows(app)", source)
         self.assertIn("findElementInWindow(window, wanted: wanted)", source)
         self.assertIn("findElementInApp(app, wanted: wanted)", source)
+        self.assertNotIn("kCGWindowName", source)
         self.assertNotIn("firstWindow", source)
 
     @unittest.skipUnless(platform.system() == "Darwin" and shutil.which("xcrun"), "requires macOS Swift toolchain")
