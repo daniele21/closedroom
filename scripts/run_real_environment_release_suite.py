@@ -23,6 +23,28 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import measured_release_target_mac as measured
 
+UI_DIAGNOSTIC_PREFIX = "closedroom_window_missing"
+SAFE_UI_DIAGNOSTIC_KEYS = {
+    "diagnostic",
+    "running_application_present",
+    "running_application_terminated",
+    "running_application_active",
+    "running_application_hidden",
+    "activation_policy",
+    "ax_windows_result",
+    "ax_windows_count",
+    "ax_windows_positive_bounds_count",
+    "ax_windows_minimized_count",
+    "ax_main_window_result",
+    "ax_main_window_present",
+    "ax_focused_window_result",
+    "ax_focused_window_present",
+    "cg_window_count",
+    "cg_onscreen_window_count",
+    "cg_normal_window_count",
+    "cg_onscreen_normal_window_count",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -52,6 +74,40 @@ def read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _bounded_diagnostic_value(value: str) -> bool | int | str | None:
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    if value in {"unknown", "unavailable"}:
+        return value
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def bounded_ui_failure_diagnostic(errors: list[Any]) -> dict[str, Any] | None:
+    """Extract only whitelisted non-content metadata from a known window-gap error."""
+    for item in errors:
+        if not isinstance(item, str):
+            continue
+        if item == UI_DIAGNOSTIC_PREFIX:
+            return {"code": UI_DIAGNOSTIC_PREFIX}
+        if not item.startswith(UI_DIAGNOSTIC_PREFIX + "|"):
+            continue
+        diagnostic: dict[str, Any] = {"code": UI_DIAGNOSTIC_PREFIX}
+        for token in item.split("|")[1:]:
+            key, separator, raw_value = token.partition("=")
+            if not separator or key not in SAFE_UI_DIAGNOSTIC_KEYS:
+                continue
+            value = _bounded_diagnostic_value(raw_value)
+            if value is not None:
+                diagnostic[key] = value
+        return diagnostic
+    return None
+
+
 def child_summary(path: Path, returncode: int) -> dict[str, Any]:
     payload = read_json(path)
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
@@ -61,13 +117,17 @@ def child_summary(path: Path, returncode: int) -> dict[str, Any]:
         for item in checks
         if isinstance(item, dict) and item.get("status") == "fail"
     ]
-    return {
+    summary = {
         "status": str(payload.get("status") or "missing"),
         "returncode": returncode,
         "evidence": str(path),
         "failed_checks": failed_checks,
         "error_count": len(errors),
     }
+    ui_diagnostic = bounded_ui_failure_diagnostic(errors)
+    if ui_diagnostic is not None:
+        summary["ui_failure_diagnostic"] = ui_diagnostic
+    return summary
 
 
 def child_passed(summary: dict[str, Any]) -> bool:
@@ -141,6 +201,9 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
         failed = child.get("failed_checks") or []
         if failed:
             print(f"  failed checks: {', '.join(failed)}")
+        diagnostic = child.get("ui_failure_diagnostic")
+        if diagnostic:
+            print(f"  bounded UI diagnostic: {json.dumps(diagnostic, sort_keys=True)}")
         if child.get("error_count"):
             print(f"  child errors: {child['error_count']} (see child evidence)")
         if child.get("timeout_seconds"):
@@ -169,8 +232,9 @@ def main() -> int:
         "tests": {},
         "errors": [],
         "privacy_boundary": (
-            "The aggregate contains status, bounded check names and evidence paths only; "
-            "child error payloads, transcript and meeting text are not copied into it."
+            "The aggregate contains status, bounded check names, evidence paths and a whitelisted "
+            "non-content process/window diagnostic for closedroom_window_missing only; child error "
+            "payloads, UI labels/titles, transcript and meeting text are not copied into it."
         ),
         "non_automated_evidence": [
             {
