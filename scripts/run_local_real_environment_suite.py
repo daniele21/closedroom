@@ -203,6 +203,9 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
         failed = child.get("failed_checks") or []
         if failed:
             print(f"  failed checks: {', '.join(failed)}")
+        diagnostic = child.get("ui_failure_diagnostic")
+        if diagnostic:
+            print(f"  bounded UI diagnostic: {json.dumps(diagnostic, sort_keys=True)}")
         if child.get("error_count"):
             print(f"  child errors: {child['error_count']} (see child evidence)")
         if child.get("timeout_seconds"):
@@ -247,8 +250,10 @@ def main() -> int:
         },
         "release_qualification": "not_established",
         "privacy_boundary": (
-            "The aggregate contains status, bounded check names and local evidence paths only; "
-            "child error payloads, transcript and meeting text are not copied into it."
+            "The aggregate contains status, bounded check names, local evidence paths and a "
+            "whitelisted non-content process/window diagnostic for closedroom_window_missing "
+            "only; child error payloads, UI labels/titles, transcript and meeting text are not "
+            "copied into it."
         ),
         "non_automated_evidence": [
             {
