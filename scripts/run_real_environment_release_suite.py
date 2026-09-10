@@ -24,6 +24,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 import measured_release_target_mac as measured
 
 UI_DIAGNOSTIC_PREFIX = "closedroom_window_missing"
+NESTED_UI_REPORT_FIELDS = ("ui_evidence_report", "seed_ui_report")
 SAFE_UI_DIAGNOSTIC_KEYS = {
     "diagnostic",
     "running_application_present",
@@ -108,6 +109,38 @@ def bounded_ui_failure_diagnostic(errors: list[Any]) -> dict[str, Any] | None:
     return None
 
 
+def nested_ui_failure_diagnostic(
+    child_path: Path, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Read only canonical sibling UI reports and return a bounded diagnostic.
+
+    Parent target-Mac runners intentionally summarize a failed UI child as a
+    failed check. The detailed UI runner remains the owner of its raw errors, so
+    the aggregate follows only the two explicit report references and only when
+    they resolve inside the same evidence directory as the parent report.
+    """
+    parent_dir = child_path.parent.resolve()
+    for field in NESTED_UI_REPORT_FIELDS:
+        raw_path = payload.get(field)
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            continue
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = child_path.parent / candidate
+        try:
+            candidate = candidate.resolve()
+        except OSError:
+            continue
+        if candidate.parent != parent_dir:
+            continue
+        nested = read_json(candidate)
+        errors = nested.get("errors") if isinstance(nested.get("errors"), list) else []
+        diagnostic = bounded_ui_failure_diagnostic(errors)
+        if diagnostic is not None:
+            return diagnostic
+    return None
+
+
 def child_summary(path: Path, returncode: int) -> dict[str, Any]:
     payload = read_json(path)
     checks = payload.get("checks") if isinstance(payload.get("checks"), list) else []
@@ -125,6 +158,8 @@ def child_summary(path: Path, returncode: int) -> dict[str, Any]:
         "error_count": len(errors),
     }
     ui_diagnostic = bounded_ui_failure_diagnostic(errors)
+    if ui_diagnostic is None:
+        ui_diagnostic = nested_ui_failure_diagnostic(path, payload)
     if ui_diagnostic is not None:
         summary["ui_failure_diagnostic"] = ui_diagnostic
     return summary
