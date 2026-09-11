@@ -71,6 +71,15 @@ class MacOSUiDriverContractTest(unittest.TestCase):
         self.assertIn("allow closedroom-ax-helper", self.smoke_source)
         self.assertNotIn("allow the Terminal app running this command", self.smoke_source)
 
+    def test_keyboard_events_are_posted_directly_to_target_process(self) -> None:
+        self.assertIn("down.postToPid(pid)", self.helper_source)
+        self.assertIn("up.postToPid(pid)", self.helper_source)
+        self.assertNotIn("down.post(tap: .cghidEventTap)", self.helper_source)
+        self.assertNotIn("up.post(tap: .cghidEventTap)", self.helper_source)
+        self.assertIn("postKey(pid: pid, code: 40, command: true)", self.helper_source)
+        self.assertIn("postKey(pid: pid, code: 53)", self.helper_source)
+        self.assertIn("postKey(pid: pid, code: 12, command: true)", self.helper_source)
+
 
 if __name__ == "__main__":
     unittest.main()
