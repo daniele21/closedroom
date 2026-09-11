@@ -24,11 +24,13 @@ pnpm --version
 ffmpeg -version
 ```
 
-The test requires an Apple-Silicon Mac. During the first run macOS may request permissions for ClosedRoom and/or the terminal automation process. Grant the requested permissions for:
+The test requires an Apple-Silicon Mac. During the first run macOS may request permissions for ClosedRoom and for the dedicated `closedroom-ax-helper` Accessibility client. Grant the requested permissions for:
 
 - Microphone;
 - Screen & System Audio Recording / system-audio capture;
-- Accessibility when requested by the UI automation path.
+- Accessibility for `closedroom-ax-helper` when requested by the UI automation path.
+
+The Accessibility helper is compiled into a stable source-versioned path under `.cache/closedroom/macos-ax-helper/`. `AXIsProcessTrusted` applies to that helper process itself, not generically to Terminal. The helper requests the standard macOS Accessibility prompt; if the run is blocked, enable `closedroom-ax-helper` in System Settings > Privacy & Security > Accessibility and run the same command again. The stable cache path allows that grant to be reused across reruns of the same helper source.
 
 If macOS asks you to quit/reopen an app after granting a permission, do so and run the same command again. The suite prefers reusing the exact finalized local app for that commit so TCC identity remains stable across reruns.
 
