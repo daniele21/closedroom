@@ -257,8 +257,11 @@ def source_tracks_with_data(recording: dict[str, Any]) -> set[str]:
 def permissions_help(p: dict[str, Any] | None = None, accessibility: bool = False) -> list[str]:
     steps = []
     if accessibility:
+        helper_path = UI_DRIVER.helper_binary_path()
         steps += [
-            "System Settings > Privacy & Security > Accessibility: allow the Terminal app running this command.",
+            "System Settings > Privacy & Security > Accessibility: allow closedroom-ax-helper when prompted by macOS.",
+            f"Accessibility client: {helper_path}",
+            "The helper uses a stable source-versioned cache path so the same grant can be reused across reruns.",
         ]
     if p:
         if p.get("microphone") != "authorized":
