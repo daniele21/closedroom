@@ -41,7 +41,7 @@ LABELS = {
     "ready": ("Ready to record", "Pronto per registrare"),
     "start": ("Start Recording", "Avvia Registrazione"),
     "stop": ("Stop and Save", "Termina e salva"),
-    "transcribe": ("Transcribe", "Trascrivi"),
+    "meeting_workspace": ("Prepare notes", "Prepara note", "Transcript only", "Solo trascrizione"),
     "search": ("Search meeting, project or text", "Cerca meeting, progetto o testo"),
     "close": ("Close", "Chiudi"),
     "permission": ("ClosedRoom needs a permission", "ClosedRoom ha bisogno di un permesso"),
@@ -462,7 +462,7 @@ def main() -> int:
             created.get("capture_mode") == "both" and {"mic", "system"}.issubset(tracks),
             report["created_recording"],
         )
-        check("meeting_workspace_after_stop", wait(lambda: exists(pid, LABELS["transcribe"]), 15))
+        check("meeting_workspace_after_stop", wait(lambda: exists(pid, LABELS["meeting_workspace"]), 15))
 
         ui(pid, "press", LABELS["home"])
         check("home_search_available", wait(lambda: exists(pid, LABELS["search"]), 15))
