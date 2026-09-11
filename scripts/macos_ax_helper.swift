@@ -258,7 +258,9 @@ guard CommandLine.arguments.count >= 3,
     fail("usage: macos_ax_helper <pid> <action> [labels...]", code: 64)
 }
 
-if !AXIsProcessTrusted() {
+let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+let trustOptions = [promptKey: true] as CFDictionary
+if !AXIsProcessTrustedWithOptions(trustOptions) {
     fail("accessibility_permission_required", code: permissionExit)
 }
 
