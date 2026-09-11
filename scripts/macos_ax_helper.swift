@@ -240,7 +240,7 @@ private func diagnosticSnapshot(_ app: AXUIElement, pid: pid_t) -> String {
     return json
 }
 
-private func postKey(code: CGKeyCode, command: Bool = false) {
+private func postKey(pid: pid_t, code: CGKeyCode, command: Bool = false) {
     guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
           let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else {
         fail("keyboard_event_creation_failed")
@@ -249,8 +249,8 @@ private func postKey(code: CGKeyCode, command: Bool = false) {
         down.flags = .maskCommand
         up.flags = .maskCommand
     }
-    down.post(tap: .cghidEventTap)
-    up.post(tap: .cghidEventTap)
+    down.postToPid(pid)
+    up.postToPid(pid)
 }
 
 guard CommandLine.arguments.count >= 3,
@@ -304,15 +304,15 @@ case "exists", "press":
     }
 case "cmd-k":
     _ = mainWindow(app)
-    postKey(code: 40, command: true)
+    postKey(pid: pid, code: 40, command: true)
     print("sent")
 case "escape":
     _ = mainWindow(app)
-    postKey(code: 53)
+    postKey(pid: pid, code: 53)
     print("sent")
 case "cmd-q":
     _ = mainWindow(app)
-    postKey(code: 12, command: true)
+    postKey(pid: pid, code: 12, command: true)
     print("sent")
 default:
     fail("unsupported_action:\(action)", code: 64)
