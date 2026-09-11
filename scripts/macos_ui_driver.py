@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Bounded macOS Accessibility driver used by ClosedRoom target-Mac evidence.
 
-The driver compiles a tiny Swift helper once per process, then talks directly to
-AXUIElement/CGEvent. It intentionally avoids System Events tree enumeration,
-which can block indefinitely on large WKWebView accessibility trees.
+The driver compiles a tiny Swift helper into a stable ignored cache and then
+talks directly to AXUIElement/CGEvent. It intentionally avoids System Events
+tree enumeration, which can block indefinitely on large WKWebView accessibility
+trees.
 """
 from __future__ import annotations
 
-import atexit
+import hashlib
 import json
+import os
 import platform
 import shutil
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -23,7 +24,7 @@ class UIAutomationError(RuntimeError):
 
 
 class AccessibilityPermissionRequired(UIAutomationError):
-    """The invoking terminal/process lacks macOS Accessibility permission."""
+    """The stable macOS Accessibility helper is not trusted."""
 
 
 class UIAutomationTimeout(UIAutomationError):
@@ -61,20 +62,30 @@ class MacOSUIDriver:
         self,
         source: Path | None = None,
         *,
+        cache_root: Path | None = None,
         action_timeout: float = 5.0,
         compile_timeout: float = 30.0,
     ) -> None:
         self.source = source or Path(__file__).with_name("macos_ax_helper.swift")
+        self.cache_root = (
+            cache_root
+            or self.source.parent.parent / ".cache" / "closedroom" / "macos-ax-helper"
+        )
         self.action_timeout = action_timeout
         self.compile_timeout = compile_timeout
-        self._tmp: tempfile.TemporaryDirectory[str] | None = None
         self._binary: Path | None = None
 
     def close(self) -> None:
-        if self._tmp is not None:
-            self._tmp.cleanup()
-            self._tmp = None
-            self._binary = None
+        self._binary = None
+
+    def helper_binary_path(self) -> Path:
+        try:
+            source_bytes = self.source.read_bytes()
+        except OSError as exc:
+            raise UIAutomationUnavailable(f"macos_ax_helper_missing:{self.source}") from exc
+        fingerprint = hashlib.sha256(source_bytes).hexdigest()[:16]
+        architecture = platform.machine() or "unknown"
+        return self.cache_root / architecture / fingerprint / "closedroom-ax-helper"
 
     def _xcrun(self) -> str:
         if platform.system() != "Darwin":
@@ -103,9 +114,15 @@ class MacOSUIDriver:
     def _ensure_binary(self) -> Path:
         if self._binary is not None and self._binary.is_file():
             return self._binary
+
+        binary = self.helper_binary_path()
+        if binary.is_file() and os.access(binary, os.X_OK):
+            self._binary = binary
+            return binary
+
         xcrun = self._xcrun()
-        self._tmp = tempfile.TemporaryDirectory(prefix="closedroom-ax-helper-")
-        binary = Path(self._tmp.name) / "closedroom-ax-helper"
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        temporary_binary = binary.with_name(f".{binary.name}.tmp-{os.getpid()}")
         command = [
             xcrun,
             "--sdk",
@@ -118,7 +135,7 @@ class MacOSUIDriver:
             "-framework",
             "ApplicationServices",
             "-o",
-            str(binary),
+            str(temporary_binary),
         ]
         try:
             subprocess.run(
@@ -128,13 +145,18 @@ class MacOSUIDriver:
                 text=True,
                 timeout=self.compile_timeout,
             )
+            os.replace(temporary_binary, binary)
         except subprocess.TimeoutExpired as exc:
-            self.close()
+            temporary_binary.unlink(missing_ok=True)
             raise UIAutomationTimeout("macos_ax_helper_compile_timeout") from exc
         except subprocess.CalledProcessError as exc:
+            temporary_binary.unlink(missing_ok=True)
             message = (exc.stderr or exc.stdout or "macos_ax_helper_compile_failed").strip()
-            self.close()
             raise UIAutomationUnavailable(message) from exc
+        except OSError as exc:
+            temporary_binary.unlink(missing_ok=True)
+            raise UIAutomationUnavailable(f"macos_ax_helper_cache_failed:{exc}") from exc
+
         self._binary = binary
         return binary
 
@@ -154,7 +176,7 @@ class MacOSUIDriver:
         output = (result.stdout or "").strip()
         error = (result.stderr or "").strip()
         if result.returncode == 77 or "accessibility_permission_required" in error.lower():
-            raise AccessibilityPermissionRequired("terminal_accessibility_permission_required")
+            raise AccessibilityPermissionRequired("accessibility_helper_permission_required")
         if result.returncode:
             raise UIAutomationError("ui_window_diagnostic_unavailable")
         try:
@@ -206,7 +228,7 @@ class MacOSUIDriver:
             output = (result.stdout or "").strip()
             error = (result.stderr or "").strip()
             if result.returncode == 77 or "accessibility_permission_required" in error.lower():
-                raise AccessibilityPermissionRequired("terminal_accessibility_permission_required")
+                raise AccessibilityPermissionRequired("accessibility_helper_permission_required")
             if result.returncode and error == TRANSIENT_WINDOW_ERROR:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -246,7 +268,6 @@ class MacOSUIDriver:
 
 
 _DEFAULT_DRIVER = MacOSUIDriver()
-atexit.register(_DEFAULT_DRIVER.close)
 
 
 def default_driver() -> MacOSUIDriver:
