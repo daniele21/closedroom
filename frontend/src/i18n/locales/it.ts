@@ -363,6 +363,7 @@ const it = {
     error: 'Errore registrazione: {error}',
     startFailed: 'Impossibile avviare la registrazione: {error}',
     chunkSaveFailed: 'Chunk non salvato: {error}',
+    uploadBackpressure: 'Il backlog di salvataggio ha raggiunto il limite. ClosedRoom ha fermato e salvato in anticipo la registrazione per proteggere la memoria.',
     finalizationFailed: 'Finalizzazione fallita: {error}',
     emptyRecordingWarning: 'La registrazione è vuota. Verifica che l\'app ClosedRoom abbia i permessi per Microfono e Registrazione schermo nelle Impostazioni di Sistema di macOS.',
     routingActive: 'Routing attivo: {devices}',

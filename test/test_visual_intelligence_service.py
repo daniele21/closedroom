@@ -1380,12 +1380,19 @@ class VisualIntelligenceTests(unittest.TestCase):
                     }
                 }, f)
 
-            original_registry = registry_module._USER_REGISTRY
-            with patch("pathlib.Path.home", return_value=tmp_home), patch.object(
-                registry_module, "_USER_REGISTRY", original_registry
-            ):
-                adapter_path = configure_local_llm_server_registry()
-                registry = registry_module.load_registry()
+            previous_registry_paths = os.environ.get("LOCAL_LLM_REGISTRY_PATHS")
+            try:
+                with patch("pathlib.Path.home", return_value=tmp_home):
+                    os.environ.pop("LOCAL_LLM_REGISTRY_PATHS", None)
+                    adapter_path = configure_local_llm_server_registry()
+                    configured_paths = os.environ.get("LOCAL_LLM_REGISTRY_PATHS", "").split(os.pathsep)
+                    self.assertEqual(configured_paths, [str(adapter_path.resolve())])
+                    registry = registry_module.load_registry()
+            finally:
+                if previous_registry_paths is None:
+                    os.environ.pop("LOCAL_LLM_REGISTRY_PATHS", None)
+                else:
+                    os.environ["LOCAL_LLM_REGISTRY_PATHS"] = previous_registry_paths
 
             self.assertEqual(adapter_path, config_dir / "local_llm_registry.yaml")
             self.assertTrue(adapter_path.exists())

@@ -8,6 +8,7 @@ on:
     branches: [dev, main]
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -16,82 +17,75 @@ concurrency:
 
 jobs:
   select:
-    name: Select validation profile
+    name: Validation scope and repository guards
     runs-on: ubuntu-latest
     outputs:
+      stage: ${{ steps.stage.outputs.stage }}
       profile: ${{ steps.profile.outputs.profile }}
       reason: ${{ steps.profile.outputs.reason }}
+      risk_dimensions: ${{ steps.profile.outputs.risk_dimensions }}
+      required_gates: ${{ steps.profile.outputs.required_gates }}
       head_sha: ${{ steps.identity.outputs.head_sha }}
       base_sha: ${{ steps.identity.outputs.base_sha }}
+      source_tree: ${{ steps.identity.outputs.source_tree }}
     steps:
-      - name: Check out exact head
+      - name: Resolve delivery stage
+        id: stage
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if [[ "${{ github.base_ref }}" == "main" ]]; then stage=release
+            elif [[ "${{ github.event.pull_request.draft }}" == "true" ]]; then stage=iteration
+            else stage=integration
+            fi
+          elif [[ "${{ github.ref_name }}" == "main" ]]; then stage=release
+          else stage=integration
+          fi
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+      - name: Check out exact source head
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - name: Enforce canonical branch flow
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REF: ${{ github.head_ref }}
+        if: github.event_name == 'pull_request'
+        shell: bash
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" != "pull_request" ]]; then
-            exit 0
+          if [[ "${{ github.base_ref }}" == "dev" && "${{ github.head_ref }}" == "main" ]]; then
+            echo "main must not flow back into dev" >&2; exit 1
           fi
-          case "$BASE_REF" in
-            dev)
-              if [[ "$HEAD_REF" == "main" ]]; then
-                echo "main is the stable branch and must not flow back into dev via PR." >&2
-                exit 1
-              fi
-              ;;
-            main)
-              if [[ "$HEAD_REF" != "dev" ]]; then
-                echo "Stable promotion must be dev -> main; got $HEAD_REF -> main." >&2
-                exit 1
-              fi
-              ;;
-            *)
-              echo "Canonical PR targets are dev and main; got $BASE_REF." >&2
-              exit 1
-              ;;
-          esac
-      - name: Resolve exact base/head
+          if [[ "${{ github.base_ref }}" == "main" && "${{ github.head_ref }}" != "dev" ]]; then
+            echo "Stable promotion must be dev -> main" >&2; exit 1
+          fi
+      - name: Resolve validation identity
         id: identity
-        env:
-          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
         run: |
           set -euo pipefail
-          HEAD_SHA="${EVENT_HEAD_SHA:-$(git rev-parse HEAD)}"
-          BASE_SHA="${EVENT_BASE_SHA:-$(git rev-parse HEAD^)}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+          fi
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
           echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
-      - name: Select blast-radius profile
+          echo "source_tree=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+      - name: Select risks and required gates
         id: profile
+        shell: bash
         run: |
           python3 scripts/select_validation_profile.py \
             --base "${{ steps.identity.outputs.base_sha }}" \
             --head "${{ steps.identity.outputs.head_sha }}" \
+            --stage "${{ steps.stage.outputs.stage }}" \
             --format github >> "$GITHUB_OUTPUT"
           python3 scripts/select_validation_profile.py \
             --base "${{ steps.identity.outputs.base_sha }}" \
-            --head "${{ steps.identity.outputs.head_sha }}"
-
-  governance:
-    name: Governance / ${{ needs.select.outputs.profile }}
-    needs: select
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out exact head
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.select.outputs.head_sha }}
-          fetch-depth: 0
-      - name: Verify exact head
-        run: test "$(git rev-parse HEAD)" = "${{ needs.select.outputs.head_sha }}"
+            --head "${{ steps.identity.outputs.head_sha }}" \
+            --stage "${{ steps.stage.outputs.stage }}"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -100,6 +94,7 @@ jobs:
           python3 scripts/verify_repository.py
           python3 scripts/verify_operations.py
           python3 scripts/verify_e2e.py
+          python3 scripts/verify_stage_environment_policy.py
           python3 scripts/verify_product_experience.py
           python3 scripts/verify_docs.py
           python3 scripts/verify_agent_context.py
@@ -108,21 +103,61 @@ jobs:
           python3 -m unittest discover -s test -p 'test_validation_profile_selector.py' -v
           python3 -m unittest discover -s test -p 'test_build_artifact_metadata.py' -v
 
+  reuse:
+    name: Reuse equivalent validation evidence
+    needs: select
+    if: needs.select.outputs.stage != 'iteration'
+    runs-on: ubuntu-latest
+    outputs:
+      reused: ${{ steps.find.outputs.reused }}
+      reuse_kind: ${{ steps.find.outputs.reuse_kind }}
+      source_run_id: ${{ steps.find.outputs.source_run_id }}
+    steps:
+      - name: Find reusable evidence
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          HEAD_SHA: ${{ needs.select.outputs.head_sha }}
+          SOURCE_TREE: ${{ needs.select.outputs.source_tree }}
+          BASE_SHA: ${{ needs.select.outputs.base_sha }}
+          PROFILE: ${{ needs.select.outputs.profile }}
+          REQUIRED_GATES: ${{ needs.select.outputs.required_gates }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate_key=$(printf '%s' "$REQUIRED_GATES" | sha256sum | cut -c1-16)
+          if [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "dev" ]]; then
+            name="validation-tree-evidence-${SOURCE_TREE}-${BASE_SHA}-${PROFILE}-${gate_key}"
+            reuse_kind=tree-equivalent
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
+            name="validation-evidence-${HEAD_SHA}-${BASE_SHA}-${PROFILE}-${gate_key}"
+            reuse_kind=exact-head
+          else
+            echo "reused=false" >> "$GITHUB_OUTPUT"; echo "reuse_kind=none" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          artifact=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${name}&per_page=20" --jq '.artifacts | map(select(.expired == false)) | sort_by(.created_at) | reverse | .[0] // empty')
+          if [[ -z "$artifact" ]]; then
+            echo "reused=false" >> "$GITHUB_OUTPUT"; echo "reuse_kind=none" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "reused=true" >> "$GITHUB_OUTPUT"
+          echo "reuse_kind=$reuse_kind" >> "$GITHUB_OUTPUT"
+          echo "source_run_id=$(jq -r '.workflow_run.id // empty' <<<"$artifact")" >> "$GITHUB_OUTPUT"
+          echo "Reusing $reuse_kind validation evidence: $name"
+
   tests:
-    name: Source tests / ${{ needs.select.outputs.profile }}
-    needs: [select, governance]
-    if: needs.select.outputs.profile != 'lean'
+    name: Source tests / ${{ needs.select.outputs.stage }} / ${{ needs.select.outputs.profile }}
+    needs: [select, reuse]
+    if: >-
+      ${{ always() && contains(needs.select.outputs.required_gates, 'source-tests') && needs.reuse.outputs.reused != 'true' }}
     runs-on: macos-14
     steps:
-      - name: Check out exact head
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ needs.select.outputs.head_sha }}
           fetch-depth: 0
-      - name: Verify arm64 exact head
-        run: |
-          test "$(git rev-parse HEAD)" = "${{ needs.select.outputs.head_sha }}"
-          test "$(uname -m)" = "arm64"
+      - run: test "$(git rev-parse HEAD)" = "${{ needs.select.outputs.head_sha }}" && test "$(uname -m)" = "arm64"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -131,47 +166,46 @@ jobs:
           brew list uv >/dev/null 2>&1 || brew install uv
           npm install --global pnpm@9
           uv sync --all-extras --frozen --python 3.12
-          cd frontend
-          pnpm install --frozen-lockfile
+          cd frontend && pnpm install --frozen-lockfile
       - name: Frontend deterministic checks
-        run: |
-          cd frontend
-          pnpm run lint
-          pnpm exec tsc --noEmit
+        run: cd frontend && pnpm run lint && pnpm exec tsc --noEmit
       - name: Python unit and integration suite
         env:
           UV_CACHE_DIR: .cache/uv
         run: uv run --frozen --python 3.12 python -m unittest discover -s test -v
+      - name: Saved Meeting browser FULL_MEDIA journey
+        if: contains(needs.select.outputs.required_gates, 'browser-e2e')
+        env:
+          E2E_SOURCE_REVISION: ${{ needs.select.outputs.head_sha }}
+        run: |
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          node scripts/browser_meeting_ui_e2e.mjs
+      - name: Upload saved Meeting browser evidence
+        if: ${{ always() && contains(needs.select.outputs.required_gates, 'browser-e2e') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: closedroom-browser-meeting-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/evidence/browser-meeting-ui/**
+          if-no-files-found: error
+          retention-days: 7
 
   packaged-app:
-    name: Packaged app / ${{ needs.select.outputs.profile }}
-    needs: [select, governance, tests]
+    name: Packaged app / ${{ needs.select.outputs.stage }} / ${{ needs.select.outputs.profile }}
+    needs: [select, reuse, tests]
     if: >-
-      ${{
-        (needs.select.outputs.profile == 'strong' || needs.select.outputs.profile == 'full') &&
-        (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-      }}
+      ${{ always() && contains(needs.select.outputs.required_gates, 'packaged-app') && needs.reuse.outputs.reused != 'true' && (needs.tests.result == 'success' || needs.tests.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: macos-14
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
     steps:
-      - name: Check out exact head
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ needs.select.outputs.head_sha }}
           fetch-depth: 0
-      - name: Verify arm64 exact head
-        run: |
-          test "$(git rev-parse HEAD)" = "${{ needs.select.outputs.head_sha }}"
-          test "$(uname -m)" = "arm64"
+      - run: test "$(git rev-parse HEAD)" = "${{ needs.select.outputs.head_sha }}" && test "$(uname -m)" = "arm64"
       - name: Verify Swift 6 packaging toolchain
-        run: |
-          set -euo pipefail
-          test -d "$DEVELOPER_DIR"
-          xcodebuild -version
-          swift --version
-          swift --version | grep -Eq 'Swift version 6\.'
+        run: test -d "$DEVELOPER_DIR" && xcodebuild -version && swift --version | grep -Eq 'Swift version 6\.'
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -188,25 +222,71 @@ jobs:
         run: bash scripts/build_artifact.sh --no-dmg
       - name: Smoke finalized .app lifecycle
         run: python3 scripts/smoke_packaged_app.py
-      - name: Prepare immutable CI archive
-        id: artifact
-        run: |
-          set -euo pipefail
-          ARTIFACT_DIR="$(python3 -c 'import json; print(json.load(open("dist/last-build.json"))["artifact_dir"])')"
-          APP="$(python3 -c 'import json; print(json.load(open("dist/last-build.json"))["app"])')"
-          ZIP="$ARTIFACT_DIR/$(basename "$APP").zip"
-          ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
-          echo "artifact_dir=$ARTIFACT_DIR" >> "$GITHUB_OUTPUT"
-          echo "build_id=$(python3 -c 'import json; print(json.load(open("dist/last-build.json"))["build_id"])')" >> "$GITHUB_OUTPUT"
       - name: Upload build + smoke evidence
         uses: actions/upload-artifact@v4
         with:
-          name: closedroom-${{ steps.artifact.outputs.build_id }}
+          name: closedroom-packaged-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ steps.artifact.outputs.artifact_dir }}/build-manifest.json
-            ${{ steps.artifact.outputs.artifact_dir }}/BUILD_CHANGELOG.md
-            ${{ steps.artifact.outputs.artifact_dir }}/SHA256SUMS
-            ${{ steps.artifact.outputs.artifact_dir }}/packaged-app-smoke.json
-            ${{ steps.artifact.outputs.artifact_dir }}/*.zip
+            dist/**/build-manifest.json
+            dist/**/BUILD_CHANGELOG.md
+            dist/**/SHA256SUMS
+            dist/**/packaged-app-smoke.json
           if-no-files-found: error
+          retention-days: 7
+
+  validation:
+    name: Repository validation / ${{ needs.select.outputs.stage }} / ${{ needs.select.outputs.profile }}
+    needs: [select, reuse, tests, packaged-app]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate validation jobs
+        env:
+          REUSED: ${{ needs.reuse.outputs.reused }}
+          GATES: ${{ needs.select.outputs.required_gates }}
+          TESTS: ${{ needs.tests.result }}
+          PACKAGED: ${{ needs.packaged-app.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$REUSED" == "true" ]]; then exit 0; fi
+          if [[ "$GATES" == *source-tests* && "$TESTS" != "success" ]]; then echo "source-tests gate failed: $TESTS" >&2; exit 1; fi
+          if [[ "$GATES" == *browser-e2e* && "$TESTS" != "success" ]]; then echo "browser-e2e gate failed: $TESTS" >&2; exit 1; fi
+          if [[ "$GATES" == *packaged-app* && "$PACKAGED" != "success" ]]; then echo "packaged-app gate failed: $PACKAGED" >&2; exit 1; fi
+
+  evidence:
+    name: Publish reusable validation evidence
+    needs: [select, reuse, validation]
+    if: needs.select.outputs.stage != 'iteration' && needs.validation.result == 'success' && needs.reuse.outputs.reused != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create evidence identity
+        id: identity
+        env:
+          HEAD_SHA: ${{ needs.select.outputs.head_sha }}
+          SOURCE_TREE: ${{ needs.select.outputs.source_tree }}
+          BASE_SHA: ${{ needs.select.outputs.base_sha }}
+          STAGE: ${{ needs.select.outputs.stage }}
+          PROFILE: ${{ needs.select.outputs.profile }}
+          RISKS: ${{ needs.select.outputs.risk_dimensions }}
+          GATES: ${{ needs.select.outputs.required_gates }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate_key=$(printf '%s' "$GATES" | sha256sum | cut -c1-16)
+          e2e_environment=none
+          if [[ "$GATES" == *browser-e2e* ]]; then e2e_environment=browser-macos-arm64-ci; fi
+          mkdir -p validation-evidence
+          printf '{"head":"%s","source_tree":"%s","target_base":"%s","stage":"%s","profile":"%s","risk_dimensions":"%s","required_gates":"%s","e2e_environment":"%s","run_id":"%s"}\n' "$HEAD_SHA" "$SOURCE_TREE" "$BASE_SHA" "$STAGE" "$PROFILE" "$RISKS" "$GATES" "$e2e_environment" "$GITHUB_RUN_ID" > validation-evidence/evidence.json
+          echo "exact=validation-evidence-${HEAD_SHA}-${BASE_SHA}-${PROFILE}-${gate_key}" >> "$GITHUB_OUTPUT"
+          echo "tree=validation-tree-evidence-${SOURCE_TREE}-${BASE_SHA}-${PROFILE}-${gate_key}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.identity.outputs.exact }}
+          path: validation-evidence/evidence.json
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.identity.outputs.tree }}
+          path: validation-evidence/evidence.json
           retention-days: 7

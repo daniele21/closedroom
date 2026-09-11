@@ -21,6 +21,20 @@ class RuntimeServiceManagerTests(unittest.TestCase):
             "/models/selected.gguf",
         )
 
+    def test_model_path_explicit_provenance_distinguishes_config_from_discovery(self) -> None:
+        from local_asr_server.runtime.models import is_local_llm_model_path_explicit
+
+        self.assertTrue(is_local_llm_model_path_explicit({
+            "local_llm_model": "selected",
+            "local_llm_model_paths": {"selected": "/models/selected.gguf"},
+            "local_llm_model_path": "",
+        }))
+        self.assertFalse(is_local_llm_model_path_explicit({
+            "local_llm_model": "nemotron-nano-4b-q8",
+            "local_llm_model_paths": {},
+            "local_llm_model_path": "",
+        }))
+
     def test_model_path_falls_back_to_legacy_global_path(self) -> None:
         settings = {
             "local_llm_model": "selected",
@@ -156,6 +170,7 @@ class RuntimeServiceManagerTests(unittest.TestCase):
             llama_server_bin="",
             reasoning="auto",
             capability="text",
+            dynamic_residency=True,
         )
 
     @patch("local_asr_server.runtime.service_manager._query_external_health")

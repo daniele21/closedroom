@@ -22,7 +22,9 @@ from local_asr_server.native_capture import NativeCaptureManager
 from local_asr_server.recordings import RecordingStore
 from local_asr_server.transcription_jobs import TranscriptionJobManager
 from local_asr_server.paths import get_static_dir
+from local_asr_server.runtime.resource_policy import ResourcePolicy, recording_has_active_capture
 from local_asr_server.runtime.service_manager import RuntimeServiceManager
+from local_asr_server.runtime.workload_arbiter import HeavyWorkloadArbiter
 from local_asr_server.services.transcription_service import TranscriptionService
 from local_asr_server.transcriber import transcribe_file_sync
 from local_asr_server.app_logging import configure_application_logging
@@ -32,7 +34,17 @@ from local_asr_server.routers.helpers import (
     _parse_allowed_origins,
     _extract_bearer_token,
 )
-from local_asr_server.routers import analysis, demo, recordings, settings, transcriptions, system, workspace
+from local_asr_server.routers import (
+    analysis,
+    capture_admission,
+    demo,
+    recordings,
+    settings,
+    transcriptions,
+    system,
+    visual_jobs,
+    workspace,
+)
 
 PUBLIC_AUTH_PATHS = {
     "/",
@@ -96,49 +108,6 @@ def create_app(
     else:
         catalog_path = CatalogStore.default_db_path()
     app.state.app_log_file = configure_application_logging(fallback_dir=catalog_path.parent)
-    
-    import logging
-    logger = logging.getLogger("uvicorn.error")
-    # Defer LLM sidecar startup to FastAPI startup event so it runs exactly
-    # once (not at module import time when uvicorn --reload re-imports).
-    @app.on_event("startup")
-    def _start_llm_sidecar():
-        llm_status = runtime_services.llm_status()
-        llm_mode = llm_status.get("mode", "disabled")
-        
-        # Color formatting
-        GREEN = "\033[92m"
-        CYAN = "\033[96m"
-        YELLOW = "\033[93m"
-        BOLD = "\033[1m"
-        RESET = "\033[0m"
-
-        # Show ClosedRoom Web UI URL
-        print(f"\n{BOLD}{GREEN}[★] ClosedRoom Web UI: {RESET}{BOLD}http://127.0.0.1:1236/{RESET}\n")
-
-        if llm_mode == "auto":
-            # Skip if already running (e.g. reload re-import)
-            if llm_status.get("pid"):
-                print(f"Local LLM: sidecar already running (pid={llm_status['pid']})")
-                return
-            print("Local LLM: mode is 'auto' → starting sidecar...")
-            logger.info("Local LLM: mode is 'auto' → starting sidecar...")
-            try:
-                result = runtime_services.start_llm()
-                base_url = result.get("base_url", "")
-                pid = result.get("pid")
-                print(f"{BOLD}{CYAN}[★] Local LLM Server UI: {RESET}{BOLD}{base_url}/{RESET}  (pid={pid})\n")
-                logger.info(f"Local LLM: sidecar started → {base_url} (pid={pid})")
-            except Exception as e:
-                print(f"{YELLOW}Local LLM: failed to start sidecar: {e}{RESET}")
-                logger.warning(f"Failed to start local LLM sidecar at startup: {e}")
-        elif llm_mode == "external":
-            ext_url = llm_status.get("url", "")
-            print(f"\n{BOLD}{CYAN}[★] External LLM Server: {RESET}{BOLD}{ext_url}/{RESET}\n")
-            logger.info(f"Local LLM: mode is 'external' (using configured URL: {ext_url})")
-        else:
-            print("Local LLM: disabled")
-            logger.info("Local LLM: disabled")
 
     catalog_store = CatalogStore(catalog_path)
     app.state.prompts_file = catalog_path.parent / "prompts.json" if temp_root in catalog_path.resolve().parents else None
@@ -148,12 +117,56 @@ def create_app(
         [job["id"] for job in interrupted_jobs if job["type"] == "analysis"],
         reason="Interrupted by server restart",
     )
-    transcription_jobs = TranscriptionJobManager(job_store)
     recording_store = RecordingStore(
         recordings_dir or Path("~/Recordings/local-asr"),
         use_settings_dir=recordings_dir is None,
         catalog=catalog_store,
     )
+
+    # RecordingStore is the existing canonical capture-state owner. ResourcePolicy
+    # narrows its durable UI/recovery state to actual capture signals, while
+    # HeavyWorkloadArbiter remains the only heavy-work scheduler.
+    resource_policy = ResourcePolicy(
+        capture_active=lambda: recording_has_active_capture(recording_store.active_recording()),
+    )
+    heavy_workloads = HeavyWorkloadArbiter.from_env(
+        admission_guard=resource_policy.assert_heavy_work_admissible,
+    )
+    app.state.resource_policy = resource_policy
+    app.state.heavy_workload_arbiter = heavy_workloads
+    transcription_jobs = TranscriptionJobManager(job_store, arbiter=heavy_workloads)
+    
+    import logging
+    logger = logging.getLogger("uvicorn.error")
+
+    @app.on_event("startup")
+    def _report_runtime_mode():
+        llm_status = runtime_services.llm_status()
+        llm_mode = llm_status.get("mode", "disabled")
+        
+        # Color formatting
+        GREEN = "\033[92m"
+        CYAN = "\033[96m"
+        BOLD = "\033[1m"
+        RESET = "\033[0m"
+
+        # Show ClosedRoom Web UI URL
+        print(f"\n{BOLD}{GREEN}[★] ClosedRoom Web UI: {RESET}{BOLD}http://127.0.0.1:1236/{RESET}\n")
+
+        if llm_mode == "auto":
+            # Managed local AI is intentionally cold at application startup.
+            # RuntimeServiceManager.ensure_llm_ready() starts it on the first
+            # local AI phase, avoiding speculative model/process residency.
+            print("Local LLM: managed on demand (cold until first local AI request)")
+            logger.info("Local LLM: managed on demand; sidecar remains cold at startup")
+        elif llm_mode == "external":
+            ext_url = llm_status.get("url", "")
+            print(f"\n{BOLD}{CYAN}[★] External LLM Server: {RESET}{BOLD}{ext_url}/{RESET}\n")
+            logger.info(f"Local LLM: mode is 'external' (using configured URL: {ext_url})")
+        else:
+            print("Local LLM: disabled")
+            logger.info("Local LLM: disabled")
+
     from local_asr_server.transcriptions import TranscriptionStore
     transcription_store = TranscriptionStore(catalog=catalog_store)
     from local_asr_server.transcription_diarization import TranscriptionDiarizationService
@@ -169,7 +182,7 @@ def create_app(
         recordings=recording_store,
         transcriptions=transcription_store,
     )
-    services.analysis_jobs = AnalysisJobManager(services, job_store)
+    services.analysis_jobs = AnalysisJobManager(services, job_store, arbiter=heavy_workloads)
     install_compatibility_aliases(app, services)
 
     # Clean up any orphan aggregate devices from previous runs/crashes
@@ -206,16 +219,18 @@ def create_app(
     def read_index() -> FileResponse:
         return FileResponse(
             static_dir / "index.html",
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
         )
 
     # Include routers
     app.include_router(analysis.router)
+    app.include_router(capture_admission.router)
     app.include_router(demo.router)
     app.include_router(recordings.router)
     app.include_router(settings.router)
     app.include_router(transcriptions.router)
     app.include_router(system.router)
+    app.include_router(visual_jobs.router)
     app.include_router(workspace.router)
 
     # Mount root static files at the end so it doesn't override API routes
@@ -223,6 +238,7 @@ def create_app(
 
     @app.on_event("shutdown")
     def shutdown_event():
+        heavy_workloads.shutdown(cancel_pending=True, wait_timeout=2.0)
         print("Stopping local LLM sidecar...")
         logger.info("Stopping local LLM sidecar...")
         runtime_services.shutdown()

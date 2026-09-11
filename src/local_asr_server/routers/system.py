@@ -23,6 +23,7 @@ from local_asr_server.schemas import (
 )
 from local_asr_server.asr_provider import asr_catalog
 from local_asr_server.macos_permissions import accessibility_status
+from local_asr_server.runtime.resource_metrics import ResourceMetricsCollector
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -81,6 +82,7 @@ def health(request: Request) -> dict:
             "GET /v1/recordings/{id}/project",
             "GET /v1/projects",
             "GET /v1/runtime/status",
+            "GET /v1/runtime/resources",
             "GET /v1/runtime/services",
             "GET /v1/runtime/services/llm",
             "POST /v1/runtime/services/llm/start",
@@ -307,9 +309,23 @@ def get_stats(request: Request):
     return stats
 
 
+@router.get("/v1/runtime/resources")
+def runtime_resources(request: Request):
+    runtime = get_services(request.app).runtime
+    llm = runtime.llm_status()
+    arbiter = getattr(request.app.state, "heavy_workload_arbiter", None)
+    return ResourceMetricsCollector().snapshot(
+        sidecar_pid=llm.get("pid"),
+        workload_arbiter=arbiter,
+    )
+
+
 @router.get("/v1/runtime/status")
 def runtime_status(request: Request):
-    return get_services(request.app).runtime.status()
+    return {
+        **get_services(request.app).runtime.status(),
+        "resources": runtime_resources(request),
+    }
 
 
 @router.get("/v1/runtime/services")

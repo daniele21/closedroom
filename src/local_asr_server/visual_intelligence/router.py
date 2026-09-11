@@ -29,7 +29,7 @@ class TaskAwareFrameRouter:
         segments: list[dict[str, Any]],
     ) -> tuple[list[FrameCandidate], dict[str, Any]]:
         if not frames:
-            return [], self._summary(0, [])
+            return [], self._summary(0, [], uncapped_candidate_count=0)
         signatures: dict[int, FrameSignature] = {}
 
         def get_sig(frame: dict[str, Any], calculate_tiles: bool = False) -> FrameSignature:
@@ -50,7 +50,29 @@ class TaskAwareFrameRouter:
         for candidate in candidates:
             unique.setdefault((candidate.sequence, candidate.task), candidate)
         ordered = sorted(unique.values(), key=lambda item: (item.timestamp, item.task.value))
-        return ordered, self._summary(len(frames), ordered)
+        uncapped_candidate_count = len(ordered)
+        bounded = self._apply_candidate_budget(ordered, self.config.max_candidates)
+        return bounded, self._summary(
+            len(frames), bounded, uncapped_candidate_count=uncapped_candidate_count,
+        )
+
+    @staticmethod
+    def _apply_candidate_budget(
+        candidates: list[FrameCandidate],
+        max_candidates: int,
+    ) -> list[FrameCandidate]:
+        """Bound VLM work while preserving deterministic coverage across the full meeting timeline."""
+        if max_candidates < 1:
+            raise ValueError("max_candidates must be at least 1")
+        if len(candidates) <= max_candidates:
+            return candidates
+        if max_candidates == 1:
+            return [candidates[0]]
+        last_index = len(candidates) - 1
+        return [
+            candidates[round(index * last_index / (max_candidates - 1))]
+            for index in range(max_candidates)
+        ]
 
     def _speaker_candidates(self, frames, segments, signature) -> list[FrameCandidate]:
         selected: list[FrameCandidate] = [self._candidate(frames[0], VisualTask.MEETING_UI, VisualTrigger.FIRST_FRAME)]
@@ -183,20 +205,30 @@ class TaskAwareFrameRouter:
             expected_cluster=expected_cluster,
         )
 
-    @staticmethod
-    def _summary(frame_count: int, candidates: list[FrameCandidate]) -> dict[str, Any]:
+    def _summary(
+        self,
+        frame_count: int,
+        candidates: list[FrameCandidate],
+        *,
+        uncapped_candidate_count: int,
+    ) -> dict[str, Any]:
         counts = {task.value: 0 for task in VisualTask}
         triggers: dict[str, int] = {}
         for candidate in candidates:
             counts[candidate.task.value] += 1
             triggers[candidate.trigger.value] = triggers.get(candidate.trigger.value, 0) + 1
+        budget_rejected = max(0, uncapped_candidate_count - len(candidates))
         return {
             "schema_version": 1,
             "captured_frames": frame_count,
             "candidate_count": len(candidates),
+            "uncapped_candidate_count": uncapped_candidate_count,
+            "candidate_budget": self.config.max_candidates,
+            "candidate_budget_applied": budget_rejected > 0,
+            "budget_rejected_candidates": budget_rejected,
             "candidates_by_task": counts,
             "candidates_by_trigger": triggers,
-            "rejected_task_evaluations": max(0, frame_count * len(VisualTask) - len(candidates)),
+            "rejected_task_evaluations": max(0, frame_count * len(VisualTask) - uncapped_candidate_count),
             "candidates": [candidate.public() for candidate in candidates],
         }
 

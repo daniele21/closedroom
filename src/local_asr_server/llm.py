@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import urllib.request
 import urllib.error
@@ -47,8 +48,78 @@ class BaseLLMProvider:
 class MockProvider(BaseLLMProvider):
     """Simulated provider for development and testing (no external calls)."""
 
+    @staticmethod
+    def _shared_notes_response(text: str, prompt: str) -> dict:
+        if "Merge the supplied partial structured meeting notes" in prompt:
+            try:
+                payload = json.loads(text)
+                partials = payload.get("partials") or []
+            except Exception:
+                partials = []
+            summaries = [
+                partial.get("summary")
+                for partial in partials
+                if isinstance(partial, dict) and isinstance(partial.get("summary"), dict)
+            ]
+            refs = [
+                ref
+                for summary in summaries
+                for ref in summary.get("source_refs") or []
+                if isinstance(ref, dict)
+            ]
+            generated = {
+                "summary": {
+                    "text": "Riepilogo simulato aggregato del meeting.",
+                    "source_refs": refs[:3],
+                },
+                "actions": [
+                    item
+                    for partial in partials
+                    if isinstance(partial, dict)
+                    for item in partial.get("actions") or []
+                    if isinstance(item, dict)
+                ],
+                "decisions": [
+                    item
+                    for partial in partials
+                    if isinstance(partial, dict)
+                    for item in partial.get("decisions") or []
+                    if isinstance(item, dict)
+                ],
+                "risks": [
+                    item
+                    for partial in partials
+                    if isinstance(partial, dict)
+                    for item in partial.get("risks") or []
+                    if isinstance(item, dict)
+                ],
+            }
+            if not generated["summary"]["source_refs"]:
+                generated["summary"]["text"] = ""
+            return {"generated": generated}
+
+        segment_ids = []
+        for raw in re.findall(r"\[S([^\s\]]+)", text):
+            value = int(raw) if raw.isdigit() else raw
+            if value not in segment_ids:
+                segment_ids.append(value)
+        source_refs = [{"segment_id": segment_id} for segment_id in segment_ids[:3]]
+        return {
+            "generated": {
+                "summary": {
+                    "text": "Riepilogo simulato basato sulla trascrizione." if source_refs else "",
+                    "source_refs": source_refs,
+                },
+                "actions": [],
+                "decisions": [],
+                "risks": [],
+            }
+        }
+
     def analyze(self, text: str, prompt: Optional[str] = None, temperature: Optional[float] = None) -> dict:
         time.sleep(1.5)  # Simulate API latency
+        if prompt and "CLOSEDROOM_MEETING_NOTES_V2" in prompt:
+            return self._shared_notes_response(text, prompt)
 
         words = text.split()
         word_count = len(words)

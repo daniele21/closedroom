@@ -257,6 +257,25 @@ class TranscriptionStore:
         self.catalog.upsert_transcription(updated, file_name=file_name)
         return updated
 
+    def replace_visual_intelligence(
+        self,
+        transcription_id: str,
+        updated: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist visual enrichment in place without creating a new ASR result."""
+        file_name = self._file_name_for(transcription_id)
+        if not file_name:
+            raise FileNotFoundError("Transcription not found")
+        json_path = self.root / file_name
+        if not json_path.exists():
+            raise FileNotFoundError("Transcription export not found")
+        if str(updated.get("id") or "") != transcription_id:
+            raise ValueError("Visual update does not match the target transcription")
+
+        self._write_export_files(json_path.stem, updated)
+        self.catalog.upsert_transcription(updated, file_name=file_name)
+        return updated
+
     def delete(self, transcription_id: str) -> bool:
         file_name = self._file_name_for(transcription_id)
         if not file_name:

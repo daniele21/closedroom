@@ -1,12 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ApiClient, Recording } from '../api/apiClient';
+import {
+  createCaptureReservation,
+  getCaptureReservation,
+  releaseCaptureReservation,
+  releaseCaptureReservationOnUnload,
+} from '../api/captureAdmission';
 import { RECORDING_CHUNK_INTERVAL_MS } from '../api/config';
 import { useTranslation } from '../i18n/i18n';
 import { useToast } from '../context/ToastContext';
 import { useAudioDevices, AudioDevice, AudioRouteStatus } from './useAudioDevices';
 import { drawAudioMeterOnCanvas } from '../utils/audioVisualizer';
+import { BrowserUploadBacklog } from '../utils/browserUploadBacklog';
 
 export type { AudioDevice, AudioRouteStatus };
+
+const AUDIO_METER_RENDER_INTERVAL_MS = 80;
+const AUDIO_METER_REACT_INTERVAL_MS = 250;
+const RECORDING_TIMER_INTERVAL_MS = 1000;
+const OVERLAY_STATUS_INTERVAL_MS = 500;
+const CAPTURE_RESERVATION_POLL_MS = 200;
+const CAPTURE_RESERVATION_STORAGE_KEY = 'closedroom-capture-reservation-id';
 
 export const openBrowserPopup = () => {
   const width = 295;
@@ -27,6 +41,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const { showToast } = useToast();
 
   const [isRecording, setIsRecording] = useState(false);
+  const [isPreparingRecording, setIsPreparingRecording] = useState(false);
+  const [isWaitingForAi, setIsWaitingForAi] = useState(false);
   const [timer, setTimer] = useState('00:00');
   const [signalLevel, setSignalLevel] = useState('-∞ dB');
   const [signalLevelMic, setSignalLevelMic] = useState('-∞ dB');
@@ -84,15 +100,23 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const sessionIdRef = useRef<string | null>(null);
   const sequenceRef = useRef<Map<string, number>>(new Map());
   const uploadChainsRef = useRef<Map<string, Promise<any>>>(new Map());
+  const browserUploadBacklogRef = useRef(new BrowserUploadBacklog());
+  const browserBackpressureTriggeredRef = useRef(false);
   const startedAtRef = useRef(0);
   const routeActivatedRef = useRef(false);
   const captureBackendRef = useRef<'browser' | 'native'>('browser');
+  const captureReservationIdRef = useRef<string | null>(null);
+  const captureLeaseCommittedRef = useRef(false);
+  const startInFlightRef = useRef(false);
+  const cancelStartRequestedRef = useRef(false);
   const broadcastIntervalRef = useRef<any>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const currentMicDbRef = useRef<number>(-120);
   const currentSysDbRef = useRef<number>(-120);
   const bcRef = useRef<BroadcastChannel | null>(null);
   const visualCaptureLabelRef = useRef('');
+  const lastMeterRenderAtRef = useRef(0);
+  const lastMeterReactAtRef = useRef(0);
 
   // Canvas Ref
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -116,9 +140,33 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     return normalized.includes('aggregate') || normalized.includes('combinat') || normalized.includes('local asr input');
   };
 
+  const releaseCaptureLease = useCallback(async () => {
+    const reservationId = captureReservationIdRef.current
+      || localStorage.getItem(CAPTURE_RESERVATION_STORAGE_KEY);
+    if (!reservationId) return;
+    try {
+      await releaseCaptureReservation(reservationId);
+      captureReservationIdRef.current = null;
+      captureLeaseCommittedRef.current = false;
+      localStorage.removeItem(CAPTURE_RESERVATION_STORAGE_KEY);
+    } catch (error) {
+      // Keep the token locally so a later recovery/mount can retry cleanup.
+      console.warn('Unable to release capture reservation:', error);
+      throw error;
+    }
+  }, []);
+
   // Interrupted recording session cleanup & recovery check
   useEffect(() => {
     const storedId = localStorage.getItem('asr-active-recording-id');
+    const storedReservationId = localStorage.getItem(CAPTURE_RESERVATION_STORAGE_KEY);
+    if (storedReservationId) captureReservationIdRef.current = storedReservationId;
+
+    const releaseRecoveredLease = () => {
+      if (!storedReservationId) return;
+      void releaseCaptureLease().catch(() => {});
+    };
+
     if (storedId) {
       ApiClient.getRecording(storedId).then(async (recording: Recording) => {
         if (['recording', 'finalizing', 'recoverable'].includes(recording.status)) {
@@ -132,14 +180,18 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         localStorage.removeItem('asr-active-recording-id');
       }).catch(() => {
         localStorage.removeItem('asr-active-recording-id');
-      });
+      }).finally(releaseRecoveredLease);
+    } else {
+      releaseRecoveredLease();
     }
-  }, [t]);
+  }, [t, releaseCaptureLease]);
 
 
   const stopAudioMeter = useCallback((closeContext = true) => {
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     animationFrameRef.current = null;
+    lastMeterRenderAtRef.current = 0;
+    lastMeterReactAtRef.current = 0;
     analyserRef.current = null;
     micAnalyserRef.current = null;
     systemAnalyserRef.current = null;
@@ -153,14 +205,21 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       const context = canvasRef.current.getContext('2d');
       context?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     }
+    signalLevelRef.current = '-∞ dB';
+    signalLevelMicRef.current = '-∞ dB';
+    signalLevelSystemRef.current = '-∞ dB';
     setSignalLevel('-∞ dB');
     setSignalLevelMic('-∞ dB');
     setSignalLevelSystem('-∞ dB');
   }, []);
 
-  const drawAudioMeter = useCallback(() => {
+  const drawAudioMeter = useCallback((timestamp = performance.now()) => {
+    animationFrameRef.current = requestAnimationFrame(drawAudioMeter);
+    if (document.hidden || timestamp - lastMeterRenderAtRef.current < AUDIO_METER_RENDER_INTERVAL_MS) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
+    lastMeterRenderAtRef.current = timestamp;
 
     const levels = drawAudioMeterOnCanvas(
       canvas,
@@ -171,40 +230,27 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       currentSysDbRef.current
     );
 
+    if (timestamp - lastMeterReactAtRef.current < AUDIO_METER_REACT_INTERVAL_MS) return;
+    lastMeterReactAtRef.current = timestamp;
+
     const levelMic = levels.dbMic <= -47.5 ? '-∞ dB' : `${levels.dbMic.toFixed(1)} dB`;
-    setSignalLevelMic(levelMic);
-
-    const levelSys = levels.dbSys <= -47.5 ? '-∞ dB' : `${levels.dbSys.toFixed(1)} dB`;
-    setSignalLevelSystem(levelSys);
-
-    const levelCombined = levels.dbCombined <= -47.5 ? '-∞ dB' : `${levels.dbCombined.toFixed(1)} dB`;
-    setSignalLevel(levelCombined);
-
-    animationFrameRef.current = requestAnimationFrame(drawAudioMeter);
-  }, []);
-
-  const startAudioMeter = useCallback((streamOrNode: AudioNode | MediaStream) => {
-    // startAudioMeter is kept for compatibility, but we now manually connect in startRecording
-    stopAudioMeter(false);
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    
-    if (streamOrNode instanceof AudioNode) {
-      audioContextRef.current = streamOrNode.context as AudioContext;
-      micAnalyserRef.current = audioContextRef.current.createAnalyser();
-      micAnalyserRef.current.fftSize = 512;
-      micAnalyserRef.current.smoothingTimeConstant = 0.78;
-      streamOrNode.connect(micAnalyserRef.current);
-    } else {
-      audioContextRef.current = new AudioContextClass();
-      micAnalyserRef.current = audioContextRef.current.createAnalyser();
-      micAnalyserRef.current.fftSize = 512;
-      micAnalyserRef.current.smoothingTimeConstant = 0.78;
-      audioContextRef.current.createMediaStreamSource(streamOrNode).connect(micAnalyserRef.current);
+    if (levelMic !== signalLevelMicRef.current) {
+      signalLevelMicRef.current = levelMic;
+      setSignalLevelMic(levelMic);
     }
 
-    drawAudioMeter();
-  }, [drawAudioMeter, stopAudioMeter]);
+    const levelSys = levels.dbSys <= -47.5 ? '-∞ dB' : `${levels.dbSys.toFixed(1)} dB`;
+    if (levelSys !== signalLevelSystemRef.current) {
+      signalLevelSystemRef.current = levelSys;
+      setSignalLevelSystem(levelSys);
+    }
+
+    const levelCombined = levels.dbCombined <= -47.5 ? '-∞ dB' : `${levels.dbCombined.toFixed(1)} dB`;
+    if (levelCombined !== signalLevelRef.current) {
+      signalLevelRef.current = levelCombined;
+      setSignalLevel(levelCombined);
+    }
+  }, []);
 
   const releaseMedia = useCallback(() => {
     stopAudioMeter();
@@ -312,12 +358,18 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
           setStatusState('error');
           setProgressText(t('recording.emptyRecordingWarning'));
           showToast(t('recording.emptyRecordingWarning'), 'error');
+        } else if (browserBackpressureTriggeredRef.current) {
+          const message = t('recording.uploadBackpressure');
+          setStatusText(t('common.error'));
+          setStatusState('error');
+          setProgressText(message);
         } else {
           setStatusText(t('recording.saved'));
           setStatusState('success');
           setProgressText(t('recording.audioCompleteSaved'));
         }
         setIsRecording(false);
+        await releaseCaptureLease().catch(() => {});
         if (onSaved) onSaved(recording);
       }
     } catch (error: any) {
@@ -325,9 +377,13 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       setStatusState('error');
       showToast(t('recording.finalizationFailed', { error: error.message }), 'error');
     } finally {
+      browserUploadBacklogRef.current.reset();
+      browserBackpressureTriggeredRef.current = false;
+      captureLeaseCommittedRef.current = false;
       await restoreAudioRoute();
+      await releaseCaptureLease().catch(() => {});
     }
-  }, [t, onSaved, releaseMedia, restoreAudioRoute, showToast]);
+  }, [t, onSaved, releaseMedia, restoreAudioRoute, showToast, releaseCaptureLease]);
 
   // Listen for remote overlay command and status requests and hold persistent BroadcastChannel
   useEffect(() => {
@@ -403,6 +459,18 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     }
   };
 
+  const cancelPendingStart = useCallback(async () => {
+    if (!isPreparingRecording || captureLeaseCommittedRef.current) return;
+    cancelStartRequestedRef.current = true;
+    setIsWaitingForAi(false);
+    setIsPreparingRecording(false);
+    setIsVerifying(false);
+    await releaseCaptureLease().catch(() => {});
+    setStatusText(t('recording.statusReady'));
+    setStatusState('ready');
+    setProgressText(t('recording.progressNone'));
+  }, [isPreparingRecording, releaseCaptureLease, setIsVerifying, t]);
+
   const startRecording = useCallback(async (
     title: string,
     projectName = '',
@@ -411,22 +479,57 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     visualWindowId?: number,
     visualCaptureLabel = '',
   ) => {
+    if (startInFlightRef.current || isRecordingRef.current) return;
     if (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia) {
       showToast(t('recording.unsupportedBrowser'), 'error');
       return;
     }
 
+    startInFlightRef.current = true;
+    cancelStartRequestedRef.current = false;
+    captureLeaseCommittedRef.current = false;
+    setIsPreparingRecording(true);
+    setIsWaitingForAi(false);
+    setIsVerifying(true);
     setPermissionsErrorDetails(null);
     setFallbackNotice(null);
     setStatusText(t('recording.audioSetupTitle'));
     setStatusState('working');
+    setProgressText(t('recording.audioSetupStatus'));
     visualCaptureLabelRef.current = visualWindowId !== undefined ? visualCaptureLabel : '';
+
+    const cancelled = () => cancelStartRequestedRef.current;
+
     try {
       let capabilityCheckFailed = false;
       const capabilities = captureCapabilities || await ApiClient.captureCapabilities().catch(() => {
         capabilityCheckFailed = true;
         return null;
       });
+
+      const initialReservation = await createCaptureReservation();
+      captureReservationIdRef.current = initialReservation.reservation_id;
+      localStorage.setItem(CAPTURE_RESERVATION_STORAGE_KEY, initialReservation.reservation_id);
+      let reservation = initialReservation;
+      if (reservation.status === 'waiting') {
+        setIsWaitingForAi(true);
+      }
+      while (reservation.status === 'waiting') {
+        await new Promise((resolve) => setTimeout(resolve, CAPTURE_RESERVATION_POLL_MS));
+        if (cancelled()) {
+          await releaseCaptureLease().catch(() => {});
+          startInFlightRef.current = false;
+          return;
+        }
+        reservation = await getCaptureReservation(reservation.reservation_id);
+      }
+      setIsWaitingForAi(false);
+      if (cancelled()) {
+        await releaseCaptureLease().catch(() => {});
+        startInFlightRef.current = false;
+        return;
+      }
+
       if (capabilities?.default_backend === 'native' && capabilities.native.available) {
         const permissionMode = visualWindowId !== undefined && mode === 'mic_only' ? 'both' : mode;
         const permissionResult = await ApiClient.ensureCapturePermissions(permissionMode);
@@ -473,6 +576,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         localStorage.setItem('asr-active-recording-id', session.id);
         
         await ApiClient.startNativeCapture(session.id, mode, visualWindowId);
+        captureLeaseCommittedRef.current = true;
         
         // Connect EventSource to receive real-time levels and capture status
         currentMicDbRef.current = -120;
@@ -492,9 +596,9 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                 const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
                 const secs = (elapsed % 60).toString().padStart(2, '0');
                 setTimer(`${mins}:${secs}`);
-              }, 250);
+              }, RECORDING_TIMER_INTERVAL_MS);
 
-              // Start status broadcast interval for the overlay window (every 300ms)
+              // The overlay needs human-scale status updates, not display-rate telemetry.
               broadcastIntervalRef.current = setInterval(() => {
                 bcRef.current?.postMessage({
                   type: 'status',
@@ -506,7 +610,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                   progressText: progressTextRef.current,
                   visualCaptureLabel: visualCaptureLabelRef.current
                 });
-              }, 300);
+              }, OVERLAY_STATUS_INTERVAL_MS);
 
               // Request showing the native overlay panel
               ApiClient.toggleOverlay(true).then((res) => {
@@ -521,6 +625,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                 openBrowserPopup();
               });
 
+              setIsPreparingRecording(false);
+              setIsVerifying(false);
               setIsRecording(true);
               setStatusState('recording');
               setStatusText(t('recording.statusRecording'));
@@ -538,8 +644,13 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
               ApiClient.cancelNativeCapture(session.id).catch(() => {});
               localStorage.removeItem('asr-active-recording-id');
               sessionIdRef.current = null;
+              captureLeaseCommittedRef.current = false;
+              setIsPreparingRecording(false);
+              setIsWaitingForAi(false);
+              setIsVerifying(false);
               setStatusState('error');
               setIsRecording(false);
+              void releaseCaptureLease().catch(() => {});
 
               if (data.reason === 'permissions_missing') {
                 setPermissionsErrorDetails({
@@ -589,14 +700,20 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
             ApiClient.cancelNativeCapture(session.id).catch(() => {});
             localStorage.removeItem('asr-active-recording-id');
             sessionIdRef.current = null;
+            captureLeaseCommittedRef.current = false;
+            setIsPreparingRecording(false);
+            setIsWaitingForAi(false);
+            setIsVerifying(false);
             setStatusState('error');
             setStatusText(t('recording.startFailed'));
             showToast(t('recording.startFailed'), 'error');
+            void releaseCaptureLease().catch(() => {});
           }
         };
 
         stopAudioMeter(false);
         drawAudioMeter();
+        startInFlightRef.current = false;
         return;
       }
 
@@ -730,6 +847,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       localStorage.setItem('asr-active-recording-id', session.id);
       sequenceRef.current = new Map();
       uploadChainsRef.current = new Map();
+      browserUploadBacklogRef.current.reset();
+      browserBackpressureTriggeredRef.current = false;
 
       // 5. Start MediaRecorder
       const recorderInputs: Array<{ trackId: string; stream: MediaStream }> = [];
@@ -757,16 +876,34 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
 
         recorder.addEventListener('dataavailable', (event) => {
           if (!event.data || event.data.size === 0 || !sessionIdRef.current) return;
+          const blob = event.data;
+          const backlogSnapshot = browserUploadBacklogRef.current.accept(blob.size);
           const currentSequence = sequenceRef.current.get(trackId) || 0;
           sequenceRef.current.set(trackId, currentSequence + 1);
           const currentChain = uploadChainsRef.current.get(trackId) || Promise.resolve();
-          const nextChain = currentChain.then(() => uploadChunk(trackId, event.data, currentSequence));
+          const nextChain = currentChain
+            .then(() => uploadChunk(trackId, blob, currentSequence))
+            .finally(() => {
+              browserUploadBacklogRef.current.release(blob.size);
+            });
           uploadChainsRef.current.set(trackId, nextChain);
           nextChain.catch((error) => {
             setStatusText(t('common.error'));
             setStatusState('error');
             showToast(t('recording.chunkSaveFailed', { error: error.message }), 'error');
           });
+
+          if (backlogSnapshot.saturated && !browserBackpressureTriggeredRef.current) {
+            browserBackpressureTriggeredRef.current = true;
+            const message = t('recording.uploadBackpressure');
+            setStatusText(t('recording.finalizing'));
+            setStatusState('working');
+            setProgressText(message);
+            showToast(message, 'error');
+            queueMicrotask(() => {
+              void stopRecording();
+            });
+          }
         });
 
         recorder.addEventListener('error', (event: any) => {
@@ -777,6 +914,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       };
 
       recorderInputs.forEach(({ trackId, stream }) => startTrackRecorder(trackId, stream));
+      captureLeaseCommittedRef.current = true;
 
       // 6. Timer and state
       startedAtRef.current = Date.now();
@@ -785,9 +923,9 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
         const secs = (elapsed % 60).toString().padStart(2, '0');
         setTimer(`${mins}:${secs}`);
-      }, 250);
+      }, RECORDING_TIMER_INTERVAL_MS);
 
-      // Start status broadcast interval for the overlay window (every 300ms)
+      // The overlay needs human-scale status updates, not display-rate telemetry.
       broadcastIntervalRef.current = setInterval(() => {
         bcRef.current?.postMessage({
           type: 'status',
@@ -799,7 +937,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
           progressText: progressTextRef.current,
           visualCaptureLabel: visualCaptureLabelRef.current
         });
-      }, 300);
+      }, OVERLAY_STATUS_INTERVAL_MS);
 
       // Request showing the native overlay panel, fallback to browser window.open if unavailable
       ApiClient.toggleOverlay(true).then((res) => {
@@ -814,12 +952,29 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         openBrowserPopup();
       });
 
+      setIsPreparingRecording(false);
+      setIsWaitingForAi(false);
+      setIsVerifying(false);
       setIsRecording(true);
       setStatusText(t('recording.statusRecording'));
       setStatusState('recording');
       setProgressText(t('recording.progressSaving'));
+      startInFlightRef.current = false;
 
     } catch (error: any) {
+      startInFlightRef.current = false;
+      setIsPreparingRecording(false);
+      setIsWaitingForAi(false);
+      setIsVerifying(false);
+      if (!captureLeaseCommittedRef.current) {
+        await releaseCaptureLease().catch(() => {});
+      }
+      if (cancelled()) {
+        setStatusText(t('recording.statusReady'));
+        setStatusState('ready');
+        setProgressText(t('recording.progressNone'));
+        return;
+      }
       visualCaptureLabelRef.current = '';
       releaseMedia();
       await restoreAudioRoute();
@@ -827,7 +982,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       setStatusState('error');
       showToast(t('recording.startFailed', { error: error.message }), 'error');
     }
-  }, [t, selectedMicrophone, selectedSystemDevice, captureCapabilities, setCapturePermissions, startAudioMeter, loadDevices, releaseMedia, restoreAudioRoute, showToast]);
+  }, [t, selectedMicrophone, selectedSystemDevice, captureCapabilities, setCapturePermissions, loadDevices, releaseMedia, restoreAudioRoute, showToast, stopRecording, drawAudioMeter, stopAudioMeter, releaseCaptureLease, setIsVerifying]);
 
   const toggleTestAudioRoute = async () => {
     setIsVerifying(true);
@@ -880,6 +1035,10 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       if (routeActivatedRef.current) {
         navigator.sendBeacon?.('/v1/system/audio/restore');
       }
+      const reservationId = captureReservationIdRef.current;
+      if (reservationId && !captureLeaseCommittedRef.current) {
+        releaseCaptureReservationOnUnload(reservationId);
+      }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -893,6 +1052,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
 
   return {
     isRecording,
+    isPreparingRecording,
+    isWaitingForAi,
     timer,
     signalLevel,
     signalLevelMic,
@@ -916,6 +1077,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     setSelectedMicrophone,
     setSelectedSystemDevice,
     startRecording,
+    cancelPendingStart,
     stopRecording,
     toggleTestAudioRoute,
     verifyAudioSetup,

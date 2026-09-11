@@ -168,6 +168,30 @@ class TranscriptionService:
         )
 
     @staticmethod
+    def resolve_recording_defaults(
+        body: TranscribeRecordingRequest,
+        settings: dict[str, Any],
+        *,
+        fallback_model: str,
+    ) -> TranscribeRecordingRequest:
+        """Resolve omitted normal-path options from persisted settings without overriding explicit requests."""
+        explicit_fields = body.model_fields_set
+        defaults: dict[str, Any] = {
+            "model": settings.get("default_model") or fallback_model,
+            "language": settings.get("default_language", "it"),
+            "task": settings.get("default_task") or "transcribe",
+            "word_timestamps": bool(settings.get("default_word_timestamps", False)),
+            "temperature": settings.get("default_temperature"),
+            "condition_on_previous_text": bool(settings.get("default_condition_on_previous", False)),
+        }
+        updates = {
+            field: value
+            for field, value in defaults.items()
+            if field not in explicit_fields
+        }
+        return body.model_copy(update=updates) if updates else body
+
+    @staticmethod
     def backend(provider: str, model: str) -> str:
         return asr_backend_for(provider, model)
 
@@ -186,6 +210,11 @@ class TranscriptionService:
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
         settings = load_settings()
+        body = self.resolve_recording_defaults(
+            body,
+            settings,
+            fallback_model=app.state.default_model,
+        )
         visual_intelligence_enabled = (
             bool(body.visual_intelligence_enabled)
             if body.visual_intelligence_enabled is not None

@@ -2,51 +2,50 @@
 
 ## Engineering baseline
 
-ClosedRoom follows `daniele21/repo-template-sw` **0.8.0** with target maturity **L2** and profiles `python`, `typescript`, `macos`, `local-ai`, `product-ui`.
+ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, with `python`, `typescript`, `macos`, `local-ai`, `product-ui`. Changes integrate through `dev`; `dev -> main` is RELEASE. Target-Mac evidence is blocking only at release.
 
-The 0.8 baseline is integrated on `speaker_detection`, the advanced product branch that was verified ahead of `main`, `pipeline`, `tech-improvements` and `ux-refactoring` at adoption time.
+## Integrated baseline
 
-## Strong existing evidence to preserve
+- Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
+- PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio-strategy benchmark tooling; dual-track audio remains canonical pending representative evidence.
+- PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and the adaptive Today/Meeting/Projects workspace.
+- PRS-17 candidate `c1c79f31` passed FULL preflight #306, including 411 Python tests and declared Meeting FULL_MEDIA journeys.
+- PRS-18 release tooling integrated through PR #48; PR #53 added one aggregate REAL_ENVIRONMENT runner over the measured target-Mac and PRS-16 contention owners while keeping release qualification fail-closed.
+- PRS-18 measured release remains the only active workstream.
 
-- Detailed current architecture and a broad Python unit/integration suite.
-- Explicit runtime/service/job/port ownership.
-- Native macOS capture, diarization and visual-intelligence boundaries with focused tests.
-- Existing visual + diarization smoke tooling and representative datasets.
-- Version-aware macOS app packaging and native-helper validation.
-- Code-first semantic UI tokens/components in the React frontend.
+## Current integration state
 
-## Baseline gaps now implemented
+`HeavyWorkloadArbiter` remains the sole heavy-work owner. Capture waits for the next safe managed-work boundary, holds bounded queued work during recording and releases it afterward; `ResourcePolicy` remains the fail-safe. `RecordingStore` remains the persistence owner and external runtimes remain caller-owned.
 
-- Blast radius is machine-selected by `scripts/select_validation_profile.py` into LEAN / SCOPED / STRONG / FULL; unknown paths fail safe to FULL.
-- `.github/workflows/preflight.yml` provides exact-head, read-only remote preflight and routes source/package validation by selected profile.
-- Canonical builds use `scripts/build_artifact.sh`; successful artifacts receive unique identity and immutable lineage directories under `dist/artifacts/`.
-- `scripts/finalize_build_artifact.py` creates `build-manifest.json`, aggregate SHA-256 evidence, `SHA256SUMS`, `BUILD_CHANGELOG.md` against the previous successful comparable build and bounded local retention.
-- `scripts/clean_build_state.py` removes transient build state without deleting finalized successful artifacts by default.
-- `scripts/smoke_packaged_app.py` exercises the finalized `.app` frozen executable, bundled FastAPI/static frontend, readiness, graceful stop, listener cleanup and observed child cleanup.
-- Packaging no longer requires a developer-machine absolute `local-llm-server` wheel path; the current 0.3.8 integration points to its published release artifact and digest.
-- Packaging precompiles the Core Audio helper without invoking user-facing `setup-audio`, so CI build does not install BlackHole or mutate audio routing merely to produce an artifact.
+The frontend reserves before capture, shows truthful cancellable preparation and starts the timer only with real capture. `App.tsx` + `workspace.css` own the adaptive shell.
 
-## Residual target-environment evidence
+PRS-18 has two separate target-Mac evidence paths:
 
-Automated packaged-app smoke is deliberately classified as `representative_virtual`, not complete target evidence. These remain separate when a change makes them material:
+- **release evidence**: `release_build` produces the exact Developer-ID-signed, securely timestamped, notarized/stapled app + DMG and Gatekeeper proof; `release_evidence` exercises that immutable artifact through WKWebView/TCC FULL_MEDIA, real local MLX/resource/thermal, PRS-9 and PRS-16 contention evidence;
+- **LOCAL REAL_ENVIRONMENT**: `python3 scripts/run_local_real_environment_suite.py` builds or reuses one exact finalized **ad-hoc** Apple-Silicon app and runs the same physical evidence owners through a local-only adapter. Evidence is written under `dist/evidence/local-real-environment/<revision>/`. This proves target-Mac behavior but never establishes distribution or release readiness.
 
-- interactive WKWebView/window/focus behavior;
-- real TCC prompts and permission identity;
-- physical microphone and system-audio device behavior;
-- production signing/notarization identity;
-- production MLX/Metal model compatibility, memory, latency, throughput and quality.
+The local adapter does not modify the canonical release runners or their Developer ID/notarization requirement.
 
-Source-contract tests likewise do not upgrade these claims.
+## Release evidence still pending
 
-## Current evidence status
+Stable promotion remains blocked until **RELEASE / FULL** automation and applicable target-environment evidence agree on the exact candidate.
 
-The gap-closing implementation is on `close-baseline-gaps`. Its deterministic unit checks and exact-head GitHub Actions preflight must pass on the resulting PR before these mechanisms are considered proven on `speaker_detection`. Until that run exists, implementation is present but remote execution evidence is pending.
+Still required:
 
-Historical planning documents still need a separate lifecycle cleanup; they are not treated as current operational truth.
+- Developer-ID/notary authority for the exact production artifact; without Apple Developer Program membership this is an explicit external release blocker, not a failed local physical test;
+- target-Mac WKWebView/accessibility/focus + TCC-backed native `both` capture with non-empty mic/system tracks and clean lifecycle;
+- PRS-16 real AI-busy contention: local MLX active while `Preparing recording` is visible, no premature capture, then capture after the safe boundary with mic/system persistence;
+- representative CPU/RSS/thermal + local MLX completion and the PRS-9 dual-vs-mixed benchmark;
+- subjective VoiceOver/usability where materially required and representative evidence for material production ASR/LLM quality or latency claims.
+
+A passing LOCAL REAL_ENVIRONMENT run can satisfy the applicable physical target-Mac observations for its exact ad-hoc artifact, but cannot satisfy Developer ID/notarization/stapling/distribution-Gatekeeper qualification.
+
+## Active workstream
+
+- [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured release active.
 
 ## Next highest-value work
 
-1. Obtain green exact-head remote preflight for the gap-closing PR, including finalized `.app` package smoke on macOS arm64.
-2. Fix any failing gate at its owning invariant rather than weakening the profile or check.
-3. Merge the gap closure into `speaker_detection` only after deterministic evidence is green.
-4. Continue moving reproducible failures found only during final macOS testing into the cheapest sufficient automated environment while preserving genuinely physical/TCC/model evidence separately.
+1. Freeze the exact `dev` candidate and live `main` base and obtain RELEASE/FULL automation.
+2. Without Apple distribution authority, run `python3 scripts/run_local_real_environment_suite.py` on the representative Mac and retain its exact evidence while keeping distribution authority blocked.
+3. If distribution authority becomes available, run the canonical signed/notarized release path and promote only when all blocking evidence matches the frozen candidate.
