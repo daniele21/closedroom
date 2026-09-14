@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Diagnose the target-Mac Cmd-K search shortcut against an exact ClosedRoom artifact.
+"""Diagnose target-Mac Cmd-K delivery against an exact ClosedRoom artifact.
 
-This is diagnostic tooling, not release qualification. It reuses the exact app
-recorded by a LOCAL REAL_ENVIRONMENT aggregate, launches it with an isolated
-HOME, navigates to Home through the same Accessibility contract used by the
-release smoke, compares Cmd-K delivery with pressing the same Search control
-through Accessibility, and records only privacy-safe process/window/focus-role
-metadata.
+Diagnostic only: reuse the exact LOCAL REAL_ENVIRONMENT artifact, seed mock data
+inside an isolated HOME so the normal Dashboard renders Search, then compare
+Cmd-K with pressing the same Search control through Accessibility. Evidence is
+privacy-safe and never establishes release qualification.
 """
 from __future__ import annotations
 
@@ -27,7 +25,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from macos_ui_driver import AccessibilityPermissionRequired, UIAutomationError, default_driver
-from real_environment_smoke import LABELS, Api, discover_server, pids_for, quit_app, wait
+from real_environment_smoke import Api, LABELS, discover_server, pids_for, quit_app, wait
 
 DRIVER = default_driver()
 
@@ -37,12 +35,9 @@ def parse_args() -> argparse.Namespace:
         description="Diagnose ClosedRoom Cmd-K delivery on a representative target Mac"
     )
     parser.add_argument("--root", default=".")
-    parser.add_argument(
-        "--candidate",
-        help="Candidate revision whose LOCAL REAL_ENVIRONMENT aggregate should be reused",
-    )
-    parser.add_argument("--aggregate", help="Explicit local-real-environment-suite.json path")
-    parser.add_argument("--evidence", help="Explicit output path")
+    parser.add_argument("--candidate")
+    parser.add_argument("--aggregate")
+    parser.add_argument("--evidence")
     parser.add_argument("--timeout", type=float, default=15.0)
     return parser.parse_args()
 
@@ -99,7 +94,6 @@ def revisions_match(left: str, right: str) -> bool:
 
 
 def focused_role(pid: int) -> str:
-    """Return only the AX role, discarding potentially sensitive detail/value."""
     raw = DRIVER.focused(pid)
     return raw.split("|", 1)[0].strip() or "unknown"
 
@@ -149,6 +143,48 @@ def evidence_path(root: Path, revision: str, explicit: str | None) -> Path:
     return path
 
 
+def launch(
+    executable: str,
+    sandbox_home: Path,
+    info: dict[str, str],
+    timeout: float,
+) -> tuple[subprocess.Popen[bytes], int, int, Api, dict[str, Any]]:
+    env = os.environ.copy()
+    env["HOME"] = str(sandbox_home)
+    process = subprocess.Popen(
+        [executable],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    pid = process.pid
+    if not wait(lambda: process.poll() is None, 3):
+        raise RuntimeError("packaged_process_did_not_start")
+    port, health = discover_server(pid, info["bundle_id"], info["version"], timeout)
+    api = Api(port)
+    if not health.get("ok"):
+        raise RuntimeError("loopback_health_failed")
+    return process, pid, port, api, health
+
+
+def stop_for_relaunch(process: subprocess.Popen[bytes], executable: str) -> None:
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+    if not wait(lambda: not pids_for(executable), 8):
+        raise RuntimeError("artifact_process_survived_seed_relaunch_boundary")
+
+
+def meeting_count(api: Api) -> int:
+    payload = api.json("/v1/meetings?limit=10")
+    items = payload.get("items", []) if isinstance(payload, dict) else []
+    return len(items) if isinstance(items, list) else 0
+
+
 def main() -> int:
     args = parse_args()
     root = Path(args.root).resolve()
@@ -196,8 +232,9 @@ def main() -> int:
         "app": str(app),
         "aggregate": str(aggregate_path),
         "privacy_boundary": (
-            "Evidence contains only bounded status, process/window metadata and focused AX role; "
-            "UI labels, titles, input values, transcript text and meeting text are not persisted."
+            "Evidence contains only bounded status, process/window metadata, focused AX role and "
+            "synthetic sandbox record counts; UI labels, titles, input values, transcript text and "
+            "meeting text are not persisted."
         ),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "steps": {},
@@ -211,42 +248,50 @@ def main() -> int:
     port: int | None = None
 
     try:
-        launch_env = os.environ.copy()
-        launch_env["HOME"] = str(sandbox_home)
-        process = subprocess.Popen(
-            [executable],
-            env=launch_env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        pid = process.pid
-        report["steps"]["packaged_process_started"] = wait(lambda: process.poll() is None, 3)
-        if not report["steps"]["packaged_process_started"]:
-            raise RuntimeError("packaged_process_did_not_start")
+        # First launch exists only to seed deterministic local data into the
+        # isolated HOME. No user data or candidate artifact contents are changed.
+        process, pid, port, api, _ = launch(executable, sandbox_home, info, args.timeout)
+        report["steps"]["seed_launch_started"] = True
 
-        port, health = discover_server(pid, info["bundle_id"], info["version"], args.timeout)
-        Api(port)
-        report["steps"]["loopback_health"] = bool(health.get("ok"))
-        if not report["steps"]["loopback_health"]:
-            raise RuntimeError("loopback_health_failed")
+        seed_result = api.json(
+            "/v1/system/mock-data",
+            "POST",
+            {"lang": "en"},
+            20,
+        )
+        seed_ok = bool(isinstance(seed_result, dict) and seed_result.get("success"))
+        report["steps"]["sandbox_mock_seeded"] = seed_ok
+        if not seed_ok:
+            raise RuntimeError("sandbox_mock_seed_failed")
+
+        seeded_count = meeting_count(api)
+        report["steps"]["sandbox_meeting_count"] = seeded_count
+        if seeded_count <= 0:
+            raise RuntimeError("sandbox_mock_seed_produced_no_meetings")
+
+        stop_for_relaunch(process, executable)
+        process = None
+        pid = None
+        port = None
+
+        # Relaunch the exact same immutable artifact against the same isolated
+        # HOME so Dashboard mounts normally with local meetings already present.
+        process, pid, port, api, _ = launch(executable, sandbox_home, info, args.timeout)
+        report["steps"]["packaged_process_started"] = True
+        report["steps"]["loopback_health"] = True
 
         report["steps"]["wkwebview_window_accessible"] = DRIVER.window_accessible(pid)
         if not report["steps"]["wkwebview_window_accessible"]:
             raise RuntimeError("wkwebview_window_not_accessible")
 
-        # Match the canonical REAL_ENVIRONMENT journey: explicitly navigate to
-        # Home before checking the Search control. A fresh isolated HOME may
-        # otherwise launch on a different route even though the sidebar is ready.
-        home_navigation_available = wait(lambda: DRIVER.exists(pid, LABELS["home"]), args.timeout)
-        report["steps"]["home_navigation_available"] = home_navigation_available
-        if not home_navigation_available:
-            raise RuntimeError("home_navigation_control_missing")
-        DRIVER.press(pid, LABELS["home"])
+        report["steps"]["sandbox_meetings_visible_after_relaunch"] = meeting_count(api) > 0
+        if not report["steps"]["sandbox_meetings_visible_after_relaunch"]:
+            raise RuntimeError("sandbox_meetings_missing_after_relaunch")
 
         home_search_available = wait(lambda: DRIVER.exists(pid, LABELS["search"]), args.timeout)
         report["steps"]["home_search_available"] = home_search_available
         if not home_search_available:
-            raise RuntimeError("home_search_control_missing_after_navigation")
+            raise RuntimeError("home_search_control_missing_with_seeded_dashboard")
 
         report["before_cmd_k"] = snapshot(pid)
         DRIVER.key(pid, "cmd-k")
@@ -263,8 +308,7 @@ def main() -> int:
         else:
             report["steps"]["ax_search_button_opens_dialog"] = "not_needed"
 
-        dialog_open = shortcut_opened or bool(fallback_opened)
-        if dialog_open:
+        if shortcut_opened or bool(fallback_opened):
             DRIVER.key(pid, "escape")
             report["steps"]["escape_closes_search"] = wait(
                 lambda: not DRIVER.exists(pid, LABELS["close"]), 3.0
