@@ -51,14 +51,24 @@ class KeyboardShortcutDiagnosticContractTest(unittest.TestCase):
         self.assertIn("artifact_revision_mismatch", self.source)
         self.assertIn('report["status"] = "complete"', self.source)
 
-    def test_diagnostic_navigates_home_before_search_probe(self) -> None:
-        nav = 'DRIVER.press(pid, LABELS["home"])'
+    def test_diagnostic_seeds_isolated_dashboard_before_shortcut_probe(self) -> None:
+        seed = '"/v1/system/mock-data"'
+        count = 'meeting_count(api)'
         search = 'home_search_available = wait(lambda: DRIVER.exists(pid, LABELS["search"])'
-        self.assertIn('home_navigation_available = wait(lambda: DRIVER.exists(pid, LABELS["home"])', self.source)
-        self.assertIn(nav, self.source)
+        key = 'DRIVER.key(pid, "cmd-k")'
+
+        self.assertIn(seed, self.source)
+        self.assertIn('"sandbox_mock_seeded"', self.source)
+        self.assertIn('"sandbox_meeting_count"', self.source)
+        self.assertIn('"sandbox_meetings_visible_after_relaunch"', self.source)
+        self.assertIn("stop_for_relaunch(process, executable)", self.source)
+        self.assertIn(count, self.source)
         self.assertIn(search, self.source)
-        self.assertLess(self.source.index(nav), self.source.index(search))
-        self.assertIn("home_search_control_missing_after_navigation", self.source)
+        self.assertIn(key, self.source)
+        self.assertLess(self.source.index(seed), self.source.index(search))
+        self.assertLess(self.source.index(search), self.source.index(key))
+        self.assertNotIn('DRIVER.press(pid, LABELS["home"])', self.source)
+        self.assertNotIn("home_search_control_missing_after_navigation", self.source)
 
 
 if __name__ == "__main__":
