@@ -3,8 +3,10 @@
 
 This is diagnostic tooling, not release qualification. It reuses the exact app
 recorded by a LOCAL REAL_ENVIRONMENT aggregate, launches it with an isolated
-HOME, compares Cmd-K delivery with pressing the same Search control through
-Accessibility, and records only privacy-safe process/window/focus-role metadata.
+HOME, navigates to Home through the same Accessibility contract used by the
+release smoke, compares Cmd-K delivery with pressing the same Search control
+through Accessibility, and records only privacy-safe process/window/focus-role
+metadata.
 """
 from __future__ import annotations
 
@@ -27,7 +29,6 @@ if str(SCRIPT_DIR) not in sys.path:
 from macos_ui_driver import AccessibilityPermissionRequired, UIAutomationError, default_driver
 from real_environment_smoke import LABELS, Api, discover_server, pids_for, quit_app, wait
 
-
 DRIVER = default_driver()
 
 
@@ -38,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", default=".")
     parser.add_argument(
         "--candidate",
-        help="Candidate revision whose LOCAL REAL_ENVIRONMENT aggregate should be reused; defaults to latest aggregate",
+        help="Candidate revision whose LOCAL REAL_ENVIRONMENT aggregate should be reused",
     )
     parser.add_argument("--aggregate", help="Explicit local-real-environment-suite.json path")
     parser.add_argument("--evidence", help="Explicit output path")
@@ -58,8 +59,14 @@ def resolve_aggregate(root: Path, candidate: str | None, explicit: str | None) -
     if explicit:
         path = Path(explicit).expanduser().resolve()
     elif candidate:
-        short = candidate[:12]
-        path = root / "dist" / "evidence" / "local-real-environment" / short / "local-real-environment-suite.json"
+        path = (
+            root
+            / "dist"
+            / "evidence"
+            / "local-real-environment"
+            / candidate[:12]
+            / "local-real-environment-suite.json"
+        )
     else:
         path = latest_aggregate(root)
     if not path.is_file():
@@ -77,11 +84,7 @@ def bundle_info(app: Path) -> dict[str, str]:
     version = str(info.get("CFBundleShortVersionString") or info.get("CFBundleVersion") or "")
     if not bundle_id or not executable_name or not executable.is_file():
         raise RuntimeError("invalid_packaged_app_identity")
-    return {
-        "bundle_id": bundle_id,
-        "version": version,
-        "executable": str(executable),
-    }
+    return {"bundle_id": bundle_id, "version": version, "executable": str(executable)}
 
 
 def manifest_source_revision(manifest: dict[str, Any]) -> str:
@@ -96,7 +99,7 @@ def revisions_match(left: str, right: str) -> bool:
 
 
 def focused_role(pid: int) -> str:
-    """Return only the AX role, discarding any potentially sensitive detail/value."""
+    """Return only the AX role, discarding potentially sensitive detail/value."""
     raw = DRIVER.focused(pid)
     return raw.split("|", 1)[0].strip() or "unknown"
 
@@ -231,10 +234,19 @@ def main() -> int:
         if not report["steps"]["wkwebview_window_accessible"]:
             raise RuntimeError("wkwebview_window_not_accessible")
 
+        # Match the canonical REAL_ENVIRONMENT journey: explicitly navigate to
+        # Home before checking the Search control. A fresh isolated HOME may
+        # otherwise launch on a different route even though the sidebar is ready.
+        home_navigation_available = wait(lambda: DRIVER.exists(pid, LABELS["home"]), args.timeout)
+        report["steps"]["home_navigation_available"] = home_navigation_available
+        if not home_navigation_available:
+            raise RuntimeError("home_navigation_control_missing")
+        DRIVER.press(pid, LABELS["home"])
+
         home_search_available = wait(lambda: DRIVER.exists(pid, LABELS["search"]), args.timeout)
         report["steps"]["home_search_available"] = home_search_available
         if not home_search_available:
-            raise RuntimeError("home_search_control_missing")
+            raise RuntimeError("home_search_control_missing_after_navigation")
 
         report["before_cmd_k"] = snapshot(pid)
         DRIVER.key(pid, "cmd-k")
