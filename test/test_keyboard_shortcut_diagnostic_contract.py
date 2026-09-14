@@ -51,6 +51,15 @@ class KeyboardShortcutDiagnosticContractTest(unittest.TestCase):
         self.assertIn("artifact_revision_mismatch", self.source)
         self.assertIn('report["status"] = "complete"', self.source)
 
+    def test_diagnostic_navigates_home_before_search_probe(self) -> None:
+        nav = 'DRIVER.press(pid, LABELS["home"])'
+        search = 'home_search_available = wait(lambda: DRIVER.exists(pid, LABELS["search"])'
+        self.assertIn('home_navigation_available = wait(lambda: DRIVER.exists(pid, LABELS["home"])', self.source)
+        self.assertIn(nav, self.source)
+        self.assertIn(search, self.source)
+        self.assertLess(self.source.index(nav), self.source.index(search))
+        self.assertIn("home_search_control_missing_after_navigation", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()
