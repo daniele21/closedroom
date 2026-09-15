@@ -41,10 +41,9 @@ class KeyboardShortcutDiagnosticContractTest(unittest.TestCase):
     def test_persisted_focus_is_role_only(self) -> None:
         self.assertIn('raw.split("|", 1)[0].strip()', self.source)
         self.assertNotIn('"focused": DRIVER.focused', self.source)
-        self.assertIn(
-            "UI labels, titles, input values, transcript text and meeting text are not persisted",
-            self.source,
-        )
+        self.assertIn("synthetic sandbox record counts", self.source)
+        self.assertIn("UI labels, titles, input values, transcript text and", self.source)
+        self.assertIn("meeting text are not persisted.", self.source)
 
     def test_diagnostic_reuses_exact_artifact_without_release_qualification(self) -> None:
         self.assertIn('"qualification_scope": "diagnostic_only"', self.source)
