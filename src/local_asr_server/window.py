@@ -167,14 +167,15 @@ class ClosedRoomWindowManager:
 
     def _handle_local_key_event(self, event):
         """Route app-local shortcuts through AppKit before WKWebView delivery."""
-        if not self.window or not self.window.isKeyWindow():
+        if not self.window:
             return event
 
         modifiers = int(event.modifierFlags())
         characters = str(event.charactersIgnoringModifiers() or "").lower()
         key_code = int(event.keyCode())
+        command_pressed = bool(modifiers & NSEventModifierFlagCommand)
 
-        if modifiers & NSEventModifierFlagCommand and characters == "k":
+        if command_pressed and (key_code == 40 or characters == "k"):
             self._dispatch_keyboard_event_to_webview(key="k", code="KeyK", meta_key=True)
         elif key_code == 53:  # Escape
             self._dispatch_keyboard_event_to_webview(key="Escape", code="Escape")

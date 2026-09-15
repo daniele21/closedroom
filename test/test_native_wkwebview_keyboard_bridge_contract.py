@@ -28,8 +28,9 @@ class NativeWKWebViewKeyboardBridgeContractTest(unittest.TestCase):
         self.assertIn("NSEvent.removeMonitor_(self._key_event_monitor)", self.window)
 
     def test_cmd_k_and_escape_bridge_to_focused_dom_keyboard_path(self) -> None:
-        self.assertIn('characters == "k"', self.window)
-        self.assertIn("modifiers & NSEventModifierFlagCommand", self.window)
+        self.assertNotIn("self.window.isKeyWindow()", self.window)
+        self.assertIn("command_pressed = bool(modifiers & NSEventModifierFlagCommand)", self.window)
+        self.assertIn('key_code == 40 or characters == "k"', self.window)
         self.assertIn("key_code == 53", self.window)
         self.assertIn("document.activeElement || document.body || document", self.window)
         self.assertIn("new KeyboardEvent('keydown'", self.window)
