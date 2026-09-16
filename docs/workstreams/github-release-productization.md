@@ -2,7 +2,7 @@
 
 Status: ACTIVE
 Owner: repository release metadata, version identity, publication automation and public release experience
-Base: `dev@eee10a04bf00255a91688da63d05af3b9f481a37`
+Base: `dev@dea61b4d938e9ee1042f034a8ff6ca61a9613263`
 
 ## Outcome
 
@@ -62,7 +62,7 @@ Release notes may use GitHub-generated PR/contributor sections, but the top sect
 | ID | Observable outcome | State |
 | --- | --- | --- |
 | GRP-1 | Stable source promotion is explicitly separated from binary distribution | DONE |
-| GRP-2 | ClosedRoom has one canonical product version consumed by bundle/build/release metadata | ACTIVE |
+| GRP-2 | ClosedRoom has one canonical product version consumed by bundle/build/release metadata | DONE |
 | GRP-3 | Release notes/categories and public asset naming are repository contracts | READY |
 | GRP-4 | A tag/main-bound workflow creates a draft GitHub Release from qualified immutable artifacts | READY |
 | GRP-5 | Developer ID/notarization credentials can satisfy publication gates without changing product behavior | BLOCKED |
@@ -83,9 +83,9 @@ Apple distribution authority does not block a truthful stable-source promotion w
 
 ### Implementation
 
-- `CONTRIBUTING.md` now defines `main` as stable source and GitHub Release as a separate distribution event.
+- `CONTRIBUTING.md` defines `main` as stable source and GitHub Release as a separate distribution event.
 - `docs/current-state.md` separates stable candidate evidence from distribution-only Developer ID/notary/Gatekeeper obligations.
-- Existing automation already supports the split: `dev -> main` selects RELEASE / FULL automated gates, while production signing/notarization is executed through the separate `release_build` / `release_evidence` commands rather than the hosted preflight workflow.
+- Existing automation supports the split: `dev -> main` selects RELEASE / FULL automated gates, while production signing/notarization is executed through the separate `release_build` / `release_evidence` commands rather than the hosted preflight workflow.
 - `.engineering/e2e.json` continues to require applicable REAL_ENVIRONMENT product/runtime evidence at stable promotion; no target-Mac product evidence was downgraded.
 
 ### Acceptance
@@ -101,16 +101,21 @@ Apple distribution authority does not block a truthful stable-source promotion w
 
 One repository-owned product version drives the macOS bundle/build identity, artifact filenames, manifest, release tag/title and visible application version.
 
-### Direction
+### Implementation
 
-Prefer a small canonical text/JSON owner dedicated to the product version rather than treating the legacy Python package version (`local-asr-server`) as the ClosedRoom product version. Existing package metadata may remain independently versioned if it is an implementation package rather than the distributed product.
+- root `VERSION` is the sole product-version data owner; current product version is `0.2.0`;
+- `scripts/product_version.py` validates numeric `X.Y.Z`, derives `vX.Y.Z`, and fails closed when an explicit release tag disagrees with the product version;
+- `build.sh`, `ClosedRoom.spec`, `scripts/build_artifact.sh` and `scripts/build_production_artifact.py` consume that canonical owner;
+- the nested native-capture helper bundle inherits the same product version;
+- `pyproject.toml` remains the independent `local-asr-server` implementation-package identity (`0.1.0`) and is no longer a product-version source;
+- cheap contract tests verify tag/version behavior and prevent product build paths from silently returning to package metadata.
 
 ### Acceptance
 
-- one edit changes the intended ClosedRoom release version everywhere through deterministic consumers;
-- build fails on mismatched explicit tag/version rather than silently publishing inconsistent identities;
+- one `VERSION` edit changes the intended ClosedRoom release version everywhere through deterministic consumers;
+- build/release tooling fails on invalid or mismatched explicit tag/version rather than silently publishing inconsistent identities;
 - `vX.Y.Z` maps deterministically to product version `X.Y.Z`;
-- version resolution is covered by cheap tests.
+- version resolution and its direct build consumers are covered by cheap tests.
 
 ## GRP-3 — release metadata and notes
 
@@ -183,14 +188,14 @@ The two converge at the publication boundary: GRP consumes successful exact-cand
 
 ## Validation
 
-Initial planning/governance changes are LEAN. Version/build/workflow changes are FULL because they touch release/build/CI identity. Apple signing/notarization execution is REAL_ENVIRONMENT / protected authority. GitHub Actions publication mechanics are REMOTE_AUTOMATED.
+Version/build/workflow changes are FULL because they touch release/build/CI identity. Apple signing/notarization execution is REAL_ENVIRONMENT / protected authority. GitHub Actions publication mechanics are REMOTE_AUTOMATED.
 
 ## Resume checkpoint
 
-- base: `dev@eee10a04bf00255a91688da63d05af3b9f481a37`;
-- GRP-1: implemented on `chore/stable-source-distribution-policy`; stable source and binary distribution are separate while target-Mac product evidence remains release-blocking when applicable;
-- confirmed: no GitHub Releases currently exist and no dedicated release-publication workflow exists;
+- base refreshed to `dev@dea61b4d938e9ee1042f034a8ff6ca61a9613263` after PR #65 integrated the accessible Search release outcome;
+- GRP-1: integrated; stable source and binary distribution are separate while target-Mac product evidence remains release-blocking when applicable;
+- GRP-2: implemented with root `VERSION`, canonical resolver/tag validation and all direct macOS build/artifact consumers moved off the legacy package version;
+- confirmed: historical tag `v0.1.0` already exists but no GitHub Release currently exists, so the next ClosedRoom product line is `0.2.0` / `v0.2.0`;
 - confirmed: existing production tooling already owns immutable manifests/checksums/build delta and signed/notarized artifact qualification;
-- confirmed: README currently describes ClosedRoom as source-built with no public binary release;
 - external block: Apple Developer distribution authority affects GRP-5/6 only;
-- next action: implement GRP-2 canonical ClosedRoom product version identity before release-note/publication automation.
+- next action: implement GRP-3 release metadata/asset contract, then GRP-4 draft GitHub Release automation while PRS-18 target-Mac evidence continues independently.

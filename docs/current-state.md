@@ -11,8 +11,9 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and the adaptive Today/Meeting/Projects workspace.
 - PRS-17 candidate `c1c79f31` passed FULL preflight #306, including 411 Python tests and declared Meeting FULL_MEDIA journeys.
 - PRS-18 release tooling integrated through PR #48; PR #53 added one aggregate REAL_ENVIRONMENT runner over the measured target-Mac and PRS-16 contention owners while keeping product/runtime qualification fail-closed.
+- PR #65 made the release-critical Search checkpoint prove accessible Search open/focus/close rather than synthetic Cmd-K/Escape delivery; shortcut behavior remains covered by focused technical tests but is not a stable-source blocker.
 - PRS-18 measured product/runtime release evidence remains active.
-- GitHub release productization is active in parallel; stable source promotion and public binary publication now have explicit non-overlapping contracts.
+- GitHub release productization has explicit non-overlapping stable-source and binary-publication contracts. ClosedRoom product version is owned by root `VERSION` (currently `0.2.0`) and is consumed by bundle/build/artifact paths independently from the legacy Python package version.
 
 ## Current integration state
 
@@ -49,13 +50,12 @@ A passing LOCAL REAL_ENVIRONMENT run may therefore close the applicable physical
 ## Active workstreams
 
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
-- [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1 stable-source/distribution separation implemented; canonical product versioning and draft GitHub Release automation remain.
+- [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1 stable-source/distribution separation and GRP-2 canonical ClosedRoom versioning implemented; release metadata and draft GitHub Release automation remain.
 
 These workstreams have separate write/ownership boundaries: PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
 
 ## Next highest-value work
 
 1. Complete the remaining PRS-18 target-Mac product/runtime evidence on the exact stable candidate, without treating Apple distribution authority as a blocker to `main`.
-2. Resolve the non-essential synthetic shortcut checkpoint so target-Mac qualification reflects release-critical user outcomes rather than synthetic key injection.
-3. Implement GRP-2: add one canonical ClosedRoom product version owner before tag/release automation.
-4. After stable promotion, implement draft GitHub Release publication from an exact `main` tag and publish a binary only when Apple distribution authority can qualify the exact immutable artifact.
+2. Implement GRP-3 release metadata, curated/generated note structure and canonical public asset validation from the canonical product version.
+3. Implement GRP-4 draft GitHub Release automation that is tag/main-bound and fail-closed on source/version/manifest/checksum mismatches; actual stable binary publication remains blocked until Apple distribution authority qualifies the exact immutable artifact.
