@@ -1,0 +1,239 @@
+name: Draft GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag in vX.Y.Z form
+        required: true
+        type: string
+      source_revision:
+        description: Exact 40-character tagged main SHA referenced by the production artifact
+        required: true
+        type: string
+      artifact_run_id:
+        description: Successful canonical production-artifact Actions run for this exact source
+        required: true
+        type: string
+      release_state:
+        description: Draft release classification
+        required: true
+        default: prerelease
+        type: choice
+        options:
+          - prerelease
+          - stable
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: closedroom-draft-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  draft-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main workflow authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Draft release workflow must be dispatched from main" >&2
+            exit 1
+          fi
+
+      - name: Check out stable repository history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify tag, stable main history and canonical version
+        env:
+          TAG: ${{ inputs.tag }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "tag must use vX.Y.Z" >&2; exit 1;
+          }
+          [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "source_revision must be a full lowercase commit SHA" >&2; exit 1;
+          }
+          git fetch origin main --tags --force
+          tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          [[ "$tag_commit" == "$SOURCE_REVISION" ]] || {
+            echo "tag does not resolve to source_revision" >&2; exit 1;
+          }
+          git merge-base --is-ancestor "$SOURCE_REVISION" origin/main || {
+            echo "tagged source is not in main history" >&2; exit 1;
+          }
+          git checkout --detach "$SOURCE_REVISION"
+          [[ -z "$(git status --porcelain)" ]] || {
+            echo "tagged source checkout is not clean" >&2; exit 1;
+          }
+          python3 scripts/product_version.py --root . --expect-tag "$TAG"
+          test -f "docs/releases/${TAG}.md" || {
+            echo "curated release notes missing for ${TAG}" >&2; exit 1;
+          }
+
+      - name: Verify canonical production artifact run and download bytes
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_RUN_ID" =~ ^[0-9]+$ ]] || {
+            echo "artifact_run_id must be numeric" >&2; exit 1;
+          }
+
+          expected_workflow_path=".github/workflows/production-release-artifact.yml"
+          expected_artifact_name="closedroom-production-release-${SOURCE_REVISION}"
+          run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ARTIFACT_RUN_ID}")"
+          [[ "$(jq -r '.status' <<<"$run_json")" == "completed" ]] || {
+            echo "artifact source run is not completed" >&2; exit 1;
+          }
+          [[ "$(jq -r '.conclusion' <<<"$run_json")" == "success" ]] || {
+            echo "artifact source run did not succeed" >&2; exit 1;
+          }
+          [[ "$(jq -r '.event' <<<"$run_json")" == "workflow_dispatch" ]] || {
+            echo "artifact source run must be an explicit workflow dispatch" >&2; exit 1;
+          }
+          [[ "$(jq -r '.path' <<<"$run_json")" == "$expected_workflow_path" ]] || {
+            echo "artifact source run is not the canonical production workflow" >&2; exit 1;
+          }
+          [[ "$(jq -r '.head_branch' <<<"$run_json")" == "main" ]] || {
+            echo "artifact source run must execute from main" >&2; exit 1;
+          }
+          [[ "$(jq -r '.head_sha' <<<"$run_json")" == "$SOURCE_REVISION" ]] || {
+            echo "artifact source run head_sha does not match tagged source" >&2; exit 1;
+          }
+
+          mkdir qualified-artifact
+          gh run download "$ARTIFACT_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$expected_artifact_name" \
+            --dir qualified-artifact
+
+          mapfile -t manifests < <(find qualified-artifact -type f -name build-manifest.json -print)
+          [[ "${#manifests[@]}" -eq 1 ]] || {
+            echo "qualified artifact must contain exactly one build-manifest.json" >&2; exit 1;
+          }
+          artifact_dir="$(dirname "${manifests[0]}")"
+          echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare fail-closed release staging
+        env:
+          TAG: ${{ inputs.tag }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          RELEASE_STATE: ${{ inputs.release_state }}
+          ARTIFACT_DIR: ${{ steps.artifact.outputs.artifact_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/prepare_github_release.py \
+            --root . \
+            --artifact-dir "$ARTIFACT_DIR" \
+            --tag "$TAG" \
+            --source-revision "$SOURCE_REVISION" \
+            --notes-source "docs/releases/${TAG}.md" \
+            --release-state "$RELEASE_STATE" \
+            --output-dir release-staging
+
+          plan=release-staging/release-plan.json
+          jq -e --arg tag "$TAG" --arg source "$SOURCE_REVISION" \
+            '.draft == true and .tag == $tag and .source_revision == $source and (.assets | length) == 4' \
+            "$plan" >/dev/null
+
+      - name: Create or update draft release only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          plan=release-staging/release-plan.json
+          notes=release-staging/RELEASE_NOTES.md
+          title="$(jq -r '.title' "$plan")"
+          prerelease="$(jq -r '.prerelease' "$plan")"
+          expected_body="$(cat "$notes")"
+
+          jq -r '.assets[].name' "$plan" | sort > /tmp/expected-names.txt
+          if existing="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId,isDraft,assets 2>/dev/null)"; then
+            [[ "$(jq -r '.isDraft' <<<"$existing")" == "true" ]] || {
+              echo "refusing to modify a published release" >&2; exit 1;
+            }
+            jq -r '.assets[].name' <<<"$existing" | sort > /tmp/existing-names.txt
+            unexpected="$(comm -13 /tmp/expected-names.txt /tmp/existing-names.txt)"
+            [[ -z "$unexpected" ]] || {
+              echo "existing draft has unexpected assets:" >&2
+              printf '%s\n' "$unexpected" >&2
+              exit 1
+            }
+            release_id="$(jq -r '.databaseId' <<<"$existing")"
+            jq -n \
+              --arg name "$title" \
+              --arg body "$expected_body" \
+              --argjson prerelease "$prerelease" \
+              '{name:$name, body:$body, draft:true, prerelease:$prerelease}' \
+              > /tmp/release-update.json
+            gh api -X PATCH \
+              "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              --input /tmp/release-update.json >/dev/null
+          else
+            create_args=(
+              "$TAG"
+              --repo "$GITHUB_REPOSITORY"
+              --draft
+              --verify-tag
+              --title "$title"
+              --notes-file "$notes"
+            )
+            if [[ "$prerelease" == "true" ]]; then
+              create_args+=(--prerelease)
+            fi
+            gh release create "${create_args[@]}"
+          fi
+
+          gh release upload "$TAG" release-staging/assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+          release_id="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
+          release_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
+          [[ "$(jq -r '.draft' <<<"$release_json")" == "true" ]] || {
+            echo "release is not draft" >&2; exit 1;
+          }
+          [[ "$(jq -r '.prerelease' <<<"$release_json")" == "$prerelease" ]] || {
+            echo "release prerelease state mismatch" >&2; exit 1;
+          }
+          [[ "$(jq -r '.tag_name' <<<"$release_json")" == "$TAG" ]] || {
+            echo "release tag mismatch" >&2; exit 1;
+          }
+          [[ "$(jq -r '.name' <<<"$release_json")" == "$title" ]] || {
+            echo "release title mismatch" >&2; exit 1;
+          }
+          [[ "$(jq -r '.body // ""' <<<"$release_json")" == "$expected_body" ]] || {
+            echo "release body mismatch" >&2; exit 1;
+          }
+
+          jq -r '.assets[] | [.name, (.bytes | tostring), ("sha256:" + .sha256)] | @tsv' "$plan" | sort > /tmp/expected-assets.tsv
+          jq -r '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' <<<"$release_json" | sort > /tmp/actual-assets.tsv
+          diff -u /tmp/expected-assets.tsv /tmp/actual-assets.tsv
+
+      - name: Preserve draft release plan evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: closedroom-draft-release-plan-${{ inputs.tag }}-${{ github.run_id }}
+          path: |
+            release-staging/release-plan.json
+            release-staging/RELEASE_NOTES.md
+          if-no-files-found: error
+          retention-days: 30

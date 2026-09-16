@@ -13,8 +13,9 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
 - PR #65 made Search release evidence prove accessible open/focus/close rather than synthetic Cmd-K/Escape delivery; shortcuts remain technically tested but are not a stable-source blocker.
 - PRS-18 measured product/runtime release evidence remains active.
-- GitHub release productization separates stable source from binary publication. Root `VERSION` owns the ClosedRoom product version (`0.2.0`) independently from the Python package version.
-- GRP-3 defines release staging as an adapter over immutable production artifacts: exact version/source/distribution evidence, unchanged DMG bytes, canonical public names, checksums, notes and asset inventory.
+- GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata.
+- GRP-3 stages immutable production artifacts with exact version/source/distribution checks, unchanged DMG bytes, canonical names, checksums, notes and inventory.
+- GRP-4 defines manual draft-only publication dispatched from `main` for an exact tagged commit in `main` history: trusted same-SHA production workflow artifact, GRP-3 validation and post-upload page/asset verification. It never builds or publishes a final release.
 
 ## Current integration state
 
@@ -40,23 +41,19 @@ Still required where material:
 - representative CPU/RSS/thermal + local MLX completion and the PRS-9 dual-vs-mixed benchmark;
 - subjective VoiceOver/usability and representative production ASR/LLM quality or latency only when material.
 
-Apple distribution authority is **not** a stable-source prerequisite. It remains required before a normal downloadable macOS binary can be published:
-
-- Developer ID signing and secure timestamp;
-- app/DMG notarization and stapling;
-- distribution Gatekeeper acceptance.
+Apple distribution authority is **not** a stable-source prerequisite. It remains required before a normal downloadable macOS binary can be published: Developer ID + timestamp, app/DMG notarization/stapling and Gatekeeper acceptance.
 
 A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligations for an exact stable candidate while public binary distribution remains externally blocked.
 
 ## Active workstreams
 
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
-- [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1 stable-source/distribution separation, GRP-2 canonical versioning and GRP-3 release surface/staging implemented; draft GitHub Release automation remains.
+- [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..4 implemented; Apple-qualified production artifact authority and first public release remain blocked.
 
 PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
 
 ## Next highest-value work
 
-1. Complete remaining PRS-18 target-Mac evidence on the exact stable candidate without treating Apple distribution authority as a blocker to `main`.
-2. Implement GRP-4 draft GitHub Release automation bound to tag/main and qualified GRP-3 output.
-3. Keep stable binary publication blocked until Apple distribution authority qualifies the exact immutable artifact; add README download links only after a real GitHub Release exists.
+1. Complete remaining PRS-18 target-Mac evidence on the exact stable candidate and promote stable source only when RELEASE/FULL evidence agrees.
+2. Establish GRP-5 protected production-artifact authority with the canonical workflow/artifact contract; do not weaken Apple qualification if authority is unavailable.
+3. Publish GRP-6 only after exact stable source and exact qualified artifact agree; add README download links only after a real GitHub Release exists.
