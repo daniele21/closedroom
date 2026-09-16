@@ -2,7 +2,7 @@
 
 Status: ACTIVE
 Owner: repository release metadata, version identity, publication automation and public release experience
-Base: `dev@06bfefe66f38475589f86b51fe54850b2c452eba`
+Base: `dev@eee10a04bf00255a91688da63d05af3b9f481a37`
 
 ## Outcome
 
@@ -61,8 +61,8 @@ Release notes may use GitHub-generated PR/contributor sections, but the top sect
 
 | ID | Observable outcome | State |
 | --- | --- | --- |
-| GRP-1 | Stable source promotion is explicitly separated from binary distribution | ACTIVE |
-| GRP-2 | ClosedRoom has one canonical product version consumed by bundle/build/release metadata | READY |
+| GRP-1 | Stable source promotion is explicitly separated from binary distribution | DONE |
+| GRP-2 | ClosedRoom has one canonical product version consumed by bundle/build/release metadata | ACTIVE |
 | GRP-3 | Release notes/categories and public asset naming are repository contracts | READY |
 | GRP-4 | A tag/main-bound workflow creates a draft GitHub Release from qualified immutable artifacts | READY |
 | GRP-5 | Developer ID/notarization credentials can satisfy publication gates without changing product behavior | BLOCKED |
@@ -79,20 +79,18 @@ Repository governance distinguishes:
 - **stable source promotion**: `dev -> main`, exact-head FULL validation plus applicable target-Mac product evidence;
 - **distribution release**: tagged publication from `main`, additionally requiring production artifact signing/notarization/stapling/Gatekeeper evidence and immutable asset publication.
 
-Apple distribution authority must not block a truthful stable-source promotion when all product/integration release evidence required for that promotion is green. It continues to block public signed binary publication.
+Apple distribution authority does not block a truthful stable-source promotion when all product/runtime release evidence required for that promotion is green. It continues to block public signed binary publication.
 
-### Required owners
+### Implementation
 
-Update the existing owners instead of adding parallel policy:
-
-- `.engineering/commands.json`;
-- `.engineering/e2e.json` where stage/evidence wording requires it;
-- `CONTRIBUTING.md` and `docs/current-state.md`;
-- release/preflight automation only when implementation requires it.
+- `CONTRIBUTING.md` now defines `main` as stable source and GitHub Release as a separate distribution event.
+- `docs/current-state.md` separates stable candidate evidence from distribution-only Developer ID/notary/Gatekeeper obligations.
+- Existing automation already supports the split: `dev -> main` selects RELEASE / FULL automated gates, while production signing/notarization is executed through the separate `release_build` / `release_evidence` commands rather than the hosted preflight workflow.
+- `.engineering/e2e.json` continues to require applicable REAL_ENVIRONMENT product/runtime evidence at stable promotion; no target-Mac product evidence was downgraded.
 
 ### Acceptance
 
-- no document simultaneously claims that `main` requires Apple distribution authority and that authority is a separate publication concern;
+- no canonical documentation claims Apple distribution authority is required merely to make source stable on `main`;
 - stable-source promotion remains FULL and exact-head;
 - physical/TCC/audio/MLX obligations remain explicit where they materially prove the stable candidate;
 - unsigned/ad-hoc artifacts are never presented as public production downloads.
@@ -189,9 +187,10 @@ Initial planning/governance changes are LEAN. Version/build/workflow changes are
 
 ## Resume checkpoint
 
-- base: `dev@06bfefe66f38475589f86b51fe54850b2c452eba`;
+- base: `dev@eee10a04bf00255a91688da63d05af3b9f481a37`;
+- GRP-1: implemented on `chore/stable-source-distribution-policy`; stable source and binary distribution are separate while target-Mac product evidence remains release-blocking when applicable;
 - confirmed: no GitHub Releases currently exist and no dedicated release-publication workflow exists;
 - confirmed: existing production tooling already owns immutable manifests/checksums/build delta and signed/notarized artifact qualification;
 - confirmed: README currently describes ClosedRoom as source-built with no public binary release;
-- external block: Apple Developer distribution authority;
-- next action: implement GRP-1 in canonical governance/command owners, then GRP-2 canonical version identity before adding publication automation.
+- external block: Apple Developer distribution authority affects GRP-5/6 only;
+- next action: implement GRP-2 canonical ClosedRoom product version identity before release-note/publication automation.
