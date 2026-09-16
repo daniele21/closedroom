@@ -41,6 +41,7 @@ class RealEnvironmentUiContractTest(unittest.TestCase):
             "real_environment_ui_evidence_contract", UI_EVIDENCE_SCRIPT
         )
         cls.meeting_source = MEETING_PAGE.read_text(encoding="utf-8")
+        cls.smoke_source = SMOKE_SCRIPT.read_text(encoding="utf-8")
 
     def test_post_stop_workspace_labels_exist_in_product_ui(self) -> None:
         self.assertEqual(
@@ -60,6 +61,17 @@ class RealEnvironmentUiContractTest(unittest.TestCase):
             checkpoints["03-meeting-persisted"],
             self.smoke.LABELS["meeting_workspace"],
         )
+
+    def test_release_search_contract_uses_accessible_controls_not_synthetic_shortcuts(self) -> None:
+        self.assertIn('ui(pid, "press", LABELS["search"])', self.smoke_source)
+        self.assertIn('check("search_opened_accessibly"', self.smoke_source)
+        self.assertIn('check("search_focus_exposed"', self.smoke_source)
+        self.assertIn('ui(pid, "press", LABELS["close"])', self.smoke_source)
+        self.assertIn('check("search_closed_accessibly"', self.smoke_source)
+        self.assertNotIn('key(pid, "cmd-k")', self.smoke_source)
+        self.assertNotIn('key(pid, "escape")', self.smoke_source)
+        self.assertNotIn('check("keyboard_cmd_k_search"', self.smoke_source)
+        self.assertNotIn('check("keyboard_escape_search"', self.smoke_source)
 
 
 if __name__ == "__main__":
