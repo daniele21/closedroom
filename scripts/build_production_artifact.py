@@ -52,6 +52,10 @@ def parse_args() -> argparse.Namespace:
         "--notary-keychain-profile",
         default=os.getenv("CLOSEDROOM_NOTARY_KEYCHAIN_PROFILE", ""),
     )
+    parser.add_argument(
+        "--notary-keychain",
+        default=os.getenv("CLOSEDROOM_NOTARY_KEYCHAIN", ""),
+    )
     parser.add_argument("--build-id", default=os.getenv("CLOSEDROOM_BUILD_ID", ""))
     parser.add_argument(
         "--keep",
@@ -108,22 +112,25 @@ def restore_generated_frontend(root: Path) -> None:
     run(["git", "clean", "-fd", "--", target], cwd=root)
 
 
-def notary_submit(artifact: Path, profile: str, *, cwd: Path) -> dict[str, Any]:
-    completed = run(
-        [
-            "xcrun",
-            "notarytool",
-            "submit",
-            str(artifact),
-            "--keychain-profile",
-            profile,
-            "--wait",
-            "--output-format",
-            "json",
-        ],
-        cwd=cwd,
-        timeout=1800,
-    )
+def notary_submit(
+    artifact: Path,
+    profile: str,
+    *,
+    cwd: Path,
+    keychain: str | None = None,
+) -> dict[str, Any]:
+    command = [
+        "xcrun",
+        "notarytool",
+        "submit",
+        str(artifact),
+        "--keychain-profile",
+        profile,
+    ]
+    if keychain:
+        command.extend(["--keychain", keychain])
+    command.extend(["--wait", "--output-format", "json"])
+    completed = run(command, cwd=cwd, timeout=1800)
     payload = json.loads(completed.stdout or "{}")
     if str(payload.get("status") or "").lower() != "accepted":
         raise RuntimeError(
@@ -158,6 +165,13 @@ def main() -> int:
     root = Path(args.root).resolve()
     identity = str(args.signing_identity or "").strip()
     profile = str(args.notary_keychain_profile or "").strip()
+    keychain_raw = str(args.notary_keychain or "").strip()
+    keychain: str | None = None
+    if keychain_raw:
+        keychain_path = Path(keychain_raw).expanduser().resolve()
+        if not keychain_path.is_file():
+            raise SystemExit(f"notary keychain not found: {keychain_path}")
+        keychain = str(keychain_path)
 
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise SystemExit("production artifact build requires a target Apple-Silicon Mac")
@@ -252,7 +266,7 @@ def main() -> int:
                 cwd=root,
                 timeout=600,
             )
-            app_notary = notary_submit(app_zip, profile, cwd=root)
+            app_notary = notary_submit(app_zip, profile, cwd=root, keychain=keychain)
             run(
                 ["xcrun", "stapler", "staple", str(staging_app)],
                 cwd=root,
@@ -284,7 +298,7 @@ def main() -> int:
             if not staging_dmg.is_file():
                 raise RuntimeError("DMG creation did not produce an artifact")
 
-            dmg_notary = notary_submit(staging_dmg, profile, cwd=root)
+            dmg_notary = notary_submit(staging_dmg, profile, cwd=root, keychain=keychain)
             run(
                 ["xcrun", "stapler", "staple", str(staging_dmg)],
                 cwd=root,

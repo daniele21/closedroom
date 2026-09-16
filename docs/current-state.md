@@ -15,7 +15,8 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - PRS-18 measured product/runtime release evidence remains active.
 - GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata.
 - GRP-3 stages immutable production artifacts with exact version/source/distribution checks, unchanged DMG bytes, canonical names, checksums, notes and inventory.
-- GRP-4 defines manual draft-only publication dispatched from `main` for an exact tagged commit in `main` history: trusted same-SHA production workflow artifact, GRP-3 validation and post-upload page/asset verification. It never builds or publishes a final release.
+- GRP-4 defines manual draft-only publication from a tagged commit in `main` history using a trusted same-SHA production workflow artifact. It never builds or publishes a final release.
+- GRP-5 automation targets the `production-release` environment, keeps Developer ID/notary authority ephemeral, delegates to the canonical production builder, validates Apple evidence and uploads only the trusted same-SHA artifact consumed by GRP-4. Real success still requires the GitHub environment/authority to be configured externally.
 
 ## Current integration state
 
@@ -48,12 +49,12 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 ## Active workstreams
 
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
-- [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..4 implemented; Apple-qualified production artifact authority and first public release remain blocked.
+- [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 
 PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
 
 ## Next highest-value work
 
 1. Complete remaining PRS-18 target-Mac evidence on the exact stable candidate and promote stable source only when RELEASE/FULL evidence agrees.
-2. Establish GRP-5 protected production-artifact authority with the canonical workflow/artifact contract; do not weaken Apple qualification if authority is unavailable.
+2. Configure the `production-release` GitHub environment with Apple authority when available and run GRP-5 on the exact tagged stable source.
 3. Publish GRP-6 only after exact stable source and exact qualified artifact agree; add README download links only after a real GitHub Release exists.
