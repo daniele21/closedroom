@@ -2,7 +2,7 @@
 
 Status: ACTIVE
 Owner: repository release metadata, version identity, publication automation and public release experience
-Base: `dev@831469a16fcdd62ba9fff5b2bf5f232ada555128`
+Base: `dev@685aad5e6040097631f0c9bb4562ae57c2dc72fa`
 
 ## Outcome
 
@@ -49,10 +49,10 @@ The public DMG is a byte-for-byte copy of the qualified production DMG. Staging 
 | GRP-2 | Canonical product version drives bundle/build/release identity | DONE |
 | GRP-3 | Release notes/categories and public asset naming are contracts | DONE |
 | GRP-4 | Tag/main-bound workflow creates draft Release from qualified artifacts | DONE |
-| GRP-5 | Developer ID/notarization authority produces trusted production artifact | BLOCKED |
+| GRP-5 | Production workflow is ready; protected Apple authority can qualify its output | AUTOMATION DONE; AUTHORITY BLOCKED |
 | GRP-6 | First public GitHub Release from exact stable source | BLOCKED |
 
-GRP-5 is externally blocked until Apple Developer distribution authority exists. GRP-6 depends on GRP-1..5; never weaken signing/notarization truth to bypass that block.
+GRP-5 execution is externally blocked until the `production-release` environment and Apple Developer distribution authority are configured. GRP-6 depends on GRP-1..5; never weaken signing/notarization truth to bypass that block.
 
 ## GRP-1 — stable source vs distribution
 
@@ -78,7 +78,9 @@ The workflow creates/updates **draft only**, refuses to modify published release
 
 ## GRP-5 — Apple distribution authority
 
-Existing production tooling must run with protected Developer ID/notary authority and expose its exact successful output through the canonical `production-release-artifact.yml` / `closedroom-production-release-<SHA>` contract consumed by GRP-4. Missing authority is `BLOCKED`, not product failure, and must never yield an unsigned artifact labeled stable.
+`.github/workflows/production-release-artifact.yml` is manual-only, read-only and targets `production-release`. It accepts an exact tagged SHA in `main` history, delegates production build/sign/notarize/staple/Gatekeeper work to the existing canonical builder, validates the resulting release lineage and uploads only the trusted same-SHA artifact consumed by GRP-4. Run-scoped authority is kept ephemeral and cleaned after execution.
+
+`release_production_artifact` is the canonical dispatch command. The repository environment protection/secrets and actual Apple authority are external configuration: until present and proven by a successful run, GRP-5 distribution qualification remains `BLOCKED`.
 
 ## GRP-6 — first public release
 
@@ -94,7 +96,7 @@ Version/build/workflow changes are FULL because they touch release/build/CI iden
 
 ## Resume checkpoint
 
-- GRP-3 integrated through PR #67; current GRP-4 base is `dev@831469a16fcdd62ba9fff5b2bf5f232ada555128`;
-- GRP-1..3 are integrated; GRP-4 implementation is complete on `chore/github-draft-release` and now needs exact-head integration validation;
+- GRP-1..4 are integrated on `dev@685aad5e6040097631f0c9bb4562ae57c2dc72fa`; GRP-5 automation is implemented on `chore/production-release-artifact` and needs exact-head integration validation;
+- real GRP-5 success remains blocked by `production-release` environment configuration plus Apple Developer authority; automation tests are not distribution qualification;
 - historical `v0.1.0` exists; no GitHub Release exists; next product line is `0.2.0` / `v0.2.0`;
-- after GRP-4 integration: complete PRS-18 stable-source evidence and establish GRP-5 protected production-artifact authority before any public binary release.
+- stable-source work is independent: complete PRS-18 exact-candidate target-Mac evidence, then promote `dev -> main` before any `v0.2.0` distribution run.
