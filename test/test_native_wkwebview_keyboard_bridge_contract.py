@@ -38,13 +38,16 @@ class NativeWKWebViewKeyboardBridgeContractTest(unittest.TestCase):
         self.assertIn('key="Escape", code="Escape"', self.window)
         self.assertIn("return event", self.window)
 
-    def test_existing_frontend_and_real_environment_keyboard_contracts_remain_authoritative(self) -> None:
+    def test_frontend_shortcuts_remain_supported_but_release_smoke_uses_search_outcome(self) -> None:
         self.assertIn("window.addEventListener('keydown', handleKeyDown)", self.dashboard)
         self.assertIn("setIsSearchOpen(true)", self.dashboard)
-        self.assertIn('key(pid, "cmd-k")', self.smoke)
-        self.assertIn('check("keyboard_cmd_k_search"', self.smoke)
-        self.assertIn('key(pid, "escape")', self.smoke)
-        self.assertIn('check("keyboard_escape_search"', self.smoke)
+        self.assertIn('ui(pid, "press", LABELS["search"])', self.smoke)
+        self.assertIn('check("search_opened_accessibly"', self.smoke)
+        self.assertIn('check("search_focus_exposed"', self.smoke)
+        self.assertIn('ui(pid, "press", LABELS["close"])', self.smoke)
+        self.assertIn('check("search_closed_accessibly"', self.smoke)
+        self.assertNotIn('key(pid, "cmd-k")', self.smoke)
+        self.assertNotIn('key(pid, "escape")', self.smoke)
 
 
 if __name__ == "__main__":
