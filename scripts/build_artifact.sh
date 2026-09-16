@@ -22,7 +22,7 @@ done
 command -v uv >/dev/null 2>&1 || { echo "uv is required" >&2; exit 1; }
 
 APP_NAME="${CLOSEDROOM_APP_NAME:-ClosedRoom}"
-APP_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+APP_VERSION="$(python3 scripts/product_version.py --root "$ROOT")"
 SOURCE_REVISION="${CLOSEDROOM_SOURCE_REVISION:-$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)}"
 if [[ -n "$(git status --porcelain 2>/dev/null || true)" ]]; then DIRTY=true; else DIRTY=false; fi
 if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then DEFAULT_CHANNEL="ci"; else DEFAULT_CHANNEL="local"; fi

@@ -17,10 +17,11 @@ import secrets
 import shutil
 import subprocess
 import tempfile
-import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from product_version import read_product_version
 
 GENERATED_FRONTEND = Path("src/local_asr_server/static")
 
@@ -140,8 +141,7 @@ def source_revision(root: Path) -> str:
 
 
 def app_version(root: Path) -> str:
-    with (root / "pyproject.toml").open("rb") as handle:
-        return str(tomllib.load(handle)["project"]["version"])
+    return read_product_version(root)
 
 
 def bundle_identity(app: Path) -> tuple[str, str]:
