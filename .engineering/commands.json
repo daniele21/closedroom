@@ -15,6 +15,7 @@
     "release_build": {"status": "required", "run": "python3 scripts/build_production_artifact.py"},
     "release_evidence": {"status": "required", "run": "python3 scripts/measured_release_target_mac.py --app <exact-production-app> && python3 scripts/record_while_ai_busy_target_mac.py --app <exact-production-app>"},
     "release_prepare": {"status": "required", "run": "python3 scripts/prepare_github_release.py --artifact-dir <exact-production-artifact-dir> --tag <vX.Y.Z> --source-revision <exact-tag-sha> --notes-source docs/releases/<vX.Y.Z>.md --release-state <stable|prerelease> --output-dir dist/github-release/<vX.Y.Z>"},
+    "release_draft": {"status": "required", "run": "gh workflow run draft-release.yml --ref main -f tag=<vX.Y.Z> -f source_revision=<exact-tag-sha> -f artifact_run_id=<canonical-production-artifact-run-id> -f release_state=<stable|prerelease>"},
     "stop": {"status": "n/a", "run": "n/a"},
     "clean": {"status": "required", "run": "python3 scripts/clean_build_state.py"}
   },
