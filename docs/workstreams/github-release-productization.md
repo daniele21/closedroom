@@ -2,7 +2,7 @@
 
 Status: ACTIVE
 Owner: repository release metadata, version identity, publication automation and public release experience
-Base: `dev@dea61b4d938e9ee1042f034a8ff6ca61a9613263`
+Base: `dev@7041779f1841e80db4145a113ee8d60ef14d5ae3`
 
 ## Outcome
 
@@ -42,20 +42,19 @@ feature/fix branches
 
 ## Release surface contract
 
-A normal public ClosedRoom release should expose:
+A normal public ClosedRoom release exposes:
 
 - semantic tag `vX.Y.Z` and title `ClosedRoom vX.Y.Z`;
 - user-oriented release notes grouped around observable changes rather than raw commits;
 - `ClosedRoom-vX.Y.Z-macos-arm64.dmg` as the primary macOS asset when distribution authority is available;
-- optional app archive only when it has the same qualified artifact lineage;
-- `SHA256SUMS`;
+- `SHA256SUMS` generated against the public asset names;
 - `build-manifest.json` with exact source/build identity;
 - `BUILD_CHANGELOG.md` as the technical build delta;
 - GitHub-provided source archives;
 - explicit prerelease/latest state;
-- concise known limitations and compatibility notes when material.
+- concise known limitations, privacy and compatibility notes.
 
-Release notes may use GitHub-generated PR/contributor sections, but the top section remains curated for users.
+The public DMG is a byte-for-byte copy of the already-qualified immutable production DMG. Publication staging may rename it, but must never rebuild or mutate it.
 
 ## Work graph
 
@@ -63,7 +62,7 @@ Release notes may use GitHub-generated PR/contributor sections, but the top sect
 | --- | --- | --- |
 | GRP-1 | Stable source promotion is explicitly separated from binary distribution | DONE |
 | GRP-2 | ClosedRoom has one canonical product version consumed by bundle/build/release metadata | DONE |
-| GRP-3 | Release notes/categories and public asset naming are repository contracts | READY |
+| GRP-3 | Release notes/categories and public asset naming are repository contracts | DONE |
 | GRP-4 | A tag/main-bound workflow creates a draft GitHub Release from qualified immutable artifacts | READY |
 | GRP-5 | Developer ID/notarization credentials can satisfy publication gates without changing product behavior | BLOCKED |
 | GRP-6 | First public GitHub Release is published from an exact stable commit | BLOCKED |
@@ -121,19 +120,22 @@ One repository-owned product version drives the macOS bundle/build identity, art
 
 ### Outcome
 
-The repository defines a predictable public release page comparable to mature GitHub projects.
+The repository defines a deterministic, dry-runnable public release surface without introducing a second build owner.
 
-### Deliverables
+### Implementation
 
-- `.github/release.yml` for generated-note categories/contributors where useful;
-- a concise release-note template/generator that keeps a curated user-facing summary first;
-- canonical asset naming and required-asset validation;
-- compatibility/known-limitations section when material;
-- README distribution section updated only when the first downloadable release actually exists.
+- `.github/release.yml` defines generated-note categories for features, fixes, performance/reliability, engineering/documentation and a catch-all category;
+- `docs/releases/v0.2.0.md` is the curated source for the next release and must contain Highlights, Compatibility, Installation, Privacy and Known limitations sections;
+- `scripts/prepare_github_release.py` is a publication adapter over one already-finalized production artifact;
+- the adapter requires tag ↔ root `VERSION` agreement, exact clean source revision, `macos/arm64/release/package` lineage, `developer-id-notarized` manifest signing, complete production notarization/stapling/Gatekeeper evidence and matching manifest/checksum/DMG bytes;
+- staging copies the exact qualified DMG bytes to `ClosedRoom-vX.Y.Z-macos-arm64.dmg`, copies `build-manifest.json` and `BUILD_CHANGELOG.md`, regenerates `SHA256SUMS` against public names, and emits `RELEASE_NOTES.md` plus an internal `release-plan.json`;
+- release state is explicit (`stable` or `prerelease`) in the plan rather than inferred from the version number;
+- `.engineering/commands.json` registers `release_prepare` as the canonical preparation command;
+- fixture tests prove same-byte staging and fail closed on version mismatch, weak signing, modified DMG, incomplete production evidence or incomplete user-facing notes.
 
 ### Acceptance
 
-A dry-run can produce the complete title/body/asset inventory for `vX.Y.Z` without publishing anything.
+A dry-run can produce the complete title/body/public asset inventory for `vX.Y.Z` without contacting GitHub or changing the qualified artifact. README distribution links remain unchanged until a downloadable release actually exists.
 
 ## GRP-4 — draft GitHub Release automation
 
@@ -192,10 +194,10 @@ Version/build/workflow changes are FULL because they touch release/build/CI iden
 
 ## Resume checkpoint
 
-- base refreshed to `dev@dea61b4d938e9ee1042f034a8ff6ca61a9613263` after PR #65 integrated the accessible Search release outcome;
-- GRP-1: integrated; stable source and binary distribution are separate while target-Mac product evidence remains release-blocking when applicable;
-- GRP-2: implemented with root `VERSION`, canonical resolver/tag validation and all direct macOS build/artifact consumers moved off the legacy package version;
+- base refreshed to `dev@7041779f1841e80db4145a113ee8d60ef14d5ae3` after GRP-2 integrated through PR #66;
+- GRP-1: integrated stable-source/distribution separation;
+- GRP-2: integrated root `VERSION=0.2.0`; FULL source, packaging and packaged-app smoke evidence passed before merge;
+- GRP-3: implemented deterministic release notes/asset staging over immutable production evidence without a second build path;
 - confirmed: historical tag `v0.1.0` already exists but no GitHub Release currently exists, so the next ClosedRoom product line is `0.2.0` / `v0.2.0`;
-- confirmed: existing production tooling already owns immutable manifests/checksums/build delta and signed/notarized artifact qualification;
 - external block: Apple Developer distribution authority affects GRP-5/6 only;
-- next action: implement GRP-3 release metadata/asset contract, then GRP-4 draft GitHub Release automation while PRS-18 target-Mac evidence continues independently.
+- next action: implement GRP-4 workflow-dispatch automation that binds tag/main/source/artifact identities and creates or updates a draft GitHub Release from GRP-3 output.
