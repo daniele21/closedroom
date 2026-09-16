@@ -14,6 +14,7 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - PR #65 made the release-critical Search checkpoint prove accessible Search open/focus/close rather than synthetic Cmd-K/Escape delivery; shortcut behavior remains covered by focused technical tests but is not a stable-source blocker.
 - PRS-18 measured product/runtime release evidence remains active.
 - GitHub release productization has explicit non-overlapping stable-source and binary-publication contracts. ClosedRoom product version is owned by root `VERSION` (currently `0.2.0`) and is consumed by bundle/build/artifact paths independently from the legacy Python package version.
+- GRP-3 release staging is defined as a publication adapter over the immutable production artifact: it requires exact version/source/distribution evidence, preserves qualified DMG bytes, and produces canonical public names, checksums, notes and asset inventory without rebuilding the app.
 
 ## Current integration state
 
@@ -50,12 +51,12 @@ A passing LOCAL REAL_ENVIRONMENT run may therefore close the applicable physical
 ## Active workstreams
 
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
-- [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1 stable-source/distribution separation and GRP-2 canonical ClosedRoom versioning implemented; release metadata and draft GitHub Release automation remain.
+- [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1 stable-source/distribution separation, GRP-2 canonical versioning and GRP-3 release surface/staging implemented; draft GitHub Release automation remains.
 
 These workstreams have separate write/ownership boundaries: PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
 
 ## Next highest-value work
 
 1. Complete the remaining PRS-18 target-Mac product/runtime evidence on the exact stable candidate, without treating Apple distribution authority as a blocker to `main`.
-2. Implement GRP-3 release metadata, curated/generated note structure and canonical public asset validation from the canonical product version.
-3. Implement GRP-4 draft GitHub Release automation that is tag/main-bound and fail-closed on source/version/manifest/checksum mismatches; actual stable binary publication remains blocked until Apple distribution authority qualifies the exact immutable artifact.
+2. Implement GRP-4 draft GitHub Release automation that is tag/main-bound, consumes only qualified GRP-3 output and fails closed on source/version/manifest/checksum mismatches.
+3. Keep actual stable binary publication blocked until Apple distribution authority qualifies the exact immutable artifact; update README download links only after a real GitHub Release exists.
