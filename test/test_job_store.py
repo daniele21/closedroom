@@ -50,6 +50,47 @@ class JobStoreTests(unittest.TestCase):
             self.assertEqual([event["sequence"] for event in events], [1, 2])
             self.assertEqual(events[-1]["status"], "completed")
 
+    def test_job_event_history_is_bounded_without_renumbering_sequences(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "closedroom.db", event_capacity=3)
+            store.create(job_id="job-1", job_type="transcription")
+            for progress in (10, 20, 30, 40):
+                store.update(
+                    "job-1",
+                    status="running",
+                    current_step="transcribing",
+                    progress=progress,
+                )
+
+            events = store.events_after("job-1")
+
+            self.assertIsNotNone(events)
+            self.assertEqual([event["sequence"] for event in events], [3, 4, 5])
+            self.assertEqual([event["progress"] for event in events], [20, 30, 40])
+            self.assertEqual(store.events_after("job-1", 4)[0]["sequence"], 5)
+
+    def test_job_event_capacity_must_be_positive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "event_capacity"):
+                JobStore(Path(tmp) / "closedroom.db", event_capacity=0)
+
+    def test_persisted_job_manager_does_not_duplicate_events_in_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "closedroom.db")
+            manager = TranscriptionJobManager(store)
+            created = manager.create("rec-1", lambda _job: {"text": "Ciao"})
+            job_id = created["id"]
+
+            import time
+
+            for _ in range(20):
+                if store.get(job_id)["status"] == "completed":
+                    break
+                time.sleep(0.05)
+
+            self.assertEqual(manager._jobs[job_id].events.qsize(), 0)
+            self.assertGreaterEqual(len(store.events_after(job_id)), 2)
+
     def test_list_jobs_filters_by_type_and_scope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "closedroom.db")

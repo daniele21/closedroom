@@ -7,6 +7,7 @@ from typing import Any
 from local_asr_server.settings import DEFAULT_VISUAL_FRAME_SIMILARITY_THRESHOLD
 
 MAX_VISUAL_FRAME_BYTES = 5 * 1024 * 1024
+MAX_VISUAL_VLM_CANDIDATES = 2048
 VISUAL_OBSERVATIONS_FILE = "visual_observations.jsonl"
 VISUAL_SUMMARY_FILE = "visual_summary.json"
 VISUAL_ROUTING_FILE = "visual_routing.json"
@@ -69,6 +70,7 @@ class VisualTrigger(str, Enum):
 class VisualRoutingConfig:
     mode: str = "v1"
     dhash_distance: int = DEFAULT_VISUAL_FRAME_SIMILARITY_THRESHOLD
+    max_candidates: int = MAX_VISUAL_VLM_CANDIDATES
     structural_dhash_distance: int = 12
     shared_roi_dhash_distance: int = 10
     speaker_delay_seconds: float = 0.5

@@ -2,51 +2,59 @@
 
 ## Engineering baseline
 
-ClosedRoom follows `daniele21/repo-template-sw` **0.8.0** with target maturity **L2** and profiles `python`, `typescript`, `macos`, `local-ai`, `product-ui`.
+ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, with `python`, `typescript`, `macos`, `local-ai`, `product-ui`. Changes integrate through `dev`; `dev -> main` is the stable-source RELEASE boundary. Applicable target-Mac product/runtime evidence blocks that boundary. Public binary distribution is separately qualified from an exact stable `main` commit/tag.
 
-The 0.8 baseline is integrated on `speaker_detection`, the advanced product branch that was verified ahead of `main`, `pipeline`, `tech-improvements` and `ux-refactoring` at adoption time.
+## Integrated baseline
 
-## Strong existing evidence to preserve
+- Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
+- PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio benchmark tooling; dual-track audio remains canonical pending representative evidence.
+- PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and adaptive Today/Meeting/Projects workspace.
+- PRS-17 candidate `c1c79f31` passed FULL preflight #306, including 411 Python tests and declared Meeting FULL_MEDIA journeys.
+- PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
+- PR #65 made Search release evidence prove accessible open/focus/close rather than synthetic Cmd-K/Escape delivery; shortcuts remain technically tested but are not a stable-source blocker.
+- PRS-18 measured product/runtime release evidence remains active.
+- GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata.
+- GRP-3 stages immutable production artifacts with exact version/source/distribution checks, unchanged DMG bytes, canonical names, checksums, notes and inventory.
+- GRP-4 defines manual draft-only publication from a tagged commit in `main` history using a trusted same-SHA production workflow artifact. It never builds or publishes a final release.
+- GRP-5 automation targets the `production-release` environment, keeps Developer ID/notary authority ephemeral, delegates to the canonical production builder, validates Apple evidence and uploads only the trusted same-SHA artifact consumed by GRP-4. Real success still requires the GitHub environment/authority to be configured externally.
 
-- Detailed current architecture and a broad Python unit/integration suite.
-- Explicit runtime/service/job/port ownership.
-- Native macOS capture, diarization and visual-intelligence boundaries with focused tests.
-- Existing visual + diarization smoke tooling and representative datasets.
-- Version-aware macOS app packaging and native-helper validation.
-- Code-first semantic UI tokens/components in the React frontend.
+## Current integration state
 
-## Baseline gaps now implemented
+`HeavyWorkloadArbiter` is the sole heavy-work owner. Capture waits for a safe managed-work boundary, queues bounded work during recording and releases it afterward; `ResourcePolicy` is the fail-safe. `RecordingStore` owns persistence and external runtimes remain caller-owned.
 
-- Blast radius is machine-selected by `scripts/select_validation_profile.py` into LEAN / SCOPED / STRONG / FULL; unknown paths fail safe to FULL.
-- `.github/workflows/preflight.yml` provides exact-head, read-only remote preflight and routes source/package validation by selected profile.
-- Canonical builds use `scripts/build_artifact.sh`; successful artifacts receive unique identity and immutable lineage directories under `dist/artifacts/`.
-- `scripts/finalize_build_artifact.py` creates `build-manifest.json`, aggregate SHA-256 evidence, `SHA256SUMS`, `BUILD_CHANGELOG.md` against the previous successful comparable build and bounded local retention.
-- `scripts/clean_build_state.py` removes transient build state without deleting finalized successful artifacts by default.
-- `scripts/smoke_packaged_app.py` exercises the finalized `.app` frozen executable, bundled FastAPI/static frontend, readiness, graceful stop, listener cleanup and observed child cleanup.
-- Packaging no longer requires a developer-machine absolute `local-llm-server` wheel path; the current 0.3.8 integration points to its published release artifact and digest.
-- Packaging precompiles the Core Audio helper without invoking user-facing `setup-audio`, so CI build does not install BlackHole or mutate audio routing merely to produce an artifact.
+The frontend reserves before capture, shows cancellable preparation and starts the timer only with real capture. `App.tsx` + `workspace.css` own the adaptive shell.
 
-## Residual target-environment evidence
+PRS-18 has two target-Mac evidence paths:
 
-Automated packaged-app smoke is deliberately classified as `representative_virtual`, not complete target evidence. These remain separate when a change makes them material:
+- **production distribution evidence**: `release_build` produces the exact Developer-ID-signed, timestamped, notarized/stapled app + DMG and Gatekeeper proof; `release_evidence` exercises that immutable artifact through WKWebView/TCC FULL_MEDIA, local MLX/resource/thermal, PRS-9 and PRS-16 contention evidence;
+- **LOCAL REAL_ENVIRONMENT**: `python3 scripts/run_local_real_environment_suite.py` builds or reuses one exact finalized **ad-hoc** Apple-Silicon app and runs the same physical product/runtime evidence owners. Evidence lives under `dist/evidence/local-real-environment/<revision>/`. This can prove target-Mac behavior for stable-source promotion, never signed public distribution.
 
-- interactive WKWebView/window/focus behavior;
-- real TCC prompts and permission identity;
-- physical microphone and system-audio device behavior;
-- production signing/notarization identity;
-- production MLX/Metal model compatibility, memory, latency, throughput and quality.
+The local adapter does not weaken the production-signing path.
 
-Source-contract tests likewise do not upgrade these claims.
+## Stable-source evidence still pending
 
-## Current evidence status
+Promotion `dev -> main` remains blocked until **RELEASE / FULL** automation and applicable target-environment observations agree on the exact candidate.
 
-The gap-closing implementation is on `close-baseline-gaps`. Its deterministic unit checks and exact-head GitHub Actions preflight must pass on the resulting PR before these mechanisms are considered proven on `speaker_detection`. Until that run exists, implementation is present but remote execution evidence is pending.
+Still required where material:
 
-Historical planning documents still need a separate lifecycle cleanup; they are not treated as current operational truth.
+- target-Mac WKWebView/accessibility + TCC-backed native `both` capture with non-empty mic/system tracks and clean lifecycle;
+- PRS-16 real AI-busy contention: local MLX active while `Preparing recording` is visible, no premature capture, then capture after the safe boundary with mic/system persistence;
+- representative CPU/RSS/thermal + local MLX completion and the PRS-9 dual-vs-mixed benchmark;
+- subjective VoiceOver/usability and representative production ASR/LLM quality or latency only when material.
+
+Apple distribution authority is **not** a stable-source prerequisite. It remains required before a normal downloadable macOS binary can be published: Developer ID + timestamp, app/DMG notarization/stapling and Gatekeeper acceptance.
+
+A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligations for an exact stable candidate while public binary distribution remains externally blocked.
+
+## Active workstreams
+
+- [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
+- [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
+
+PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
 
 ## Next highest-value work
 
-1. Obtain green exact-head remote preflight for the gap-closing PR, including finalized `.app` package smoke on macOS arm64.
-2. Fix any failing gate at its owning invariant rather than weakening the profile or check.
-3. Merge the gap closure into `speaker_detection` only after deterministic evidence is green.
-4. Continue moving reproducible failures found only during final macOS testing into the cheapest sufficient automated environment while preserving genuinely physical/TCC/model evidence separately.
+1. Complete remaining PRS-18 target-Mac evidence on the exact stable candidate and promote stable source only when RELEASE/FULL evidence agrees.
+2. Configure the `production-release` GitHub environment with Apple authority when available and run GRP-5 on the exact tagged stable source.
+3. Publish GRP-6 only after exact stable source and exact qualified artifact agree; add README download links only after a real GitHub Release exists.

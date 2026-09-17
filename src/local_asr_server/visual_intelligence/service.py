@@ -59,6 +59,10 @@ class VisualBackendUnavailable(RuntimeError):
     """Raised after repeated infrastructure failures make more frame attempts wasteful."""
 
 
+class VisualProcessingCancelled(RuntimeError):
+    """Raised between bounded visual work units when the owning job is cancelled."""
+
+
 def calculate_dhash(image_path: Path) -> int:
     """Calculate a 64-bit dHash of the image for similarity checks."""
     return calculate_signature(image_path).global_dhash
@@ -75,10 +79,15 @@ class PostMeetingVisualService:
         payload: dict[str, Any],
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         enabled: bool | None = None,
+        routing_mode: str | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
+        strict_v2_routing = routing_mode == "v2"
         settings = load_settings()
         if enabled is not None:
             settings = {**settings, "visual_intelligence_enabled": enabled}
+        if routing_mode is not None:
+            settings = {**settings, "visual_routing_mode": routing_mode}
         requested_routing_mode = str(settings.get("visual_routing_mode") or "v1")
         frames = services.recordings.list_visual_frames(recording_id)
         if not frames:
@@ -152,9 +161,18 @@ class PostMeetingVisualService:
                     return self._process_v2(
                         services, recording_id, payload, frames, candidates, routing_summary,
                         model=model, progress_callback=progress_callback, routing_config=routing_config,
-                        routing_artifact=routing_artifact,
+                        routing_artifact=routing_artifact, cancel_requested=cancel_requested,
                     )
+            except VisualProcessingCancelled:
+                raise
             except Exception as exc:
+                if strict_v2_routing:
+                    logger.error(
+                        "Explicit bounded visual routing failed for %s; legacy fallback disabled: %s",
+                        recording_id,
+                        exc,
+                    )
+                    raise RuntimeError("visual_v2_router_failed") from exc
                 routing_error = str(exc)
                 routing_mode = "v1"
                 routing_summary = {"schema_version": 1, "error": routing_error}
@@ -183,6 +201,8 @@ class PostMeetingVisualService:
             last_hash = None
             last_parsed = None
             for i, frame in enumerate(frames):
+                if cancel_requested is not None and cancel_requested():
+                    raise VisualProcessingCancelled("visual_processing_cancelled")
                 is_duplicate = False
                 frame_hash = None
                 try:
@@ -309,6 +329,8 @@ class PostMeetingVisualService:
             )
             payload.setdefault("stats", {})["visual_intelligence"] = summary
             return payload
+        except VisualProcessingCancelled:
+            raise
         except VisualBackendUnavailable as exc:
             preserve_staging = True
             elapsed = time.perf_counter() - started
@@ -382,12 +404,13 @@ class PostMeetingVisualService:
             }
             return payload
         finally:
+            services.runtime.release_llm_residency()
             if not preserve_staging:
                 services.recordings.finish_visual_processing(recording_id)
 
     def _process_v2(
         self, services, recording_id, payload, frames, candidates, routing_summary, *, model,
-        progress_callback, routing_config, routing_artifact,
+        progress_callback, routing_config, routing_artifact, cancel_requested=None,
     ):
         settings = load_settings()
         generation_id = f"visual-run-{uuid.uuid4()}"
@@ -420,6 +443,7 @@ class PostMeetingVisualService:
         completed = False
         processed_candidates = 0
         chat_params = {}
+        llm_phase_acquired = False
 
         try:
             rejected_candidates = int(routing_summary.get("rejected_task_evaluations") or 0)
@@ -451,6 +475,8 @@ class PostMeetingVisualService:
             backend_error_message = "visual_backend_unavailable"
 
             for index, candidate in enumerate(candidates):
+                if cancel_requested is not None and cancel_requested():
+                    raise VisualProcessingCancelled("visual_processing_cancelled")
                 processed_candidates = index + 1
                 frame = frames_by_sequence[candidate.sequence]
                 observation_id = f"visual-{candidate.sequence}-{candidate.task.value}"
@@ -547,6 +573,7 @@ class PostMeetingVisualService:
                                     reasoning="off",
                                     overrides={"local_llm_model": model},
                                 )
+                                llm_phase_acquired = True
                                 client = self._client(ready["base_url"], model)
                             inf_start = time.perf_counter()
                             qwen_calls += 1
@@ -616,7 +643,6 @@ class PostMeetingVisualService:
                             candidate.sequence, candidate.task.value, exc,
                         )
 
-                # Preview generation if enabled
                 if settings.get("visual_debug_previews_enabled", False):
                     from local_asr_server.visual_intelligence.contracts import VISUAL_GENERATION_STAGING_DIR
                     staging_previews_dir = session_dir / VISUAL_GENERATION_STAGING_DIR / generation_id / "previews"
@@ -694,7 +720,6 @@ class PostMeetingVisualService:
                 "prompt_version": TASK_PROMPT_VERSION,
             }
 
-            # Setup inputs config metadata for run.json
             input_fingerprints = {}
             for c in candidates:
                 input_fingerprints[str(c.sequence)] = f"ts={c.timestamp},task={c.task.value}"
@@ -740,6 +765,9 @@ class PostMeetingVisualService:
 
             trace_store.log_event("run_completed", status=status)
             return payload
+        except VisualProcessingCancelled:
+            trace_store.log_event("run_cancelled", processed=processed_candidates, total=len(candidates))
+            raise
         except VisualBackendUnavailable as exc:
             trace_store.log_event("run_failed", error="visual_backend_unavailable", details=str(exc))
             logger.error(
@@ -790,6 +818,8 @@ class PostMeetingVisualService:
             }
             return payload
         finally:
+            if llm_phase_acquired:
+                services.runtime.release_llm_residency()
             try:
                 trace_path.unlink(missing_ok=True)
             except Exception:

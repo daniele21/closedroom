@@ -18,21 +18,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 # ── Project layout ─────────────────────────────────────────────────────────────
 
 PROJECT_ROOT   = Path(SPECPATH)                                     # noqa: F821
-# Try to extract the app version from pyproject.toml
-APP_VERSION = "1.0.0"
-try:
-    import tomllib
-    with open(PROJECT_ROOT / "pyproject.toml", "rb") as _f:
-        APP_VERSION = tomllib.load(_f)["project"]["version"]
-except Exception:
-    try:
-        import re
-        _content = (PROJECT_ROOT / "pyproject.toml").read_text()
-        _m = re.search(r'version\s*=\s*"([^"]+)"', _content)
-        if _m:
-            APP_VERSION = _m.group(1)
-    except Exception:
-        pass
+sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+from product_version import read_product_version
+APP_VERSION = read_product_version(PROJECT_ROOT)
 
 CACHE_DIR      = PROJECT_ROOT / ".cache"
 AUDIO_HELPER   = CACHE_DIR / "audio-helper" / "audio-helper"

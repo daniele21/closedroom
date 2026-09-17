@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "contract_version": "0.5.0",
+  "contract_version": "0.8.1",
   "applicable": true,
   "design_source_of_truth": {
     "type": "code-first",
-    "location": "frontend/src, frontend/src/index.css and frontend/public logo assets"
+    "location": "frontend/src, frontend/src/index.css, frontend/src/workspace.css and frontend/public logo assets"
   },
   "experience_context": {
     "primary_users": [
@@ -13,16 +13,16 @@
     ],
     "primary_jobs": [
       "start and understand a reliable meeting recording",
-      "transcribe a recording and understand processing state",
+      "prepare a recorded meeting into readable transcript and useful notes without technical setup",
       "review speaker-attributed meeting content",
-      "extract useful meeting/project insights",
+      "extract useful meeting/project notes and insights",
       "recover from permission, audio, model or processing failures without losing work"
     ],
     "primary_surfaces": [
-      "dashboard and meeting/project workspace",
-      "recording and compact recording overlay",
-      "transcription and meeting detail",
-      "analysis workflows",
+      "Today and meeting/project workspace",
+      "new meeting and compact recording overlay",
+      "meeting detail with transcript, notes, speakers and on-demand tools",
+      "secondary import and power-tool workflows",
       "settings and diagnostics"
     ]
   },
@@ -43,6 +43,128 @@
     "bounded_information_density": true,
     "actionable_error_recovery": true
   },
+  "product_object_model": {
+    "primary_user_object": "meeting",
+    "normal_user_concepts": [
+      "meeting",
+      "project",
+      "transcript",
+      "notes",
+      "actions",
+      "speakers",
+      "search"
+    ],
+    "implementation_concepts_hidden_by_default": [
+      "recording job",
+      "transcription job",
+      "analysis job",
+      "provider",
+      "model",
+      "runtime",
+      "backend",
+      "port",
+      "model path",
+      "audio routing"
+    ],
+    "rule": "Technical capability does not imply a user-facing decision or setting. Surface implementation concepts only when an explicit advanced choice or recovery action materially requires them."
+  },
+  "normal_decision_budget": {
+    "start_meeting_required_decisions_max": 1,
+    "golden_path_technical_concepts": 0,
+    "provider_model_decisions_before_recording": 0,
+    "provider_model_decisions_before_transcription": 0,
+    "provider_model_decisions_before_notes": 0,
+    "prepare_notes_primary_actions": 1,
+    "transcript_only_secondary_actions": 1
+  },
+  "capability_placement": {
+    "core": [
+      "microphone and computer audio recording",
+      "meeting transcript",
+      "summary, decisions and actions",
+      "speaker attribution and naming",
+      "meeting search"
+    ],
+    "contextual": [
+      "project organization and filtering"
+    ],
+    "secondary": [
+      "transcript-only preparation",
+      "file import"
+    ],
+    "on_demand": [
+      "visual intelligence",
+      "custom analysis and ask"
+    ],
+    "advanced": [
+      "cloud/local trust boundary override",
+      "provider, model and quality overrides"
+    ],
+    "developer": [
+      "custom model paths",
+      "custom runtime endpoints",
+      "backend and context overrides"
+    ],
+    "diagnostics": [
+      "runtime lifecycle controls",
+      "ports",
+      "logs",
+      "audio routing diagnostics"
+    ],
+    "power_tools": [
+      "merge, split and raw transcript tools"
+    ]
+  },
+  "workspace_navigation": {
+    "primary_destinations": ["today", "projects"],
+    "meeting_parent": "today",
+    "persistent_primary_action": "new_meeting",
+    "utility_destinations": ["settings", "theme", "language", "tour", "demo", "runtime_status"],
+    "desktop_pattern": "one stable left workspace rail",
+    "compact_pattern": "the same destinations and action hierarchy reflow into one sticky top toolbar; compact width must not introduce a second navigation model",
+    "rule": "Today, Meeting and Projects share one workspace chrome. Meeting is opened from Today/search/project context but does not become a third peer destination. Advanced transcription, analysis and diagnostics remain contextual or utility routes."
+  },
+  "golden_path": {
+    "steps": [
+      "today",
+      "new_meeting",
+      "record",
+      "stop",
+      "meeting",
+      "prepare_notes",
+      "notes_review"
+    ],
+    "normal_path_rule": "A configured user completes the golden path without choosing capture backend, source device, diarization, visual enrichment, provider, model, runtime, helper, process, port, model path or routing concepts.",
+    "surface_hierarchy": {
+      "today": "understand what happened, what needs attention and what to open or do next",
+      "new_meeting": "optionally add meeting context, see readiness and start recording; if managed AI is already active, show truthful cancellable preparation rather than pretending recording has started",
+      "record": "understand capture status and safely stop with minimal live UI work",
+      "meeting": "use the saved meeting as the canonical workspace with one primary Prepare notes action and secondary Transcript only recovery/power action",
+      "prepare_notes": "coordinate transcript then notes as one recoverable user task, expose the transcript as soon as it is ready, and preserve completed work across cancel, failure, reconnect and explicit resume",
+      "notes_review": "open ready notes first while keeping transcript, speakers and advanced tools directly reachable"
+    }
+  },
+  "complexity_disclosure": {
+    "tiers": [
+      "essential",
+      "contextual",
+      "advanced",
+      "diagnostics"
+    ],
+    "essential": "Information and actions required to complete the user's current outcome.",
+    "contextual": "Optional outcome-level choices the user can understand without technical architecture knowledge, such as project organization. A capability is not contextual merely because it can change implementation behavior.",
+    "advanced": "Explicit expert trust, provider, model or quality overrides that normal use does not require.",
+    "diagnostics": "Internal runtime, helper, process, port, log, routing and model-path details used for troubleshooting rather than normal operation.",
+    "diagnostics_default_hidden": true,
+    "recovery_exception": "A technical condition may surface outside diagnostics only when the user must act on it; present the user-facing consequence and recovery action before raw technical detail."
+  },
+  "resource_experience": {
+    "recording_priority": "While recording is active, ClosedRoom prioritizes capture and persistence and does not start heavy ASR, LLM or VLM work.",
+    "recording_start_priority": "When Start meeting races with managed heavy work, one capture reservation in the canonical workload owner closes the admission boundary atomically. Already-active managed work reaches its normal safe boundary without force-kill; queued work stays bounded and resumes after Stop. The UI calls the waiting state preparation, never recording, and offers cancellation while it is waiting for the active AI phase.",
+    "heavy_work_admission": "One canonical runtime policy and the existing bounded workload owner decide when heavy work may start; meeting preparation and recording admission never own a second heavy-work queue.",
+    "model_residency": "Managed AI residency is phase-scoped and reclaimed after work; external runtimes remain caller-owned.",
+    "background_activity": "Stable UI state must not require display-rate React updates or avoidable polling loops; bounded short-interval polling is allowed only for the transient capture-reservation handshake and stops when it grants, cancels or fails."
+  },
   "critical_states": [
     "loading",
     "empty",
@@ -50,6 +172,7 @@
     "disabled",
     "permission-denied",
     "processing",
+    "waiting-for-safe-boundary",
     "partial",
     "interrupted"
   ],
@@ -68,6 +191,11 @@
       "primary resizable macOS WKWebView window",
       "compact floating recording overlay",
       "browser development viewport"
+    ],
+    "workspace_rules": [
+      "wide windows keep one stable workspace rail and bounded content column",
+      "compact windows reflow the same primary destinations and New Meeting action into one sticky top toolbar",
+      "narrow windows may collapse labels but must preserve semantic destinations, visible focus, utility access and avoid page-wide horizontal overflow"
     ]
   },
   "design_system": {
@@ -107,10 +235,13 @@
     ]
   },
   "critical_journeys": [
-    {"id": "record-meeting", "name": "Start, monitor and safely stop a local meeting recording", "e2e": "required"},
-    {"id": "transcribe-meeting", "name": "Transcribe a recording and recover from processing failure", "e2e": "required"},
-    {"id": "review-meeting", "name": "Review transcript, speakers and derived meeting evidence", "e2e": "recommended"},
-    {"id": "analyze-meeting", "name": "Run meeting analysis with an explicit provider/runtime choice", "e2e": "recommended"}
+    {"id": "record-meeting", "name": "Start, monitor and safely stop a local meeting recording without technical setup, including truthful safe-boundary preparation when managed AI is already active", "e2e": "required"},
+    {"id": "prepare-meeting-notes", "name": "Prepare transcript and notes with one durable action, reconnect safely and resume only missing work after failure", "e2e": "required"},
+    {"id": "coherent-macos-workspace", "name": "Move between Today, a Meeting and Projects with one stable hierarchy across wide, compact and narrow windows while keeping New Meeting primary and utilities secondary", "e2e": "required"},
+    {"id": "transcribe-meeting", "name": "Create or replace only the transcript through the secondary/expert path and recover from processing failure", "e2e": "recommended"},
+    {"id": "review-meeting", "name": "Review transcript, speakers, notes and derived meeting evidence", "e2e": "recommended"},
+    {"id": "analyze-meeting", "name": "Run additional meeting analyses with automatic defaults and optional advanced overrides", "e2e": "recommended"},
+    {"id": "visual-on-demand", "name": "Explicitly analyze shared visual content without making visual capture part of normal recording", "e2e": "recommended"}
   ],
   "reference_views": [
     "docs/assets/0.home.png",

@@ -5,8 +5,15 @@ import json
 
 
 class RuntimeStub:
+    def __init__(self):
+        self.release_calls = 0
+
     def ensure_llm_ready(self, **kwargs):
         return {"base_url": "http://127.0.0.1:1235", "model": "qwen3-vl-4b"}
+
+    def release_llm_residency(self):
+        self.release_calls += 1
+        return {"released": True, "cold": True}
 
 
 class TaskAwareClientStub:

@@ -86,6 +86,12 @@ class AnalysisPipelineRequest(BaseModel):
     period_start: Optional[str] = None
     period_end: Optional[str] = None
 
+
+class StructuredNoteEditRequest(BaseModel):
+    base_generated_hash: str
+    fields: dict[str, Optional[str]]
+
+
 class TranscribePathRequest(BaseModel):
     file: str
     model: Optional[str] = None

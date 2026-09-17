@@ -363,6 +363,7 @@ const en = {
     error: 'Recording error: {error}',
     startFailed: 'Unable to start recording: {error}',
     chunkSaveFailed: 'Chunk not saved: {error}',
+    uploadBackpressure: 'Upload backlog limit reached. ClosedRoom stopped and saved the recording early to protect memory.',
     finalizationFailed: 'Finalization failed: {error}',
     emptyRecordingWarning: 'The recording is empty. Please verify that ClosedRoom has Microphone and Screen Recording permissions in macOS System Settings.',
     routingActive: 'Active routing: {devices}',

@@ -7,6 +7,8 @@ from typing import Any
 DEFAULT_TEMPLATE_VERSION = "v1"
 DEFAULT_ANALYSIS_TYPE = "meeting_brief"
 DEFAULT_PIPELINE_ID = "meeting_default"
+SHARED_NOTES_TEMPLATE_ID = "meeting_notes_shared"
+SHARED_NOTES_TEMPLATE_VERSION = "v2"
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,7 @@ class AnalysisTemplate:
     description: str
     version: str
     prompt: str
+    internal: bool = False
 
     def public(self) -> dict[str, Any]:
         return {
@@ -45,6 +48,18 @@ class AnalysisPipeline:
 
 
 TEMPLATES: dict[str, AnalysisTemplate] = {
+    SHARED_NOTES_TEMPLATE_ID: AnalysisTemplate(
+        id=SHARED_NOTES_TEMPLATE_ID,
+        analysis_type="meeting_brief",
+        label="Shared meeting notes",
+        description="Internal shared extraction for summary, actions, decisions and risks.",
+        version=SHARED_NOTES_TEMPLATE_VERSION,
+        prompt=(
+            "CLOSEDROOM_MEETING_NOTES_V2. Produce the versioned shared structured notes contract "
+            "with source references. This template is executed by the structured-notes service."
+        ),
+        internal=True,
+    ),
     "meeting_brief": AnalysisTemplate(
         id="meeting_brief",
         analysis_type="meeting_brief",
@@ -173,6 +188,8 @@ def get_template(template_id: str | None) -> AnalysisTemplate:
 def template_for_analysis_type(analysis_type: str | None) -> AnalysisTemplate:
     if analysis_type:
         for template in TEMPLATES.values():
+            if template.internal:
+                continue
             if template.analysis_type == analysis_type:
                 return template
     return TEMPLATES[DEFAULT_ANALYSIS_TYPE]
@@ -185,7 +202,7 @@ def get_pipeline(pipeline_id: str | None) -> AnalysisPipeline:
 
 
 def list_templates() -> list[dict[str, Any]]:
-    return [template.public() for template in TEMPLATES.values()]
+    return [template.public() for template in TEMPLATES.values() if not template.internal]
 
 
 def list_pipelines() -> list[dict[str, Any]]:

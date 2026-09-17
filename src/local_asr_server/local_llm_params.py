@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,8 @@ import yaml
 from local_asr_server.paths import get_local_llm_params_file
 
 logger = logging.getLogger("uvicorn.error")
+
+LOCAL_LLM_REGISTRY_PATHS_ENV = "LOCAL_LLM_REGISTRY_PATHS"
 
 DEFAULT_LOCAL_LLM_PARAMS: dict[str, Any] = {
     "models": {
@@ -80,23 +83,54 @@ def load_local_llm_params() -> dict[str, Any]:
     return _default_params_copy()
 
 
-def configure_local_llm_server_registry() -> Path:
-    """Materialize ClosedRoom model overrides as an upstream registry overlay.
+def _external_registry_paths_without(adapter_file: Path) -> list[str]:
+    """Preserve caller-provided external registries while excluding our prior overlay."""
+    raw = os.environ.get(LOCAL_LLM_REGISTRY_PATHS_ENV, "")
+    if not raw.strip():
+        return []
+    adapter = adapter_file.expanduser().resolve()
+    retained: list[str] = []
+    for value in raw.split(os.pathsep):
+        value = value.strip()
+        if not value:
+            continue
+        candidate = Path(value).expanduser().resolve()
+        if candidate == adapter:
+            continue
+        retained.append(str(candidate))
+    return retained
 
-    ``local-llm-server`` 0.3.8 deliberately owns a YAML model registry, while
-    ClosedRoom owns the user-facing ``local_llm_params.json`` configuration.
-    The managed sidecar calls this adapter before invoking the pinned upstream
-    CLI.  The real ``~/.local-llm/models.yaml`` is read as an input and is never
-    modified.
+
+def configure_local_llm_server_registry() -> Path:
+    """Materialize ClosedRoom overrides through local-llm-server's public API.
+
+    local-llm-server 0.4 exposes generic registry overlays through
+    ``LOCAL_LLM_REGISTRY_PATHS``. ClosedRoom writes one private adapter file and
+    appends it to that public environment contract instead of mutating upstream
+    module globals. Any pre-existing external registry layers are preserved.
+
+    The upstream user registry keeps the precedence defined by local-llm-server
+    0.4. ClosedRoom does not rewrite or monkey-patch that upstream source.
     """
     import local_llm_server.registry as upstream_registry
 
-    # A previous invocation in the same process may have pointed the upstream
-    # module at our generated overlay. Always rebuild from the genuine upstream
-    # user registry first.
-    upstream_user_registry = Path.home() / ".local-llm" / "models.yaml"
-    upstream_registry._USER_REGISTRY = upstream_user_registry
-    registry = upstream_registry.load_registry()
+    adapter_file = get_local_llm_params_file().with_name("local_llm_registry.yaml")
+    external_paths = _external_registry_paths_without(adapter_file)
+
+    # Build the adapter from genuine upstream inputs, excluding an older
+    # ClosedRoom-generated overlay from a prior invocation in this process.
+    previous_env = os.environ.get(LOCAL_LLM_REGISTRY_PATHS_ENV)
+    try:
+        if external_paths:
+            os.environ[LOCAL_LLM_REGISTRY_PATHS_ENV] = os.pathsep.join(external_paths)
+        else:
+            os.environ.pop(LOCAL_LLM_REGISTRY_PATHS_ENV, None)
+        registry = upstream_registry.load_registry()
+    finally:
+        if previous_env is None:
+            os.environ.pop(LOCAL_LLM_REGISTRY_PATHS_ENV, None)
+        else:
+            os.environ[LOCAL_LLM_REGISTRY_PATHS_ENV] = previous_env
 
     models: dict[str, Any] = {}
     for key, entry in (registry.get("models") or {}).items():
@@ -126,7 +160,6 @@ def configure_local_llm_server_registry() -> Path:
         "default_model": registry.get("default_model"),
         "startup_models": startup_models or list(registry.get("startup_models") or []),
     }
-    adapter_file = get_local_llm_params_file().with_name("local_llm_registry.yaml")
     adapter_file.parent.mkdir(parents=True, exist_ok=True)
     temporary = adapter_file.with_suffix(".yaml.tmp")
     temporary.write_text(
@@ -136,7 +169,8 @@ def configure_local_llm_server_registry() -> Path:
     temporary.replace(adapter_file)
     adapter_file.chmod(0o600)
 
-    # The CLI imports this same module object afterwards, so pointing it at the
-    # generated overlay preserves per-model params without touching user files.
-    upstream_registry._USER_REGISTRY = adapter_file
+    # The upstream CLI reads this public environment contract when it loads its
+    # registry. Append our overlay exactly once and preserve existing layers.
+    combined = [*external_paths, str(adapter_file.resolve())]
+    os.environ[LOCAL_LLM_REGISTRY_PATHS_ENV] = os.pathsep.join(combined)
     return adapter_file

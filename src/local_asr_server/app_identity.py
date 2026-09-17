@@ -36,42 +36,54 @@ class AppIdentity:
         }
 
 
-def get_bundle_display_name() -> str:
-    """Return the visible bundle name from Info.plist when bundled."""
+def _bundle_info() -> dict:
     contents_dir = get_app_contents_dir()
     if contents_dir is None:
-        return APP_NAME
+        return {}
 
     info_plist = contents_dir / "Info.plist"
     try:
         with info_plist.open("rb") as f:
             payload = plistlib.load(f)
     except Exception:
-        return APP_NAME
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
+
+def get_bundle_display_name() -> str:
+    """Return the visible bundle name from Info.plist when bundled."""
+    payload = _bundle_info()
     value = payload.get("CFBundleDisplayName") or payload.get("CFBundleName")
     return str(value or APP_NAME)
 
 
 def get_bundle_identifier() -> str:
-    """Return the bundle identifier from Info.plist when bundled, falling back to paths.APP_BUNDLE_ID."""
-    contents_dir = get_app_contents_dir()
-    if contents_dir is None:
-        return APP_BUNDLE_ID
-
-    info_plist = contents_dir / "Info.plist"
-    try:
-        with info_plist.open("rb") as f:
-            payload = plistlib.load(f)
-    except Exception:
-        return APP_BUNDLE_ID
-
+    """Return the bundle identifier from Info.plist when bundled."""
+    payload = _bundle_info()
     value = payload.get("CFBundleIdentifier")
     return str(value or APP_BUNDLE_ID)
 
 
+def get_bundle_version() -> str | None:
+    """Return the product version embedded in the macOS bundle, when available."""
+    payload = _bundle_info()
+    value = payload.get("CFBundleShortVersionString") or payload.get("CFBundleVersion")
+    text = str(value or "").strip()
+    return text or None
+
+
 def get_app_version() -> str:
-    """Return the installed package version, falling back to the module version."""
+    """Return the product identity version for bundled apps, package version otherwise.
+
+    ClosedRoom's root VERSION owns the macOS product version and is embedded in
+    Info.plist at build time. The Python distribution has an independent package
+    version, so a frozen app must not expose that package version as its runtime
+    application identity.
+    """
+    if is_bundled():
+        bundle_version = get_bundle_version()
+        if bundle_version:
+            return bundle_version
     try:
         return metadata.version("local-asr-server")
     except metadata.PackageNotFoundError:
