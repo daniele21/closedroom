@@ -252,10 +252,6 @@ class MeetingPreparationManager:
         self.services.jobs.link_child(
             parent_job_id, child["id"], stage="transcription", ordinal=0,
         )
-        if self._reuse_completed_visual_stage(parent_job_id):
-            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
-            return
-
         parent = self.services.jobs.get(parent_job_id)
         if parent is None or parent["status"] in TERMINAL_JOB_STATUSES:
             return
@@ -304,6 +300,10 @@ class MeetingPreparationManager:
         if not available:
             self._append_warning(parent_job_id, "screenshot_assets_unavailable")
             self._merge_result(parent_job_id, visual_status="skipped_assets_unavailable")
+            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
+            return
+
+        if self._reuse_completed_visual_stage(parent_job_id):
             self._start_analysis(parent_job_id, transcription_id, start_pipeline)
             return
 
