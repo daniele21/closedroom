@@ -103,6 +103,7 @@ class RecordingStore:
         self._locks_guard = threading.Lock()
         self._locks: dict[str, threading.Lock] = {}
         self._mark_interrupted_jobs()
+        self._reconcile_screenshot_assets()
         self.sync_catalog()
         self.cleanup_orphaned_visual_processing()
 
@@ -1399,6 +1400,69 @@ class RecordingStore:
         timeline = metadata.get("timeline")
         if timeline is not None:
             self._write_json_atomic(session_dir / "timeline.json", timeline)
+
+
+    def _reconcile_screenshot_assets(self) -> None:
+        """Reconcile persisted screenshot manifests and assets after an unclean stop.
+
+        The manifest remains canonical. Missing assets are preserved as unavailable
+        evidence markers, while unreferenced temporary/orphan files are removed.
+        """
+        for metadata_path in self.root.glob("*/*/metadata.json"):
+            session_dir = metadata_path.parent
+            screenshots_dir = self._screenshots_dir(session_dir)
+            if not screenshots_dir.exists():
+                continue
+            try:
+                with metadata_path.open("r", encoding="utf-8") as metadata_file:
+                    metadata = json.load(metadata_file)
+                recording_id = str(metadata.get("id") or session_dir.name)
+                manifest_path = self._screenshot_manifest_path(session_dir)
+                if not manifest_path.exists():
+                    shutil.rmtree(screenshots_dir / ".screenshot-capture-temp", ignore_errors=True)
+                    for candidate in screenshots_dir.iterdir():
+                        if candidate.is_file() and candidate.name.endswith(".tmp"):
+                            candidate.unlink(missing_ok=True)
+                    continue
+
+                manifest = self._read_screenshot_manifest(session_dir, recording_id)
+                referenced: set[str] = {"manifest.json"}
+                for item in manifest["items"]:
+                    for key in ("original_file", "thumbnail_file"):
+                        name = str(item.get(key) or "")
+                        if name:
+                            referenced.add(name)
+
+                shutil.rmtree(screenshots_dir / ".screenshot-capture-temp", ignore_errors=True)
+                root = screenshots_dir.resolve()
+                for candidate in screenshots_dir.iterdir():
+                    if not candidate.is_file() or candidate.name in referenced:
+                        continue
+                    resolved = candidate.resolve()
+                    if root not in resolved.parents:
+                        continue
+                    # Only assets/temp files owned by this feature are eligible for cleanup.
+                    if candidate.suffix.lower() in {".jpg", ".jpeg", ".tmp"}:
+                        candidate.unlink(missing_ok=True)
+
+                changed = False
+                expected_count = len(manifest["items"])
+                if int(metadata.get("screenshot_count") or 0) != expected_count:
+                    metadata["screenshot_count"] = expected_count
+                    changed = True
+                if int(metadata.get("screenshot_manifest_version") or 0) != SCREENSHOT_MANIFEST_VERSION:
+                    metadata["screenshot_manifest_version"] = SCREENSHOT_MANIFEST_VERSION
+                    changed = True
+                if changed:
+                    metadata["screenshot_revision"] = int(metadata.get("screenshot_revision") or 0) + 1
+                    self._write_metadata(session_dir, metadata)
+                    self._upsert_catalog(metadata)
+            except (OSError, json.JSONDecodeError, KeyError, RecordingConflict, ValueError):
+                logger.warning(
+                    "Unable to reconcile screenshot assets for %s",
+                    session_dir,
+                    exc_info=True,
+                )
 
     def _mark_interrupted_jobs(self) -> None:
         for metadata_path in self.root.glob("*/*/metadata.json"):
