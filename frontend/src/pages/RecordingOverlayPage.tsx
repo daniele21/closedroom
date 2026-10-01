@@ -323,7 +323,7 @@ export default function RecordingOverlayPage() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 's') {
+      if (event.metaKey && event.shiftKey && event.key === '9') {
         event.preventDefault();
         void handleCaptureScreenshot();
       }
