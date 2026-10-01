@@ -14,9 +14,11 @@ from local_asr_server.settings import (
     load_settings,
 )
 from local_asr_server.visual_intelligence.contracts import (
+    FrameCandidate,
     VisualProcessingProgress,
     VisualRoutingConfig,
     VisualTask,
+    VisualTrigger,
 )
 from local_asr_server.visual_intelligence import adapter as visual_adapter
 from local_asr_server.visual_intelligence.fusion import (
@@ -89,7 +91,16 @@ class PostMeetingVisualService:
         if routing_mode is not None:
             settings = {**settings, "visual_routing_mode": routing_mode}
         requested_routing_mode = str(settings.get("visual_routing_mode") or "v1")
-        frames = services.recordings.list_visual_frames(recording_id)
+        visual_sources = (
+            services.recordings.list_visual_evidence_frames(recording_id)
+            if requested_routing_mode == "v2"
+            else services.recordings.list_visual_frames(recording_id)
+        )
+        unavailable_sources = [
+            source for source in visual_sources
+            if source.get("evidence_source") == "manual_screenshot" and not source.get("available", True)
+        ]
+        frames = [source for source in visual_sources if source.get("path") is not None]
         if not frames:
             self._report_progress(
                 progress_callback, recording_id,
@@ -141,6 +152,28 @@ class PostMeetingVisualService:
             try:
                 router = TaskAwareFrameRouter(routing_config)
                 candidates, routing_summary = router.route(frames, payload.get("segments") or [])
+                existing = {(candidate.sequence, candidate.task) for candidate in candidates}
+                manual_frames = [
+                    frame for frame in frames
+                    if frame.get("evidence_source") == "manual_screenshot"
+                ]
+                for frame in manual_frames:
+                    key = (int(frame["sequence"]), VisualTask.SHARED_CONTENT)
+                    if key in existing:
+                        continue
+                    candidates.append(FrameCandidate(
+                        sequence=int(frame["sequence"]),
+                        timestamp=float(frame["timestamp"]),
+                        task=VisualTask.SHARED_CONTENT,
+                        trigger=VisualTrigger.STRUCTURAL_CHANGE,
+                    ))
+                    existing.add(key)
+                candidates = sorted(candidates, key=lambda item: (item.timestamp, item.task.value))
+                routing_summary = {
+                    **routing_summary,
+                    "manual_screenshot_candidates": len(manual_frames),
+                    "unavailable_manual_screenshots": len(unavailable_sources),
+                }
                 routing_artifact = {
                     **routing_summary,
                     "routing_mode": routing_mode,
@@ -427,7 +460,7 @@ class PostMeetingVisualService:
         trace_store.log_event("run_started", model=model, candidate_count=len(candidates))
         trace_store.log_event("frame_captured", count=len(frames))
 
-        fingerprint = self._processing_fingerprint(candidates, model)
+        fingerprint = self._processing_fingerprint(candidates, frames, model)
         observations = services.recordings.begin_visual_processing(
             recording_id, fingerprint, prompt_version=TASK_PROMPT_VERSION,
         )
@@ -462,7 +495,10 @@ class PostMeetingVisualService:
             )
             client = None
             frames_by_sequence = {int(item["sequence"]): item for item in frames}
-            ordered_frames = sorted(frames, key=lambda item: int(item["sequence"]))
+            ordered_frames = sorted(
+                frames,
+                key=lambda item: (float(item.get("timestamp") or 0.0), int(item["sequence"])),
+            )
             previous_frame_by_sequence = {
                 int(frame["sequence"]): ordered_frames[index - 1] if index else None
                 for index, frame in enumerate(ordered_frames)
@@ -494,12 +530,16 @@ class PostMeetingVisualService:
                         trigger=candidate.trigger.value,
                         reason="recovered",
                     )
-                elif candidate.task is VisualTask.SHARED_CONTENT and not should_infer_shared_candidate(
+                elif (
+                    candidate.task is VisualTask.SHARED_CONTENT
+                    and frame.get("capture_kind") != "manual"
+                    and not should_infer_shared_candidate(
                     trigger=candidate.trigger.value,
                     timestamp=candidate.timestamp,
                     last_inference_timestamp=last_shared_inference_timestamp,
                     content_type=last_shared_content_type,
                     config=routing_config,
+                    )
                 ):
                     skipped_by_cadence += 1
                     skipped += 1
@@ -595,7 +635,9 @@ class PostMeetingVisualService:
 
                             parsed = parse_visual_response(raw)
                             normalized = normalize_task_response(candidate.task, parsed)
-                            observation = TaskAwareVisualProcessor.observation(candidate, normalized, model)
+                            observation = TaskAwareVisualProcessor.observation(
+                                candidate, normalized, model, source=frame,
+                            )
                             observations.append(observation)
                             services.recordings.append_visual_observation(recording_id, observation)
 
@@ -635,6 +677,12 @@ class PostMeetingVisualService:
                             "sequence": candidate.sequence,
                             "task": candidate.task.value,
                             "trigger": candidate.trigger.value,
+                            "source": {
+                                "kind": frame.get("evidence_source") or "continuous_frame",
+                                "evidence_id": frame.get("evidence_id"),
+                                "screenshot_id": frame.get("screenshot_id"),
+                                "sha256": frame.get("sha256"),
+                            },
                             "error_type": "validation" if isinstance(exc, VisualResponseValidationError) else "inference",
                             "error": str(exc),
                         })
@@ -710,10 +758,47 @@ class PostMeetingVisualService:
                     duration_seconds=elapsed,
                 ),
             }
+            processed_screenshot_ids = {
+                str((item.get("source") or {}).get("screenshot_id"))
+                for item in observations
+                if (item.get("source") or {}).get("screenshot_id")
+            }
+            failed_screenshot_ids = {
+                str((item.get("source") or {}).get("screenshot_id"))
+                for item in candidate_errors
+                if (item.get("source") or {}).get("screenshot_id")
+            }
+            manual_source_inventory = [
+                {
+                    "screenshot_id": frame.get("screenshot_id"),
+                    "timestamp": frame.get("timestamp"),
+                    "sha256": frame.get("sha256"),
+                    "display_id": frame.get("display_id"),
+                    "status": (
+                        "processed"
+                        if str(frame.get("screenshot_id")) in processed_screenshot_ids
+                        else "failed"
+                        if str(frame.get("screenshot_id")) in failed_screenshot_ids
+                        else "not_selected"
+                    ),
+                }
+                for frame in frames
+                if frame.get("evidence_source") == "manual_screenshot"
+            ] + [
+                {
+                    "screenshot_id": frame.get("screenshot_id"),
+                    "timestamp": frame.get("timestamp"),
+                    "sha256": frame.get("sha256"),
+                    "display_id": frame.get("display_id"),
+                    "status": "asset_missing",
+                }
+                for frame in unavailable_sources
+            ]
             document = {
                 "schema_version": 2,
                 "observations": observations,
                 "candidate_errors": candidate_errors,
+                "manual_screenshot_sources": manual_source_inventory,
                 **temporal,
                 "routing_summary": self._compact_routing_summary(routing_summary),
                 "model": model,
@@ -950,12 +1035,22 @@ class PostMeetingVisualService:
             return None
 
     @staticmethod
-    def _processing_fingerprint(candidates, model: str) -> str:
+    def _processing_fingerprint(candidates, frames, model: str) -> str:
+        sources_by_sequence = {
+            int(frame["sequence"]): {
+                "evidence_source": frame.get("evidence_source"),
+                "evidence_id": frame.get("evidence_id"),
+                "sha256": frame.get("sha256"),
+                "timestamp": frame.get("timestamp"),
+            }
+            for frame in frames
+        }
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
             "model": model,
             "prompt_version": TASK_PROMPT_VERSION,
             "candidates": [candidate.public() for candidate in candidates],
+            "sources": sources_by_sequence,
         }
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
