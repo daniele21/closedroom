@@ -275,5 +275,56 @@ class RecordingStoreTests(unittest.TestCase):
         self.assertTrue(listed[0]["thumbnail_available"])
 
 
+    def test_restart_reconciles_screenshot_orphans_without_dropping_manifest_evidence(self) -> None:
+        recording = self.store.create(
+            title="Screenshot restart",
+            mime_type="audio/wav",
+            model="test-model",
+            language="it",
+            capture_mode="both",
+            capture_backend="native",
+        )
+        capture = {
+            "timestamp": 3.0,
+            "captured_uptime": 103.0,
+            "recording_ready_uptime": 100.0,
+            "captured_wall_time": 200.0,
+            "display_id": 7,
+            "display_title": "Screen 1",
+            "width": 1920,
+            "height": 1080,
+            "thumbnail_width": 640,
+            "thumbnail_height": 360,
+            "overlay_exclusion": "closedroom_windows",
+        }
+        saved = self.store.save_screenshot(
+            recording["id"],
+            request_id="restart-request",
+            capture=capture,
+            original=b"\xff\xd8\xfforiginal",
+            thumbnail=b"\xff\xd8\xffthumb",
+        )
+        session_dir = self.store.session_dir(recording["id"])
+        screenshots_dir = session_dir / "screenshots"
+        orphan = screenshots_dir / "screenshot-orphan.jpg"
+        orphan.write_bytes(b"\xff\xd8\xfforphan")
+        interrupted_temp = session_dir / ".screenshot-capture-temp"
+        interrupted_temp.mkdir()
+        (interrupted_temp / "half-written.jpg").write_bytes(b"partial")
+
+        self.store.screenshot_asset_path(recording["id"], saved["screenshot_id"]).unlink()
+
+        restarted = RecordingStore(self.root, use_settings_dir=False)
+        listed = restarted.list_screenshots(recording["id"])
+
+        self.assertFalse(orphan.exists())
+        self.assertFalse(interrupted_temp.exists())
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["screenshot_id"], saved["screenshot_id"])
+        self.assertFalse(listed[0]["available"])
+        self.assertTrue(listed[0]["thumbnail_available"])
+        self.assertEqual(restarted.get(recording["id"])["screenshot_count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
