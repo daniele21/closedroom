@@ -149,6 +149,8 @@ func runWindows() {
                 let sourceID = -Int(displayID)
                 return [
                     "id": sourceID,
+                    "display_id": Int(displayID),
+                    "kind": "display",
                     "title": "Schermo/Screen \(index + 1) (\(display.width)x\(display.height))",
                     "application_name": "Schermo Intero/Full Screen",
                     "bundle_identifier": "com.apple.displays",
@@ -163,6 +165,7 @@ func runWindows() {
                       window.frame.width >= 160, window.frame.height >= 120 else { return nil }
                 return [
                     "id": Int(window.windowID),
+                    "kind": "window",
                     "title": window.title ?? "",
                     "application_name": window.owningApplication?.applicationName ?? "",
                     "bundle_identifier": window.owningApplication?.bundleIdentifier ?? "",
@@ -217,6 +220,7 @@ func capabilityPayload() -> [String: Any] {
         "modes": available ? ["both", "mic_only", "pc_only"] : [],
         "minimum_macos": "13.0",
         "visual_window_capture": available,
+        "manual_screenshot_capture": available,
         "screen_recording_permission": screenCaptureAllowed ? "granted" : "required",
         "microphone_permission": micStatusString(micStatus),
     ]
@@ -595,6 +599,231 @@ final class VisualWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             JSONEmitter.shared.emit(["type": "warning", "source": "visual", "message": error.localizedDescription])
         }
     }
+}
+
+
+@available(macOS 13.0, *)
+final class OneShotDisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
+    var onComplete: ((Result<[String: Any], Error>) -> Void)?
+    private let displayID: CGDirectDisplayID
+    private let originalURL: URL
+    private let thumbnailURL: URL
+    private let recordingReadyUptime: Double
+    private let queue = DispatchQueue(label: "closedroom.native.screenshot")
+    private let context = CIContext(options: [.cacheIntermediates: false])
+    private let lock = NSLock()
+    private var stream: SCStream?
+    private var completed = false
+
+    init(
+        displayID: CGDirectDisplayID,
+        originalURL: URL,
+        thumbnailURL: URL,
+        recordingReadyUptime: Double
+    ) {
+        self.displayID = displayID
+        self.originalURL = originalURL
+        self.thumbnailURL = thumbnailURL
+        self.recordingReadyUptime = recordingReadyUptime
+    }
+
+    func start() async throws {
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+        guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+            throw NSError(domain: "ClosedRoomNativeCapture", code: 60, userInfo: [
+                NSLocalizedDescriptionKey: "Selected screenshot display is no longer available"
+            ])
+        }
+
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let excludedWindows = content.windows.filter { window in
+            let app = window.owningApplication
+            let bundle = (app?.bundleIdentifier ?? "").lowercased()
+            let name = (app?.applicationName ?? "").lowercased()
+            return app?.processID == ownPID || bundle.contains("closedroom") || name.contains("closedroom")
+        }
+        let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+        let configuration = SCStreamConfiguration()
+        configuration.width = max(2, Int(display.width))
+        configuration.height = max(2, Int(display.height))
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        configuration.queueDepth = 1
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
+
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        self.stream = stream
+        try await stream.startCapture()
+    }
+
+    func failBeforeStart(_ error: Error) {
+        finish(.failure(error), stopStream: false)
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        finish(.failure(error), stopStream: false)
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of type: SCStreamOutputType
+    ) {
+        guard type == .screen, CMSampleBufferDataIsReady(sampleBuffer),
+              let pixelBuffer = sampleBuffer.imageBuffer else { return }
+
+        lock.lock()
+        let alreadyCompleted = completed
+        lock.unlock()
+        if alreadyCompleted { return }
+
+        let capturedUptime = ProcessInfo.processInfo.systemUptime
+        let capturedWallTime = Date().timeIntervalSince1970
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let qualityKey = CIImageRepresentationOption(
+            rawValue: kCGImageDestinationLossyCompressionQuality as String
+        )
+        guard let original = context.jpegRepresentation(
+            of: image,
+            colorSpace: CGColorSpaceCreateDeviceRGB(),
+            options: [qualityKey: 0.92]
+        ) else {
+            finish(.failure(NSError(domain: "ClosedRoomNativeCapture", code: 61, userInfo: [
+                NSLocalizedDescriptionKey: "Unable to encode screenshot"
+            ])))
+            return
+        }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let scale = min(1.0, 640.0 / Double(max(width, height)))
+        let thumbnailImage = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let thumbnail = context.jpegRepresentation(
+            of: thumbnailImage,
+            colorSpace: CGColorSpaceCreateDeviceRGB(),
+            options: [qualityKey: 0.78]
+        ) else {
+            finish(.failure(NSError(domain: "ClosedRoomNativeCapture", code: 62, userInfo: [
+                NSLocalizedDescriptionKey: "Unable to encode screenshot thumbnail"
+            ])))
+            return
+        }
+
+        do {
+            try original.write(to: originalURL, options: .atomic)
+            try thumbnail.write(to: thumbnailURL, options: .atomic)
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+            finish(.success([
+                "type": "screenshot",
+                "display_id": Int(displayID),
+                "captured_uptime": capturedUptime,
+                "captured_wall_time": capturedWallTime,
+                "timestamp": max(0.0, capturedUptime - recordingReadyUptime),
+                "pts": pts,
+                "width": width,
+                "height": height,
+                "thumbnail_width": max(1, Int(Double(width) * scale)),
+                "thumbnail_height": max(1, Int(Double(height) * scale)),
+                "format": "image/jpeg",
+                "overlay_exclusion": "closedroom_windows",
+            ])))
+        } catch {
+            try? FileManager.default.removeItem(at: originalURL)
+            try? FileManager.default.removeItem(at: thumbnailURL)
+            finish(.failure(error))
+        }
+    }
+
+    private func finish(_ result: Result<[String: Any], Error>, stopStream: Bool = true) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let callback = onComplete
+        onComplete = nil
+        let currentStream = stream
+        stream = nil
+        lock.unlock()
+
+        Task {
+            if stopStream, let currentStream = currentStream {
+                try? await currentStream.stopCapture()
+            }
+            callback?(result)
+        }
+    }
+}
+
+@available(macOS 13.0, *)
+func captureDisplayScreenshot(
+    displayID: CGDirectDisplayID,
+    originalURL: URL,
+    thumbnailURL: URL,
+    recordingReadyUptime: Double
+) async throws -> [String: Any] {
+    let capture = OneShotDisplayCapture(
+        displayID: displayID,
+        originalURL: originalURL,
+        thumbnailURL: thumbnailURL,
+        recordingReadyUptime: recordingReadyUptime
+    )
+    return try await withCheckedThrowingContinuation { continuation in
+        capture.onComplete = { [capture] result in
+            _ = capture
+            continuation.resume(with: result)
+        }
+        Task {
+            do {
+                try await capture.start()
+            } catch {
+                capture.failBeforeStart(error)
+            }
+        }
+    }
+}
+
+func runScreenshot(
+    displayID: Int,
+    recordingReadyUptime: Double,
+    originalFile: String,
+    thumbnailFile: String
+) {
+    guard #available(macOS 13.0, *) else {
+        JSONEmitter.shared.emitAndExit([
+            "type": "error",
+            "reason": "macos_13_required",
+            "message": "Screenshot capture requires macOS 13.0 or later"
+        ], exitCode: 3)
+    }
+    guard CGPreflightScreenCaptureAccess() else {
+        JSONEmitter.shared.emitAndExit([
+            "type": "error",
+            "reason": "screen_capture_permission_required",
+            "message": "Screen Recording permission is required for screenshots"
+        ], exitCode: 3)
+    }
+
+    Task {
+        do {
+            let result = try await captureDisplayScreenshot(
+                displayID: CGDirectDisplayID(displayID),
+                originalURL: URL(fileURLWithPath: originalFile),
+                thumbnailURL: URL(fileURLWithPath: thumbnailFile),
+                recordingReadyUptime: recordingReadyUptime
+            )
+            JSONEmitter.shared.emitAndExit(result, exitCode: 0)
+        } catch {
+            JSONEmitter.shared.emitAndExit([
+                "type": "error",
+                "reason": "screenshot_capture_failed",
+                "message": error.localizedDescription
+            ], exitCode: 4)
+        }
+    }
+    RunLoop.main.run()
 }
 
 final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
@@ -1049,6 +1278,23 @@ case "diagnostics":
     JSONEmitter.shared.emitAndExit(diagnosticsPayload(), exitCode: 0)
 case "windows":
     runWindows()
+case "screenshot":
+    guard let displayID = requireArg("--display-id", in: args).flatMap({ Int($0) }),
+          let recordingReadyUptime = requireArg("--recording-ready-uptime", in: args).flatMap({ Double($0) }),
+          let originalFile = requireArg("--original-file", in: args),
+          let thumbnailFile = requireArg("--thumbnail-file", in: args) else {
+        JSONEmitter.shared.emitAndExit([
+            "type": "error",
+            "reason": "invalid_screenshot_arguments",
+            "message": "Missing required screenshot arguments"
+        ], exitCode: 2)
+    }
+    runScreenshot(
+        displayID: displayID,
+        recordingReadyUptime: recordingReadyUptime,
+        originalFile: originalFile,
+        thumbnailFile: thumbnailFile
+    )
 case "start":
     guard let recordingID = requireArg("--recording-id", in: args),
           let outputDir = requireArg("--output-dir", in: args),
