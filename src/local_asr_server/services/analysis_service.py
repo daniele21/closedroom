@@ -26,6 +26,7 @@ from local_asr_server.structured_notes import (
 logger = logging.getLogger("uvicorn.error")
 ANALYSIS_CACHE_VERSION = "analysis-v1"
 STRUCTURED_ANALYSIS_CACHE_VERSION = "analysis-structured-v3"
+MAX_STRUCTURED_VISUAL_SOURCES = 12
 
 
 class AnalysisService:
@@ -278,10 +279,21 @@ class AnalysisService:
                 "confidence": observation.get("confidence"),
                 "generation_id": generation_id,
             }
-        return sorted(
+        ordered = sorted(
             sources.values(),
             key=lambda item: (float(item.get("timestamp") or 0.0), str(item.get("screenshot_id") or "")),
         )
+        if len(ordered) <= MAX_STRUCTURED_VISUAL_SOURCES:
+            return ordered
+
+        # Preserve temporal coverage rather than silently favoring the beginning
+        # of long meetings. The same input always selects the same source indices.
+        last_index = len(ordered) - 1
+        selected_indices = {
+            round(index * last_index / (MAX_STRUCTURED_VISUAL_SOURCES - 1))
+            for index in range(MAX_STRUCTURED_VISUAL_SOURCES)
+        }
+        return [ordered[index] for index in sorted(selected_indices)]
 
     @staticmethod
     def _structured_source_snapshot(transcription: dict[str, Any]) -> dict[str, Any]:
