@@ -257,7 +257,7 @@ export default function RecordingOverlayPage() {
         setTimeout(() => {
           setIsStopping((stillStopping) => {
             if (stillStopping) {
-              setErrorMsg('Timeout stop backend. Riprova o torna alla finestra principale.');
+              setErrorMsg(t('recording.stopBackendTimeout'));
               return false;
             }
             return stillStopping;
@@ -269,7 +269,7 @@ export default function RecordingOverlayPage() {
       setTimeout(() => {
         setIsStopping((stillStopping) => {
           if (stillStopping) {
-            setErrorMsg('Nessun riscontro dal registratore browser.');
+            setErrorMsg(t('recording.browserStopUnconfirmed'));
             return false;
           }
           return stillStopping;
@@ -281,7 +281,7 @@ export default function RecordingOverlayPage() {
   const handleCaptureScreenshot = async () => {
     if (!recordingId || captureBackend !== 'native' || !isRecording || isStopping || isCapturingScreenshot) return;
     if (displays.length > 1 && selectedDisplayId === null) {
-      setErrorMsg('Scegli il monitor da catturare.');
+      setErrorMsg(t('recording.screenshotChooseMonitorError'));
       setIsExpanded(true);
       void ApiClient.resizeOverlay(320, 300);
       return;
@@ -300,14 +300,14 @@ export default function RecordingOverlayPage() {
       setLastScreenshotAt(saved.timestamp);
       if (saved.display_id) setSelectedDisplayId(saved.display_id);
     } catch (err: any) {
-      const message = String(err?.message || 'Screenshot non riuscito');
+      const message = String(err?.message || t('recording.screenshotFailed'));
       if (message.includes('selected_display_unavailable')) {
-        setErrorMsg('Il monitor selezionato non è più disponibile. Scegline un altro.');
+        setErrorMsg(t('recording.screenshotDisplayUnavailable'));
         await loadDisplays(null);
         setIsExpanded(true);
         void ApiClient.resizeOverlay(320, 300);
       } else if (message.includes('display_selection_required')) {
-        setErrorMsg('Scegli il monitor da catturare.');
+        setErrorMsg(t('recording.screenshotChooseMonitorError'));
         await loadDisplays(null);
         setIsExpanded(true);
         void ApiClient.resizeOverlay(320, 300);
@@ -422,7 +422,7 @@ export default function RecordingOverlayPage() {
               🎙️ {title || t('recording.noActiveRecording') || 'Nessuna registrazione attiva'}
             </div>
             <div className="col-span-2 flex items-center gap-2">
-              <span className="opacity-50 shrink-0">Monitor:</span>
+              <span className="opacity-50 shrink-0">{t('recording.screenshotMonitor')}:</span>
               {captureBackend === 'native' && displays.length > 0 ? (
                 <select
                   value={selectedDisplayId ?? ''}
@@ -430,7 +430,7 @@ export default function RecordingOverlayPage() {
                   className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-1.5 py-1 text-[10px] text-white"
                   aria-label="Monitor per screenshot"
                 >
-                  {displays.length > 1 && <option value="">Scegli monitor…</option>}
+                  {displays.length > 1 && <option value="">{t('recording.screenshotChooseMonitor')}</option>}
                   {displays.map((display) => (
                     <option key={display.display_id} value={display.display_id}>
                       {display.title}
@@ -439,16 +439,16 @@ export default function RecordingOverlayPage() {
                 </select>
               ) : (
                 <span className="truncate text-white/80">
-                  {captureBackend === 'native' ? 'Nessun monitor disponibile' : 'Screenshot solo con acquisizione nativa'}
+                  {captureBackend === 'native' ? t('recording.screenshotNoMonitor') : t('recording.screenshotNativeOnly')}
                 </span>
               )}
             </div>
             <div>
-              <span className="opacity-50">Screenshot:</span>{' '}
+              <span className="opacity-50">{t('recording.screenshotCount')}:</span>{' '}
               <span className="font-semibold text-white/90">{screenshotCount}</span>
             </div>
             <div>
-              <span className="opacity-50">Ultimo:</span>{' '}
+              <span className="opacity-50">{t('recording.screenshotLast')}:</span>{' '}
               <span className="font-semibold text-white/90">
                 {lastScreenshotAt === null ? '—' : `${Math.floor(lastScreenshotAt / 60)}:${String(Math.floor(lastScreenshotAt % 60)).padStart(2, '0')}`}
               </span>
@@ -556,8 +556,8 @@ export default function RecordingOverlayPage() {
             || (displays.length > 1 && selectedDisplayId === null)
           }
           className="h-9 min-w-9 rounded-lg border border-white/10 bg-white/10 px-2 text-[10px] font-semibold text-white/90 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-          title={captureBackend === 'native' ? 'Screenshot (⌘⇧S)' : 'Screenshot disponibile con acquisizione nativa'}
-          aria-label="Cattura screenshot"
+          title={captureBackend === 'native' ? t('recording.screenshotShortcut') : t('recording.screenshotNativeOnly')}
+          aria-label={t('recording.screenshotAction')}
         >
           {isCapturingScreenshot ? '…' : `▣ ${screenshotCount}`}
         </button>
