@@ -433,7 +433,7 @@ const en = {
     screenshotDisplayUnavailable: 'The selected display is no longer available. Choose another one.',
     screenshotFailed: 'Screenshot failed',
     screenshotAction: 'Capture screenshot',
-    screenshotShortcut: 'Screenshot (⌘⇧S)',
+    screenshotShortcut: 'Screenshot (⌘⇧9)',
     stopBackendTimeout: 'The backend did not confirm that saving finished. Retry or open the main window.',
     browserStopUnconfirmed: 'The browser recorder did not confirm that saving finished.',
     readinessMicAuthorized: 'Microphone authorized',
