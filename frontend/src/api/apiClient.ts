@@ -1073,7 +1073,7 @@ export const ApiClient = {
     title?: string;
     capture_backend?: 'browser' | 'native';
     capture_mode?: 'both' | 'mic_only' | 'pc_only';
-    started_at?: number;
+    started_at?: number | string;
     bytes_written?: number;
     mic_db?: number;
     system_db?: number;
