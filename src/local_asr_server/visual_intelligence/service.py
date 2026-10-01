@@ -111,24 +111,66 @@ class PostMeetingVisualService:
             )
             if settings.get("visual_intelligence_enabled"):
                 model = str(settings.get("visual_llm_model") or "qwen3-vl-4b")
+                missing_manual = len(unavailable_sources)
+                is_v2 = requested_routing_mode == "v2"
+                fallback_reason = (
+                    "manual_screenshot_assets_unavailable"
+                    if missing_manual
+                    else "no_visual_frames_captured"
+                )
                 summary = {
-                    "version": 1,
+                    "version": 2 if is_v2 else 1,
                     "status": "degraded",
                     "model": model,
                     "frame_count": 0,
                     "observation_count": 0,
                     "parse_errors": 0,
+                    "manual_screenshot_count": missing_manual,
+                    "unavailable_manual_screenshot_count": missing_manual,
                     **diagnostic(
                         "visual_intelligence",
                         "degraded",
                         requested_backend=model,
                         fallback_used=True,
-                        fallback_reason="no_visual_frames_captured",
-                        counts={"frames": 0, "observations": 0, "parse_errors": 0},
+                        fallback_reason=fallback_reason,
+                        counts={
+                            "frames": 0,
+                            "observations": 0,
+                            "parse_errors": 0,
+                            "manual_screenshots": missing_manual,
+                            "unavailable_manual_screenshots": missing_manual,
+                        },
                     ),
                 }
+                document = None
+                if is_v2:
+                    document = {
+                        "schema_version": 2,
+                        "observations": [],
+                        "candidate_errors": [],
+                        "speaker_intervals": [],
+                        "meeting_state_events": [],
+                        "share_sessions": [],
+                        "semantic_links": [],
+                        "routing_summary": {
+                            "manual_screenshot_candidates": 0,
+                            "unavailable_manual_screenshots": missing_manual,
+                        },
+                        "manual_screenshot_sources": [
+                            {
+                                "screenshot_id": source.get("screenshot_id"),
+                                "timestamp": source.get("timestamp"),
+                                "sha256": source.get("sha256"),
+                                "display_id": source.get("display_id"),
+                                "status": "asset_missing",
+                            }
+                            for source in unavailable_sources
+                        ],
+                        "model": model,
+                        "prompt_version": TASK_PROMPT_VERSION,
+                    }
                 services.recordings.replace_visual_intelligence_artifacts(
-                    recording_id, [], summary,
+                    recording_id, [], summary, document=document,
                 )
                 payload.setdefault("stats", {})["visual_intelligence"] = summary
             return payload
