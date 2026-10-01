@@ -15,6 +15,7 @@ from local_asr_server.settings import (
 )
 from local_asr_server.visual_intelligence.contracts import (
     FrameCandidate,
+    MAX_VISUAL_VLM_CANDIDATES,
     VisualProcessingProgress,
     VisualRoutingConfig,
     VisualTask,
@@ -183,9 +184,20 @@ class PostMeetingVisualService:
             "visual_frame_similarity_threshold",
             DEFAULT_VISUAL_FRAME_SIMILARITY_THRESHOLD,
         )
+        manual_frames = [
+            frame for frame in frames
+            if frame.get("evidence_source") == "manual_screenshot"
+        ]
+        # Manual screenshots are deliberate evidence and each keeps a shared-content
+        # slot, but they remain inside the same hard visual work ceiling.
+        routed_candidate_budget = max(
+            1,
+            MAX_VISUAL_VLM_CANDIDATES - min(len(manual_frames), MAX_VISUAL_VLM_CANDIDATES - 1),
+        )
         routing_config = VisualRoutingConfig(
             mode=routing_mode,
             dhash_distance=int(configured_similarity_threshold),
+            max_candidates=routed_candidate_budget,
         )
         routing_summary = None
         routing_error = None
@@ -195,10 +207,6 @@ class PostMeetingVisualService:
                 router = TaskAwareFrameRouter(routing_config)
                 candidates, routing_summary = router.route(frames, payload.get("segments") or [])
                 existing = {(candidate.sequence, candidate.task) for candidate in candidates}
-                manual_frames = [
-                    frame for frame in frames
-                    if frame.get("evidence_source") == "manual_screenshot"
-                ]
                 for frame in manual_frames:
                     key = (int(frame["sequence"]), VisualTask.SHARED_CONTENT)
                     if key in existing:
@@ -211,6 +219,10 @@ class PostMeetingVisualService:
                     ))
                     existing.add(key)
                 candidates = sorted(candidates, key=lambda item: (item.timestamp, item.task.value))
+                if len(candidates) > MAX_VISUAL_VLM_CANDIDATES:
+                    # Defensive fail-closed check: store limits make this unreachable,
+                    # but a future producer must not silently escape the bounded budget.
+                    raise RuntimeError("visual_candidate_budget_exceeded")
                 routing_summary = {
                     **routing_summary,
                     "manual_screenshot_candidates": len(manual_frames),
