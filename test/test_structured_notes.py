@@ -180,6 +180,67 @@ class StructuredNotesTests(unittest.TestCase):
         self.assertIn("ship only after validation", projections["decisions"]["markdown"])
         self.assertIn("blocking the release", projections["risks_blockers"]["markdown"])
 
+    def test_visual_source_refs_are_typed_and_not_collapsed_into_transcript_refs(self) -> None:
+        transcription = meeting_transcription()
+        transcription["visual_sources"] = [{
+            "screenshot_id": "shot-1",
+            "timestamp": 15.5,
+            "confidence": 0.88,
+            "content_type": "slide",
+            "title": "Q4 roadmap",
+            "visible_text": ["Launch in October"],
+            "key_information": ["Milestone: October"],
+        }]
+        chunks, refs = build_source_chunks(transcription)
+
+        self.assertTrue(any("[Vshot-1" in chunk for chunk in chunks))
+        self.assertEqual(refs["V:shot-1"]["source_type"], "screenshot")
+        self.assertTrue(refs["V:shot-1"]["machine_interpreted"])
+
+        result = normalize_structured_notes(
+            {
+                "generated": {
+                    "summary": {
+                        "text": "The captured slide shows an October milestone.",
+                        "source_refs": [{"source_type": "screenshot", "screenshot_id": "shot-1"}],
+                    },
+                    "actions": [],
+                    "decisions": [],
+                    "risks": [],
+                }
+            },
+            refs,
+        )
+        summary = result["generated"]["summary"]
+        self.assertEqual(summary["evidence_basis"], "visual")
+        self.assertEqual(summary["source_refs"][0]["screenshot_id"], "shot-1")
+        self.assertEqual(summary["source_refs"][0]["evidence_basis"], "visual_inference")
+        self.assertIn("Screenshot 00:15", result["markdown"])
+
+    def test_unknown_visual_source_reference_is_rejected(self) -> None:
+        transcription = meeting_transcription()
+        transcription["visual_sources"] = [{
+            "screenshot_id": "shot-1",
+            "timestamp": 15.5,
+            "content_type": "slide",
+        }]
+        _chunks, refs = build_source_chunks(transcription)
+        with self.assertRaises(StructuredNotesError):
+            normalize_structured_notes(
+                {
+                    "generated": {
+                        "summary": {
+                            "text": "Unsupported visual claim",
+                            "source_refs": [{"source_type": "screenshot", "screenshot_id": "missing"}],
+                        },
+                        "actions": [],
+                        "decisions": [],
+                        "risks": [],
+                    }
+                },
+                refs,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
