@@ -226,5 +226,54 @@ class RecordingStoreTests(unittest.TestCase):
         self.assertIn("microphone lost", updated_meta3["warnings"])
 
 
+
+    def test_manual_screenshot_manifest_is_idempotent_and_keeps_missing_assets_visible(self) -> None:
+        recording = self.store.create(
+            title="Screenshot call",
+            mime_type="audio/wav",
+            model="test-model",
+            language="it",
+            capture_mode="both",
+            capture_backend="native",
+        )
+        capture = {
+            "timestamp": 1.25,
+            "captured_uptime": 101.25,
+            "recording_ready_uptime": 100.0,
+            "captured_wall_time": 200.0,
+            "display_id": 7,
+            "display_title": "Screen 1",
+            "width": 1920,
+            "height": 1080,
+            "thumbnail_width": 640,
+            "thumbnail_height": 360,
+            "overlay_exclusion": "closedroom_windows",
+        }
+        first = self.store.save_screenshot(
+            recording["id"],
+            request_id="same-request",
+            capture=capture,
+            original=b"\xff\xd8\xfforiginal",
+            thumbnail=b"\xff\xd8\xffthumb",
+        )
+        retry = self.store.save_screenshot(
+            recording["id"],
+            request_id="same-request",
+            capture={**capture, "timestamp": 9.0},
+            original=b"\xff\xd8\xffdifferent",
+            thumbnail=b"\xff\xd8\xffother",
+        )
+
+        self.assertEqual(first["screenshot_id"], retry["screenshot_id"])
+        self.assertEqual(len(self.store.list_screenshots(recording["id"])), 1)
+        self.assertEqual(self.store.get(recording["id"])["screenshot_count"], 1)
+
+        original_path = self.store.screenshot_asset_path(recording["id"], first["screenshot_id"])
+        original_path.unlink()
+        listed = self.store.list_screenshots(recording["id"])
+        self.assertFalse(listed[0]["available"])
+        self.assertTrue(listed[0]["thumbnail_available"])
+
+
 if __name__ == "__main__":
     unittest.main()
