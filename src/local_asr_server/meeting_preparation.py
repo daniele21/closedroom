@@ -68,7 +68,11 @@ class MeetingPreparationManager:
         # leave an orphan parent job.
         self.services.recordings.get(recording_id, include_result=False)
         transcription_request = TranscriptionJobRequest(visual_intelligence_enabled=False)
-        source_identity = self._source_identity(recording_id)
+        audio_source_identity = self._audio_source_identity(recording_id)
+        source_identity = self._source_identity(
+            recording_id,
+            audio_source_identity=audio_source_identity,
+        )
         asr_identity, asr_material = self._asr_identity(transcription_request)
         analysis_request = AnalysisPipelineRequest(
             recording_id=recording_id,
@@ -124,6 +128,7 @@ class MeetingPreparationManager:
             "version": PREPARATION_RESULT_VERSION,
             "preparation_key": preparation_key,
             "source_identity": source_identity,
+            "audio_source_identity": audio_source_identity,
             "asr_identity": asr_identity,
             "analysis_identity": analysis_identity,
             "pipeline_id": MEETING_PREPARATION_PIPELINE,
@@ -149,7 +154,7 @@ class MeetingPreparationManager:
 
         reusable = self._reusable_transcription(
             recording_id,
-            source_identity=source_identity,
+            audio_source_identity=audio_source_identity,
             asr_identity=asr_identity,
             asr_material=asr_material,
         )
@@ -549,7 +554,8 @@ class MeetingPreparationManager:
             progress_detail={"phase": "failed"},
         )
 
-    def _source_identity(self, recording_id: str) -> str:
+    def _audio_source_identity(self, recording_id: str) -> str:
+        """Stable ASR source identity. Visual evidence must never invalidate it."""
         tracks = []
         for track, audio_path in self.services.recordings.transcribable_tracks(recording_id):
             chunks = track.get("chunks") or []
@@ -572,6 +578,15 @@ class MeetingPreparationManager:
             else:
                 source["sha256"] = _hash_file(audio_path)
             tracks.append(source)
+        # Keep the pre-screenshot v1 material exactly stable for backward reuse.
+        return _hash_json({"version": 1, "tracks": tracks})
+
+    def _source_identity(
+        self,
+        recording_id: str,
+        *,
+        audio_source_identity: str | None = None,
+    ) -> str:
         screenshots = [
             {
                 "screenshot_id": item.get("screenshot_id"),
@@ -586,7 +601,9 @@ class MeetingPreparationManager:
         ]
         return _hash_json({
             "version": 2,
-            "tracks": tracks,
+            "audio_source_identity": (
+                audio_source_identity or self._audio_source_identity(recording_id)
+            ),
             "screenshots": screenshots,
         })
 
@@ -631,7 +648,7 @@ class MeetingPreparationManager:
         self,
         recording_id: str,
         *,
-        source_identity: str,
+        audio_source_identity: str,
         asr_identity: str,
         asr_material: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -648,8 +665,12 @@ class MeetingPreparationManager:
             result = preparation.get("result") or {}
             if result.get("transcription_id") != transcription_id:
                 continue
+            prior_audio_identity = result.get("audio_source_identity")
+            if prior_audio_identity is None and int(result.get("version") or 1) < 2:
+                # v1 preparation source_identity contained audio only.
+                prior_audio_identity = result.get("source_identity")
             if (
-                result.get("source_identity") == source_identity
+                prior_audio_identity == audio_source_identity
                 and result.get("asr_identity") == asr_identity
             ):
                 return transcription
