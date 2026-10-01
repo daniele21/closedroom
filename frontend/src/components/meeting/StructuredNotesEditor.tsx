@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, Clock3, Pencil, RotateCcw, Save, X } from 'lucide-react';
+import { AlertTriangle, Check, Clock3, Image as ImageIcon, Pencil, RotateCcw, Save, X } from 'lucide-react';
 
-import type { AnalysisRun } from '../../api/apiClient';
+import type { AnalysisRun, RecordingScreenshot } from '../../api/apiClient';
 import {
   discardStructuredNoteEdit,
   editStructuredNoteItem,
@@ -21,6 +21,8 @@ interface StructuredNotesEditorProps {
   lang: string;
   onSeek: (seconds: number) => void;
   onChanged: () => Promise<void> | void;
+  screenshots?: RecordingScreenshot[];
+  onOpenScreenshot?: (screenshot: RecordingScreenshot) => void;
   readOnly?: boolean;
 }
 
@@ -51,18 +53,59 @@ function formatTimestamp(seconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-function EvidenceRefs({ refs, onSeek }: { refs?: StructuredNoteSourceRef[]; onSeek: (seconds: number) => void }) {
+function EvidenceRefs({
+  refs,
+  onSeek,
+  screenshots,
+  onOpenScreenshot,
+}: {
+  refs?: StructuredNoteSourceRef[];
+  onSeek: (seconds: number) => void;
+  screenshots: RecordingScreenshot[];
+  onOpenScreenshot?: (screenshot: RecordingScreenshot) => void;
+}) {
   if (!refs?.length) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Source evidence">
       {refs.map((ref, index) => {
+        if (ref.source_type === 'screenshot' || ref.screenshot_id) {
+          const screenshot = screenshots.find((item) => item.screenshot_id === ref.screenshot_id);
+          const timestamp = typeof ref.timestamp === 'number' ? ref.timestamp : screenshot?.timestamp;
+          const label = `Screenshot${typeof timestamp === 'number' ? ` · ${formatTimestamp(timestamp)}` : ''}`;
+          if (!screenshot || !onOpenScreenshot) {
+            return (
+              <span
+                key={`${ref.screenshot_id || 'visual'}-${index}`}
+                className="inline-flex items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1 text-[10px] font-medium text-text-muted"
+                title={ref.machine_interpreted ? 'Machine-interpreted local visual evidence' : undefined}
+              >
+                <ImageIcon className="h-3 w-3" aria-hidden="true" />
+                {label}
+                {!screenshot?.available && ' · non disponibile'}
+              </span>
+            );
+          }
+          return (
+            <button
+              key={`${ref.screenshot_id}-${index}`}
+              type="button"
+              onClick={() => onOpenScreenshot(screenshot)}
+              className="inline-flex items-center gap-1 rounded-md border border-cyan-500/25 bg-cyan-500/5 px-2 py-1 text-[10px] font-medium text-cyan-700 transition-colors hover:bg-cyan-500/10 dark:text-cyan-300"
+              title={ref.machine_interpreted ? 'Apri evidenza visuale interpretata localmente' : 'Apri screenshot'}
+            >
+              <ImageIcon className="h-3 w-3" aria-hidden="true" />
+              {label}
+            </button>
+          );
+        }
+
         const label = typeof ref.start === 'number'
           ? `${formatTimestamp(ref.start)}${ref.speaker ? ` · ${ref.speaker}` : ''}`
-          : `S${ref.segment_id}`;
+          : `S${ref.segment_id ?? '?'}`;
         if (typeof ref.start !== 'number') {
           return (
             <span
-              key={`${ref.segment_id}-${index}`}
+              key={`${ref.segment_id ?? 'spoken'}-${index}`}
               className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-bg-surface px-2 py-1 text-[10px] font-medium text-text-muted"
             >
               <Clock3 className="h-3 w-3" aria-hidden="true" />
@@ -72,7 +115,7 @@ function EvidenceRefs({ refs, onSeek }: { refs?: StructuredNoteSourceRef[]; onSe
         }
         return (
           <button
-            key={`${ref.segment_id}-${index}`}
+            key={`${ref.segment_id ?? ref.source_id}-${index}`}
             type="button"
             onClick={() => onSeek(ref.start as number)}
             className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-bg-surface px-2 py-1 text-[10px] font-medium text-accent transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
@@ -85,6 +128,16 @@ function EvidenceRefs({ refs, onSeek }: { refs?: StructuredNoteSourceRef[]; onSe
       })}
     </div>
   );
+}
+
+function EvidenceBasis({ basis, lang }: { basis?: string; lang: string }) {
+  if (!basis) return null;
+  const label = basis === 'visual'
+    ? (lang === 'it' ? 'Evidenza visuale' : 'Visual evidence')
+    : basis === 'mixed'
+      ? (lang === 'it' ? 'Audio + visuale' : 'Audio + visual')
+      : (lang === 'it' ? 'Parlato' : 'Spoken');
+  return <Badge variant="idle">{label}</Badge>;
 }
 
 function itemFields(kind: StructuredNoteItemKind, item: StructuredNoteItem): Record<string, string> {
@@ -113,6 +166,8 @@ export function StructuredNotesEditor({
   lang,
   onSeek,
   onChanged,
+  screenshots = [],
+  onOpenScreenshot,
   readOnly = false,
 }: StructuredNotesEditorProps) {
   const result = isStructuredNotesResult(run.result) ? run.result : null;
@@ -295,7 +350,10 @@ export function StructuredNotesEditor({
           <>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium leading-relaxed text-text-primary">{item.text}</p>
+                <div className="flex flex-wrap items-start gap-2">
+                  <p className="min-w-0 flex-1 text-sm font-medium leading-relaxed text-text-primary">{item.text}</p>
+                  <EvidenceBasis basis={sourceItem.evidence_basis || item.evidence_basis} lang={lang} />
+                </div>
                 {kind === 'action' && (item.owner || item.due || item.status) && (
                   <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-text-muted">
                     {item.owner && <span><strong className="text-text-secondary">{lang === 'it' ? 'Responsabile' : 'Owner'}:</strong> {item.owner}</span>}
@@ -309,7 +367,12 @@ export function StructuredNotesEditor({
                     {item.impact && <p><strong className="text-text-secondary">{lang === 'it' ? 'Impatto' : 'Impact'}:</strong> {item.impact}</p>}
                   </div>
                 )}
-                <EvidenceRefs refs={sourceItem.source_refs || item.source_refs} onSeek={onSeek} />
+                <EvidenceRefs
+                  refs={sourceItem.source_refs || item.source_refs}
+                  onSeek={onSeek}
+                  screenshots={screenshots}
+                  onOpenScreenshot={onOpenScreenshot}
+                />
               </div>
               {!readOnly && !conflict && (
                 <Button
@@ -373,8 +436,16 @@ export function StructuredNotesEditor({
             {lang === 'it' ? 'Sintesi' : 'Summary'}
           </h4>
           <div className="rounded-xl border border-border-subtle bg-bg-surface/50 p-4">
-            <p className="text-sm leading-relaxed text-text-primary">{generated.summary.text}</p>
-            <EvidenceRefs refs={generated.summary.source_refs} onSeek={onSeek} />
+            <div className="flex flex-wrap items-start gap-2">
+              <p className="min-w-0 flex-1 text-sm leading-relaxed text-text-primary">{generated.summary.text}</p>
+              <EvidenceBasis basis={generated.summary.evidence_basis} lang={lang} />
+            </div>
+            <EvidenceRefs
+              refs={generated.summary.source_refs}
+              onSeek={onSeek}
+              screenshots={screenshots}
+              onOpenScreenshot={onOpenScreenshot}
+            />
           </div>
         </section>
       )}
