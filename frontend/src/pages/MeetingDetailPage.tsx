@@ -96,6 +96,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [visualFramesError, setVisualFramesError] = useState<string | null>(null);
   const [screenshots, setScreenshots] = useState<RecordingScreenshot[]>([]);
   const [screenshotsState, setScreenshotsState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [selectedAnalysisType, setSelectedAnalysisType] = useState('meeting_brief');
@@ -273,7 +274,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
 
   useEffect(() => {
     if (
-      activeTab !== 'transcript'
+      !['transcript', 'analysis'].includes(activeTab)
       || !recordingId
       || demoMode
       || !meeting?.transcription
@@ -907,6 +908,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                       onTimestampClick={handleTimestampClick}
                       currentTime={currentTime}
                       screenshots={screenshots}
+                      onOpenScreenshot={setSelectedScreenshot}
                     />
                   </div>
                 ) : meeting.transcription?.text ? (
@@ -1042,6 +1044,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                         lang={lang}
                         onSeek={handleTimestampClick}
                         onChanged={async () => { await load(); }}
+                        screenshots={screenshots}
+                        onOpenScreenshot={setSelectedScreenshot}
                         readOnly={demoMode}
                       />
                     ) : (
@@ -1358,6 +1362,63 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </SheetBody>
         </SheetContent>
       </Sheet>
+
+
+      {selectedScreenshot && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={lang === 'it' ? 'Screenshot della riunione' : 'Meeting screenshot'}
+          onClick={() => setSelectedScreenshot(null)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle bg-bg-elevated shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-text-primary">
+                  Screenshot · {Math.floor(selectedScreenshot.timestamp / 60)}:{String(Math.floor(selectedScreenshot.timestamp % 60)).padStart(2, '0')}
+                </p>
+                <p className="truncate text-xs text-text-muted">{selectedScreenshot.display_title || (lang === 'it' ? 'Schermo acquisito' : 'Captured display')}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleTimestampClick(selectedScreenshot.timestamp)}
+                >
+                  {lang === 'it' ? "Vai all'audio" : 'Seek audio'}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedScreenshot(null)}
+                  className="rounded-lg p-2 text-text-muted hover:bg-bg-surface hover:text-text-primary"
+                  aria-label={lang === 'it' ? 'Chiudi screenshot' : 'Close screenshot'}
+                >
+                  <XCircle className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 overflow-auto bg-black/5 p-3">
+              {selectedScreenshot.available ? (
+                <img
+                  src={selectedScreenshot.original_url}
+                  alt={lang === 'it' ? 'Screenshot della riunione' : 'Meeting screenshot'}
+                  className="mx-auto max-h-[76vh] max-w-full rounded-lg object-contain"
+                />
+              ) : (
+                <div className="rounded-xl border border-warning/30 bg-warning/5 p-6 text-center text-sm text-text-secondary">
+                  {lang === 'it'
+                    ? "L'immagine non è più disponibile. Il riferimento temporale resta nel meeting."
+                    : 'The image is no longer available. Its timeline reference remains in the meeting.'}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <AnalysisSetupModal
         isOpen={analysisSetupOpen}
