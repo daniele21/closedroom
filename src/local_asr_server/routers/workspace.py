@@ -13,6 +13,7 @@ from local_asr_server.recordings import RecordingConflict, RecordingNotFound
 from local_asr_server.routers.helpers import _build_meeting, _build_meetings, _build_projects
 from local_asr_server.routers.transcriptions import run_recording_transcription
 from local_asr_server.schemas import AnalysisPipelineRequest, TranscriptionJobRequest
+from local_asr_server.visual_intelligence.jobs import start_visual_intelligence_job
 
 
 router = APIRouter()
@@ -108,6 +109,18 @@ def prepare_meeting(recording_id: str, request: Request):
             on_terminal=on_terminal,
         )
 
+    def start_visual(
+        transcription_id: str,
+        on_terminal: Callable[[dict[str, Any]], None],
+    ) -> dict[str, Any]:
+        return start_visual_intelligence_job(
+            services,
+            recording_id,
+            transcription_id=transcription_id,
+            on_terminal=on_terminal,
+            trigger="meeting_prepare_notes",
+        )
+
     def start_pipeline(
         transcription_id: str,
         on_terminal: Callable[[dict[str, Any]], None],
@@ -127,6 +140,7 @@ def prepare_meeting(recording_id: str, request: Request):
             recording_id,
             start_transcription=start_transcription,
             start_pipeline=start_pipeline,
+            start_visual=start_visual,
         )
     except RecordingConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
