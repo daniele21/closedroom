@@ -393,6 +393,28 @@ def resize_overlay_window(request: Request, body: OverlayResizeRequest):
     return {"success": True}
 
 
+@router.post("/v1/system/window/main/meeting/{recording_id}")
+def open_meeting_window(recording_id: str, request: Request):
+    window_manager = getattr(request.app.state, "window_manager", None)
+    if not window_manager:
+        return {"success": False, "error": "Native window manager not available"}
+
+    try:
+        get_services(request.app).recordings.get(recording_id, include_result=False)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+
+    from local_asr_server.window import run_on_main_thread
+
+    def _open() -> None:
+        window_manager.load_url(f"{window_manager.url}/#meeting/{recording_id}")
+        window_manager.show()
+        window_manager.hide_overlay()
+
+    run_on_main_thread(_open)
+    return {"success": True}
+
+
 @router.post("/v1/system/select-directory")
 def select_directory():
     import subprocess
