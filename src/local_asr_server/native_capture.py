@@ -51,6 +51,9 @@ class CaptureSession:
     last_volume: dict[str, float] = field(default_factory=dict)
     warnings: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=128))
     stopped: bool = False
+    screenshot_display_id: int | None = None
+    screenshot_lock: threading.Lock = field(default_factory=threading.Lock)
+    accept_screenshots: bool = True
 
 
 def validate_audio_file(file_path: Path) -> dict[str, Any]:
@@ -148,6 +151,123 @@ class NativeCaptureManager:
         if not self.helper_path.exists():
             return {"windows": [], "reason": "helper_missing"}
         return self._run_json(["windows"], fallback_reason="window_listing_failed")
+
+    def displays(self) -> dict[str, Any]:
+        payload = self.windows()
+        displays: list[dict[str, Any]] = []
+        for item in payload.get("windows") or []:
+            if item.get("kind") != "display" and item.get("bundle_identifier") != "com.apple.displays":
+                continue
+            source_id = int(item.get("id") or 0)
+            display_id = int(item.get("display_id") or abs(source_id))
+            if display_id <= 0:
+                continue
+            displays.append({
+                "display_id": display_id,
+                "source_id": source_id,
+                "title": item.get("title") or f"Display {display_id}",
+                "width": int(item.get("width") or 0),
+                "height": int(item.get("height") or 0),
+            })
+        return {"displays": displays, "reason": payload.get("reason")}
+
+    def capture_screenshot(
+        self,
+        recording_id: str,
+        *,
+        request_id: str,
+        display_id: int | None = None,
+    ) -> dict[str, Any]:
+        request_id = request_id.strip()
+        if not request_id or len(request_id) > 128:
+            raise ValueError("request_id must contain between 1 and 128 characters")
+
+        with self._lock:
+            session = self._sessions.get(recording_id)
+        if session is None or session.stopped:
+            raise RuntimeError("Native capture session is not active")
+        if not session.accept_screenshots:
+            raise RuntimeError("Screenshot capture is closing")
+
+        display_payload = self.displays()
+        displays = display_payload.get("displays") or []
+        by_id = {int(item["display_id"]): item for item in displays}
+        selected = display_id if display_id is not None else session.screenshot_display_id
+        if selected is None:
+            if len(displays) == 1:
+                selected = int(displays[0]["display_id"])
+            elif len(displays) > 1:
+                raise RuntimeError("display_selection_required")
+            else:
+                raise RuntimeError(display_payload.get("reason") or "no_display_available")
+        selected = int(selected)
+        if selected not in by_id:
+            raise RuntimeError("selected_display_unavailable")
+
+        ready = session.ready_event or {}
+        ready_uptime = ready.get("recording_ready_uptime")
+        if ready_uptime is None:
+            raise RuntimeError("capture_not_ready")
+
+        with session.screenshot_lock:
+            if session.stopped or not session.accept_screenshots:
+                raise RuntimeError("Screenshot capture is closing")
+            session.screenshot_display_id = selected
+            temp_dir = session.output_dir / ".screenshot-capture-temp"
+            temp_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            token = uuid.uuid4().hex
+            original_path = temp_dir / f"{token}.jpg"
+            thumbnail_path = temp_dir / f"{token}-thumb.jpg"
+            try:
+                completed = subprocess.run(
+                    [
+                        str(self.helper_path),
+                        "screenshot",
+                        "--display-id", str(selected),
+                        "--recording-ready-uptime", str(float(ready_uptime)),
+                        "--original-file", str(original_path),
+                        "--thumbnail-file", str(thumbnail_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+                stdout = completed.stdout.strip()
+                parsed: dict[str, Any] = {}
+                if stdout:
+                    try:
+                        candidate = json.loads(stdout.splitlines()[-1])
+                        if isinstance(candidate, dict):
+                            parsed = candidate
+                    except (json.JSONDecodeError, IndexError):
+                        parsed = {}
+                if completed.returncode != 0:
+                    reason = parsed.get("reason") or "screenshot_capture_failed"
+                    message = parsed.get("message") or completed.stderr.strip() or reason
+                    raise RuntimeError(f"{reason}: {message}")
+                if not original_path.is_file() or not thumbnail_path.is_file():
+                    raise RuntimeError("screenshot_capture_missing_output")
+                captured_uptime = float(parsed.get("captured_uptime"))
+                return {
+                    **parsed,
+                    "request_id": request_id,
+                    "recording_id": recording_id,
+                    "display_id": selected,
+                    "display_title": by_id[selected].get("title"),
+                    "captured_uptime": captured_uptime,
+                    "recording_ready_uptime": float(ready_uptime),
+                    "timestamp": max(0.0, captured_uptime - float(ready_uptime)),
+                    "original_bytes": original_path.read_bytes(),
+                    "thumbnail_bytes": thumbnail_path.read_bytes(),
+                }
+            finally:
+                original_path.unlink(missing_ok=True)
+                thumbnail_path.unlink(missing_ok=True)
+                try:
+                    temp_dir.rmdir()
+                except OSError:
+                    pass
 
     def ensure_permissions(self, mode: str) -> dict[str, Any]:
         if mode not in VALID_NATIVE_MODES:
@@ -326,6 +446,11 @@ class NativeCaptureManager:
             session = self._sessions.get(recording_id)
         if session is None:
             return {"recording_id": recording_id, "backend": "native", "status": "not_active"}
+
+        session.accept_screenshots = False
+        screenshot_drained = session.screenshot_lock.acquire(timeout=10)
+        if screenshot_drained:
+            session.screenshot_lock.release()
             
         was_killed = False
         if session.process.poll() is None:
