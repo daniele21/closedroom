@@ -15,11 +15,13 @@ _ACTIVE_JOB_STATUSES = {"queued", "running", "waiting_for_service", "retrying", 
 def create_visual_intelligence_job(recording_id: str, request: Request):
     services = get_services(request.app)
     try:
-        frames = services.recordings.list_visual_frames(recording_id)
+        frames = services.recordings.list_visual_evidence_frames(recording_id)
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     if not frames:
         raise HTTPException(status_code=409, detail="No screen context was captured for this meeting")
+    if not any(frame.get("path") is not None for frame in frames):
+        raise HTTPException(status_code=409, detail="Screen evidence exists but its image assets are unavailable")
 
     transcription = services.transcriptions.latest_for_recording(recording_id)
     if transcription is None:
