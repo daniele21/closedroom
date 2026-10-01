@@ -92,6 +92,60 @@ class RecordingApiTests(unittest.TestCase):
         )
         self.assertEqual(rejected.status_code, 409)
 
+
+    def test_manual_screenshot_api_persists_before_success_and_retry_is_idempotent(self) -> None:
+        class FakeCaptureManager:
+            def capture_screenshot(self, recording_id: str, *, request_id: str, display_id: int | None = None):
+                return {
+                    "request_id": request_id,
+                    "recording_id": recording_id,
+                    "display_id": display_id or 7,
+                    "display_title": "Screen 1",
+                    "timestamp": 2.5,
+                    "captured_uptime": 12.5,
+                    "recording_ready_uptime": 10.0,
+                    "captured_wall_time": 1000.0,
+                    "width": 1920,
+                    "height": 1080,
+                    "thumbnail_width": 640,
+                    "thumbnail_height": 360,
+                    "format": "image/jpeg",
+                    "overlay_exclusion": "closedroom_windows",
+                    "original_bytes": b"\xff\xd8\xfforiginal",
+                    "thumbnail_bytes": b"\xff\xd8\xffthumb",
+                }
+
+        self.app.state.capture_manager = FakeCaptureManager()
+        created = self.client.post(
+            "/v1/recordings",
+            json={
+                "title": "Screenshot call",
+                "mime_type": "audio/wav",
+                "capture_mode": "both",
+                "capture_backend": "native",
+            },
+        )
+        recording_id = created.json()["id"]
+
+        first = self.client.post(
+            f"/v1/recordings/{recording_id}/screenshots",
+            json={"request_id": "request-1", "display_id": 7},
+        )
+        retry = self.client.post(
+            f"/v1/recordings/{recording_id}/screenshots",
+            json={"request_id": "request-1", "display_id": 7},
+        )
+        listed = self.client.get(f"/v1/recordings/{recording_id}/screenshots")
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(retry.status_code, 201)
+        self.assertEqual(first.json()["screenshot_id"], retry.json()["screenshot_id"])
+        self.assertEqual(listed.json()["total"], 1)
+        original = self.client.get(first.json()["original_url"])
+        thumbnail = self.client.get(first.json()["thumbnail_url"])
+        self.assertEqual(original.content, b"\xff\xd8\xfforiginal")
+        self.assertEqual(thumbnail.content, b"\xff\xd8\xffthumb")
+
     def test_visual_intelligence_v2_endpoint_preserves_v1_response(self) -> None:
         created = self.client.post(
             "/v1/recordings",
