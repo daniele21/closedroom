@@ -115,8 +115,13 @@ export default function RecordingOverlayPage() {
           }, 1500);
         }
       } else if (data.type === 'ack' && data.action === 'stop') {
-        // Broadcast ACK received! Stop is being handled.
-        setIsStopping(false);
+        // ACK only means the stop command was received. Persisted backend state
+        // remains authoritative for completion; do not show a saved state yet.
+        void ApiClient.getActiveRecording()
+          .then((active) => {
+            if (!active.active) setIsStopping(false);
+          })
+          .catch(() => {});
       }
     };
 
