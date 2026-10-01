@@ -1,6 +1,6 @@
-# Overlay chiamata e screenshot come fonti del meeting
+ ACTIVE | ACTIVE | ACTIVE | ACTIVE | ACTIVE | ACTIVE |# Overlay chiamata e screenshot come fonti del meeting
 
-Status: READY
+Status: ACTIVE
 Owner: meeting UX, RecordingStore, NativeCaptureManager e servizi canonici di analisi/job
 Read when: implementare o riprendere overlay, screenshot manuali e citazioni visuali
 Created: 2026-10-01
@@ -51,6 +51,8 @@ appunti/analisi; audio e testo restano utilizzabili se l'AI fallisce.
 | CO-6 | Percorso integrabile con prove/docs | E2E/script/registry, docs/design, smoke packaging | CO-1..5 | no | BLOCKED |
 
 Stati: READY / ACTIVE / BLOCKED / DONE; BLOCKED indica dipendenze non completate.
+
+Implementation checkpoint 2026-10-01: CO-1..5 sono implementati sul branch `work/call-overlay-screenshot-evidence`; CO-6 è attivo per diff review, selector, E2E/preflight e chiusura documentale. Il lavoro è partito dal `dev` esatto `d34dfc0e`. Durante l'implementazione quel branch è stato promosso e rimosso; `main` è avanzato solo attraverso commit di promozione/tree-equivalent rispetto a `d34dfc0e`, quindi il workstream viene riallineato a `main` prima del preflight senza sostituire owner o contratti locali.
 Ogni fase possiede i test relativi. Parallelismo possibile, non delega ad agenti.
 CO-1 congela i contratti prima di CO-2/3; revisioni passano dal suo owner.
 CO-3 termina prima di CO-5 sul Meeting; CO-4 possiede i tipi fonte.
