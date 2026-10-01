@@ -18,6 +18,7 @@ from local_asr_server.transcription_jobs import (
     TRANSCRIPTION_JOB_TYPE,
     VISUAL_INTELLIGENCE_JOB_TYPE,
 )
+from local_asr_server.visual_intelligence.service import visual_processing_identity
 
 
 MEETING_PREPARATION_JOB_TYPE = "meeting_preparation"
@@ -68,11 +69,19 @@ class MeetingPreparationManager:
         # leave an orphan parent job.
         self.services.recordings.get(recording_id, include_result=False)
         transcription_request = TranscriptionJobRequest(visual_intelligence_enabled=False)
+        screenshots = self.services.recordings.list_screenshots(recording_id)
         audio_source_identity = self._audio_source_identity(recording_id)
         source_identity = self._source_identity(
             recording_id,
             audio_source_identity=audio_source_identity,
+            screenshots=screenshots,
         )
+        visual_material = (
+            visual_processing_identity()
+            if any(item.get("available") for item in screenshots)
+            else {"version": 1, "status": "not_applicable"}
+        )
+        visual_identity = _hash_json(visual_material)
         asr_identity, asr_material = self._asr_identity(transcription_request)
         analysis_request = AnalysisPipelineRequest(
             recording_id=recording_id,
@@ -86,6 +95,7 @@ class MeetingPreparationManager:
                 "recording_id": recording_id,
                 "source_identity": source_identity,
                 "asr_identity": asr_identity,
+                "visual_identity": visual_identity,
                 "analysis_identity": analysis_identity,
             }
         )
@@ -130,6 +140,7 @@ class MeetingPreparationManager:
             "source_identity": source_identity,
             "audio_source_identity": audio_source_identity,
             "asr_identity": asr_identity,
+            "visual_identity": visual_identity,
             "analysis_identity": analysis_identity,
             "pipeline_id": MEETING_PREPARATION_PIPELINE,
             "transcription_id": None,
@@ -241,6 +252,10 @@ class MeetingPreparationManager:
         self.services.jobs.link_child(
             parent_job_id, child["id"], stage="transcription", ordinal=0,
         )
+        if self._reuse_completed_visual_stage(parent_job_id):
+            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
+            return
+
         parent = self.services.jobs.get(parent_job_id)
         if parent is None or parent["status"] in TERMINAL_JOB_STATUSES:
             return
@@ -279,9 +294,9 @@ class MeetingPreparationManager:
         start_pipeline: StartPipeline,
         start_visual: StartVisual | None,
     ) -> None:
-        screenshots = self.services.recordings.list_screenshots(
-            (self.services.jobs.get(parent_job_id) or {}).get("scope_id") or ""
-        )
+        parent = self.services.jobs.get(parent_job_id)
+        recording_id = (parent or {}).get("scope_id") or ""
+        screenshots = self.services.recordings.list_screenshots(recording_id)
         available = [item for item in screenshots if item.get("available")]
         if start_visual is None or not screenshots:
             self._start_analysis(parent_job_id, transcription_id, start_pipeline)
@@ -514,6 +529,31 @@ class MeetingPreparationManager:
         return len(current)
 
 
+    def _reuse_completed_visual_stage(self, parent_job_id: str) -> bool:
+        parent = self.services.jobs.get(parent_job_id)
+        if parent is None:
+            return False
+        previous_id = (parent.get("result") or {}).get("resumed_from_job_id")
+        if not previous_id:
+            return False
+        previous = self.services.jobs.get(previous_id)
+        previous_result = (previous or {}).get("result") or {}
+        visual_job_id = previous_result.get("visual_job_id")
+        if not visual_job_id:
+            return False
+        visual_job = self.services.jobs.get(visual_job_id)
+        if visual_job is None or visual_job.get("status") != "completed":
+            return False
+        outcome = (visual_job.get("result") or {}).get("outcome_status") or "completed"
+        self._merge_result(
+            parent_job_id,
+            visual_job_id=visual_job_id,
+            visual_status=f"reused_{outcome}",
+        )
+        for warning in previous_result.get("warnings") or []:
+            self._append_warning(parent_job_id, str(warning))
+        return True
+
     def _append_warning(self, parent_job_id: str, warning: str) -> None:
         parent = self.services.jobs.get(parent_job_id)
         if parent is None:
@@ -586,8 +626,10 @@ class MeetingPreparationManager:
         recording_id: str,
         *,
         audio_source_identity: str | None = None,
+        screenshots: list[dict[str, Any]] | None = None,
     ) -> str:
-        screenshots = [
+        screenshots = screenshots if screenshots is not None else self.services.recordings.list_screenshots(recording_id)
+        screenshot_material = [
             {
                 "screenshot_id": item.get("screenshot_id"),
                 "sequence": item.get("sequence"),
@@ -597,14 +639,14 @@ class MeetingPreparationManager:
                 "capture_kind": item.get("capture_kind"),
                 "available": item.get("available"),
             }
-            for item in self.services.recordings.list_screenshots(recording_id)
+            for item in screenshots
         ]
         return _hash_json({
             "version": 2,
             "audio_source_identity": (
                 audio_source_identity or self._audio_source_identity(recording_id)
             ),
-            "screenshots": screenshots,
+            "screenshots": screenshot_material,
         })
 
     def _asr_identity(
