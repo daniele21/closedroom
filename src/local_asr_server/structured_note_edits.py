@@ -54,7 +54,19 @@ def _canonical_json(value: Any) -> str:
 
 def _source_anchor(item: dict[str, Any]) -> str:
     refs = item.get("source_refs") or []
-    identifiers = [str(ref.get("segment_id")) for ref in refs if isinstance(ref, dict) and ref.get("segment_id") is not None]
+    identifiers: list[str] = []
+    for ref in refs:
+        if not isinstance(ref, dict):
+            continue
+        if ref.get("source_type") == "screenshot" or ref.get("screenshot_id") is not None:
+            screenshot_id = str(ref.get("screenshot_id") or "").strip()
+            if screenshot_id:
+                identifiers.append(f"V:{screenshot_id}")
+            continue
+        if ref.get("segment_id") is not None:
+            # Keep the legacy transcript anchor shape so transcript-only item IDs
+            # remain stable while visual evidence becomes part of the identity.
+            identifiers.append(str(ref.get("segment_id")))
     return "|".join(sorted(identifiers))
 
 
