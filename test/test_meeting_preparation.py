@@ -482,6 +482,135 @@ class MeetingPreparationTests(unittest.TestCase):
             ["visual-failed"],
         )
 
+    def test_notes_retry_reuses_completed_visual_stage(self) -> None:
+        self.transcriptions.current = self._transcription()
+        self.recordings.screenshots = [{
+            "screenshot_id": "shot-retry",
+            "sequence": 0,
+            "timestamp": 8.0,
+            "sha256": "shot-retry-hash",
+            "display_id": 7,
+            "capture_kind": "manual",
+            "available": True,
+        }]
+        visual_calls = []
+        pipeline_calls = []
+
+        def completed_visual(transcription_id, callback):
+            visual_calls.append(transcription_id)
+            child = self.store.create(
+                job_id=f"visual-{len(visual_calls)}",
+                job_type="visual_intelligence",
+                scope_type="transcription",
+                scope_id=transcription_id,
+            )
+            snapshot = self.store.update(
+                child["id"],
+                status="completed",
+                current_step="completed",
+                progress=100,
+                result={"outcome_status": "completed"},
+            )
+            callback(snapshot)
+            return snapshot
+
+        def failing_pipeline(transcription_id, callback):
+            pipeline_calls.append(transcription_id)
+            job_id = "analysis-visual-retry-failed"
+            self.store.create(
+                job_id=job_id,
+                job_type="analysis",
+                scope_type="transcription",
+                scope_id=transcription_id,
+            )
+            snapshot = self.store.update(
+                job_id,
+                status="failed",
+                current_step="failed",
+                error="notes failed",
+            )
+            callback(snapshot)
+            return {
+                "pipeline_run_id": "pipeline-failed",
+                "pipeline_id": "meeting_default",
+                "status": "queued",
+                "jobs": [{"job_id": job_id, "status": "failed"}],
+            }
+
+        first = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=failing_pipeline,
+            start_visual=completed_visual,
+        )
+        self.assertEqual(self.store.get(first["id"])["status"], "failed")
+        self.assertEqual(visual_calls, ["trans-1"])
+
+        second = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory(pipeline_calls),
+            start_visual=completed_visual,
+        )
+        second_state = self.store.get(second["id"])
+
+        self.assertEqual(second_state["status"], "completed")
+        self.assertEqual(visual_calls, ["trans-1"])
+        self.assertEqual(second_state["result"]["visual_status"], "reused_completed")
+
+    def test_visual_model_change_invalidates_completed_preparation(self) -> None:
+        self.transcriptions.current = self._transcription()
+        self.recordings.screenshots = [{
+            "screenshot_id": "shot-model",
+            "sequence": 0,
+            "timestamp": 8.0,
+            "sha256": "shot-model-hash",
+            "display_id": 7,
+            "capture_kind": "manual",
+            "available": True,
+        }]
+
+        def completed_visual(transcription_id, callback):
+            job_id = f"visual-model-{len(self.store.list_jobs(job_type='visual_intelligence', limit=100))}"
+            self.store.create(
+                job_id=job_id,
+                job_type="visual_intelligence",
+                scope_type="transcription",
+                scope_id=transcription_id,
+            )
+            snapshot = self.store.update(
+                job_id,
+                status="completed",
+                current_step="completed",
+                progress=100,
+                result={"outcome_status": "completed"},
+            )
+            callback(snapshot)
+            return snapshot
+
+        self.settings["visual_llm_model"] = "visual-model-a"
+        first = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory([]),
+            start_visual=completed_visual,
+        )
+        self.assertEqual(self.store.get(first["id"])["status"], "completed")
+
+        self.settings["visual_llm_model"] = "visual-model-b"
+        second = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory([]),
+            start_visual=completed_visual,
+        )
+
+        self.assertNotEqual(second["id"], first["id"])
+        self.assertNotEqual(
+            self.store.get(second["id"])["result"]["visual_identity"],
+            self.store.get(first["id"])["result"]["visual_identity"],
+        )
+
     def test_screenshot_identity_invalidates_completed_preparation_but_reuses_asr(self) -> None:
         self.transcriptions.current = self._transcription()
         transcription_calls = []
