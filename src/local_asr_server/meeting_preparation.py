@@ -77,7 +77,7 @@ class MeetingPreparationManager:
             screenshots=screenshots,
         )
         visual_material = (
-            visual_processing_identity()
+            visual_processing_identity(load_settings())
             if any(item.get("available") for item in screenshots)
             else {"version": 1, "status": "not_applicable"}
         )
