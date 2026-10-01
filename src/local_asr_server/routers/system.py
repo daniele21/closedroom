@@ -62,11 +62,14 @@ def health(request: Request) -> dict:
             "POST /v1/capture/request-permissions",
             "POST /v1/capture/ensure-permissions",
             "GET /v1/capture/diagnostics",
+            "GET /v1/capture/displays",
             "GET /v1/system/accessibility",
             "POST /v1/recordings/{id}/capture/start",
             "GET /v1/recordings/{id}/capture/events",
             "POST /v1/recordings/{id}/capture/stop",
             "POST /v1/recordings/{id}/capture/cancel",
+            "POST /v1/recordings/{id}/screenshots",
+            "GET /v1/recordings/{id}/screenshots",
             "POST /v1/recordings/{id}/transcription-jobs",
             "POST /v1/analysis-jobs",
             "POST /v1/analysis-pipelines",
@@ -192,6 +195,11 @@ def system_accessibility():
 @router.get("/v1/capture/windows")
 def capture_windows(request: Request):
     return get_services(request.app).capture.windows()
+
+
+@router.get("/v1/capture/displays")
+def capture_displays(request: Request):
+    return get_services(request.app).capture.displays()
 
 
 @router.post("/v1/recordings/{recording_id}/capture/start", status_code=202)
