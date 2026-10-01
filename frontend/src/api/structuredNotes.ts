@@ -3,10 +3,17 @@ import type { AnalysisRun } from './apiClient';
 export type StructuredNoteItemKind = 'action' | 'decision';
 
 export interface StructuredNoteSourceRef {
-  segment_id: string | number;
+  source_type?: 'transcript' | 'screenshot';
+  source_id?: string;
+  segment_id?: string | number;
   start?: number | null;
   end?: number | null;
   speaker?: string | null;
+  screenshot_id?: string;
+  timestamp?: number;
+  confidence?: number | null;
+  evidence_basis?: 'spoken' | 'visual_inference' | string;
+  machine_interpreted?: boolean;
 }
 
 export interface StructuredNoteItem {
@@ -14,6 +21,7 @@ export interface StructuredNoteItem {
   generated_hash: string;
   text: string;
   source_refs: StructuredNoteSourceRef[];
+  evidence_basis?: 'spoken' | 'visual' | 'mixed' | string;
   user_edited?: boolean;
   owner?: string | null;
   due?: string | null;
@@ -43,13 +51,13 @@ export interface StructuredNoteConflict {
 export interface StructuredNotesResult {
   schema: { id: string; version: number };
   generated: {
-    summary?: { text?: string; source_refs?: StructuredNoteSourceRef[] };
+    summary?: { text?: string; source_refs?: StructuredNoteSourceRef[]; evidence_basis?: 'spoken' | 'visual' | 'mixed' | string };
     actions?: StructuredNoteItem[];
     decisions?: StructuredNoteItem[];
     risks?: StructuredNoteItem[];
   };
   effective?: {
-    summary?: { text?: string; source_refs?: StructuredNoteSourceRef[] };
+    summary?: { text?: string; source_refs?: StructuredNoteSourceRef[]; evidence_basis?: 'spoken' | 'visual' | 'mixed' | string };
     actions?: StructuredNoteItem[];
     decisions?: StructuredNoteItem[];
     risks?: StructuredNoteItem[];
