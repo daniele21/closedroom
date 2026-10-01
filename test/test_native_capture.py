@@ -17,7 +17,13 @@ class NativeCaptureManagerTests(unittest.TestCase):
         self.helper.write_text(
             """#!/usr/bin/env python3
 import json, sys, time
+from pathlib import Path
+
 cmd = sys.argv[1]
+
+def arg(name):
+    idx = sys.argv.index(name)
+    return sys.argv[idx + 1]
 if cmd == 'capabilities':
     print(json.dumps({'available': True, 'backend': 'native', 'modes': ['both']}))
 elif cmd == 'permissions':
@@ -27,9 +33,21 @@ elif cmd == 'request-permissions':
 elif cmd == 'diagnostics':
     print(json.dumps({'bundle_identifier': 'com.closedroom.nativecapture', 'code_signature': 'signed', 'screen_capture': 'granted'}))
 elif cmd == 'windows':
-    print(json.dumps({'windows': [{'id': 42, 'title': 'Meet', 'application_name': 'Chrome', 'bundle_identifier': 'com.google.Chrome'}]}))
+    print(json.dumps({'windows': [
+        {'id': -7, 'display_id': 7, 'kind': 'display', 'title': 'Screen 1', 'application_name': 'Full Screen', 'bundle_identifier': 'com.apple.displays', 'width': 1920, 'height': 1080},
+        {'id': 42, 'kind': 'window', 'title': 'Meet', 'application_name': 'Chrome', 'bundle_identifier': 'com.google.Chrome'}
+    ]}))
+elif cmd == 'screenshot':
+    Path(arg('--original-file')).write_bytes(b'\\xff\\xd8\\xfforiginal')
+    Path(arg('--thumbnail-file')).write_bytes(b'\\xff\\xd8\\xffthumb')
+    print(json.dumps({
+        'type': 'screenshot', 'display_id': int(arg('--display-id')),
+        'captured_uptime': 12.5, 'captured_wall_time': 1000.0,
+        'width': 1920, 'height': 1080, 'thumbnail_width': 640, 'thumbnail_height': 360,
+        'format': 'image/jpeg', 'overlay_exclusion': 'closedroom_windows'
+    }))
 elif cmd == 'start':
-    print(json.dumps({'type': 'ready'}), flush=True)
+    print(json.dumps({'type': 'ready', 'recording_ready_uptime': 10.0}), flush=True)
     time.sleep(0.05)
     print(json.dumps({'type': 'stopped'}), flush=True)
 else:
@@ -61,9 +79,32 @@ else:
 
     def test_lists_windows_and_starts_visual_capture(self) -> None:
         manager = NativeCaptureManager(helper_path=self.helper)
-        self.assertEqual(manager.windows()["windows"][0]["id"], 42)
+        windows = manager.windows()["windows"]
+        self.assertEqual(next(item for item in windows if item.get("kind") == "window")["id"], 42)
+        self.assertEqual(manager.displays()["displays"][0]["display_id"], 7)
         started = manager.start("rec-visual", self.root, "both", visual_window_id=42, visual_fps=1.0)
         self.assertEqual(started["status"], "starting")
+
+
+    def test_manual_screenshot_uses_ready_uptime_and_persists_display_selection(self) -> None:
+        manager = NativeCaptureManager(helper_path=self.helper)
+        manager.start("rec-shot", self.root, "both")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            session = manager.get_session("rec-shot")
+            if session and session.ready_event:
+                break
+            time.sleep(0.01)
+
+        captured = manager.capture_screenshot(
+            "rec-shot", request_id="request-1", display_id=7,
+        )
+
+        self.assertEqual(captured["display_id"], 7)
+        self.assertEqual(captured["timestamp"], 2.5)
+        self.assertEqual(captured["original_bytes"], b"\xff\xd8\xfforiginal")
+        self.assertEqual(captured["thumbnail_bytes"], b"\xff\xd8\xffthumb")
+        self.assertEqual(manager.get_session("rec-shot").screenshot_display_id, 7)
 
     def test_validate_audio_file_behavior(self) -> None:
         from local_asr_server.native_capture import validate_audio_file
