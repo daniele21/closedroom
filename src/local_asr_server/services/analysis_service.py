@@ -25,7 +25,7 @@ from local_asr_server.structured_notes import (
 
 logger = logging.getLogger("uvicorn.error")
 ANALYSIS_CACHE_VERSION = "analysis-v1"
-STRUCTURED_ANALYSIS_CACHE_VERSION = "analysis-structured-v2"
+STRUCTURED_ANALYSIS_CACHE_VERSION = "analysis-structured-v3"
 
 
 class AnalysisService:
@@ -181,6 +181,15 @@ class AnalysisService:
         structured_notes = is_structured_notes_template(body.template_id)
         if structured_notes and transcription is None:
             transcription = {"text": text_to_analyze, "segments": []}
+        if (
+            structured_notes
+            and transcription is not None
+            and body.recording_id
+            and provider_name in {"nemotron_local", "voxtral_local", "mock"}
+        ):
+            visual_sources = self._structured_visual_sources(body.recording_id)
+            if visual_sources:
+                transcription = {**transcription, "visual_sources": visual_sources}
         try:
             input_hash = (
                 self._structured_input_hash(transcription or {"text": text_to_analyze})
@@ -200,6 +209,9 @@ class AnalysisService:
                         provider,
                         transcription or {"text": text_to_analyze},
                         temperature=temperature,
+                    )
+                    result["source_snapshot"] = self._structured_source_snapshot(
+                        transcription or {"text": text_to_analyze}
                     )
                 else:
                     result = provider.analyze(text_to_analyze, prompt=body.prompt, temperature=temperature)
@@ -225,6 +237,69 @@ class AnalysisService:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+    def _structured_visual_sources(self, recording_id: str) -> list[dict[str, Any]]:
+        """Project locally-produced screenshot observations into notes-safe text sources.
+
+        This helper is invoked only for local/mock text providers. It never reads or
+        forwards image bytes, and cloud text providers never receive these derived
+        visual descriptions implicitly.
+        """
+        try:
+            visual = self.services.recordings.get_visual_intelligence_v2(recording_id)
+        except (FileNotFoundError, ValueError):
+            return []
+        document = visual.get("document") or {}
+        generation_id = document.get("generation_id") or (visual.get("summary") or {}).get("generation_id")
+        sources: dict[str, dict[str, Any]] = {}
+        for observation in document.get("observations") or []:
+            if not isinstance(observation, dict) or observation.get("status") != "valid":
+                continue
+            source = observation.get("source") or {}
+            if source.get("kind") != "manual_screenshot":
+                continue
+            screenshot_id = str(source.get("screenshot_id") or "").strip()
+            if not screenshot_id:
+                continue
+            if observation.get("task") != "shared_content":
+                continue
+            sources[screenshot_id] = {
+                "screenshot_id": screenshot_id,
+                "sha256": source.get("sha256"),
+                "display_id": source.get("display_id"),
+                "display_title": source.get("display_title"),
+                "timestamp": float(observation.get("timestamp") or 0.0),
+                "content_type": observation.get("content_type"),
+                "title": observation.get("title"),
+                "visible_text": observation.get("visible_text"),
+                "key_information": observation.get("key_information"),
+                "content_state": observation.get("content_state"),
+                "confidence": observation.get("confidence"),
+                "generation_id": generation_id,
+            }
+        return sorted(
+            sources.values(),
+            key=lambda item: (float(item.get("timestamp") or 0.0), str(item.get("screenshot_id") or "")),
+        )
+
+    @staticmethod
+    def _structured_source_snapshot(transcription: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "transcription_id": transcription.get("id"),
+            "transcript_segment_count": len(transcription.get("segments") or []),
+            "visual_sources": [
+                {
+                    "screenshot_id": source.get("screenshot_id"),
+                    "sha256": source.get("sha256"),
+                    "timestamp": source.get("timestamp"),
+                    "generation_id": source.get("generation_id"),
+                }
+                for source in transcription.get("visual_sources") or []
+                if isinstance(source, dict)
+            ],
+        }
 
     def _get_cached_analysis(self, cache_key: str) -> dict[str, Any] | None:
         result = self.services.catalog.get_analysis_cache(cache_key)
@@ -259,9 +334,25 @@ class AnalysisService:
                     "text": segment.get("text") or "",
                 }
             )
+        visual_sources = []
+        for source in transcription.get("visual_sources") or []:
+            if not isinstance(source, dict):
+                continue
+            visual_sources.append({
+                "screenshot_id": source.get("screenshot_id"),
+                "sha256": source.get("sha256"),
+                "timestamp": source.get("timestamp"),
+                "content_type": source.get("content_type"),
+                "title": source.get("title"),
+                "visible_text": source.get("visible_text"),
+                "key_information": source.get("key_information"),
+                "confidence": source.get("confidence"),
+                "generation_id": source.get("generation_id"),
+            })
         payload = {
             "text": transcription.get("text") or "",
             "segments": segments,
+            "visual_sources": visual_sources,
         }
         serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return cls._hash_text(serialized)
