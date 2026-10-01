@@ -1411,6 +1411,7 @@ class RecordingStore:
         for metadata_path in self.root.glob("*/*/metadata.json"):
             session_dir = metadata_path.parent
             screenshots_dir = self._screenshots_dir(session_dir)
+            shutil.rmtree(session_dir / ".screenshot-capture-temp", ignore_errors=True)
             if not screenshots_dir.exists():
                 continue
             try:
@@ -1419,7 +1420,6 @@ class RecordingStore:
                 recording_id = str(metadata.get("id") or session_dir.name)
                 manifest_path = self._screenshot_manifest_path(session_dir)
                 if not manifest_path.exists():
-                    shutil.rmtree(screenshots_dir / ".screenshot-capture-temp", ignore_errors=True)
                     for candidate in screenshots_dir.iterdir():
                         if candidate.is_file() and candidate.name.endswith(".tmp"):
                             candidate.unlink(missing_ok=True)
@@ -1433,7 +1433,6 @@ class RecordingStore:
                         if name:
                             referenced.add(name)
 
-                shutil.rmtree(screenshots_dir / ".screenshot-capture-temp", ignore_errors=True)
                 root = screenshots_dir.resolve()
                 for candidate in screenshots_dir.iterdir():
                     if not candidate.is_file() or candidate.name in referenced:
