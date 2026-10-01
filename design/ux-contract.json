@@ -116,10 +116,20 @@
     ]
   },
   "workspace_navigation": {
-    "primary_destinations": ["today", "projects"],
+    "primary_destinations": [
+      "today",
+      "projects"
+    ],
     "meeting_parent": "today",
     "persistent_primary_action": "new_meeting",
-    "utility_destinations": ["settings", "theme", "language", "tour", "demo", "runtime_status"],
+    "utility_destinations": [
+      "settings",
+      "theme",
+      "language",
+      "tour",
+      "demo",
+      "runtime_status"
+    ],
     "desktop_pattern": "one stable left workspace rail",
     "compact_pattern": "the same destinations and action hierarchy reflow into one sticky top toolbar; compact width must not introduce a second navigation model",
     "rule": "Today, Meeting and Projects share one workspace chrome. Meeting is opened from Today/search/project context but does not become a third peer destination. Advanced transcription, analysis and diagnostics remain contextual or utility routes."
@@ -138,7 +148,7 @@
     "surface_hierarchy": {
       "today": "understand what happened, what needs attention and what to open or do next",
       "new_meeting": "optionally add meeting context, see readiness and start recording; if managed AI is already active, show truthful cancellable preparation rather than pretending recording has started",
-      "record": "understand capture status and safely stop with minimal live UI work",
+      "record": "understand capture status, take deliberate manual screenshots of a selected display when useful, and safely Stop; screenshot feedback is secondary to audio health and never implies persistence before backend confirmation",
       "meeting": "use the saved meeting as the canonical workspace with one primary Prepare notes action and secondary Transcript only recovery/power action",
       "prepare_notes": "coordinate transcript then notes as one recoverable user task, expose the transcript as soon as it is ready, and preserve completed work across cancel, failure, reconnect and explicit resume",
       "notes_review": "open ready notes first while keeping transcript, speakers and advanced tools directly reachable"
@@ -159,7 +169,7 @@
     "recovery_exception": "A technical condition may surface outside diagnostics only when the user must act on it; present the user-facing consequence and recovery action before raw technical detail."
   },
   "resource_experience": {
-    "recording_priority": "While recording is active, ClosedRoom prioritizes capture and persistence and does not start heavy ASR, LLM or VLM work.",
+    "recording_priority": "While recording is active, ClosedRoom prioritizes audio capture and persistence. Manual screenshot capture is a bounded one-shot local write on the recording path; no ASR, LLM or VLM starts during capture.",
     "recording_start_priority": "When Start meeting races with managed heavy work, one capture reservation in the canonical workload owner closes the admission boundary atomically. Already-active managed work reaches its normal safe boundary without force-kill; queued work stays bounded and resumes after Stop. The UI calls the waiting state preparation, never recording, and offers cancellation while it is waiting for the active AI phase.",
     "heavy_work_admission": "One canonical runtime policy and the existing bounded workload owner decide when heavy work may start; meeting preparation and recording admission never own a second heavy-work queue.",
     "model_residency": "Managed AI residency is phase-scoped and reclaimed after work; external runtimes remain caller-owned.",
@@ -174,7 +184,9 @@
     "processing",
     "waiting-for-safe-boundary",
     "partial",
-    "interrupted"
+    "interrupted",
+    "screenshot-saving",
+    "screenshot-failed"
   ],
   "accessibility": {
     "target": "macOS accessibility conventions plus WCAG 2.2 AA semantics for web-rendered content where applicable",
@@ -235,13 +247,46 @@
     ]
   },
   "critical_journeys": [
-    {"id": "record-meeting", "name": "Start, monitor and safely stop a local meeting recording without technical setup, including truthful safe-boundary preparation when managed AI is already active", "e2e": "required"},
-    {"id": "prepare-meeting-notes", "name": "Prepare transcript and notes with one durable action, reconnect safely and resume only missing work after failure", "e2e": "required"},
-    {"id": "coherent-macos-workspace", "name": "Move between Today, a Meeting and Projects with one stable hierarchy across wide, compact and narrow windows while keeping New Meeting primary and utilities secondary", "e2e": "required"},
-    {"id": "transcribe-meeting", "name": "Create or replace only the transcript through the secondary/expert path and recover from processing failure", "e2e": "recommended"},
-    {"id": "review-meeting", "name": "Review transcript, speakers, notes and derived meeting evidence", "e2e": "recommended"},
-    {"id": "analyze-meeting", "name": "Run additional meeting analyses with automatic defaults and optional advanced overrides", "e2e": "recommended"},
-    {"id": "visual-on-demand", "name": "Explicitly analyze shared visual content without making visual capture part of normal recording", "e2e": "recommended"}
+    {
+      "id": "record-meeting",
+      "name": "Start, monitor and safely stop a local meeting recording without technical setup, including truthful safe-boundary preparation when managed AI is already active",
+      "e2e": "required"
+    },
+    {
+      "id": "call-overlay-screenshot-evidence",
+      "name": "During an active native meeting, deliberately capture a selected display, save it before success is shown, Stop into the saved Meeting, review the image at its recording timestamp and distinguish visual evidence from spoken evidence in notes",
+      "e2e": "required"
+    },
+    {
+      "id": "prepare-meeting-notes",
+      "name": "Prepare transcript and notes with one durable action, reconnect safely and resume only missing work after failure",
+      "e2e": "required"
+    },
+    {
+      "id": "coherent-macos-workspace",
+      "name": "Move between Today, a Meeting and Projects with one stable hierarchy across wide, compact and narrow windows while keeping New Meeting primary and utilities secondary",
+      "e2e": "required"
+    },
+    {
+      "id": "transcribe-meeting",
+      "name": "Create or replace only the transcript through the secondary/expert path and recover from processing failure",
+      "e2e": "recommended"
+    },
+    {
+      "id": "review-meeting",
+      "name": "Review transcript, speakers, notes and derived meeting evidence",
+      "e2e": "recommended"
+    },
+    {
+      "id": "analyze-meeting",
+      "name": "Run additional meeting analyses with automatic defaults and optional advanced overrides",
+      "e2e": "recommended"
+    },
+    {
+      "id": "visual-on-demand",
+      "name": "Explicitly analyze shared visual content without making visual capture part of normal recording",
+      "e2e": "recommended"
+    }
   ],
   "reference_views": [
     "docs/assets/0.home.png",
