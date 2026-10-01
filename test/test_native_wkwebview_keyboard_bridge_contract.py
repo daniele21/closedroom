@@ -40,12 +40,12 @@ class NativeWKWebViewKeyboardBridgeContractTest(unittest.TestCase):
 
     def test_screenshot_shortcut_has_local_and_global_overlay_paths(self) -> None:
         self.assertIn("NSEventModifierFlagShift", self.window)
-        self.assertIn("command_pressed and shift_pressed and characters == \"s\"", self.window)
+        self.assertIn("command_pressed and shift_pressed and characters == \"9\"", self.window)
         self.assertIn("evaluate_overlay_js", self.window)
         self.assertIn("NSEvent.addGlobalMonitorForEventsMatchingMask_handler_", self.window)
         self.assertIn("self._install_global_key_monitor()", self.window)
         self.assertIn("NSEvent.removeMonitor_(self._global_key_event_monitor)", self.window)
-        self.assertIn('key="s", code="KeyS", meta_key=True, shift_key=True', self.window)
+        self.assertIn('key="9", code="Digit9", meta_key=True, shift_key=True', self.window)
 
     def test_frontend_shortcuts_remain_supported_but_release_smoke_uses_search_outcome(self) -> None:
         self.assertIn("window.addEventListener('keydown', handleKeyDown)", self.dashboard)
