@@ -22,12 +22,13 @@ from local_asr_server.transcription_jobs import (
 
 MEETING_PREPARATION_JOB_TYPE = "meeting_preparation"
 MEETING_PREPARATION_PIPELINE = "meeting_default"
-PREPARATION_RESULT_VERSION = 1
+PREPARATION_RESULT_VERSION = 2
 
 logger = logging.getLogger("uvicorn.error")
 TerminalCallback = Callable[[dict[str, Any]], None]
 StartTranscription = Callable[[TerminalCallback], dict[str, Any]]
 StartPipeline = Callable[[str, TerminalCallback], dict[str, Any]]
+StartVisual = Callable[[str, TerminalCallback], dict[str, Any]]
 
 
 def _hash_json(value: Any) -> str:
@@ -61,6 +62,7 @@ class MeetingPreparationManager:
         *,
         start_transcription: StartTranscription,
         start_pipeline: StartPipeline,
+        start_visual: StartVisual | None = None,
     ) -> dict[str, Any]:
         # Resolve the recording before creating durable work so a bad id cannot
         # leave an orphan parent job.
@@ -130,6 +132,9 @@ class MeetingPreparationManager:
             "pipeline_run_id": None,
             "analysis_job_ids": [],
             "analysis_launch_complete": False,
+            "visual_job_id": None,
+            "visual_status": "not_requested",
+            "warnings": [],
             "resumed_from_job_id": previous["id"] if previous is not None else None,
         }
         self.services.jobs.update(
@@ -150,13 +155,15 @@ class MeetingPreparationManager:
         )
         if reusable is not None:
             self._merge_result(parent["id"], transcription_id=reusable["id"])
-            self._start_analysis(parent["id"], reusable["id"], start_pipeline)
+            self._start_visual_or_analysis(
+                parent["id"], reusable["id"], start_pipeline, start_visual,
+            )
             return self.services.jobs.get(parent["id"]) or parent
 
         try:
             child = start_transcription(
                 lambda snapshot: self._on_transcription_terminal(
-                    parent["id"], snapshot, start_pipeline,
+                    parent["id"], snapshot, start_pipeline, start_visual,
                 )
             )
             self.services.jobs.link_child(
@@ -224,6 +231,7 @@ class MeetingPreparationManager:
         parent_job_id: str,
         child: dict[str, Any],
         start_pipeline: StartPipeline,
+        start_visual: StartVisual | None = None,
     ) -> None:
         self.services.jobs.link_child(
             parent_job_id, child["id"], stage="transcription", ordinal=0,
@@ -255,6 +263,126 @@ class MeetingPreparationManager:
             transcription_id=transcription_id,
             transcription_job_id=child["id"],
         )
+        self._start_visual_or_analysis(
+            parent_job_id, transcription_id, start_pipeline, start_visual,
+        )
+
+    def _start_visual_or_analysis(
+        self,
+        parent_job_id: str,
+        transcription_id: str,
+        start_pipeline: StartPipeline,
+        start_visual: StartVisual | None,
+    ) -> None:
+        screenshots = self.services.recordings.list_screenshots(
+            (self.services.jobs.get(parent_job_id) or {}).get("scope_id") or ""
+        )
+        available = [item for item in screenshots if item.get("available")]
+        if start_visual is None or not screenshots:
+            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
+            return
+        if not available:
+            self._append_warning(parent_job_id, "screenshot_assets_unavailable")
+            self._merge_result(parent_job_id, visual_status="skipped_assets_unavailable")
+            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
+            return
+
+        parent = self.services.jobs.get(parent_job_id)
+        if parent is None or parent["status"] in TERMINAL_JOB_STATUSES:
+            return
+        if parent.get("cancel_requested"):
+            self.services.jobs.update(
+                parent_job_id,
+                status="cancelled",
+                current_step="cancelled",
+                progress=parent.get("progress") or 0,
+                cancel_requested=True,
+            )
+            return
+
+        self.services.jobs.update(
+            parent_job_id,
+            status="running",
+            current_step="preparing_visual_evidence",
+            progress=45,
+            result=parent.get("result"),
+            event_payload={
+                "phase": "visual",
+                "transcription_id": transcription_id,
+                "screenshot_count": len(screenshots),
+                "available_screenshot_count": len(available),
+            },
+            progress_detail={
+                "phase": "visual",
+                "screenshot_count": len(screenshots),
+                "available_screenshot_count": len(available),
+            },
+        )
+        try:
+            child = start_visual(
+                transcription_id,
+                lambda snapshot: self._on_visual_terminal(
+                    parent_job_id, snapshot, transcription_id, start_pipeline,
+                ),
+            )
+            self.services.jobs.link_child(
+                parent_job_id, child["id"], stage="visual", ordinal=0,
+            )
+            self._merge_result(
+                parent_job_id,
+                visual_job_id=child["id"],
+                visual_status=child.get("status") or "queued",
+            )
+            self._cancel_child_if_parent_cancelled(parent_job_id, child)
+        except Exception as exc:
+            logger.warning(
+                "Visual evidence stage could not start for preparation %s: %s",
+                parent_job_id,
+                exc,
+            )
+            self._append_warning(parent_job_id, f"visual_stage_not_started:{exc}")
+            self._merge_result(parent_job_id, visual_status="failed_to_start")
+            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
+
+    def _on_visual_terminal(
+        self,
+        parent_job_id: str,
+        child: dict[str, Any],
+        transcription_id: str,
+        start_pipeline: StartPipeline,
+    ) -> None:
+        self.services.jobs.link_child(
+            parent_job_id, child["id"], stage="visual", ordinal=0,
+        )
+        parent = self.services.jobs.get(parent_job_id)
+        if parent is None or parent["status"] in TERMINAL_JOB_STATUSES:
+            return
+        if parent.get("cancel_requested"):
+            self.services.jobs.update(
+                parent_job_id,
+                status="cancelled",
+                current_step="cancelled",
+                progress=parent.get("progress") or 0,
+                cancel_requested=True,
+            )
+            return
+
+        if child.get("status") == "completed":
+            self._merge_result(
+                parent_job_id,
+                visual_job_id=child["id"],
+                visual_status=(child.get("result") or {}).get("outcome_status") or "completed",
+            )
+        else:
+            self._append_warning(
+                parent_job_id,
+                child.get("error") or f"visual_stage_{child.get('status') or 'failed'}",
+            )
+            self._merge_result(
+                parent_job_id,
+                visual_job_id=child["id"],
+                visual_status=child.get("status") or "failed",
+            )
         self._start_analysis(parent_job_id, transcription_id, start_pipeline)
 
     def _start_analysis(
@@ -380,6 +508,17 @@ class MeetingPreparationManager:
                 return int(child.get("link_ordinal") or 0)
         return len(current)
 
+
+    def _append_warning(self, parent_job_id: str, warning: str) -> None:
+        parent = self.services.jobs.get(parent_job_id)
+        if parent is None:
+            return
+        result = dict(parent.get("result") or {})
+        warnings = list(result.get("warnings") or [])
+        if warning not in warnings:
+            warnings.append(warning[:500])
+        self._merge_result(parent_job_id, warnings=warnings)
+
     def _merge_result(self, parent_job_id: str, **updates: Any) -> dict[str, Any] | None:
         parent = self.services.jobs.get(parent_job_id)
         if parent is None:
@@ -433,7 +572,23 @@ class MeetingPreparationManager:
             else:
                 source["sha256"] = _hash_file(audio_path)
             tracks.append(source)
-        return _hash_json({"version": 1, "tracks": tracks})
+        screenshots = [
+            {
+                "screenshot_id": item.get("screenshot_id"),
+                "sequence": item.get("sequence"),
+                "timestamp": item.get("timestamp"),
+                "sha256": item.get("sha256"),
+                "display_id": item.get("display_id"),
+                "capture_kind": item.get("capture_kind"),
+                "available": item.get("available"),
+            }
+            for item in self.services.recordings.list_screenshots(recording_id)
+        ]
+        return _hash_json({
+            "version": 2,
+            "tracks": tracks,
+            "screenshots": screenshots,
+        })
 
     def _asr_identity(
         self,
