@@ -4,7 +4,7 @@ import { formatTime } from '../../utils/formatters';
 import { Button } from '../ui/Button';
 import {
   Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  Activity, Timer, Gauge, Users, Image as ImageIcon, X,
+  Activity, Timer, Gauge, Users, Image as ImageIcon,
 } from 'lucide-react';
 
 interface TranscriptTextViewProps {
@@ -13,6 +13,7 @@ interface TranscriptTextViewProps {
   onTimestampClick?: (time: number) => void;
   currentTime?: number;
   screenshots?: RecordingScreenshot[];
+  onOpenScreenshot?: (screenshot: RecordingScreenshot) => void;
 }
 
 const SEGMENTS_PER_PAGE = 25;
@@ -54,12 +55,12 @@ export default function TranscriptTextView({
   onTimestampClick,
   currentTime = 0,
   screenshots = [],
+  onOpenScreenshot,
 }: TranscriptTextViewProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [showAudioDetails, setShowAudioDetails] = useState(true);
-  const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(segments.length / SEGMENTS_PER_PAGE));
 
@@ -291,7 +292,7 @@ export default function TranscriptTextView({
               <button
                 key={`screenshot-${shot.screenshot_id}`}
                 type="button"
-                onClick={() => setSelectedScreenshot(shot)}
+                onClick={() => onOpenScreenshot?.(shot)}
                 className="group flex w-full items-center gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-left transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/10"
                 aria-label={`Apri screenshot a ${formatTime(shot.timestamp)}`}
               >
@@ -391,53 +392,7 @@ export default function TranscriptTextView({
       {/* Pagination */}
       {renderPagination()}
 
-      {selectedScreenshot && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Screenshot della riunione"
-          onClick={() => setSelectedScreenshot(null)}
-        >
-          <div
-            className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle bg-bg-elevated shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-text-primary">Screenshot · {formatTime(selectedScreenshot.timestamp)}</p>
-                <p className="truncate text-xs text-text-muted">{selectedScreenshot.display_title || 'Schermo acquisito'}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="ghost" onClick={() => onTimestampClick?.(selectedScreenshot.timestamp)}>
-                  Vai all'audio
-                </Button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedScreenshot(null)}
-                  className="rounded-lg p-2 text-text-muted hover:bg-bg-surface hover:text-text-primary"
-                  aria-label="Chiudi screenshot"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            <div className="min-h-0 overflow-auto bg-black/5 p-3">
-              {selectedScreenshot.available ? (
-                <img
-                  src={selectedScreenshot.original_url}
-                  alt={`Screenshot a ${formatTime(selectedScreenshot.timestamp)}`}
-                  className="mx-auto max-h-[76vh] max-w-full rounded-lg object-contain"
-                />
-              ) : (
-                <div className="rounded-xl border border-warning/30 bg-warning/5 p-6 text-center text-sm text-text-secondary">
-                  L'immagine non è più disponibile. Il riferimento temporale resta nella timeline.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }
