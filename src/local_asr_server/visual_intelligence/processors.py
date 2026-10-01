@@ -22,7 +22,7 @@ class TaskAwareVisualProcessor:
     """Owns conversion of typed task responses into canonical v2 observations."""
 
     @staticmethod
-    def observation(candidate, parsed, model: str):
+    def observation(candidate, parsed, model: str, *, source=None):
         result = {
             "schema_version": 2,
             "observation_id": f"visual-{candidate.sequence}-{candidate.task.value}",
@@ -36,6 +36,16 @@ class TaskAwareVisualProcessor:
             "confidence": parsed["confidence"],
             "status": "valid",
         }
+        if source:
+            result["source"] = {
+                "kind": source.get("evidence_source") or "continuous_frame",
+                "evidence_id": source.get("evidence_id"),
+                "capture_kind": source.get("capture_kind"),
+                "screenshot_id": source.get("screenshot_id"),
+                "sha256": source.get("sha256"),
+                "display_id": source.get("display_id"),
+                "display_title": source.get("display_title"),
+            }
         if candidate.task is VisualTask.MEETING_UI:
             result.update({key: parsed[key] for key in (
                 "platform", "layout", "participants", "active_speakers", "evidence",
