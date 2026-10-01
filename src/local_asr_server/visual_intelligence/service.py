@@ -58,6 +58,39 @@ platform, layout, participants (array), active_speakers (array), evidence (array
 Se un dato non è leggibile usa un valore unknown o un array vuoto. Non inventare nomi."""
 
 
+def visual_processing_identity(
+    settings: dict[str, Any] | None = None,
+    *,
+    routing_mode: str = "v2",
+) -> dict[str, Any]:
+    """Return non-secret material that invalidates reusable visual work."""
+    resolved = settings or load_settings()
+    from local_asr_server.local_llm_params import load_local_llm_params
+
+    configured_similarity_threshold = resolved.get(
+        "visual_frame_similarity_threshold",
+        DEFAULT_VISUAL_FRAME_SIMILARITY_THRESHOLD,
+    )
+    routing_config = VisualRoutingConfig(
+        mode=routing_mode,
+        dhash_distance=int(configured_similarity_threshold),
+    )
+    local_params = load_local_llm_params()
+    return {
+        "version": 1,
+        "model": str(resolved.get("visual_llm_model") or "qwen3-vl-4b"),
+        "routing_mode": routing_mode,
+        "routing_config": asdict(routing_config),
+        "prompt_versions": {
+            "meeting_ui": TASK_PROMPT_VERSION,
+            "meeting_state": TASK_PROMPT_VERSION,
+            "shared_content": TASK_PROMPT_VERSION,
+        },
+        "llm_parameters": local_params.get("chat_params", {}),
+        "local_ocr_adapter_version": 1,
+    }
+
+
 class VisualBackendUnavailable(RuntimeError):
     """Raised after repeated infrastructure failures make more frame attempts wasteful."""
 
