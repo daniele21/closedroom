@@ -250,6 +250,8 @@ export default function RecordingOverlayPage() {
         if (!opened.success && window.opener) {
           window.opener.location.hash = `#meeting/${recordingId}`;
           window.opener.focus();
+        } else if (!opened.success) {
+          window.location.hash = `#meeting/${recordingId}`;
         }
       } catch (err: any) {
         console.error('Stop control endpoint failed:', err);
