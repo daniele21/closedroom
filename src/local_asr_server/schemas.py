@@ -210,6 +210,11 @@ class CaptureStartRequest(BaseModel):
     visual_fps: float = 0.5
 
 
+class ScreenshotCaptureRequest(BaseModel):
+    request_id: str
+    display_id: Optional[int] = None
+
+
 class CaptureEnsurePermissionsRequest(BaseModel):
     mode: str = "both"
 
