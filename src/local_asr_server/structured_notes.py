@@ -85,31 +85,82 @@ def _source_blocks(transcription: dict[str, Any]) -> tuple[list[tuple[int | str,
                 continue
             blocks.append((segment_id, block))
             refs[str(segment_id)] = {
+                "source_type": "transcript",
+                "source_id": f"transcript:{segment_id}",
                 "segment_id": segment_id,
                 "start": float(segment.get("start") or 0.0),
                 "end": float(segment.get("end") or segment.get("start") or 0.0),
                 "speaker": segment.get("speaker_name") or segment.get("speaker_label") or segment.get("speaker"),
+                "evidence_basis": "spoken",
             }
-        if blocks:
-            return blocks, refs
 
     text = str(transcription.get("text") or "").strip()
-    if not text:
-        return [], {}
-    paragraphs = [part.strip() for part in re.split(r"\n+", text) if part.strip()]
-    if not paragraphs:
-        paragraphs = [text]
-    for index, paragraph in enumerate(paragraphs):
-        blocks.append((index, f"[S{index}] {paragraph}"))
-        refs[str(index)] = {"segment_id": index, "start": None, "end": None, "speaker": None}
-    return blocks, refs
+    if not blocks and text:
+        paragraphs = [part.strip() for part in re.split(r"\n+", text) if part.strip()]
+        if not paragraphs:
+            paragraphs = [text]
+        for index, paragraph in enumerate(paragraphs):
+            blocks.append((index, f"[S{index}] {paragraph}"))
+            refs[str(index)] = {
+                "source_type": "transcript",
+                "source_id": f"transcript:{index}",
+                "segment_id": index,
+                "start": None,
+                "end": None,
+                "speaker": None,
+                "evidence_basis": "spoken",
+            }
 
+    for source in transcription.get("visual_sources") or []:
+        if not isinstance(source, dict):
+            continue
+        screenshot_id = str(source.get("screenshot_id") or "").strip()
+        if not screenshot_id:
+            continue
+        source_key = f"V:{screenshot_id}"
+        timestamp = float(source.get("timestamp") or 0.0)
+        confidence = source.get("confidence")
+        fields: list[str] = []
+        if source.get("content_type"):
+            fields.append(f"type={source['content_type']}")
+        if source.get("title"):
+            fields.append(f"title={source['title']}")
+        if source.get("visible_text"):
+            fields.append(f"visible_text={source['visible_text']}")
+        if source.get("key_information"):
+            value = source.get("key_information")
+            rendered = "; ".join(str(item) for item in value) if isinstance(value, list) else str(value)
+            fields.append(f"key_information={rendered}")
+        if not fields:
+            fields.append("no readable visual description")
+        confidence_part = (
+            f" confidence={float(confidence):.2f}"
+            if isinstance(confidence, (int, float))
+            else ""
+        )
+        blocks.append((
+            source_key,
+            f"[V{screenshot_id} t={timestamp:.2f}{confidence_part}] " + " | ".join(fields),
+        ))
+        refs[source_key] = {
+            "source_type": "screenshot",
+            "source_id": f"screenshot:{screenshot_id}",
+            "screenshot_id": screenshot_id,
+            "timestamp": timestamp,
+            "confidence": confidence,
+            "evidence_basis": "visual_inference",
+            "machine_interpreted": True,
+        }
+
+    return blocks, refs
 
 def _split_oversized_block(segment_id: int | str, block: str, budget: int) -> list[tuple[int | str, str]]:
     if len(block) <= budget:
         return [(segment_id, block)]
-    prefix_match = re.match(r"^(\[S[^\]]+\]\s*)", block)
-    prefix = prefix_match.group(1) if prefix_match else f"[S{segment_id}] "
+    prefix_match = re.match(r"^(\[[SV][^\]]+\]\s*)", block)
+    prefix = prefix_match.group(1) if prefix_match else (
+        f"[V{str(segment_id)[2:]}] " if str(segment_id).startswith("V:") else f"[S{segment_id}] "
+    )
     body = block[len(prefix):]
     words = body.split()
     parts: list[tuple[int | str, str]] = []
