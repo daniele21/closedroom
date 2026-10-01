@@ -10,6 +10,14 @@ const canonicalEvidenceRoot = path.resolve(
 
 const journeys = [
   {
+    script: 'scripts/browser_call_overlay_screenshot_e2e.mjs',
+    env: {
+      CLOSEDROOM_CALL_SCREENSHOT_E2E_EVIDENCE:
+        process.env.CLOSEDROOM_CALL_SCREENSHOT_E2E_EVIDENCE
+        || path.join(canonicalEvidenceRoot, 'call-screenshot'),
+    },
+  },
+  {
     script: 'scripts/browser_saved_meeting_e2e.mjs',
     env: {},
   },
