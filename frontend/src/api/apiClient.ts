@@ -365,6 +365,35 @@ export interface RecordingVisualFrame {
   url: string;
 }
 
+export interface CaptureDisplay {
+  display_id: number;
+  source_id: number;
+  title: string;
+  width: number;
+  height: number;
+}
+
+export interface RecordingScreenshot {
+  screenshot_id: string;
+  recording_id: string;
+  request_id: string;
+  sequence: number;
+  capture_kind: 'manual' | 'automatic' | string;
+  timestamp: number;
+  captured_wall_time?: number | null;
+  display_id: number;
+  display_title?: string | null;
+  width: number;
+  height: number;
+  thumbnail_width?: number;
+  thumbnail_height?: number;
+  sha256: string;
+  available: boolean;
+  thumbnail_available: boolean;
+  original_url: string;
+  thumbnail_url: string;
+}
+
 export interface MergedSource {
   id: string;
   audio_filename: string;
@@ -995,6 +1024,29 @@ export const ApiClient = {
     return (await request(`/v1/recordings/${recordingId}/visual-frames`)).json();
   },
 
+  async captureDisplays(): Promise<{ displays: CaptureDisplay[]; reason?: string | null }> {
+    return (await request('/v1/capture/displays')).json();
+  },
+
+  async recordingScreenshots(recordingId: string): Promise<{ items: RecordingScreenshot[]; total: number }> {
+    return (await request(`/v1/recordings/${recordingId}/screenshots`)).json();
+  },
+
+  async captureScreenshot(recordingId: string, requestId: string, displayId?: number): Promise<RecordingScreenshot> {
+    return (await request(`/v1/recordings/${recordingId}/screenshots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        request_id: requestId,
+        ...(displayId !== undefined ? { display_id: displayId } : {}),
+      }),
+    })).json();
+  },
+
+  async deleteScreenshot(recordingId: string, screenshotId: string): Promise<void> {
+    await request(`/v1/recordings/${recordingId}/screenshots/${screenshotId}`, { method: 'DELETE' });
+  },
+
   async updateTranscriptionSpeakers(id: string, names: Record<string, string>): Promise<Transcription> {
     return (await request(`/v1/transcriptions/${id}/speakers`, {
       method: 'PATCH',
@@ -1026,12 +1078,18 @@ export const ApiClient = {
     mic_db?: number;
     system_db?: number;
     warnings?: string[];
+    screenshot_count?: number;
+    screenshot_display_id?: number | null;
   }> {
     return (await request('/v1/recordings/active')).json();
   },
 
   async stopRecordingControl(recordingId: string): Promise<any> {
     return (await request(`/v1/recordings/${recordingId}/control/stop`, { method: 'POST' })).json();
+  },
+
+  async openMeetingWindow(recordingId: string): Promise<{ success: boolean; error?: string }> {
+    return (await request(`/v1/system/window/main/meeting/${recordingId}`, { method: 'POST' })).json();
   },
 
   async resizeOverlay(width: number, height: number): Promise<{ success: boolean; error?: string }> {
