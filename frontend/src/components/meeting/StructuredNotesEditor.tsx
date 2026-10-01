@@ -519,7 +519,12 @@ export function StructuredNotesEditor({
                           {editedText}
                         </div>
                       )}
-                      <EvidenceRefs refs={sourceItem?.source_refs} onSeek={onSeek} />
+                      <EvidenceRefs
+                        refs={sourceItem?.source_refs}
+                        onSeek={onSeek}
+                        screenshots={screenshots}
+                        onOpenScreenshot={onOpenScreenshot}
+                      />
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
                           size="sm"
@@ -549,9 +554,17 @@ export function StructuredNotesEditor({
           <div className="flex flex-col gap-2">
             {risks.length ? risks.map((item) => (
               <div key={item.item_id} className="rounded-xl border border-border-subtle bg-bg-surface/50 p-4">
-                <p className="text-sm leading-relaxed text-text-primary">{item.text}</p>
+                <div className="flex flex-wrap items-start gap-2">
+                  <p className="min-w-0 flex-1 text-sm leading-relaxed text-text-primary">{item.text}</p>
+                  <EvidenceBasis basis={item.evidence_basis} lang={lang} />
+                </div>
                 {item.impact && <p className="mt-1 text-[11px] text-text-muted">{item.impact}</p>}
-                <EvidenceRefs refs={item.source_refs} onSeek={onSeek} />
+                <EvidenceRefs
+                  refs={item.source_refs}
+                  onSeek={onSeek}
+                  screenshots={screenshots}
+                  onOpenScreenshot={onOpenScreenshot}
+                />
               </div>
             )) : (
               <p className="rounded-xl border border-border-subtle bg-bg-surface/30 px-4 py-3 text-xs text-text-muted">
