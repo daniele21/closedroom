@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import threading
@@ -12,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from local_asr_server.catalog import CatalogStore
+logger = logging.getLogger("uvicorn.error")
+
 from local_asr_server.visual_intelligence.contracts import (
     MAX_VISUAL_FRAME_BYTES,
     VISUAL_DOCUMENT_FILE,
