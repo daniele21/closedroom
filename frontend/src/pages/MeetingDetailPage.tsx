@@ -15,7 +15,7 @@ import {
   Users,
   XCircle,
 } from 'lucide-react';
-import { ApiClient, AnalysisRun, Meeting, MeetingDiagnostics } from '../api/apiClient';
+import { ApiClient, AnalysisRun, Meeting, MeetingDiagnostics, RecordingScreenshot } from '../api/apiClient';
 import { createVisualIntelligenceJob, cancelVisualIntelligenceJob } from '../api/visualJobs';
 import { prepareMeetingNotes, cancelMeetingPreparation } from '../api/meetingPreparation';
 import { ANALYSIS_TYPE_LABELS, ANALYSIS_TYPE_ORDER } from '../api/config';
@@ -94,6 +94,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [visualFrameCount, setVisualFrameCount] = useState(0);
   const [visualFramesState, setVisualFramesState] = useState<VisualFramesState>('idle');
   const [visualFramesError, setVisualFramesError] = useState<string | null>(null);
+  const [screenshots, setScreenshots] = useState<RecordingScreenshot[]>([]);
+  const [screenshotsState, setScreenshotsState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [selectedAnalysisType, setSelectedAnalysisType] = useState('meeting_brief');
@@ -114,6 +116,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const loadQueuedRef = useRef(false);
   const diagnosticsGenerationRef = useRef(0);
   const visualFramesGenerationRef = useRef(0);
+  const screenshotsGenerationRef = useRef(0);
   const userSelectedTabRef = useRef(false);
 
   const handleTimestampClick = (time: number) => {
@@ -207,6 +210,23 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     }
   };
 
+
+  const loadScreenshots = async () => {
+    if (!recordingId || demoMode) return;
+    const generation = ++screenshotsGenerationRef.current;
+    setScreenshotsState('loading');
+    try {
+      const payload = await ApiClient.recordingScreenshots(recordingId);
+      if (generation !== screenshotsGenerationRef.current) return;
+      setScreenshots(payload.items || []);
+      setScreenshotsState('ready');
+    } catch {
+      if (generation !== screenshotsGenerationRef.current) return;
+      setScreenshots([]);
+      setScreenshotsState('error');
+    }
+  };
+
   const loadVisualFrames = async () => {
     if (!recordingId || demoMode) return;
     const generation = ++visualFramesGenerationRef.current;
@@ -234,6 +254,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     setDiagnosticsError(null);
     setVisualFrameCount(0);
     setVisualFramesState('idle');
+    setScreenshots([]);
+    setScreenshotsState('idle');
     setVisualFramesError(null);
     userSelectedTabRef.current = false;
     void load();
@@ -248,6 +270,17 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     if (!detailsOpen || !recordingId || demoMode || diagnosticReport || diagnosticsLoading || diagnosticsError) return;
     void loadDiagnostics();
   }, [detailsOpen, recordingId, demoMode, diagnosticReport, diagnosticsLoading, diagnosticsError]);
+
+  useEffect(() => {
+    if (
+      activeTab !== 'transcript'
+      || !recordingId
+      || demoMode
+      || !meeting?.transcription
+      || screenshotsState !== 'idle'
+    ) return;
+    void loadScreenshots();
+  }, [activeTab, recordingId, demoMode, meeting?.transcription?.id, screenshotsState]);
 
   useEffect(() => {
     if (
@@ -873,6 +906,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                       speakerMappings={speakerMappings}
                       onTimestampClick={handleTimestampClick}
                       currentTime={currentTime}
+                      screenshots={screenshots}
                     />
                   </div>
                 ) : meeting.transcription?.text ? (
