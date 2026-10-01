@@ -359,7 +359,7 @@ try {
   if (!expanded) throw new Error('overlay details control not found');
   await waitText(browser, ['Synthetic Display 1'], 5000, true);
   const selected = await browser.execute(`
-    const select = document.querySelector('select[aria-label="Monitor per screenshot"]');
+    const select = document.querySelector('[data-testid="recording-overlay"] select');
     if (!select) return false; select.value = '7'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === '7';
   `);
   if (!selected) throw new Error('display selection failed');
