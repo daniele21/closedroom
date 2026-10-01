@@ -1,0 +1,291 @@
+name: Production release artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag in vX.Y.Z form
+        required: true
+        type: string
+      source_revision:
+        description: Exact 40-character tagged SHA in main history
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: closedroom-production-release-${{ inputs.source_revision }}
+  cancel-in-progress: false
+
+jobs:
+  production-artifact:
+    runs-on: macos-14
+    timeout-minutes: 90
+    environment: production-release
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
+      CLOSEDROOM_BUILD_PYTHON_VERSION: "3.12"
+    steps:
+      - name: Require main dispatch authority
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "production artifact workflow must be dispatched from main" >&2; exit 1;
+          }
+          [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "source_revision must be a full lowercase commit SHA" >&2; exit 1;
+          }
+          [[ "$(uname -m)" == "arm64" ]] || {
+            echo "production artifact build requires arm64" >&2; exit 1;
+          }
+
+      - name: Check out exact production source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_revision }}
+          fetch-depth: 0
+
+      - name: Verify stable tag and canonical product version
+        env:
+          TAG: ${{ inputs.tag }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "tag must use vX.Y.Z" >&2; exit 1;
+          }
+          test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+          git fetch origin main --tags --force
+          test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$SOURCE_REVISION"
+          git merge-base --is-ancestor "$SOURCE_REVISION" origin/main
+          test -z "$(git status --porcelain)"
+          python3 scripts/product_version.py --root . --expect-tag "$TAG"
+
+      - name: Verify Swift 6 production toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          swift --version | grep -Eq 'Swift version 6\.'
+          xcrun notarytool --version
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install production build toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew list uv >/dev/null 2>&1 || brew install uv
+          npm install --global pnpm@9
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          brew list librsvg >/dev/null 2>&1 || brew install librsvg
+
+      - name: Import protected Apple release authority
+        env:
+          P12_BASE64: ${{ secrets.CLOSEDROOM_DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.CLOSEDROOM_DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_BASE64: ${{ secrets.CLOSEDROOM_NOTARY_API_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.CLOSEDROOM_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.CLOSEDROOM_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in P12_BASE64 P12_PASSWORD NOTARY_KEY_BASE64 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
+            [[ -n "${!value:-}" ]] || { echo "required protected release secret is missing: $value" >&2; exit 1; }
+          done
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/closedroom-production-release.keychain-db"
+          CERTIFICATE_PATH="$RUNNER_TEMP/closedroom-developer-id.p12"
+          API_KEY_PATH="$RUNNER_TEMP/closedroom-notary-api-key.p8"
+          NOTARY_PROFILE="closedroom-production-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          export CERTIFICATE_PATH API_KEY_PATH
+
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          Path(os.environ["CERTIFICATE_PATH"]).write_bytes(
+              base64.b64decode(os.environ["P12_BASE64"], validate=True)
+          )
+          Path(os.environ["API_KEY_PATH"]).write_bytes(
+              base64.b64decode(os.environ["NOTARY_KEY_BASE64"], validate=True)
+          )
+          PY
+          chmod 600 "$CERTIFICATE_PATH" "$API_KEY_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$P12_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -nE 's/.*"(Developer ID Application:[^"]+)".*/\1/p')"
+          IDENTITY_COUNT="$(printf '%s\n' "$IDENTITIES" | sed '/^$/d' | wc -l | tr -d ' ')"
+          [[ "$IDENTITY_COUNT" == "1" ]] || {
+            echo "expected exactly one Developer ID Application identity, found $IDENTITY_COUNT" >&2; exit 1;
+          }
+          SIGNING_IDENTITY="$(printf '%s\n' "$IDENTITIES" | head -n 1)"
+
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+            --key "$API_KEY_PATH" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --keychain "$KEYCHAIN_PATH"
+
+          {
+            echo "CLOSEDROOM_SIGN_IDENTITY=$SIGNING_IDENTITY"
+            echo "CLOSEDROOM_NOTARY_KEYCHAIN_PROFILE=$NOTARY_PROFILE"
+            echo "CLOSEDROOM_NOTARY_KEYCHAIN=$KEYCHAIN_PATH"
+            echo "CLOSEDROOM_BUILD_ID=github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          } >> "$GITHUB_ENV"
+
+      - name: Build signed and notarized immutable artifact
+        env:
+          UV_CACHE_DIR: .cache/uv
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/build_production_artifact.py --root .
+
+      - name: Verify production artifact inventory
+        id: verify
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_DIR="dist/artifacts/macos-arm64-release-package/${CLOSEDROOM_BUILD_ID}"
+          test -d "$ARTIFACT_DIR"
+          echo "artifact_dir=$ARTIFACT_DIR" >> "$GITHUB_OUTPUT"
+
+          python3 - "$ARTIFACT_DIR" "$SOURCE_REVISION" "$CLOSEDROOM_BUILD_ID" <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+
+          artifact_dir = Path(sys.argv[1])
+          revision = sys.argv[2]
+          build_id = sys.argv[3]
+
+          def load_json(name: str) -> dict:
+              path = artifact_dir / name
+              if not path.is_file():
+                  raise SystemExit(f"missing production artifact metadata: {path}")
+              return json.loads(path.read_text(encoding="utf-8"))
+
+          def sha256_file(path: Path) -> str:
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          manifest = load_json("build-manifest.json")
+          evidence = load_json("production-release-evidence.json")
+          changelog = artifact_dir / "BUILD_CHANGELOG.md"
+          checksums = artifact_dir / "SHA256SUMS"
+          if not changelog.is_file() or not checksums.is_file():
+              raise SystemExit("production artifact is missing changelog or checksums")
+
+          if manifest.get("status") != "successful":
+              raise SystemExit("production manifest is not successful")
+          if manifest.get("build_id") != build_id:
+              raise SystemExit("production manifest build id mismatch")
+          source = manifest.get("source") or {}
+          if source.get("revision") != revision or source.get("dirty") is not False:
+              raise SystemExit("production manifest source identity mismatch")
+          lineage = manifest.get("lineage") or {}
+          expected_lineage = {
+              "platform": "macos",
+              "architecture": "arm64",
+              "channel": "release",
+              "variant": "package",
+          }
+          for key, expected in expected_lineage.items():
+              if lineage.get(key) != expected:
+                  raise SystemExit(f"production manifest lineage mismatch: {key}")
+          if (manifest.get("configuration") or {}).get("signing") != "developer-id-notarized":
+              raise SystemExit("production manifest signing is not release-ready")
+
+          expected_evidence = {
+              "status": "pass",
+              "source_revision": revision,
+              "build_id": build_id,
+              "signing": "developer-id",
+              "secure_timestamp": True,
+              "app_notarization": "accepted",
+              "app_stapler_validation": "pass",
+              "app_gatekeeper_assessment": "pass",
+              "dmg_notarization": "accepted",
+              "dmg_stapler_validation": "pass",
+              "dmg_gatekeeper_assessment": "pass",
+              "notary_profile_configured": True,
+          }
+          for key, expected in expected_evidence.items():
+              if evidence.get(key) != expected:
+                  raise SystemExit(f"production evidence mismatch: {key}")
+
+          artifacts = manifest.get("artifacts") or {}
+          app_meta = artifacts.get("app") or {}
+          dmg_meta = artifacts.get("dmg") or {}
+          app = artifact_dir / str(app_meta.get("path") or "")
+          dmg = artifact_dir / str(dmg_meta.get("path") or "")
+          if not app.is_dir():
+              raise SystemExit("production app bundle is missing")
+          if not dmg.is_file():
+              raise SystemExit("production DMG is missing")
+          if dmg.stat().st_size != dmg_meta.get("bytes"):
+              raise SystemExit("production DMG byte count mismatch")
+          if sha256_file(dmg) != dmg_meta.get("sha256"):
+              raise SystemExit("production DMG SHA-256 mismatch")
+
+          checksum_lines = set(checksums.read_text(encoding="utf-8").splitlines())
+          expected_app_line = f"{app_meta.get('sha256')}  {app_meta.get('path')}/"
+          expected_dmg_line = f"{dmg_meta.get('sha256')}  {dmg_meta.get('path')}"
+          if expected_app_line not in checksum_lines or expected_dmg_line not in checksum_lines:
+              raise SystemExit("production checksums do not match manifest")
+          PY
+
+      - name: Upload qualified production artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: closedroom-production-release-${{ inputs.source_revision }}
+          path: |
+            ${{ steps.verify.outputs.artifact_dir }}/*.dmg
+            ${{ steps.verify.outputs.artifact_dir }}/build-manifest.json
+            ${{ steps.verify.outputs.artifact_dir }}/production-release-evidence.json
+            ${{ steps.verify.outputs.artifact_dir }}/BUILD_CHANGELOG.md
+            ${{ steps.verify.outputs.artifact_dir }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove protected Apple release authority
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          security delete-keychain "$RUNNER_TEMP/closedroom-production-release.keychain-db" >/dev/null 2>&1
+          rm -f \
+            "$RUNNER_TEMP/closedroom-developer-id.p12" \
+            "$RUNNER_TEMP/closedroom-notary-api-key.p8"

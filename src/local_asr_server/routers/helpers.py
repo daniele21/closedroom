@@ -9,6 +9,7 @@ from local_asr_server.transcription_quality import dedupe_cross_track_segments
 from local_asr_server.asr_models import get_asr_backend
 from local_asr_server.asr_provider import ASR_PROVIDER_LOCAL, public_asr_metadata
 from local_asr_server.speaker_labels import apply_speaker_labels
+from local_asr_server.structured_notes_projection import expand_analysis_runs
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -103,6 +104,37 @@ def _merge_track_transcriptions(
     })
 
 
+def _current_analysis_runs(
+    runs: list[dict[str, Any]],
+    transcription: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Keep derived Meeting state tied to the currently selected transcript."""
+    if transcription is None:
+        return [run for run in runs if not run.get("transcription_id")]
+    transcription_id = transcription.get("id")
+    return [run for run in runs if run.get("transcription_id") == transcription_id]
+
+
+def _exclude_incomplete_preparation_runs(
+    runs: list[dict[str, Any]],
+    preparation_jobs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Do not promote partial/cancelled preparation output as ready Meeting notes."""
+    incomplete_pipeline_ids = {
+        (job.get("result") or {}).get("pipeline_run_id")
+        for job in preparation_jobs
+        if job.get("type") == "meeting_preparation"
+        and job.get("status") in {"failed", "interrupted", "cancelled"}
+        and (job.get("result") or {}).get("pipeline_run_id")
+    }
+    if not incomplete_pipeline_ids:
+        return runs
+    return [
+        run for run in runs
+        if run.get("pipeline_run_id") not in incomplete_pipeline_ids
+    ]
+
+
 def _build_projects(app: FastAPI) -> dict:
     recordings = get_services(app).recordings.list(limit=999)
     projects: dict[str, dict] = {}
@@ -120,12 +152,27 @@ def _build_projects(app: FastAPI) -> dict:
             transcription_runs = get_services(app).catalog.list_analysis_runs(transcription_id=transcription["id"], limit=50)
             existing = {run["id"] for run in runs}
             runs.extend(run for run in transcription_runs if run["id"] not in existing)
-        latest_analysis = next((run for run in sorted(runs, key=lambda item: item.get("created_at") or 0, reverse=True) if run.get("status") == "completed"), None)
+        current_runs = _current_analysis_runs(runs, transcription)
+        preparation_jobs = get_services(app).transcription_jobs.list(
+            job_type="meeting_preparation",
+            scope_type="recording",
+            scope_id=recording["id"],
+            limit=50,
+        )
+        canonical_runs = expand_analysis_runs(
+            _exclude_incomplete_preparation_runs(current_runs, preparation_jobs)
+        )
+        latest_analysis = next((run for run in sorted(canonical_runs, key=lambda item: item.get("created_at") or 0, reverse=True) if run.get("status") == "completed"), None)
+        legacy_analysis = (
+            transcription.get("analysis")
+            if transcription and not preparation_jobs
+            else None
+        )
         bucket["items"].append({
             "recording": recording,
             "transcription": transcription,
-            "analysis": latest_analysis or (transcription.get("analysis") if transcription else None),
-            "analysis_runs": sorted(runs, key=lambda item: item.get("created_at") or 0, reverse=True),
+            "analysis": latest_analysis or legacy_analysis,
+            "analysis_runs": sorted(expand_analysis_runs(runs), key=lambda item: item.get("created_at") or 0, reverse=True),
         })
     items = sorted(projects.values(), key=lambda item: (item["is_unassigned"], item["name"].lower()))
     return {"items": items}
@@ -212,6 +259,7 @@ def _build_meeting(app: FastAPI, recording: dict[str, Any], *, compact: bool = F
         )
         existing = {run["id"] for run in runs}
         runs.extend(run for run in transcription_runs if run["id"] not in existing)
+    current_runs = _current_analysis_runs(runs, transcription)
     related_jobs = get_services(app).transcription_jobs.list(
         scope_type="recording",
         scope_id=recording["id"],
@@ -225,6 +273,8 @@ def _build_meeting(app: FastAPI, recording: dict[str, Any], *, compact: bool = F
                 limit=50,
             )
         )
+    canonical_runs = _exclude_incomplete_preparation_runs(current_runs, related_jobs)
+    expanded_canonical_runs = expand_analysis_runs(canonical_runs)
     jobs = [
         _compact_job(job)
         for job in sorted(
@@ -234,11 +284,11 @@ def _build_meeting(app: FastAPI, recording: dict[str, Any], *, compact: bool = F
         )
     ]
     latest_by_type: dict[str, dict[str, Any]] = {}
-    for run in sorted(runs, key=lambda item: item.get("created_at") or 0, reverse=True):
+    for run in sorted(expanded_canonical_runs, key=lambda item: item.get("created_at") or 0, reverse=True):
         analysis_type = run.get("analysis_type") or "meeting_brief"
         if analysis_type not in latest_by_type and run.get("status") == "completed":
             latest_by_type[analysis_type] = run
-    public_runs = sorted(runs, key=lambda item: item.get("created_at") or 0, reverse=True)
+    public_runs = sorted(expand_analysis_runs(runs), key=lambda item: item.get("created_at") or 0, reverse=True)
     public_latest = latest_by_type
     if compact:
         public_runs = [_compact_analysis_run(run) for run in public_runs]
@@ -250,7 +300,7 @@ def _build_meeting(app: FastAPI, recording: dict[str, Any], *, compact: bool = F
         "analysis_runs": public_runs,
         "latest_analysis": public_latest,
         "jobs": jobs,
-        "status": _meeting_status(recording, transcription, runs),
+        "status": _meeting_status(recording, transcription, canonical_runs),
         "project_name": recording.get("project_name") or "",
         "created_at": recording.get("created_at"),
         "updated_at": recording.get("completed_at") or recording.get("stopped_at") or recording.get("created_at"),

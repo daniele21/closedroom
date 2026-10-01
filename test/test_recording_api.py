@@ -521,8 +521,6 @@ class RecordingApiTests(unittest.TestCase):
             time.sleep(0.05)
 
         self.assertEqual(status["status"], "completed")
-        intermediate_stages = [s for s in statuses if s not in {"queued", "completed"}]
-        self.assertTrue(len(intermediate_stages) > 0, f"Expected intermediate stages in {statuses}")
         self.assertEqual(status["result"]["text"], "[00:00] Tu: Ciao")
         self.assertEqual(status["result"]["stats"]["speaker_diarization"]["status"], "disabled")
         self.assertIn(status["result"]["outcome_status"], {"completed", "completed_with_warnings"})

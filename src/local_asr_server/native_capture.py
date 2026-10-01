@@ -9,9 +9,15 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from local_asr_server.runtime.capture_events import (
+    BoundedCaptureEventHistory,
+    CoalescingCaptureEventQueue,
+)
 
 from local_asr_server.paths import (
     get_native_capture_helper_path,
@@ -37,13 +43,13 @@ class CaptureSession:
     output_dir: Path
     reader_thread: threading.Thread | None = None
     started_at: float = field(default_factory=time.time)
-    events: "queue.Queue[dict[str, Any]]" = field(default_factory=queue.Queue)
-    event_log: list[dict[str, Any]] = field(default_factory=list)
+    events: CoalescingCaptureEventQueue = field(default_factory=CoalescingCaptureEventQueue)
+    event_log: BoundedCaptureEventHistory = field(default_factory=BoundedCaptureEventHistory)
     ready_event: dict[str, Any] | None = None
     track_ready: dict[str, dict[str, Any]] = field(default_factory=dict)
     track_written: dict[str, dict[str, Any]] = field(default_factory=dict)
     last_volume: dict[str, float] = field(default_factory=dict)
-    warnings: list[dict[str, Any]] = field(default_factory=list)
+    warnings: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=128))
     stopped: bool = False
 
 
@@ -484,4 +490,10 @@ class NativeCaptureManager:
             "backend": "native",
             "status": "cancelled" if cancel else ("interrupted" if was_killed else "stopped"),
             "events": events,
+            "event_buffer": {
+                "queue": session.events.stats(),
+                "history": session.event_log.stats(),
+                "retained_warnings": len(session.warnings),
+                "warning_capacity": session.warnings.maxlen,
+            },
         }

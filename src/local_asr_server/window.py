@@ -35,6 +35,9 @@ from AppKit import (
     NSColor,
     NSView,
     NSViewMinYMargin,
+    NSEvent,
+    NSEventMaskKeyDown,
+    NSEventModifierFlagCommand,
 )
 from Foundation import NSURL, NSURLRequest
 
@@ -108,6 +111,7 @@ class ClosedRoomWindowManager:
         self.overlay_webview: Optional[objc.objc_object] = None
         self._delegate: Optional[ClosedRoomWindowDelegate] = None
         self._observer: Optional[ClosedRoomActivationObserver] = None
+        self._key_event_monitor: Optional[objc.objc_object] = None
 
     def show(self) -> None:
         """Show the native window, creating it if it doesn't exist yet."""
@@ -141,6 +145,53 @@ class ClosedRoomWindowManager:
                 self.webview.evaluateJavaScript_completionHandler_(js_code, None)
         
         run_on_main_thread(_eval)
+
+    def _dispatch_keyboard_event_to_webview(self, *, key: str, code: str, meta_key: bool = False) -> None:
+        """Bridge an AppKit key event into the focused DOM path of the main WKWebView.
+
+        ClosedRoom owns app-level keyboard commands at the native window boundary.
+        The bridge intentionally targets the current DOM focus so existing React
+        and dialog keyboard handlers remain the canonical behavior owners.
+        """
+        meta_value = "true" if meta_key else "false"
+        js = (
+            "(() => {"
+            "const target = document.activeElement || document.body || document;"
+            "target.dispatchEvent(new KeyboardEvent('keydown', {"
+            f"key: {key!r}, code: {code!r}, metaKey: {meta_value}, "
+            "bubbles: true, cancelable: true"
+            "}));"
+            "})();"
+        )
+        self.evaluate_js(js)
+
+    def _handle_local_key_event(self, event):
+        """Route app-local shortcuts through AppKit before WKWebView delivery."""
+        if not self.window:
+            return event
+
+        modifiers = int(event.modifierFlags())
+        characters = str(event.charactersIgnoringModifiers() or "").lower()
+        key_code = int(event.keyCode())
+        command_pressed = bool(modifiers & NSEventModifierFlagCommand)
+
+        if command_pressed and (key_code == 40 or characters == "k"):
+            self._dispatch_keyboard_event_to_webview(key="k", code="KeyK", meta_key=True)
+        elif key_code == 53:  # Escape
+            self._dispatch_keyboard_event_to_webview(key="Escape", code="Escape")
+
+        # Preserve the normal AppKit/WebKit path for real keyboard events. The
+        # bridge is additive and idempotent for the existing open/close handlers.
+        return event
+
+    def _install_local_key_monitor(self) -> None:
+        """Install one bounded app-local key monitor for the main window."""
+        if self._key_event_monitor is not None:
+            return
+        self._key_event_monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+            NSEventMaskKeyDown,
+            self._handle_local_key_event,
+        )
 
     def show_loading(self) -> None:
         """Display a premium loading screen inside the webview."""
@@ -243,6 +294,7 @@ class ClosedRoomWindowManager:
         self.webview = WKWebView.alloc().initWithFrame_(content_rect)
         self.webview.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
         self.window.setContentView_(self.webview)
+        self._install_local_key_monitor()
 
         # Display initial loading screen
         self.show_loading()
@@ -415,6 +467,9 @@ class ClosedRoomWindowManager:
         if self._observer:
             NSNotificationCenter.defaultCenter().removeObserver_(self._observer)
             self._observer = None
+        if self._key_event_monitor is not None:
+            NSEvent.removeMonitor_(self._key_event_monitor)
+            self._key_event_monitor = None
         if self.window:
             self.window.setDelegate_(None)
             self.window.close()
@@ -448,4 +503,3 @@ def run_on_main_thread(callback: Callable[[], None], wait: bool = False) -> None
         callback,
         wait,
     )
-

@@ -167,7 +167,7 @@ test-out-2/mic.wav
 test-out-2/recording.wav
 test-out-2/system.wav
 build_assets/native-capture-helper
-build_assets/ClosedRoomNativeCapture.app/Contents/MacOS/ClosedRoomNativeCapture
+build_assets/ClosedRoomNativeCapture.app/
 update-uv-dependences-llm-local-server
 docs/assets/Screenshot 2026-06-26 alle 16.23.57.heic
 docs/assets/Screenshot 2026-06-26 alle 16.24.33.heic

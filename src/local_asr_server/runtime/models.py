@@ -50,6 +50,27 @@ class AnalysisQualityDefaults:
 ANALYSIS_QUALITY_DEFAULTS = AnalysisQualityDefaults()
 
 
+def is_local_llm_model_path_explicit(
+    settings: dict[str, Any], model: str | None = None,
+) -> bool:
+    """Return whether the selected model path is explicitly user/config supplied.
+
+    Automatic LM Studio discovery is deliberately excluded: registered product
+    models may be re-resolved by local-llm-server 0.4 after a zero-resident
+    transition, while explicit paths must preserve their exact artifact through
+    an owned process restart boundary.
+    """
+    selected_model = model or settings.get("local_llm_model") or ""
+    model_paths = settings.get("local_llm_model_paths") or {}
+    if not isinstance(model_paths, dict):
+        model_paths = {}
+    if model_paths.get(selected_model) or settings.get("local_llm_model_path"):
+        return True
+    if selected_model:
+        return Path(selected_model).expanduser().exists()
+    return False
+
+
 def resolve_local_llm_model_path(settings: dict[str, Any], model: str | None = None) -> str:
     """Resolve model-specific paths before the legacy global model path."""
 

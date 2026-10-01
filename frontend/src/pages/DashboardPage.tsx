@@ -3,12 +3,12 @@
  * Main "Today" view — progressive disclosure layout.
  *
  * Information hierarchy:
- *   Level 1 (Hero)      — Period selector, record CTA, 4 smart KPIs
- *   Level 2 (Spotlight) — Top 3 meetings, top 3 actions, top 2 digest snippets
- *   Level 3 (On-demand) — Full lists, decisions, risks open in drawers
+ *   Level 1 (Hero)      — Period, search, summary links and guidance
+ *   Level 2 (Spotlight) — Top 3 meetings and top 2 digest snippets
+ *   Level 3 (On-demand) — Full lists, actions, decisions, risks and diagnostics
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ChevronDown,
@@ -22,7 +22,6 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
-  X,
 } from 'lucide-react';
 import { ApiClient, Meeting } from '../api/apiClient';
 import { getDemoMeetings } from '../features/demo/demoData';
@@ -33,6 +32,7 @@ import { Dialog, DialogContent, DialogHeader, DialogBody } from '../components/u
 import { TaskProcessingLoader } from '../components/workspace/TaskProcessingLoader';
 import { InsightDetailDialog, InsightTab } from '../components/workspace/InsightDetailDialog';
 import { MeetingListDialog } from '../components/workspace/MeetingListDialog';
+import { MeetingSearchDialog } from '../components/workspace/MeetingSearchDialog';
 import {
   DigestPanel,
   EmptyState,
@@ -65,18 +65,14 @@ interface DashboardPageProps {
   onActivateDemo?: () => void;
 }
 
-// ─── Small "view all" action link ────────────────────────────────────────────
-
 function ViewAllLink({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button type="button" onClick={onClick} className="view-all-link">
       {label}
-      <ChevronRight className="h-3.5 w-3.5" />
+      <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
     </button>
   );
 }
-
-// ─── Compact insight preview (actions/decisions/risks) ────────────────────────
 
 function InsightPreviewCard({
   text,
@@ -104,8 +100,6 @@ function InsightPreviewCard({
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
 export default function DashboardPage({
   navigateTo,
   demoMode = false,
@@ -115,18 +109,16 @@ export default function DashboardPage({
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [query, setQuery] = useState('');
   const [timeRange, setTimeRange] = useState<TimeRangeState>({ mode: 'today' });
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [dropdownCoords, setDropdownCoords] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const periodMenuRef = useRef<HTMLDivElement>(null);
 
-  // Rename state
   const [editingRecordingId, setEditingRecordingId] = useState<string | null>(null);
   const [editTitleValue, setEditTitleValue] = useState('');
 
-  // Drawer state
   const [insightDialogOpen, setInsightDialogOpen] = useState(false);
   const [insightDialogTab, setInsightDialogTab] = useState<InsightTab>('actions');
   const [meetingListDialogOpen, setMeetingListDialogOpen] = useState(false);
@@ -139,12 +131,53 @@ export default function DashboardPage({
     }
   }, [isDropdownOpen]);
 
+  useEffect(() => {
+    if (!isDropdownOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      periodMenuRef.current
+        ?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]')
+        ?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isDropdownOpen]);
+
   const rangeOptions = useMemo(() => [
     { mode: 'today' as const, label: lang === 'it' ? 'Oggi' : 'Today' },
     { mode: 'last3' as const, label: lang === 'it' ? 'Ultimi 3 giorni' : 'Last 3 days' },
     { mode: 'week' as const, label: lang === 'it' ? 'Settimana' : 'This week' },
     { mode: 'custom' as const, label: lang === 'it' ? 'Range custom' : 'Custom range' },
   ], [lang]);
+
+  const handlePeriodMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(
+      periodMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [],
+    );
+    if (!items.length) return;
+
+    const currentIndex = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement));
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % items.length;
+    else if (event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + items.length) % items.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = items.length - 1;
+    else if (event.key === 'Escape') {
+      event.preventDefault();
+      setIsDropdownOpen(false);
+      triggerRef.current?.focus();
+      return;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    items[nextIndex]?.focus();
+  };
+
+  const selectRange = (mode: TimeRangeState['mode']) => {
+    setTimeRange((current) => ({ ...current, mode }));
+    setIsDropdownOpen(false);
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
 
   const load = async () => {
     try {
@@ -164,31 +197,21 @@ export default function DashboardPage({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setIsSearchOpen(true); }
-      if (e.key === 'Escape') { setIsSearchOpen(false); setIsDropdownOpen(false); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(true);
+      }
+      if (e.key === 'Escape') setIsDropdownOpen(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-
-
-  // ─── Computed data ──────────────────────────────────────────────────────────
-
   const resolvedRange = useMemo(() => resolveTimeRange(timeRange), [timeRange]);
   const rangeLabel = useMemo(() => formatTimeRangeLabel(timeRange, lang), [timeRange, lang]);
-
-  const searchedMeetings = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return meetings;
-    return meetings.filter((m) =>
-      [meetingTitle(m), m.project_name, m.transcription?.text?.slice(0, 800)].join(' ').toLowerCase().includes(needle),
-    );
-  }, [meetings, query]);
-
   const periodMeetings = useMemo(
-    () => searchedMeetings.filter((m) => isWithinTimeRange(m.created_at, resolvedRange)),
-    [searchedMeetings, resolvedRange],
+    () => meetings.filter((meeting) => isWithinTimeRange(meeting.created_at, resolvedRange)),
+    [meetings, resolvedRange],
   );
 
   const sources = useMemo(() => periodMeetings.map(sourceFromMeeting), [periodMeetings]);
@@ -207,7 +230,6 @@ export default function DashboardPage({
     (m) => m.status === 'analyzing' || m.jobs.some((j) => !['completed', 'failed', 'cancelled', 'interrupted'].includes(j.status)),
   ).length;
   const readyCount = periodMeetings.filter((m) => m.status === 'ready').length;
-
   const hasAnyData = meetings.length > 0;
 
   const handleRenameClick = (meeting: Meeting) => {
@@ -224,7 +246,6 @@ export default function DashboardPage({
       return;
     }
     try {
-      // Optimistic update
       setMeetings((prev) =>
         prev.map((m) =>
           m.id === meeting.id ? { ...m, recording: { ...m.recording, title } } : m
@@ -235,7 +256,6 @@ export default function DashboardPage({
       await ApiClient.updateRecording(meeting.recording.id, { title });
       showToast(t('transcription.titleSaveSuccess') || 'Title updated successfully', 'success');
 
-      // Sync backend state in background
       const data = await ApiClient.listMeetings(120);
       setMeetings(data.items || []);
     } catch (err: any) {
@@ -243,8 +263,6 @@ export default function DashboardPage({
       load();
     }
   };
-
-  // ─── Loading ────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -265,8 +283,6 @@ export default function DashboardPage({
   const activeOption = rangeOptions.find((opt) => opt.mode === timeRange.mode);
   const activeLabel = activeOption ? activeOption.label : '';
 
-  // ─── Empty state (no data, not demo) ────────────────────────────────────────
-
   if (!hasAnyData && !demoMode) {
     return (
       <EmptyStateHero
@@ -275,14 +291,14 @@ export default function DashboardPage({
         description={t('demo.emptyDesc')}
         primaryAction={
           <Button size="lg" onClick={() => navigateTo('recording')}>
-            <Mic className="h-5 w-5" />
+            <Mic className="h-5 w-5" aria-hidden="true" />
             {t('demo.emptyCta')}
           </Button>
         }
         secondaryAction={
           onActivateDemo ? (
             <Button size="lg" variant="secondary" onClick={onActivateDemo}>
-              <Sparkles className="h-5 w-5" />
+              <Sparkles className="h-5 w-5" aria-hidden="true" />
               {t('demo.emptyCtaDemo')}
             </Button>
           ) : undefined
@@ -291,48 +307,58 @@ export default function DashboardPage({
     );
   }
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
-
   return (
-    <div className="flex flex-col gap-5 animate-page-in">
-      {/* ── LEVEL 1: Hero — period picker + record CTA ── */}
+    <div className="flex flex-col gap-5">
       <section
         data-tour="today-summary"
         className="premium-hero page-hero rounded-2xl p-5 sm:p-6"
       >
         <span className="hero-orbital-line" aria-hidden="true" />
         <div className="flex flex-wrap items-start justify-between gap-4">
-          {/* Title + period picker */}
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold uppercase text-accent">{rangeLabel}</span>
               <Badge variant="success">{t('dashboard.localBadge')}</Badge>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              {/* Period dropdown */}
               <div className="relative">
                 <button
                   ref={triggerRef}
                   type="button"
-                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="flex items-center gap-2 rounded-xl bg-transparent px-0 py-0 text-3xl font-bold text-text-primary outline-none transition-colors hover:text-accent sm:text-4xl"
+                  onClick={() => setIsDropdownOpen((open) => !open)}
+                  className="flex items-center gap-2 rounded-xl bg-transparent px-0 py-0 text-3xl font-bold text-text-primary outline-none transition-colors hover:text-accent focus-visible:ring-2 focus-visible:ring-border-focus sm:text-4xl"
+                  aria-haspopup="menu"
+                  aria-expanded={isDropdownOpen}
+                  aria-controls="dashboard-period-menu"
+                  aria-label={lang === 'it' ? `Periodo: ${activeLabel}` : `Period: ${activeLabel}`}
                 >
                   <span>{activeLabel}</span>
-                  <ChevronDown className="h-6 w-6 shrink-0 text-text-muted" />
+                  <ChevronDown className="h-6 w-6 shrink-0 text-text-muted" aria-hidden="true" />
                 </button>
                 {isDropdownOpen && dropdownCoords && createPortal(
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setIsDropdownOpen(false)} />
                     <div
+                      className="fixed inset-0 z-40"
+                      onMouseDown={() => setIsDropdownOpen(false)}
+                      aria-hidden="true"
+                    />
+                    <div
+                      id="dashboard-period-menu"
+                      ref={periodMenuRef}
+                      role="menu"
+                      aria-label={lang === 'it' ? 'Seleziona periodo' : 'Select period'}
+                      onKeyDown={handlePeriodMenuKeyDown}
                       style={{ position: 'absolute', top: `${dropdownCoords.top + 6}px`, left: `${dropdownCoords.left}px` }}
-                      className="z-50 w-48 rounded-xl border border-border-subtle bg-bg-elevated p-1 shadow-premium animate-in fade-in slide-in-from-top-1 duration-150"
+                      className="z-50 w-48 rounded-xl border border-border-subtle bg-bg-elevated p-1 shadow-premium"
                     >
                       {rangeOptions.map((option) => (
                         <button
                           key={option.mode}
                           type="button"
-                          onClick={() => { setTimeRange({ ...timeRange, mode: option.mode }); setIsDropdownOpen(false); }}
-                          className={`w-full rounded-lg px-3 py-2 text-left text-xs font-medium transition-all ${
+                          role="menuitemradio"
+                          aria-checked={timeRange.mode === option.mode}
+                          onClick={() => selectRange(option.mode)}
+                          className={`w-full rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${
                             timeRange.mode === option.mode
                               ? 'bg-accent/15 text-accent'
                               : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
@@ -347,44 +373,45 @@ export default function DashboardPage({
                 )}
               </div>
 
-              {/* Custom date range */}
               {timeRange.mode === 'custom' && (
-                <div className="flex items-center gap-1.5 text-xs animate-in fade-in slide-in-from-left-2 duration-200">
+                <div className="flex items-center gap-1.5 text-xs">
                   <input
                     type="date"
                     value={timeRange.startDate || ''}
                     onChange={(e) => setTimeRange({ ...timeRange, startDate: e.target.value })}
-                    className="h-8 rounded-lg border border-border-subtle bg-bg-elevated px-2 text-xs text-text-primary outline-none transition-premium focus:border-border-focus"
+                    aria-label={lang === 'it' ? 'Data iniziale' : 'Start date'}
+                    className="h-8 rounded-lg border border-border-subtle bg-bg-elevated px-2 text-xs text-text-primary outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus"
                   />
-                  <span className="text-text-muted">-</span>
+                  <span className="text-text-muted" aria-hidden="true">–</span>
                   <input
                     type="date"
                     value={timeRange.endDate || ''}
                     onChange={(e) => setTimeRange({ ...timeRange, endDate: e.target.value })}
-                    className="h-8 rounded-lg border border-border-subtle bg-bg-elevated px-2 text-xs text-text-primary outline-none transition-premium focus:border-border-focus"
+                    aria-label={lang === 'it' ? 'Data finale' : 'End date'}
+                    className="h-8 rounded-lg border border-border-subtle bg-bg-elevated px-2 text-xs text-text-primary outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus"
                   />
                 </div>
               )}
 
-              {/* Search icon */}
               <Tooltip content={t('dashboard.searchPlaceholder')}>
                 <button
                   type="button"
                   onClick={() => setIsSearchOpen(true)}
-                  className="pressable p-2 text-text-muted hover:text-text-primary hover:bg-bg-hover rounded-xl border border-transparent hover:border-border-focus transition-premium"
+                  aria-label={t('dashboard.searchPlaceholder')}
+                  className="pressable rounded-xl border border-transparent p-2 text-text-muted transition-colors hover:border-border-focus hover:bg-bg-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 >
-                  <Search className="h-4 w-4" />
+                  <Search className="h-4 w-4" aria-hidden="true" />
                 </button>
               </Tooltip>
 
-              {/* Technical details icon */}
               <Tooltip content={lang === 'it' ? 'Dettagli tecnici' : 'Technical status'}>
                 <button
                   type="button"
                   onClick={() => setTechDetailsOpen(true)}
-                  className="pressable p-2 text-text-muted hover:text-text-primary hover:bg-bg-hover rounded-xl border border-transparent hover:border-border-focus transition-premium"
+                  aria-label={lang === 'it' ? 'Apri dettagli tecnici' : 'Open technical status'}
+                  className="pressable rounded-xl border border-transparent p-2 text-text-muted transition-colors hover:border-border-focus hover:bg-bg-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 >
-                  <Info className="h-4 w-4" />
+                  <Info className="h-4 w-4" aria-hidden="true" />
                 </button>
               </Tooltip>
             </div>
@@ -394,9 +421,9 @@ export default function DashboardPage({
                 <button
                   type="button"
                   onClick={() => setMeetingListDialogOpen(true)}
-                  className="flex items-center gap-2 rounded-xl border border-border-subtle bg-bg-glass/40 hover:bg-bg-hover hover:border-border-focus px-3 py-1.5 text-xs font-semibold text-text-secondary transition-premium hover-lift"
+                  className="flex items-center gap-2 rounded-xl border border-border-subtle bg-bg-glass/40 px-3 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 >
-                  <FileAudio className="h-3.5 w-3.5 text-accent" />
+                  <FileAudio className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
                   <span>
                     <strong>{periodMeetings.length}</strong> {lang === 'it' ? 'Meeting nel periodo' : 'Meetings in period'}
                   </span>
@@ -405,9 +432,9 @@ export default function DashboardPage({
                 <button
                   type="button"
                   onClick={() => { setInsightDialogTab('actions'); setInsightDialogOpen(true); }}
-                  className="flex items-center gap-2 rounded-xl border border-border-subtle bg-bg-glass/40 hover:bg-bg-hover hover:border-border-focus px-3 py-1.5 text-xs font-semibold text-text-secondary transition-premium hover-lift"
+                  className="flex items-center gap-2 rounded-xl border border-border-subtle bg-bg-glass/40 px-3 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 >
-                  <ListChecks className="h-3.5 w-3.5 text-success" />
+                  <ListChecks className="h-3.5 w-3.5 text-success" aria-hidden="true" />
                   <span>
                     <strong>{actionItems.length}</strong> {lang === 'it' ? 'Azioni aperte' : 'Open actions'}
                   </span>
@@ -416,7 +443,6 @@ export default function DashboardPage({
             )}
           </div>
 
-          {/* Context */}
           <div className="flex flex-wrap items-center gap-2">
             <GuidanceCallout
               icon={ShieldCheck}
@@ -428,11 +454,8 @@ export default function DashboardPage({
         </div>
       </section>
 
-      {/* ── LEVEL 2: Main content — Spotlight ── */}
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,1fr)]">
         <main className="flex min-w-0 flex-col gap-5">
-
-          {/* Meetings spotlight — top 3 */}
           <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4 theme-audio" data-tour="today-meetings">
             <div className="flex items-center justify-between gap-3">
               <SectionHeader
@@ -449,20 +472,6 @@ export default function DashboardPage({
               )}
             </div>
 
-            {/* Active search filter banner */}
-            {query && (
-              <div className="flex items-center justify-between rounded-xl border border-border-subtle bg-bg-elevated p-3 animate-in fade-in slide-in-from-top-1 duration-200">
-                <span className="text-xs text-text-secondary">
-                  {lang === 'it' ? 'Filtro:' : 'Filter:'}{' '}
-                  <strong className="text-text-primary">"{query}"</strong>{' '}
-                  ({periodMeetings.length} {lang === 'it' ? 'risultati' : 'results'})
-                </span>
-                <button onClick={() => setQuery('')} className="text-xs font-semibold text-accent hover:underline">
-                  {lang === 'it' ? 'Azzera' : 'Clear'}
-                </button>
-              </div>
-            )}
-
             {periodMeetings.length === 0 ? (
               <EmptyState
                 icon={Mic}
@@ -478,7 +487,6 @@ export default function DashboardPage({
               />
             ) : (
               <div className="flex flex-col gap-3">
-                {/* Show top 3, rest accessible via dialog */}
                 {periodMeetings.slice(0, 3).map((meeting) => (
                   <MeetingCard
                     key={meeting.id}
@@ -494,12 +502,11 @@ export default function DashboardPage({
                     demoMode={demoMode}
                   />
                 ))}
-                {/* View all trigger */}
                 {periodMeetings.length > 3 && (
                   <button
                     type="button"
                     onClick={() => setMeetingListDialogOpen(true)}
-                    className="rounded-xl border border-dashed border-border-subtle py-3 text-center text-xs font-semibold text-text-muted transition-all hover:border-border-focus hover:bg-bg-hover hover:text-accent"
+                    className="rounded-xl border border-dashed border-border-subtle py-3 text-center text-xs font-semibold text-text-muted transition-colors hover:border-border-focus hover:bg-bg-hover hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   >
                     {lang === 'it'
                       ? `+ ${periodMeetings.length - 3} altri meeting`
@@ -511,16 +518,13 @@ export default function DashboardPage({
           </section>
         </main>
 
-        {/* ── Aside ── */}
         <aside className="flex flex-col gap-4">
-          {/* Digest */}
           <DigestPanel items={digestItems.slice(0, 2)} title={t('dashboard.digestTitle')} />
         </aside>
       </section>
 
       {(periodMeetings.length > 0 || actionItems.length > 0 || decisions.length > 0 || risks.length > 0) && (
         <section className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-          {/* Actions preview — top 3, rest in drawer */}
           <section
             className="surface-primary flex flex-col gap-3 rounded-2xl p-4 theme-tasks"
             data-tour="open-actions"
@@ -611,7 +615,6 @@ export default function DashboardPage({
         </section>
       )}
 
-      {/* ── LEVEL 3: On-demand drawers ── */}
       <InsightDetailDialog
         dataTour="insight-detail-dialog-content"
         open={insightDialogOpen}
@@ -630,7 +633,6 @@ export default function DashboardPage({
         onOpenMeeting={(id) => navigateTo('meeting', id)}
       />
 
-      {/* Technical details dialog */}
       <Dialog open={techDetailsOpen} onOpenChange={setTechDetailsOpen}>
         <DialogContent size="sm" dataTour="tech-details-dialog-content">
           <DialogHeader
@@ -657,68 +659,13 @@ export default function DashboardPage({
         </DialogContent>
       </Dialog>
 
-      {/* ── Search overlay ── */}
-      {isSearchOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-bg-base/70 backdrop-blur-md pt-[10vh] px-4 animate-in fade-in duration-200">
-          <div className="absolute inset-0" onClick={() => setIsSearchOpen(false)} />
-          <div className="relative w-full max-w-2xl bg-bg-surface border border-border-subtle rounded-2xl shadow-premium overflow-hidden flex flex-col max-h-[75vh] animate-in zoom-in-95 duration-200">
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-border-subtle bg-bg-elevated">
-              <Search className="h-5 w-5 text-text-muted shrink-0" />
-              <input
-                autoFocus
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t('dashboard.searchPlaceholder')}
-                className="w-full bg-transparent text-text-primary placeholder:text-text-muted outline-none text-base"
-              />
-              {query && (
-                <button onClick={() => setQuery('')} className="p-1 hover:bg-bg-hover rounded-full text-text-muted hover:text-text-primary transition-all">
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-              <button
-                onClick={() => setIsSearchOpen(false)}
-                className="text-xs px-2.5 py-1 border border-border-subtle hover:border-border-focus hover:bg-bg-hover rounded-lg text-text-secondary transition-all"
-              >
-                Esc
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2">
-              {searchedMeetings.length === 0 ? (
-                <div className="py-8 text-center text-sm text-text-muted">
-                  {lang === 'it' ? 'Nessun meeting trovato' : 'No meetings found'}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-1.5">
-                  <div className="px-3 py-1.5 text-xs font-semibold text-text-muted uppercase">
-                    {lang === 'it' ? 'Risultati' : 'Results'} ({searchedMeetings.length})
-                  </div>
-                  {searchedMeetings.map((meeting) => (
-                    <button
-                      key={meeting.id}
-                      onClick={() => { navigateTo('meeting', meeting.id); setIsSearchOpen(false); }}
-                      className="w-full flex items-center justify-between p-3 rounded-xl border border-transparent hover:border-border-focus hover:bg-bg-hover text-left transition-all group"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-sm text-text-primary group-hover:text-accent transition-colors truncate">
-                          {meetingTitle(meeting)}
-                        </div>
-                        <div className="text-xs text-text-muted truncate mt-0.5">
-                          {meeting.project_name || (lang === 'it' ? 'Nessun Progetto' : 'No Project')}
-                        </div>
-                      </div>
-                      <div className="text-xs text-text-muted shrink-0 ml-4">
-                        {new Date(meeting.created_at).toLocaleDateString(lang)}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <MeetingSearchDialog
+        open={isSearchOpen}
+        onOpenChange={setIsSearchOpen}
+        onOpenMeeting={(id) => navigateTo('meeting', id)}
+        lang={lang}
+        demoMeetings={demoMode ? meetings : undefined}
+      />
     </div>
   );
 }

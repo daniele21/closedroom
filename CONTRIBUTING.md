@@ -22,7 +22,9 @@ For meaningful changes use the repo-local `structured-change` skill. For meaning
 ClosedRoom uses `dev -> main` as the canonical flow.
 
 - `dev` is the integration/development branch. Feature, fix, refactor, UX/UI and engineering work should branch from the latest `dev` and open a pull request back to `dev`.
-- `main` is the stable branch. It should receive changes only through a promotion pull request from `dev` after the required exact-head validation is green.
+- `main` is the stable **source** branch. It should receive changes only through a promotion pull request from `dev` after exact-head RELEASE / FULL automation and every applicable target-Mac product/runtime evidence gate are green.
+- A public GitHub Release is a separate distribution event from an exact `main` commit/tag. It additionally requires the production artifact distribution contract (Developer ID signing, secure timestamp, notarization/stapling, Gatekeeper evidence and immutable release assets) before a macOS binary is published as stable.
+- Missing Apple distribution authority therefore blocks binary publication, not a truthful stable-source promotion whose product/runtime release evidence is otherwise complete.
 - Direct feature branches to `main` are non-canonical and fail the repository branch-flow preflight.
 - `speaker_detection` is retained only as historical context for the earlier product line; it is not a canonical development or release target.
 - Keep `dev` rebased/merged from the latest accepted work before opening `dev -> main`; do not maintain independent product changes directly on `main`.
@@ -35,8 +37,10 @@ Repository health checks are intentionally zero-dependency and run on pull reque
 
 When an E2E claim depends on macOS permissions/audio hardware, packaged app behavior or production local-model performance, report the actual environment and residual gaps from `.engineering/e2e.json`.
 
+Stable-source promotion remains a RELEASE / FULL boundary. GitHub binary publication adds distribution qualification on top; it does not replace or weaken the product/runtime evidence required for `main`.
+
 ## Pull requests
 
 Keep one coherent outcome per PR. Describe the owning boundary, user-visible/contract impact, selected validation profile, executed evidence, pending remote/real-environment evidence and documentation/design-contract changes. Never mark a known-red or unexecuted gate as passing.
 
-Before opening a PR, verify the target branch explicitly: ordinary work targets `dev`; only stable promotion uses `dev -> main`.
+Before opening a PR, verify the target branch explicitly: ordinary work targets `dev`; only stable-source promotion uses `dev -> main`. Public binary publication starts from an exact stable `main` commit/tag rather than from an ordinary feature branch.

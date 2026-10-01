@@ -1,29 +1,21 @@
 {
   "schema_version": 1,
-  "standard": {
-    "source": "daniele21/repo-template-sw",
-    "version": "0.8.0"
-  },
+  "standard": {"source": "daniele21/repo-template-sw", "version": "0.10.0", "revision": "f392e4ded5cd3ec5efbf806934789c6cb9f10ded"},
   "target_level": "L2",
-  "profiles": [
-    "python",
-    "typescript",
-    "macos",
-    "local-ai",
-    "product-ui"
-  ],
+  "profiles": ["python", "typescript", "macos", "local-ai", "product-ui"],
   "skills": {
-    "plan-workstream": {"source_version": "0.1.0", "customized": false},
-    "structured-change": {"source_version": "0.6.0", "customized": false},
+    "plan-workstream": {"source_version": "0.10.0", "customized": true},
+    "structured-change": {"source_version": "0.10.0", "customized": true},
     "design-product-experience": {"source_version": "0.5.0", "customized": false},
-    "validate-change": {"source_version": "0.8.0", "customized": false},
-    "preflight-change": {"source_version": "0.8.0", "customized": false},
-    "remote-preflight": {"source_version": "0.2.0", "customized": false},
-    "finalize-workstream": {"source_version": "0.1.0", "customized": false},
+    "validate-change": {"source_version": "0.10.0", "customized": true},
+    "preflight-change": {"source_version": "0.10.0", "customized": true},
+    "remote-preflight": {"source_version": "0.10.0", "customized": true},
+    "finalize-workstream": {"source_version": "0.10.0", "customized": true},
     "review-reference-quality": {"source_version": "0.4.0", "customized": false}
   },
-  "documentation": {
-    "completed_workstreams": "delete-by-default",
-    "historical_archive": "exception-only"
+  "documentation": {"completed_workstreams": "delete-by-default", "historical_archive": "exception-only"},
+  "adoption": {
+    "development_velocity_0_9_2": {"staged_delivery": "adopted", "risk_to_gate_selection": "adopted", "exact_head_evidence_reuse": "adopted", "post_merge_tree_equivalent_reuse": "adopted-on-dev", "risk_based_ui_evidence": "adopted", "affected_automated_e2e_before_dev": "adopted", "integration_real_environment_deferred_to_release": "adopted", "release_real_environment_blocking": "adopted", "target_mac_real_environment_boundary": "preserved"},
+    "development_velocity_0_10_0": {"bounded_agent_reporting": "adopted", "schema2_context_routes": "adopted", "two-failed-repair_diagnostic_pivot": "adopted", "resume_checkpoint": "adopted", "template_revision": "f392e4ded5cd3ec5efbf806934789c6cb9f10ded"}
   }
 }

@@ -25,10 +25,10 @@ dependencies = [
     # is resolved.
     "mlx==0.31.2; sys_platform == 'darwin'",
     "onnxruntime>=1.14.0,<1.24.0",
-    # Local LLM inference (Nemotron text + Voxtral audio). Pin the existing
-    # 0.3.8 integration to its published immutable release artifact instead of
-    # a developer-machine absolute path so clean builds and CI are portable.
-    "local-llm-server[vision] @ https://github.com/daniele21/local-llm-server/releases/download/v0.3.8/local_llm_server-0.3.8-py3-none-any.whl#sha256=cbd7b7d684658021b17ba04f9e0fddb246ebd65192bb7af581aabb492c456edb",
+    # Local LLM/VLM control plane. Pin the validated repository source to an
+    # immutable Git revision so clean builds compile exactly the same runtime
+    # while still allowing ClosedRoom to consume post-release resource fixes.
+    "local-llm-server[vision] @ git+https://github.com/daniele21/local-llm-server.git@53500af8c1e1df1c92937b18928790fded8b437f",
     # Audio preprocessing for Voxtral multimodal analysis
     "soundfile>=0.12.0",
     "numpy>=1.24.0",

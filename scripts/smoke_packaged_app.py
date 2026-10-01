@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import json
 import os
 import plistlib
@@ -83,6 +84,28 @@ def fetch_json(url: str, timeout: float = 2.0) -> dict[str, Any]:
 def fetch_text(url: str, timeout: float = 2.0) -> str:
     with urllib.request.urlopen(url, timeout=timeout) as response:
         return response.read().decode("utf-8", errors="replace")
+
+
+def probe_archive_search(port: int, timeout: float = 5.0) -> dict[str, Any]:
+    """Exercise the authenticated meeting-search path in the frozen Python runtime.
+
+    A 200 proves that the bundled sqlite3 can create/query the FTS5 projection rather
+    than relying on the host Python used to build the artifact.
+    """
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    base = f"http://127.0.0.1:{port}"
+    with opener.open(f"{base}/v1/session", timeout=timeout) as response:
+        if response.status != 200:
+            raise RuntimeError(f"session bootstrap returned HTTP {response.status}")
+    with opener.open(f"{base}/v1/meetings?q=packaged-fts5-probe&page=1&limit=1", timeout=timeout) as response:
+        payload = json.loads(response.read())
+        if response.status != 200:
+            raise RuntimeError(f"archive search returned HTTP {response.status}")
+    required = {"items", "total", "page", "limit", "has_more"}
+    if not required.issubset(payload):
+        raise RuntimeError(f"archive search response missing fields: {sorted(required - set(payload))}")
+    return payload
 
 
 def process_table() -> dict[int, tuple[int, str]]:
@@ -181,6 +204,14 @@ def main() -> int:
                     return False
 
             ready_ok = wait_until(ready, args.timeout)
+            archive_search_payload: dict[str, Any] | None = None
+            archive_search_error: str | None = None
+            if ready_ok:
+                try:
+                    archive_search_payload = probe_archive_search(port)
+                except Exception as exc:
+                    archive_search_error = str(exc)
+
             table_before = process_table()
             child_pids = sorted(descendants(process.pid, table_before))
 
@@ -209,6 +240,8 @@ def main() -> int:
         errors: list[str] = []
         if not ready_ok:
             errors.append("packaged server/static root did not reach readiness")
+        if archive_search_error:
+            errors.append(f"packaged archive search/FTS5 probe failed: {archive_search_error}")
         if process.returncode not in (0, 130):
             errors.append(f"packaged process exited with {process.returncode}")
         if not graceful:
@@ -231,6 +264,8 @@ def main() -> int:
             "port": port,
             "health_ok": bool(health.get("ok")),
             "static_root_loaded": root_loaded,
+            "archive_search_fts5_ok": archive_search_payload is not None,
+            "archive_search_probe": archive_search_payload,
             "graceful_sigint": graceful,
             "returncode": process.returncode,
             "port_closed": port_closed,
