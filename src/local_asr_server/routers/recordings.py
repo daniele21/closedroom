@@ -15,7 +15,7 @@ from local_asr_server.recordings import (
     RecordingNotFound,
     RecordingStore,
 )
-from local_asr_server.schemas import CreateRecordingRequest, UpdateRecordingRequest
+from local_asr_server.schemas import CreateRecordingRequest, ScreenshotCaptureRequest, UpdateRecordingRequest
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -74,6 +74,99 @@ async def append_recording_chunk(
     except OSError as exc:
         raise HTTPException(status_code=507, detail=str(exc)) from exc
 
+
+
+
+def _screenshot_payload(recording_id: str, item: dict) -> dict:
+    screenshot_id = item["screenshot_id"]
+    return {
+        **item,
+        "original_url": f"/v1/recordings/{recording_id}/screenshots/{screenshot_id}/original",
+        "thumbnail_url": f"/v1/recordings/{recording_id}/screenshots/{screenshot_id}/thumbnail",
+    }
+
+
+@router.get("/v1/recordings/{recording_id}/screenshots")
+def list_screenshots(recording_id: str, request: Request):
+    try:
+        items = get_services(request.app).recordings.list_screenshots(recording_id)
+        return {
+            "items": [_screenshot_payload(recording_id, item) for item in items],
+            "total": len(items),
+        }
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/recordings/{recording_id}/screenshots", status_code=201)
+def capture_screenshot(recording_id: str, request: Request, body: ScreenshotCaptureRequest):
+    services = get_services(request.app)
+    store = services.recordings
+    try:
+        existing = store.screenshot_for_request(recording_id, body.request_id)
+        if existing is not None:
+            return _screenshot_payload(recording_id, existing)
+
+        captured = services.capture.capture_screenshot(
+            recording_id,
+            request_id=body.request_id,
+            display_id=body.display_id,
+        )
+        original = captured.pop("original_bytes")
+        thumbnail = captured.pop("thumbnail_bytes")
+        saved = store.save_screenshot(
+            recording_id,
+            request_id=body.request_id,
+            capture=captured,
+            original=original,
+            thumbnail=thumbnail,
+        )
+        return _screenshot_payload(recording_id, saved)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=507, detail=str(exc)) from exc
+
+
+@router.get("/v1/recordings/{recording_id}/screenshots/{screenshot_id}/original")
+def get_screenshot_original(recording_id: str, screenshot_id: str, request: Request):
+    try:
+        path = get_services(request.app).recordings.screenshot_asset_path(
+            recording_id, screenshot_id, thumbnail=False,
+        )
+        return FileResponse(path, media_type="image/jpeg")
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Screenshot not found") from exc
+
+
+@router.get("/v1/recordings/{recording_id}/screenshots/{screenshot_id}/thumbnail")
+def get_screenshot_thumbnail(recording_id: str, screenshot_id: str, request: Request):
+    try:
+        path = get_services(request.app).recordings.screenshot_asset_path(
+            recording_id, screenshot_id, thumbnail=True,
+        )
+        return FileResponse(path, media_type="image/jpeg")
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Screenshot not found") from exc
+
+
+@router.delete("/v1/recordings/{recording_id}/screenshots/{screenshot_id}", status_code=204)
+def delete_screenshot(recording_id: str, screenshot_id: str, request: Request):
+    try:
+        get_services(request.app).recordings.delete_screenshot(recording_id, screenshot_id)
+        return Response(status_code=204)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Screenshot not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 @router.post("/v1/recordings/{recording_id}/visual-frames", status_code=202)
 async def append_visual_frame(
@@ -387,6 +480,8 @@ def get_active_recording(request: Request):
         "mic_db": mic_db,
         "system_db": system_db,
         "warnings": warnings,
+        "screenshot_count": int(active.get("screenshot_count") or 0),
+        "screenshot_display_id": session.screenshot_display_id if session else None,
     }
 
 
@@ -545,6 +640,8 @@ def overlay_events(recording_id: str, request: Request):
                 "mic_db": mic_db,
                 "system_db": system_db,
                 "warnings": warnings,
+                "screenshot_count": int(active.get("screenshot_count") or 0),
+                "screenshot_display_id": session.screenshot_display_id if session else None,
             }
 
             if status_payload != last_sent:
