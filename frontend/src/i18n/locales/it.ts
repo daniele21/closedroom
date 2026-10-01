@@ -433,7 +433,7 @@ const it = {
     screenshotDisplayUnavailable: 'Il monitor selezionato non è più disponibile. Scegline un altro.',
     screenshotFailed: 'Screenshot non riuscito',
     screenshotAction: 'Cattura screenshot',
-    screenshotShortcut: 'Screenshot (⌘⇧S)',
+    screenshotShortcut: 'Screenshot (⌘⇧9)',
     stopBackendTimeout: 'Il salvataggio non ha ricevuto conferma dal backend. Riprova o apri la finestra principale.',
     browserStopUnconfirmed: 'Il registratore browser non ha confermato il salvataggio.',
     readinessMicAuthorized: 'Microfono autorizzato',
