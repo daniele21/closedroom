@@ -38,6 +38,7 @@ from AppKit import (
     NSEvent,
     NSEventMaskKeyDown,
     NSEventModifierFlagCommand,
+    NSEventModifierFlagShift,
 )
 from Foundation import NSURL, NSURLRequest
 
@@ -146,24 +147,44 @@ class ClosedRoomWindowManager:
         
         run_on_main_thread(_eval)
 
-    def _dispatch_keyboard_event_to_webview(self, *, key: str, code: str, meta_key: bool = False) -> None:
+    def evaluate_overlay_js(self, js_code: str) -> None:
+        """Evaluate JavaScript in the recording overlay when it exists."""
+        if not self.overlay_webview:
+            return
+
+        def _eval():
+            if self.overlay_webview:
+                self.overlay_webview.evaluateJavaScript_completionHandler_(js_code, None)
+
+        run_on_main_thread(_eval)
+
+    def _keyboard_event_js(
+        self, *, key: str, code: str, meta_key: bool = False, shift_key: bool = False,
+    ) -> str:
+        meta_value = "true" if meta_key else "false"
+        shift_value = "true" if shift_key else "false"
+        return (
+            "(() => {"
+            "const target = document.activeElement || document.body || document;"
+            "target.dispatchEvent(new KeyboardEvent('keydown', {"
+            f"key: {key!r}, code: {code!r}, metaKey: {meta_value}, shiftKey: {shift_value}, "
+            "bubbles: true, cancelable: true"
+            "}));"
+            "})();"
+        )
+
+    def _dispatch_keyboard_event_to_webview(
+        self, *, key: str, code: str, meta_key: bool = False, shift_key: bool = False,
+    ) -> None:
         """Bridge an AppKit key event into the focused DOM path of the main WKWebView.
 
         ClosedRoom owns app-level keyboard commands at the native window boundary.
         The bridge intentionally targets the current DOM focus so existing React
         and dialog keyboard handlers remain the canonical behavior owners.
         """
-        meta_value = "true" if meta_key else "false"
-        js = (
-            "(() => {"
-            "const target = document.activeElement || document.body || document;"
-            "target.dispatchEvent(new KeyboardEvent('keydown', {"
-            f"key: {key!r}, code: {code!r}, metaKey: {meta_value}, "
-            "bubbles: true, cancelable: true"
-            "}));"
-            "})();"
-        )
-        self.evaluate_js(js)
+        self.evaluate_js(self._keyboard_event_js(
+            key=key, code=code, meta_key=meta_key, shift_key=shift_key,
+        ))
 
     def _handle_local_key_event(self, event):
         """Route app-local shortcuts through AppKit before WKWebView delivery."""
@@ -174,8 +195,13 @@ class ClosedRoomWindowManager:
         characters = str(event.charactersIgnoringModifiers() or "").lower()
         key_code = int(event.keyCode())
         command_pressed = bool(modifiers & NSEventModifierFlagCommand)
+        shift_pressed = bool(modifiers & NSEventModifierFlagShift)
 
-        if command_pressed and (key_code == 40 or characters == "k"):
+        if command_pressed and shift_pressed and characters == "s" and self.overlay_webview:
+            self.evaluate_overlay_js(self._keyboard_event_js(
+                key="s", code="KeyS", meta_key=True, shift_key=True,
+            ))
+        elif command_pressed and (key_code == 40 or characters == "k"):
             self._dispatch_keyboard_event_to_webview(key="k", code="KeyK", meta_key=True)
         elif key_code == 53:  # Escape
             self._dispatch_keyboard_event_to_webview(key="Escape", code="Escape")
@@ -377,7 +403,7 @@ class ClosedRoomWindowManager:
 
         # Default compact dimensions
         width = 300
-        height = 130
+        height = 150
 
         # Load saved position if available
         saved_pos = None
