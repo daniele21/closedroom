@@ -243,16 +243,21 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 def _normalize_ref(value: Any, refs: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
     if isinstance(value, (int, str)):
-        segment_id = value
+        key = str(value)
     elif isinstance(value, dict):
-        segment_id = value.get("segment_id")
+        source_type = str(value.get("source_type") or "").strip()
+        if source_type == "screenshot" or value.get("screenshot_id") is not None:
+            screenshot_id = str(value.get("screenshot_id") or "").strip()
+            key = f"V:{screenshot_id}" if screenshot_id else ""
+        else:
+            segment_id = value.get("segment_id")
+            key = str(segment_id) if segment_id is not None else ""
     else:
         return None
-    canonical = refs.get(str(segment_id))
+    canonical = refs.get(key)
     if canonical is None:
         return None
     return dict(canonical)
-
 
 def _normalize_refs(value: Any, refs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     values = value if isinstance(value, list) else []
@@ -262,7 +267,7 @@ def _normalize_refs(value: Any, refs: dict[str, dict[str, Any]]) -> list[dict[st
         ref = _normalize_ref(item, refs)
         if ref is None:
             continue
-        key = str(ref.get("segment_id"))
+        key = str(ref.get("source_id") or ref.get("segment_id") or ref.get("screenshot_id"))
         if key in seen:
             continue
         seen.add(key)
@@ -272,6 +277,15 @@ def _normalize_refs(value: Any, refs: dict[str, dict[str, Any]]) -> list[dict[st
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _evidence_basis(refs: list[dict[str, Any]]) -> str:
+    source_types = {str(ref.get("source_type") or "transcript") for ref in refs}
+    if source_types == {"screenshot"}:
+        return "visual"
+    if source_types == {"transcript"}:
+        return "spoken"
+    return "mixed"
 
 
 def _normalize_summary(value: Any, refs: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -286,7 +300,11 @@ def _normalize_summary(value: Any, refs: dict[str, dict[str, Any]]) -> dict[str,
         source_refs = []
     if text and not source_refs:
         raise StructuredNotesError("Generated summary is missing source_refs")
-    return {"text": text, "source_refs": source_refs}
+    return {
+        "text": text,
+        "source_refs": source_refs,
+        "evidence_basis": _evidence_basis(source_refs) if source_refs else None,
+    }
 
 
 def _normalize_items(
@@ -321,6 +339,7 @@ def _normalize_items(
             value = item.get(field)
             output[field] = _text(value) or None
         output["source_refs"] = source_refs
+        output["evidence_basis"] = _evidence_basis(source_refs)
         normalized.append(output)
     return normalized
 
@@ -367,6 +386,9 @@ def normalize_structured_notes(
 
 
 def _ref_label(ref: dict[str, Any]) -> str:
+    if ref.get("source_type") == "screenshot":
+        timestamp = float(ref.get("timestamp") or 0.0)
+        return f"Screenshot {int(timestamp // 60):02d}:{int(timestamp % 60):02d}"
     start = ref.get("start")
     end = ref.get("end")
     if isinstance(start, (int, float)) and isinstance(end, (int, float)):
@@ -486,7 +508,9 @@ def _aggregate_groups(partials: list[dict[str, Any]], budget: int) -> list[list[
 
 
 def _refs_for_chunk(chunk: str, refs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    identifiers = set(re.findall(r"\[S([^\s\]]+)", chunk))
+    transcript_ids = set(re.findall(r"\[S([^\s\]]+)", chunk))
+    visual_ids = {f"V:{value}" for value in re.findall(r"\[V([^\s\]]+)", chunk)}
+    identifiers = transcript_ids | visual_ids
     return {key: value for key, value in refs.items() if key in identifiers}
 
 
@@ -496,7 +520,11 @@ def _source_ref_ids(value: Any) -> set[str]:
         source_refs = value.get("source_refs")
         if isinstance(source_refs, list):
             for ref in source_refs:
-                if isinstance(ref, dict) and ref.get("segment_id") is not None:
+                if not isinstance(ref, dict):
+                    continue
+                if ref.get("source_type") == "screenshot" and ref.get("screenshot_id"):
+                    identifiers.add(f"V:{ref['screenshot_id']}")
+                elif ref.get("segment_id") is not None:
                     identifiers.add(str(ref["segment_id"]))
         for child in value.values():
             identifiers.update(_source_ref_ids(child))
