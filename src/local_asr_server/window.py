@@ -198,9 +198,9 @@ class ClosedRoomWindowManager:
         command_pressed = bool(modifiers & NSEventModifierFlagCommand)
         shift_pressed = bool(modifiers & NSEventModifierFlagShift)
 
-        if command_pressed and shift_pressed and characters == "s" and self.overlay_webview:
+        if command_pressed and shift_pressed and characters == "9" and self.overlay_webview:
             self.evaluate_overlay_js(self._keyboard_event_js(
-                key="s", code="KeyS", meta_key=True, shift_key=True,
+                key="9", code="Digit9", meta_key=True, shift_key=True,
             ))
         elif command_pressed and (key_code == 40 or characters == "k"):
             self._dispatch_keyboard_event_to_webview(key="k", code="KeyK", meta_key=True)
@@ -228,9 +228,9 @@ class ClosedRoomWindowManager:
         characters = str(event.charactersIgnoringModifiers() or "").lower()
         command_pressed = bool(modifiers & NSEventModifierFlagCommand)
         shift_pressed = bool(modifiers & NSEventModifierFlagShift)
-        if command_pressed and shift_pressed and characters == "s":
+        if command_pressed and shift_pressed and characters == "9":
             self.evaluate_overlay_js(self._keyboard_event_js(
-                key="s", code="KeyS", meta_key=True, shift_key=True,
+                key="9", code="Digit9", meta_key=True, shift_key=True,
             ))
 
     def _install_global_key_monitor(self) -> None:
