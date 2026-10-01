@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
-import { TranscriptionSegment } from '../../api/apiClient';
+import { RecordingScreenshot, TranscriptionSegment } from '../../api/apiClient';
 import { formatTime } from '../../utils/formatters';
 import { Button } from '../ui/Button';
 import {
   Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  Activity, Timer, Gauge, Users,
+  Activity, Timer, Gauge, Users, Image as ImageIcon, X,
 } from 'lucide-react';
 
 interface TranscriptTextViewProps {
@@ -12,6 +12,7 @@ interface TranscriptTextViewProps {
   speakerMappings: Array<{ speaker_cluster: string; display_name?: string | null }>;
   onTimestampClick?: (time: number) => void;
   currentTime?: number;
+  screenshots?: RecordingScreenshot[];
 }
 
 const SEGMENTS_PER_PAGE = 25;
@@ -52,11 +53,13 @@ export default function TranscriptTextView({
   speakerMappings,
   onTimestampClick,
   currentTime = 0,
+  screenshots = [],
 }: TranscriptTextViewProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [showAudioDetails, setShowAudioDetails] = useState(true);
+  const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(segments.length / SEGMENTS_PER_PAGE));
 
@@ -109,6 +112,27 @@ export default function TranscriptTextView({
     const start = currentPage * SEGMENTS_PER_PAGE;
     return segments.slice(start, start + SEGMENTS_PER_PAGE);
   }, [segments, currentPage]);
+
+  const timelineItems = useMemo(() => {
+    const pageStartIndex = currentPage * SEGMENTS_PER_PAGE;
+    const nextPageStart = segments[pageStartIndex + SEGMENTS_PER_PAGE]?.start;
+    const lowerBound = currentPage === 0 ? Number.NEGATIVE_INFINITY : (segments[pageStartIndex]?.start ?? Number.POSITIVE_INFINITY);
+    const upperBound = nextPageStart ?? Number.POSITIVE_INFINITY;
+
+    const screenshotItems = screenshots
+      .filter((shot) => shot.timestamp >= lowerBound && shot.timestamp < upperBound)
+      .map((shot) => ({ kind: 'screenshot' as const, timestamp: shot.timestamp, sequence: shot.sequence, screenshot: shot }));
+    const segmentItems = pageSegments.map((segment) => ({
+      kind: 'segment' as const,
+      timestamp: segment.start,
+      sequence: segment.id,
+      segment,
+    }));
+    return [...screenshotItems, ...segmentItems].sort((a, b) => (
+      a.timestamp - b.timestamp
+      || (a.kind === b.kind ? a.sequence - b.sequence : (a.kind === 'screenshot' ? -1 : 1))
+    ));
+  }, [currentPage, pageSegments, screenshots, segments]);
 
   /** Render text with search highlights */
   const renderHighlightedText = (text: string, segmentId: number) => {
@@ -260,7 +284,41 @@ export default function TranscriptTextView({
 
       {/* Segment cards */}
       <div className="flex flex-col gap-3">
-        {pageSegments.map((seg) => {
+        {timelineItems.map((item) => {
+          if (item.kind === 'screenshot') {
+            const shot = item.screenshot;
+            return (
+              <button
+                key={`screenshot-${shot.screenshot_id}`}
+                type="button"
+                onClick={() => setSelectedScreenshot(shot)}
+                className="group flex w-full items-center gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-left transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/10"
+                aria-label={`Apri screenshot a ${formatTime(shot.timestamp)}`}
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-300">
+                  <ImageIcon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">
+                    Screenshot · {formatTime(shot.timestamp)}
+                  </span>
+                  <span className="block truncate text-xs text-text-secondary">
+                    {shot.available ? (shot.display_title || 'Schermo acquisito') : 'Immagine originale non disponibile'}
+                  </span>
+                </span>
+                {shot.thumbnail_available && (
+                  <img
+                    src={shot.thumbnail_url}
+                    alt=""
+                    loading="lazy"
+                    className="h-10 w-16 shrink-0 rounded-md border border-border-subtle object-cover"
+                  />
+                )}
+              </button>
+            );
+          }
+
+          const seg = item.segment;
           const mapping = speakerMappings.find((m) => m.speaker_cluster === seg.speaker_label);
           const speakerName = mapping?.display_name || seg.speaker_name || seg.speaker_label || 'Speaker';
           const colorClass = speakerColorMap[seg.speaker_label || 'unknown'] || 'border-l-4 border-border-subtle';
@@ -332,6 +390,54 @@ export default function TranscriptTextView({
 
       {/* Pagination */}
       {renderPagination()}
+
+      {selectedScreenshot && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Screenshot della riunione"
+          onClick={() => setSelectedScreenshot(null)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle bg-bg-elevated shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-text-primary">Screenshot · {formatTime(selectedScreenshot.timestamp)}</p>
+                <p className="truncate text-xs text-text-muted">{selectedScreenshot.display_title || 'Schermo acquisito'}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={() => onTimestampClick?.(selectedScreenshot.timestamp)}>
+                  Vai all'audio
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedScreenshot(null)}
+                  className="rounded-lg p-2 text-text-muted hover:bg-bg-surface hover:text-text-primary"
+                  aria-label="Chiudi screenshot"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 overflow-auto bg-black/5 p-3">
+              {selectedScreenshot.available ? (
+                <img
+                  src={selectedScreenshot.original_url}
+                  alt={`Screenshot a ${formatTime(selectedScreenshot.timestamp)}`}
+                  className="mx-auto max-h-[76vh] max-w-full rounded-lg object-contain"
+                />
+              ) : (
+                <div className="rounded-xl border border-warning/30 bg-warning/5 p-6 text-center text-sm text-text-secondary">
+                  L'immagine non è più disponibile. Il riferimento temporale resta nella timeline.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
