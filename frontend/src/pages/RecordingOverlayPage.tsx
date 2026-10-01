@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ApiClient } from '../api/apiClient';
+import { ApiClient, CaptureDisplay } from '../api/apiClient';
 import { useTranslation } from '../i18n/i18n';
 
 export default function RecordingOverlayPage() {
@@ -18,6 +18,11 @@ export default function RecordingOverlayPage() {
   const [bytesWritten, setBytesWritten] = useState(0);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [displays, setDisplays] = useState<CaptureDisplay[]>([]);
+  const [selectedDisplayId, setSelectedDisplayId] = useState<number | null>(null);
+  const [screenshotCount, setScreenshotCount] = useState(0);
+  const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
+  const [lastScreenshotAt, setLastScreenshotAt] = useState<number | null>(null);
 
   // Dynamic body class for transparency
   useEffect(() => {
@@ -55,6 +60,35 @@ export default function RecordingOverlayPage() {
 
   const formatDb = (db: number) => {
     return db <= -47.5 ? '-∞ dB' : `${db.toFixed(1)} dB`;
+  };
+
+  const recordingStartedAtMs = (value: number | string | undefined) => {
+    if (typeof value === 'number') return value > 10_000_000_000 ? value : value * 1000;
+    if (typeof value === 'string') {
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  };
+
+  const loadDisplays = async (preferredDisplayId?: number | null) => {
+    try {
+      const payload = await ApiClient.captureDisplays();
+      const available = payload.displays || [];
+      setDisplays(available);
+      const preferred = preferredDisplayId ?? selectedDisplayId;
+      if (preferred && available.some((display) => display.display_id === preferred)) {
+        setSelectedDisplayId(preferred);
+      } else if (available.length === 1) {
+        setSelectedDisplayId(available[0].display_id);
+      } else {
+        setSelectedDisplayId(null);
+      }
+    } catch (err) {
+      console.warn('Unable to load screenshot displays:', err);
+      setDisplays([]);
+      setSelectedDisplayId(null);
+    }
   };
 
   // Poll/Check state on mount and connect SSE/BroadcastChannel
@@ -100,9 +134,15 @@ export default function RecordingOverlayPage() {
           setCaptureMode(activeData.capture_mode || 'both');
           setBytesWritten(activeData.bytes_written || 0);
           setWarnings(activeData.warnings || []);
+          setScreenshotCount(activeData.screenshot_count || 0);
+          setSelectedDisplayId(activeData.screenshot_display_id || null);
+          if ((activeData.capture_backend || 'browser') === 'native') {
+            void loadDisplays(activeData.screenshot_display_id || null);
+          }
           
-          if (activeData.started_at) {
-            startedAtRef.current = activeData.started_at * 1000;
+          const startedAtMs = recordingStartedAtMs(activeData.started_at);
+          if (startedAtMs) {
+            startedAtRef.current = startedAtMs;
             // Setup local smooth timer
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
             timerIntervalRef.current = setInterval(() => {
@@ -159,9 +199,11 @@ export default function RecordingOverlayPage() {
           setSignalLevelMic(formatDb(data.mic_db));
           setSignalLevelSystem(formatDb(data.system_db));
           setWarnings(data.warnings || []);
+          setScreenshotCount(data.screenshot_count || 0);
+          if (data.screenshot_display_id) setSelectedDisplayId(data.screenshot_display_id);
 
           if (data.started_at && !startedAtRef.current) {
-            startedAtRef.current = data.started_at * 1000;
+            startedAtRef.current = recordingStartedAtMs(data.started_at);
           }
         } catch (err) {
           console.error('Error parsing SSE event:', err);
@@ -197,7 +239,13 @@ export default function RecordingOverlayPage() {
     if (recordingId) {
       try {
         await ApiClient.stopRecordingControl(recordingId);
+        setIsRecording(false);
         setIsStopping(false);
+        const opened = await ApiClient.openMeetingWindow(recordingId);
+        if (!opened.success && window.opener) {
+          window.opener.location.hash = `#meeting/${recordingId}`;
+          window.opener.focus();
+        }
       } catch (err: any) {
         console.error('Stop control endpoint failed:', err);
         // Fallback: wait for BroadcastChannel timeout
@@ -225,6 +273,58 @@ export default function RecordingOverlayPage() {
     }
   };
 
+  const handleCaptureScreenshot = async () => {
+    if (!recordingId || captureBackend !== 'native' || !isRecording || isStopping || isCapturingScreenshot) return;
+    if (displays.length > 1 && selectedDisplayId === null) {
+      setErrorMsg('Scegli il monitor da catturare.');
+      setIsExpanded(true);
+      void ApiClient.resizeOverlay(320, 300);
+      return;
+    }
+
+    setIsCapturingScreenshot(true);
+    setErrorMsg(null);
+    const requestId = `overlay-${recordingId}-${crypto.randomUUID()}`;
+    try {
+      const saved = await ApiClient.captureScreenshot(
+        recordingId,
+        requestId,
+        selectedDisplayId ?? undefined,
+      );
+      setScreenshotCount((count) => Math.max(count + 1, saved.sequence + 1));
+      setLastScreenshotAt(saved.timestamp);
+      if (saved.display_id) setSelectedDisplayId(saved.display_id);
+    } catch (err: any) {
+      const message = String(err?.message || 'Screenshot non riuscito');
+      if (message.includes('selected_display_unavailable')) {
+        setErrorMsg('Il monitor selezionato non è più disponibile. Scegline un altro.');
+        await loadDisplays(null);
+        setIsExpanded(true);
+        void ApiClient.resizeOverlay(320, 300);
+      } else if (message.includes('display_selection_required')) {
+        setErrorMsg('Scegli il monitor da catturare.');
+        await loadDisplays(null);
+        setIsExpanded(true);
+        void ApiClient.resizeOverlay(320, 300);
+      } else {
+        setErrorMsg(message);
+      }
+    } finally {
+      setIsCapturingScreenshot(false);
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        void handleCaptureScreenshot();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
   const handleCloseOverlay = async () => {
     if (window.name === 'ClosedRoomOverlay') {
       window.close();
@@ -236,8 +336,8 @@ export default function RecordingOverlayPage() {
   const toggleExpand = async () => {
     const nextState = !isExpanded;
     setIsExpanded(nextState);
-    const targetW = 300;
-    const targetH = nextState ? 240 : 130;
+    const targetW = nextState ? 320 : 300;
+    const targetH = nextState ? 300 : 150;
     
     // Call Native Resize API
     try {
@@ -265,7 +365,7 @@ export default function RecordingOverlayPage() {
   const systemHealth = getDeviceHealth(signalLevelSystem);
 
   return (
-    <div className="overlay-shell p-3 select-none flex flex-col justify-between">
+    <div className="overlay-shell p-3 select-none flex flex-col justify-between" data-testid="recording-overlay">
       {/* Top Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
@@ -315,6 +415,38 @@ export default function RecordingOverlayPage() {
           <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[10px] text-white/70 animate-fadeIn">
             <div className="col-span-2 font-medium truncate text-white border-b border-white/5 pb-1 mb-1">
               🎙️ {title || t('recording.noActiveRecording') || 'Nessuna registrazione attiva'}
+            </div>
+            <div className="col-span-2 flex items-center gap-2">
+              <span className="opacity-50 shrink-0">Monitor:</span>
+              {captureBackend === 'native' && displays.length > 0 ? (
+                <select
+                  value={selectedDisplayId ?? ''}
+                  onChange={(event) => setSelectedDisplayId(event.target.value ? Number(event.target.value) : null)}
+                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-1.5 py-1 text-[10px] text-white"
+                  aria-label="Monitor per screenshot"
+                >
+                  {displays.length > 1 && <option value="">Scegli monitor…</option>}
+                  {displays.map((display) => (
+                    <option key={display.display_id} value={display.display_id}>
+                      {display.title}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="truncate text-white/80">
+                  {captureBackend === 'native' ? 'Nessun monitor disponibile' : 'Screenshot solo con acquisizione nativa'}
+                </span>
+              )}
+            </div>
+            <div>
+              <span className="opacity-50">Screenshot:</span>{' '}
+              <span className="font-semibold text-white/90">{screenshotCount}</span>
+            </div>
+            <div>
+              <span className="opacity-50">Ultimo:</span>{' '}
+              <span className="font-semibold text-white/90">
+                {lastScreenshotAt === null ? '—' : `${Math.floor(lastScreenshotAt / 60)}:${String(Math.floor(lastScreenshotAt % 60)).padStart(2, '0')}`}
+              </span>
             </div>
             {visualCaptureLabel && (
               <div
@@ -376,8 +508,8 @@ export default function RecordingOverlayPage() {
         )}
       </div>
 
-      {/* Bottom Bar: dB Signal Level + Stop Control */}
-      <div className="flex items-center gap-3">
+      {/* Bottom Bar: dB Signal Level + Screenshot + Stop */}
+      <div className="flex items-center gap-2">
         {/* dB Signal Level Visualizer */}
         <div className="flex-1 flex flex-col gap-1.5">
           {/* Mic level */}
@@ -408,6 +540,22 @@ export default function RecordingOverlayPage() {
             </div>
           )}
         </div>
+
+        <button
+          onClick={handleCaptureScreenshot}
+          disabled={
+            captureBackend !== 'native'
+            || !isRecording
+            || isStopping
+            || isCapturingScreenshot
+            || (displays.length > 1 && selectedDisplayId === null)
+          }
+          className="h-9 min-w-9 rounded-lg border border-white/10 bg-white/10 px-2 text-[10px] font-semibold text-white/90 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+          title={captureBackend === 'native' ? 'Screenshot (⌘⇧S)' : 'Screenshot disponibile con acquisizione nativa'}
+          aria-label="Cattura screenshot"
+        >
+          {isCapturingScreenshot ? '…' : `▣ ${screenshotCount}`}
+        </button>
 
         {/* Circular Stop Button */}
         <button
