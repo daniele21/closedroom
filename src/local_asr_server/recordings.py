@@ -42,6 +42,7 @@ SCREENSHOT_MANIFEST_VERSION = 1
 MAX_SCREENSHOT_BYTES = 25 * 1024 * 1024
 MAX_SCREENSHOT_THUMBNAIL_BYTES = 2 * 1024 * 1024
 MAX_SCREENSHOT_PIXELS = 100_000_000
+MAX_SCREENSHOTS_PER_RECORDING = 200
 MIN_SCREENSHOT_FREE_BYTES = 32 * 1024 * 1024
 
 TRACK_LABELS = {
@@ -424,6 +425,10 @@ class RecordingStore:
             existing = next((entry for entry in manifest["items"] if entry.get("request_id") == request_id), None)
             if existing is not None:
                 return self._public_screenshot(session_dir, existing)
+            if len(manifest["items"]) >= MAX_SCREENSHOTS_PER_RECORDING:
+                raise RecordingConflict(
+                    f"Screenshot limit reached ({MAX_SCREENSHOTS_PER_RECORDING} per recording)"
+                )
 
             required = len(original) + len(thumbnail) + MIN_SCREENSHOT_FREE_BYTES
             if shutil.disk_usage(session_dir).free < required:
@@ -560,6 +565,59 @@ class RecordingStore:
             for key, value in item.items()
             if key not in {"original_file", "thumbnail_file"}
         } | {"available": original_ok, "thumbnail_available": thumbnail_ok}
+
+
+    def list_visual_evidence_frames(self, recording_id: str) -> list[dict[str, Any]]:
+        """Return post-meeting visual inputs with stable source provenance.
+
+        Continuous visual frames keep their native sequence. Manual screenshots use
+        a separate high sequence namespace so observation IDs cannot collide.
+        """
+        frames = [
+            {
+                **item,
+                "evidence_source": "continuous_frame",
+                "capture_kind": "automatic",
+                "evidence_id": f"visual-frame-{int(item['sequence'])}",
+            }
+            for item in self.list_visual_frames(recording_id)
+        ]
+        screenshots = self.list_screenshots(recording_id)
+        for item in screenshots:
+            if not item.get("available"):
+                frames.append({
+                    "sequence": 1_000_000_000 + int(item.get("sequence") or 0),
+                    "timestamp": float(item.get("timestamp") or 0.0),
+                    "path": None,
+                    "evidence_source": "manual_screenshot",
+                    "capture_kind": "manual",
+                    "evidence_id": item.get("screenshot_id"),
+                    "screenshot_id": item.get("screenshot_id"),
+                    "sha256": item.get("sha256"),
+                    "display_id": item.get("display_id"),
+                    "display_title": item.get("display_title"),
+                    "available": False,
+                })
+                continue
+            frames.append({
+                "sequence": 1_000_000_000 + int(item.get("sequence") or 0),
+                "timestamp": float(item.get("timestamp") or 0.0),
+                "path": self.screenshot_asset_path(
+                    recording_id, str(item["screenshot_id"]), thumbnail=False,
+                ),
+                "evidence_source": "manual_screenshot",
+                "capture_kind": "manual",
+                "evidence_id": item.get("screenshot_id"),
+                "screenshot_id": item.get("screenshot_id"),
+                "sha256": item.get("sha256"),
+                "display_id": item.get("display_id"),
+                "display_title": item.get("display_title"),
+                "available": True,
+            })
+        return sorted(
+            frames,
+            key=lambda item: (float(item.get("timestamp") or 0.0), int(item.get("sequence") or 0)),
+        )
 
     def stage_visual_frame(
         self, recording_id: str, sequence: int, timestamp: float, content: bytes,
