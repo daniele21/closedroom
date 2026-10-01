@@ -71,15 +71,18 @@ export default function RecordingOverlayPage() {
     return null;
   };
 
-  const loadDisplays = async (preferredDisplayId?: number | null) => {
+  const loadDisplays = async (
+    preferredDisplayId?: number | null,
+    autoSelectSingle = true,
+  ) => {
     try {
       const payload = await ApiClient.captureDisplays();
       const available = payload.displays || [];
       setDisplays(available);
-      const preferred = preferredDisplayId ?? selectedDisplayId;
+      const preferred = preferredDisplayId === undefined ? selectedDisplayId : preferredDisplayId;
       if (preferred && available.some((display) => display.display_id === preferred)) {
         setSelectedDisplayId(preferred);
-      } else if (available.length === 1) {
+      } else if (autoSelectSingle && available.length === 1) {
         setSelectedDisplayId(available[0].display_id);
       } else {
         setSelectedDisplayId(null);
@@ -282,7 +285,7 @@ export default function RecordingOverlayPage() {
 
   const handleCaptureScreenshot = async () => {
     if (!recordingId || captureBackend !== 'native' || !isRecording || isStopping || isCapturingScreenshot) return;
-    if (displays.length > 1 && selectedDisplayId === null) {
+    if (selectedDisplayId === null) {
       setErrorMsg(t('recording.screenshotChooseMonitorError'));
       setIsExpanded(true);
       void ApiClient.resizeOverlay(320, 300);
@@ -305,12 +308,12 @@ export default function RecordingOverlayPage() {
       const message = String(err?.message || t('recording.screenshotFailed'));
       if (message.includes('selected_display_unavailable')) {
         setErrorMsg(t('recording.screenshotDisplayUnavailable'));
-        await loadDisplays(null);
+        await loadDisplays(null, false);
         setIsExpanded(true);
         void ApiClient.resizeOverlay(320, 300);
       } else if (message.includes('display_selection_required')) {
         setErrorMsg(t('recording.screenshotChooseMonitorError'));
-        await loadDisplays(null);
+        await loadDisplays(null, false);
         setIsExpanded(true);
         void ApiClient.resizeOverlay(320, 300);
       } else {
@@ -430,9 +433,11 @@ export default function RecordingOverlayPage() {
                   value={selectedDisplayId ?? ''}
                   onChange={(event) => setSelectedDisplayId(event.target.value ? Number(event.target.value) : null)}
                   className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-1.5 py-1 text-[10px] text-white"
-                  aria-label="Monitor per screenshot"
+                  aria-label={t('recording.screenshotMonitor')}
                 >
-                  {displays.length > 1 && <option value="">{t('recording.screenshotChooseMonitor')}</option>}
+                  {(selectedDisplayId === null || displays.length > 1) && (
+                    <option value="">{t('recording.screenshotChooseMonitor')}</option>
+                  )}
                   {displays.map((display) => (
                     <option key={display.display_id} value={display.display_id}>
                       {display.title}
@@ -555,7 +560,7 @@ export default function RecordingOverlayPage() {
             || !isRecording
             || isStopping
             || isCapturingScreenshot
-            || (displays.length > 1 && selectedDisplayId === null)
+            || selectedDisplayId === null
           }
           className="h-9 min-w-9 rounded-lg border border-white/10 bg-white/10 px-2 text-[10px] font-semibold text-white/90 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
           title={captureBackend === 'native' ? t('recording.screenshotShortcut') : t('recording.screenshotNativeOnly')}
