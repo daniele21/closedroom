@@ -218,8 +218,14 @@ class VisualOnDemandApiTests(unittest.TestCase):
 class StrictVisualRoutingTests(unittest.TestCase):
     def test_explicit_v2_router_failure_never_falls_back_to_legacy_inference(self) -> None:
         recordings = Mock()
-        recordings.list_visual_frames.return_value = [
-            {"sequence": 0, "timestamp": 0.0, "path": Path("unused.jpg")},
+        recordings.list_visual_evidence_frames.return_value = [
+            {
+                "sequence": 0,
+                "timestamp": 0.0,
+                "path": Path("unused.jpg"),
+                "evidence_source": "continuous_frame",
+                "capture_kind": "automatic",
+            },
         ]
         runtime = Mock()
         services = SimpleNamespace(recordings=recordings, runtime=runtime)
