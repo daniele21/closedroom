@@ -95,7 +95,21 @@ class RecordingApiTests(unittest.TestCase):
 
     def test_manual_screenshot_api_persists_before_success_and_retry_is_idempotent(self) -> None:
         class FakeCaptureManager:
-            def capture_screenshot(self, recording_id: str, *, request_id: str, display_id: int | None = None):
+            def begin_screenshot(self, recording_id: str) -> None:
+                return None
+
+            def finish_screenshot(self, recording_id: str) -> None:
+                return None
+
+            def capture_screenshot(
+                self,
+                recording_id: str,
+                *,
+                request_id: str,
+                display_id: int | None = None,
+                admission_held: bool = False,
+            ):
+                self.assert_admission = admission_held
                 return {
                     "request_id": request_id,
                     "recording_id": recording_id,
@@ -148,7 +162,20 @@ class RecordingApiTests(unittest.TestCase):
 
     def test_screenshot_failure_does_not_stop_or_mutate_recording(self) -> None:
         class FailingCaptureManager:
-            def capture_screenshot(self, recording_id: str, *, request_id: str, display_id: int | None = None):
+            def begin_screenshot(self, recording_id: str) -> None:
+                return None
+
+            def finish_screenshot(self, recording_id: str) -> None:
+                return None
+
+            def capture_screenshot(
+                self,
+                recording_id: str,
+                *,
+                request_id: str,
+                display_id: int | None = None,
+                admission_held: bool = False,
+            ):
                 raise RuntimeError("screen_capture_permission_required")
 
         self.app.state.capture_manager = FailingCaptureManager()
