@@ -61,6 +61,13 @@ export function VisualIntelligencePanel({ data, mappings, loading, error }: Prop
         </div>
       </div>
 
+      {data.source_validity?.status === 'stale' && (
+        <div className="border-b border-warning/30 bg-warning/5 px-4 py-3 text-xs text-warning" role="status">
+          <p className="font-semibold">{t('meeting.visualSourcesStaleTitle')}</p>
+          <p className="mt-0.5 text-text-secondary">{t('meeting.visualSourcesStaleDesc')}</p>
+        </div>
+      )}
+
       <div className="grid gap-0 lg:grid-cols-[minmax(220px,0.75fr)_minmax(0,1.5fr)]">
         <div className="border-b border-border-subtle p-4 lg:border-b-0 lg:border-r">
           <div className="mb-3 flex items-center gap-2">
