@@ -10,6 +10,7 @@ MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
 TRANSCRIPT = ROOT / "frontend" / "src" / "components" / "transcription" / "TranscriptTextView.tsx"
 NOTES = ROOT / "frontend" / "src" / "components" / "meeting" / "StructuredNotesEditor.tsx"
 CLIENT = ROOT / "frontend" / "src" / "api" / "apiClient.ts"
+PREPARATION_API = ROOT / "frontend" / "src" / "api" / "meetingPreparation.ts"
 E2E = ROOT / "scripts" / "browser_call_overlay_screenshot_e2e.mjs"
 
 
@@ -21,6 +22,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         cls.transcript = TRANSCRIPT.read_text(encoding="utf-8")
         cls.notes = NOTES.read_text(encoding="utf-8")
         cls.client = CLIENT.read_text(encoding="utf-8")
+        cls.preparation_api = PREPARATION_API.read_text(encoding="utf-8")
         cls.e2e = E2E.read_text(encoding="utf-8")
 
     def test_overlay_uses_persisted_screenshot_api_and_truthful_stop_completion(self) -> None:
@@ -48,6 +50,12 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("onOpenScreenshot={setSelectedScreenshot}", self.meeting)
         self.assertIn("ref.source_type === 'screenshot'", self.notes)
         self.assertIn("onOpenScreenshot(screenshot)", self.notes)
+
+    def test_prepare_notes_exposes_and_persists_screenshot_inclusion_choice(self) -> None:
+        self.assertIn("Includi ${manualScreenshotCount} screenshot", self.meeting)
+        self.assertIn("includeScreenshots", self.meeting)
+        self.assertIn("latestPreparation?.result?.include_screenshots", self.meeting)
+        self.assertIn("include_screenshots: includeScreenshots", self.preparation_api)
 
     def test_full_media_journey_covers_overlay_to_notes_and_audio(self) -> None:
         for evidence in (
