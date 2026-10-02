@@ -665,10 +665,11 @@ class MeetingPreparationTests(unittest.TestCase):
     def test_screenshot_identity_invalidates_completed_preparation_but_reuses_asr(self) -> None:
         self.transcriptions.current = self._transcription()
         transcription_calls = []
+        pipeline_calls = []
         first = self.manager.create(
             "rec-1",
             start_transcription=self._queued_transcription_factory(transcription_calls),
-            start_pipeline=self._completed_pipeline_factory([]),
+            start_pipeline=self._completed_pipeline_factory(pipeline_calls),
         )
         self.assertEqual(self.store.get(first["id"])["status"], "completed")
 
@@ -684,7 +685,7 @@ class MeetingPreparationTests(unittest.TestCase):
         second = self.manager.create(
             "rec-1",
             start_transcription=self._queued_transcription_factory(transcription_calls),
-            start_pipeline=self._completed_pipeline_factory([]),
+            start_pipeline=self._completed_pipeline_factory(pipeline_calls),
         )
 
         self.assertNotEqual(second["id"], first["id"])
