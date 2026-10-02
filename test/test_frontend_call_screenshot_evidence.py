@@ -52,7 +52,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("onOpenScreenshot(screenshot)", self.notes)
 
     def test_prepare_notes_exposes_and_persists_screenshot_inclusion_choice(self) -> None:
-        self.assertIn("Includi ${manualScreenshotCount} screenshot", self.meeting)
+        self.assertIn("Includi ${savedScreenshotCount} screenshot", self.meeting)
         self.assertIn("includeScreenshots", self.meeting)
         self.assertIn("latestPreparation?.result?.include_screenshots", self.meeting)
         self.assertIn("include_screenshots: includeScreenshots", self.preparation_api)
