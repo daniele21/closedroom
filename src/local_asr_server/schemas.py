@@ -215,6 +215,10 @@ class ScreenshotCaptureRequest(BaseModel):
     display_id: Optional[int] = None
 
 
+class MeetingPreparationRequest(BaseModel):
+    include_screenshots: bool = True
+
+
 class CaptureEnsurePermissionsRequest(BaseModel):
     mode: str = "both"
 
