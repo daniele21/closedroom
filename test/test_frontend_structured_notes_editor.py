@@ -26,7 +26,9 @@ class FrontendStructuredNotesEditorContractTests(unittest.TestCase):
     def test_removed_conflict_keeps_verifiable_source_snapshot(self) -> None:
         self.assertIn("base_generated?: StructuredNoteItem | null", self.api)
         self.assertIn("conflict.retained_edit.base_generated", self.editor)
-        self.assertIn("<EvidenceRefs refs={sourceItem?.source_refs}", self.editor)
+        self.assertIn("refs={sourceItem?.source_refs}", self.editor)
+        self.assertIn("screenshots={screenshots}", self.editor)
+        self.assertIn("onOpenScreenshot={onOpenScreenshot}", self.editor)
         self.assertIn("Previous generated", self.editor)
         self.assertIn("Versione precedente", self.editor)
 
