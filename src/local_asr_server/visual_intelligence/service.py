@@ -281,7 +281,8 @@ class PostMeetingVisualService:
                     return self._process_v2(
                         services, recording_id, payload, frames, candidates, routing_summary,
                         model=model, progress_callback=progress_callback, routing_config=routing_config,
-                        routing_artifact=routing_artifact, cancel_requested=cancel_requested,
+                        routing_artifact=routing_artifact, unavailable_sources=unavailable_sources,
+                        cancel_requested=cancel_requested,
                     )
             except VisualProcessingCancelled:
                 raise
@@ -530,8 +531,10 @@ class PostMeetingVisualService:
 
     def _process_v2(
         self, services, recording_id, payload, frames, candidates, routing_summary, *, model,
-        progress_callback, routing_config, routing_artifact, cancel_requested=None,
+        progress_callback, routing_config, routing_artifact, unavailable_sources=None,
+        cancel_requested=None,
     ):
+        unavailable_sources = list(unavailable_sources or [])
         settings = load_settings()
         generation_id = f"visual-run-{uuid.uuid4()}"
         session_dir = services.recordings.session_dir(recording_id)
@@ -1108,7 +1111,7 @@ class PostMeetingVisualService:
                 },
             )
             observation = TaskAwareVisualProcessor.observation(
-                candidate, normalized, "macos-vision-ocr",
+                candidate, normalized, "macos-vision-ocr", source=frame,
             )
             observation["active_tile_index"] = tile_index
             observation["inference_backend"] = "local_ocr"
