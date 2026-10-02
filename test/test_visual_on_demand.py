@@ -70,6 +70,27 @@ class VisualOnDemandApiTests(unittest.TestCase):
         self.assertEqual(stopped.status_code, 202)
         return recording_id
 
+    def _save_manual_screenshot(self, recording_id: str) -> dict:
+        return self.app.state.recording_store.save_screenshot(
+            recording_id,
+            request_id="manual-shot",
+            capture={
+                "timestamp": 2.5,
+                "captured_uptime": 12.5,
+                "recording_ready_uptime": 10.0,
+                "captured_wall_time": 1000.0,
+                "display_id": 7,
+                "display_title": "Screen 1",
+                "width": 1200,
+                "height": 800,
+                "thumbnail_width": 640,
+                "thumbnail_height": 427,
+                "overlay_exclusion": "closedroom_windows",
+            },
+            original=b"\xff\xd8\xffmanual-original",
+            thumbnail=b"\xff\xd8\xffmanual-thumb",
+        )
+
     def _save_transcription(self, recording_id: str) -> dict:
         return self.app.state.transcription_store.save(
             {
@@ -106,6 +127,48 @@ class VisualOnDemandApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertIn("No screen context", response.json()["detail"])
+
+    def test_job_accepts_manual_screenshot_without_continuous_visual_frames(self) -> None:
+        created = self.client.post(
+            "/v1/recordings",
+            json={
+                "title": "Screenshot-only visual",
+                "mime_type": "audio/webm",
+                "capture_mode": "pc_only",
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        recording_id = created.json()["id"]
+        saved_screenshot = self._save_manual_screenshot(recording_id)
+        self.assertTrue(saved_screenshot["available"])
+        self.assertEqual(self.client.post(f"/v1/recordings/{recording_id}/stop").status_code, 202)
+        saved = self._save_transcription(recording_id)
+
+        def fake_process(_services, received_recording_id, payload, **kwargs):
+            self.assertEqual(received_recording_id, recording_id)
+            self.assertEqual(payload["id"], saved["id"])
+            return {
+                **payload,
+                "stats": {
+                    **(payload.get("stats") or {}),
+                    "visual_intelligence": {
+                        "version": 2,
+                        "status": "completed",
+                        "routing_mode": "v2",
+                        "observation_count": 1,
+                    },
+                },
+            }
+
+        with patch.object(self.app.state.transcription_service.visual, "process", side_effect=fake_process):
+            response = self.client.post(
+                f"/v1/recordings/{recording_id}/visual-intelligence-jobs"
+            )
+            self.assertEqual(response.status_code, 202)
+            job = self._wait_for_job(response.json()["id"])
+
+        self.assertEqual(job["status"], "completed")
+
 
     def test_job_enriches_existing_transcription_in_place_with_v2(self) -> None:
         recording_id = self._create_recording(with_visual_frame=True)
