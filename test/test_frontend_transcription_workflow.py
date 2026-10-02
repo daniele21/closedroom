@@ -38,7 +38,8 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         page = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
 
         self.assertIn("const startPreparation = async () =>", page)
-        self.assertIn("await prepareMeetingNotes(meeting.id)", page)
+        self.assertIn("await prepareMeetingNotes(meeting.id, requestedIncludeScreenshots)", page)
+        self.assertIn("latestPreparation?.result?.include_screenshots", page)
         self.assertIn("onClick={startPreparation}", page)
         self.assertIn("'Prepara note' : 'Prepare notes'", page)
 
