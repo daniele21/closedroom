@@ -482,6 +482,57 @@ class MeetingPreparationTests(unittest.TestCase):
             ["visual-failed"],
         )
 
+    def test_screenshot_inclusion_choice_is_persisted_and_skips_visual_when_disabled(self) -> None:
+        self.transcriptions.current = self._transcription()
+        self.recordings.screenshots = [{
+            "screenshot_id": "shot-choice",
+            "sequence": 0,
+            "timestamp": 8.0,
+            "sha256": "shot-choice-hash",
+            "display_id": 7,
+            "capture_kind": "manual",
+            "available": True,
+        }]
+        visual_calls = []
+        analysis_calls = []
+
+        def unexpected_visual(transcription_id, _callback):
+            visual_calls.append(transcription_id)
+            raise AssertionError("visual stage must not start when screenshots are excluded")
+
+        excluded = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory(analysis_calls),
+            start_visual=unexpected_visual,
+            include_screenshots=False,
+        )
+        excluded_state = self.store.get(excluded["id"])
+
+        self.assertEqual(excluded_state["status"], "completed")
+        self.assertEqual(visual_calls, [])
+        self.assertEqual(excluded_state["result"]["visual_status"], "excluded")
+        self.assertFalse(excluded_state["result"]["include_screenshots"])
+        self.assertEqual(excluded_state["result"]["screenshot_count"], 0)
+        self.assertEqual(excluded_state["result"]["screenshot_source_snapshot"], [])
+        self.assertFalse(excluded_state["payload"]["include_screenshots"])
+
+        included = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory(analysis_calls),
+            include_screenshots=True,
+        )
+        self.assertNotEqual(included["id"], excluded["id"])
+        included_state = self.store.get(included["id"])
+        self.assertTrue(included_state["result"]["include_screenshots"])
+        self.assertEqual(included_state["result"]["screenshot_count"], 1)
+        self.assertEqual(
+            included_state["result"]["screenshot_source_snapshot"][0]["screenshot_id"],
+            "shot-choice",
+        )
+
+
     def test_notes_retry_reuses_completed_visual_stage(self) -> None:
         self.transcriptions.current = self._transcription()
         self.recordings.screenshots = [{
