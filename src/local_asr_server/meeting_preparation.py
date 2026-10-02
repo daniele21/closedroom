@@ -358,12 +358,12 @@ class MeetingPreparationManager:
                 parent_job_id,
                 f"screenshot_sources_unavailable:{len(unavailable_selected)}",
             )
-        if start_visual is None or (not screenshots and not unavailable_selected):
-            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
-            return
-        if not available:
+        if unavailable_selected and not available:
             self._append_warning(parent_job_id, "screenshot_assets_unavailable")
             self._merge_result(parent_job_id, visual_status="skipped_assets_unavailable")
+            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
+            return
+        if start_visual is None or not screenshots:
             self._start_analysis(parent_job_id, transcription_id, start_pipeline)
             return
 
