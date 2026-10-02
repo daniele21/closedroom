@@ -14,6 +14,7 @@ from local_asr_server.env import get_env_var
 from local_asr_server.runtime.llm_sidecar import LocalLLMSidecarError
 from local_asr_server.runtime.models import ANALYSIS_QUALITY_DEFAULTS, resolve_local_llm_model_path
 from local_asr_server.schemas import ANALYSIS_SETTING_OVERRIDE_FIELDS, AnalysisRequest
+from local_asr_server.recordings import RecordingError
 from local_asr_server.settings import load_settings
 from local_asr_server.structured_notes import (
     StructuredNotesError,
@@ -249,15 +250,15 @@ class AnalysisService:
         """
         try:
             visual = self.services.recordings.get_visual_intelligence_v2(recording_id)
-        except (FileNotFoundError, ValueError):
+            current_screenshots = {
+                str(item.get("screenshot_id")): item
+                for item in self.services.recordings.list_screenshots(recording_id)
+                if item.get("screenshot_id") and item.get("available")
+            }
+        except (FileNotFoundError, ValueError, OSError, RecordingError):
             return []
         document = visual.get("document") or {}
         generation_id = document.get("generation_id") or (visual.get("summary") or {}).get("generation_id")
-        current_screenshots = {
-            str(item.get("screenshot_id")): item
-            for item in self.services.recordings.list_screenshots(recording_id)
-            if item.get("screenshot_id") and item.get("available")
-        }
         sources: dict[str, dict[str, Any]] = {}
         for observation in document.get("observations") or []:
             if not isinstance(observation, dict) or observation.get("status") != "valid":
