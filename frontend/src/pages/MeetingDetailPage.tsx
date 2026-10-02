@@ -130,6 +130,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     }, 100);
   };
   const visualEnabled = meeting?.transcription?.stats?.visual_intelligence?.version === 2;
+  const manualScreenshotCount = screenshots.filter((item) => item.available).length;
+  const visualEvidenceCount = visualFrameCount + manualScreenshotCount;
   const { data: visualData, loading: visualLoading, error: visualError } = useVisualIntelligence(
     demoMode ? null : recordingId, visualEnabled && activeTab === 'analysis',
   );
@@ -364,7 +366,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   };
 
   const startVisualContextAnalysis = async () => {
-    if (!meeting?.transcription || demoMode || isBusy || visualFrameCount <= 0) return;
+    if (!meeting?.transcription || demoMode || isBusy || visualEvidenceCount <= 0) return;
     setBusyAction('visual_intelligence');
     setError(null);
     try {
@@ -736,7 +738,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
         )}
 
-        {activeTab === 'analysis' && !isBusy && meeting.transcription && visualFrameCount > 0 && !visualEnabled && (
+        {activeTab === 'analysis' && !isBusy && meeting.transcription && visualEvidenceCount > 0 && !visualEnabled && (
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 rounded-xl border border-border-subtle bg-bg-surface/30">
             <div className="flex items-start gap-2.5 min-w-0">
               <Sparkles className="h-4 w-4 text-text-muted shrink-0 mt-0.5" aria-hidden="true" />
@@ -764,7 +766,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
         )}
 
-        {activeTab === 'analysis' && meeting.transcription && !visualEnabled && visualFramesState === 'error' && (
+        {activeTab === 'analysis' && meeting.transcription && !visualEnabled && visualEvidenceCount === 0 && visualFramesState === 'error' && screenshotsState !== 'loading' && (
           <div className="flex flex-col gap-2 rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 text-xs text-text-secondary sm:flex-row sm:items-center sm:justify-between" role="status">
             <div>
               <p className="font-semibold text-text-primary">
