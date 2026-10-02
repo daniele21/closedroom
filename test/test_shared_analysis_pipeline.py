@@ -59,6 +59,46 @@ class FakeTranscriptions:
         return copy.deepcopy(self.transcription)
 
 
+class FakeRecordings:
+    def __init__(self) -> None:
+        self.screenshots = [{
+            "screenshot_id": "shot-1",
+            "sha256": "current-hash",
+            "available": True,
+        }]
+        self.visual = {
+            "document": {
+                "schema_version": 2,
+                "generation_id": "visual-generation-1",
+                "observations": [{
+                    "status": "valid",
+                    "task": "shared_content",
+                    "timestamp": 8.0,
+                    "content_type": "slide",
+                    "title": "Release plan",
+                    "visible_text": ["Launch Friday"],
+                    "confidence": 0.9,
+                    "source": {
+                        "kind": "manual_screenshot",
+                        "screenshot_id": "shot-1",
+                        "sha256": "current-hash",
+                        "display_id": 7,
+                    },
+                }],
+            },
+        }
+
+    def get_visual_intelligence_v2(self, recording_id):
+        if recording_id != "rec-1":
+            raise FileNotFoundError(recording_id)
+        return copy.deepcopy(self.visual)
+
+    def list_screenshots(self, recording_id):
+        if recording_id != "rec-1":
+            raise FileNotFoundError(recording_id)
+        return copy.deepcopy(self.screenshots)
+
+
 class CountingStructuredProvider:
     def __init__(self) -> None:
         self.calls = 0
@@ -104,9 +144,11 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
         self.store = JobStore(root / "jobs.db")
         self.catalog = FakeCatalog()
         self.transcriptions = FakeTranscriptions(transcript_fixture())
+        self.recordings = FakeRecordings()
         self.services = SimpleNamespace(
             catalog=self.catalog,
             transcriptions=self.transcriptions,
+            recordings=self.recordings,
         )
         self.settings = deterministic_settings(root)
         self.settings["llm_provider"] = "mock"
@@ -186,6 +228,27 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
         _transcription_id, legacy = self.transcriptions.saved[-1]
         self.assertEqual(legacy["summary"], "Supported summary")
         self.assertIn("action_items", legacy)
+
+    def test_structured_visual_sources_ignore_deleted_or_replaced_screenshots(self) -> None:
+        service = AnalysisService(self.services)
+
+        current = service._structured_visual_sources("rec-1")
+        self.assertEqual([item["screenshot_id"] for item in current], ["shot-1"])
+
+        self.recordings.screenshots = []
+        self.assertEqual(service._structured_visual_sources("rec-1"), [])
+
+        self.recordings.screenshots = [{
+            "screenshot_id": "shot-1",
+            "sha256": "replacement-hash",
+            "available": True,
+        }]
+        self.assertEqual(service._structured_visual_sources("rec-1"), [])
+
+        self.recordings.visual["document"]["observations"][0]["source"]["sha256"] = "replacement-hash"
+        replaced = service._structured_visual_sources("rec-1")
+        self.assertEqual([item["sha256"] for item in replaced], ["replacement-hash"])
+
 
     def test_one_structured_run_projects_to_four_legacy_read_views(self) -> None:
         service = AnalysisService(self.services)
