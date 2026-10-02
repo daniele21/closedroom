@@ -96,6 +96,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [visualFramesError, setVisualFramesError] = useState<string | null>(null);
   const [screenshots, setScreenshots] = useState<RecordingScreenshot[]>([]);
   const [screenshotsState, setScreenshotsState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [includeScreenshots, setIncludeScreenshots] = useState(true);
   const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -259,6 +260,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     setVisualFramesState('idle');
     setScreenshots([]);
     setScreenshotsState('idle');
+    setIncludeScreenshots(true);
     setVisualFramesError(null);
     userSelectedTabRef.current = false;
     void load();
@@ -266,6 +268,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
       loadGenerationRef.current += 1;
       diagnosticsGenerationRef.current += 1;
       visualFramesGenerationRef.current += 1;
+      screenshotsGenerationRef.current += 1;
     };
   }, [recordingId, demoMode, lang]);
 
@@ -279,11 +282,10 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
       !['transcript', 'analysis'].includes(activeTab)
       || !recordingId
       || demoMode
-      || !meeting?.transcription
       || screenshotsState !== 'idle'
     ) return;
     void loadScreenshots();
-  }, [activeTab, recordingId, demoMode, meeting?.transcription?.id, screenshotsState]);
+  }, [activeTab, recordingId, demoMode, screenshotsState]);
 
   useEffect(() => {
     if (
@@ -356,7 +358,10 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     setBusyAction('meeting_preparation');
     setError(null);
     try {
-      await prepareMeetingNotes(meeting.id);
+      const requestedIncludeScreenshots = canResumePreparation
+        ? latestPreparation?.result?.include_screenshots !== false
+        : includeScreenshots;
+      await prepareMeetingNotes(meeting.id, requestedIncludeScreenshots);
       await load();
     } catch (err: any) {
       setError(err?.message || (lang === 'it' ? 'Impossibile preparare le note' : 'Failed to prepare meeting notes'));
@@ -705,6 +710,29 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 </p>
                 {latestPreparation?.error && canResumePreparation && (
                   <p className="text-[10px] text-warning mt-1 line-clamp-2">{latestPreparation.error}</p>
+                )}
+                {manualScreenshotCount > 0 && (
+                  <label className="mt-2 inline-flex items-center gap-2 text-[11px] text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={canResumePreparation
+                        ? latestPreparation?.result?.include_screenshots !== false
+                        : includeScreenshots}
+                      disabled={canResumePreparation || busyAction === 'meeting_preparation'}
+                      onChange={(event) => setIncludeScreenshots(event.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-border-subtle accent-[var(--color-accent)]"
+                    />
+                    <span>
+                      {lang === 'it'
+                        ? `Includi ${manualScreenshotCount} screenshot`
+                        : `Include ${manualScreenshotCount} screenshot${manualScreenshotCount === 1 ? '' : 's'}`}
+                    </span>
+                    {canResumePreparation && (
+                      <span className="text-text-muted">
+                        {lang === 'it' ? '· stesse fonti del tentativo' : '· same sources as this attempt'}
+                      </span>
+                    )}
+                  </label>
                 )}
               </div>
             </div>
