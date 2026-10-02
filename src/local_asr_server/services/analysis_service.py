@@ -253,6 +253,11 @@ class AnalysisService:
             return []
         document = visual.get("document") or {}
         generation_id = document.get("generation_id") or (visual.get("summary") or {}).get("generation_id")
+        current_screenshots = {
+            str(item.get("screenshot_id")): item
+            for item in self.services.recordings.list_screenshots(recording_id)
+            if item.get("screenshot_id") and item.get("available")
+        }
         sources: dict[str, dict[str, Any]] = {}
         for observation in document.get("observations") or []:
             if not isinstance(observation, dict) or observation.get("status") != "valid":
@@ -262,6 +267,13 @@ class AnalysisService:
                 continue
             screenshot_id = str(source.get("screenshot_id") or "").strip()
             if not screenshot_id:
+                continue
+            current = current_screenshots.get(screenshot_id)
+            if current is None:
+                continue
+            source_sha = str(source.get("sha256") or "").strip()
+            current_sha = str(current.get("sha256") or "").strip()
+            if source_sha and current_sha and source_sha != current_sha:
                 continue
             if observation.get("task") != "shared_content":
                 continue
