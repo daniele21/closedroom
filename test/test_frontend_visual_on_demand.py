@@ -18,7 +18,7 @@ class FrontendVisualOnDemandContractTests(unittest.TestCase):
 
     def test_meeting_only_offers_analysis_when_screen_context_was_captured(self) -> None:
         self.assertIn("ApiClient.recordingVisualFrames(recordingId)", self.meeting)
-        self.assertIn("const visualEvidenceCount = visualFrameCount + manualScreenshotCount", self.meeting)
+        self.assertIn("const visualEvidenceCount = visualFrameCount + availableScreenshotCount", self.meeting)
         self.assertIn("visualData?.source_validity?.status === 'stale'", self.meeting)
         self.assertIn("visualResultAvailable && !visualSourcesStale", self.meeting)
         self.assertIn("visualEvidenceCount > 0 && !visualEnabled", self.meeting)
