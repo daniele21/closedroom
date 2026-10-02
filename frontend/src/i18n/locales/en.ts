@@ -875,6 +875,8 @@ const en = {
     visualTimelineDesc: 'Observed events and conservative attributions in chronological order.',
     visualTimelineLoading: 'Loading visual context',
     visualTimelineUnavailable: 'Visual details are unavailable. The transcript remains usable.',
+    visualSourcesStaleTitle: 'Some visual evidence changed',
+    visualSourcesStaleDesc: 'This is a historical result based on screenshots that are no longer current. Regenerate screen context to use the remaining evidence.',
     visualTimelineEmpty: 'No stable visual event was detected.',
     visualObservedTimeline: 'Observed timeline',
     visualEvents: 'events',
