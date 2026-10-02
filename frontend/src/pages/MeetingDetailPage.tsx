@@ -131,8 +131,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     }, 100);
   };
   const visualResultAvailable = meeting?.transcription?.stats?.visual_intelligence?.version === 2;
-  const manualScreenshotCount = screenshots.filter((item) => item.available).length;
-  const visualEvidenceCount = visualFrameCount + manualScreenshotCount;
+  const savedScreenshotCount = screenshots.length;
+  const availableScreenshotCount = screenshots.filter((item) => item.available).length;
+  const visualEvidenceCount = visualFrameCount + availableScreenshotCount;
   const { data: visualData, loading: visualLoading, error: visualError } = useVisualIntelligence(
     demoMode ? null : recordingId, visualResultAvailable && activeTab === 'analysis',
   );
@@ -713,7 +714,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 {latestPreparation?.error && canResumePreparation && (
                   <p className="text-[10px] text-warning mt-1 line-clamp-2">{latestPreparation.error}</p>
                 )}
-                {manualScreenshotCount > 0 && (
+                {savedScreenshotCount > 0 && (
                   <label className="mt-2 inline-flex items-center gap-2 text-[11px] text-text-secondary">
                     <input
                       type="checkbox"
@@ -726,8 +727,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     />
                     <span>
                       {lang === 'it'
-                        ? `Includi ${manualScreenshotCount} screenshot`
-                        : `Include ${manualScreenshotCount} screenshot${manualScreenshotCount === 1 ? '' : 's'}`}
+                        ? `Includi ${savedScreenshotCount} screenshot`
+                        : `Include ${savedScreenshotCount} screenshot${savedScreenshotCount === 1 ? '' : 's'}`}
                     </span>
                     {canResumePreparation && (
                       <span className="text-text-muted">
