@@ -23,7 +23,7 @@ from local_asr_server.visual_intelligence.service import visual_processing_ident
 
 MEETING_PREPARATION_JOB_TYPE = "meeting_preparation"
 MEETING_PREPARATION_PIPELINE = "meeting_default"
-PREPARATION_RESULT_VERSION = 2
+PREPARATION_RESULT_VERSION = 3
 
 logger = logging.getLogger("uvicorn.error")
 TerminalCallback = Callable[[dict[str, Any]], None]
@@ -64,22 +64,37 @@ class MeetingPreparationManager:
         start_transcription: StartTranscription,
         start_pipeline: StartPipeline,
         start_visual: StartVisual | None = None,
+        include_screenshots: bool = True,
     ) -> dict[str, Any]:
         # Resolve the recording before creating durable work so a bad id cannot
         # leave an orphan parent job.
         self.services.recordings.get(recording_id, include_result=False)
         transcription_request = TranscriptionJobRequest(visual_intelligence_enabled=False)
         screenshots = self.services.recordings.list_screenshots(recording_id)
+        selected_screenshots = screenshots if include_screenshots else []
+        available_screenshots = [item for item in selected_screenshots if item.get("available")]
+        screenshot_source_snapshot = [
+            {
+                "screenshot_id": item.get("screenshot_id"),
+                "sha256": item.get("sha256"),
+                "timestamp": item.get("timestamp"),
+                "available": bool(item.get("available")),
+            }
+            for item in selected_screenshots
+        ]
         audio_source_identity = self._audio_source_identity(recording_id)
         source_identity = self._source_identity(
             recording_id,
             audio_source_identity=audio_source_identity,
-            screenshots=screenshots,
+            screenshots=selected_screenshots,
         )
         visual_material = (
             visual_processing_identity(load_settings())
-            if any(item.get("available") for item in screenshots)
-            else {"version": 1, "status": "not_applicable"}
+            if available_screenshots
+            else {
+                "version": 1,
+                "status": "excluded" if not include_screenshots else "not_applicable",
+            }
         )
         visual_identity = _hash_json(visual_material)
         asr_identity, asr_material = self._asr_identity(transcription_request)
@@ -93,6 +108,7 @@ class MeetingPreparationManager:
             {
                 "version": PREPARATION_RESULT_VERSION,
                 "recording_id": recording_id,
+                "include_screenshots": include_screenshots,
                 "source_identity": source_identity,
                 "asr_identity": asr_identity,
                 "visual_identity": visual_identity,
@@ -127,6 +143,8 @@ class MeetingPreparationManager:
                 "recording_id": recording_id,
                 "pipeline_id": MEETING_PREPARATION_PIPELINE,
                 "preparation_key": preparation_key,
+                "include_screenshots": include_screenshots,
+                "screenshot_count": len(selected_screenshots),
             },
             current_step="preparing_transcript",
             progress=5,
@@ -139,6 +157,10 @@ class MeetingPreparationManager:
             "preparation_key": preparation_key,
             "source_identity": source_identity,
             "audio_source_identity": audio_source_identity,
+            "include_screenshots": include_screenshots,
+            "screenshot_count": len(selected_screenshots),
+            "available_screenshot_count": len(available_screenshots),
+            "screenshot_source_snapshot": screenshot_source_snapshot,
             "asr_identity": asr_identity,
             "visual_identity": visual_identity,
             "analysis_identity": analysis_identity,
@@ -292,6 +314,11 @@ class MeetingPreparationManager:
     ) -> None:
         parent = self.services.jobs.get(parent_job_id)
         recording_id = (parent or {}).get("scope_id") or ""
+        result = (parent or {}).get("result") or {}
+        if not result.get("include_screenshots", True):
+            self._merge_result(parent_job_id, visual_status="excluded")
+            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
+            return
         screenshots = self.services.recordings.list_screenshots(recording_id)
         available = [item for item in screenshots if item.get("available")]
         if start_visual is None or not screenshots:
