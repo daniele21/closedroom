@@ -130,12 +130,14 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
       }
     }, 100);
   };
-  const visualEnabled = meeting?.transcription?.stats?.visual_intelligence?.version === 2;
+  const visualResultAvailable = meeting?.transcription?.stats?.visual_intelligence?.version === 2;
   const manualScreenshotCount = screenshots.filter((item) => item.available).length;
   const visualEvidenceCount = visualFrameCount + manualScreenshotCount;
   const { data: visualData, loading: visualLoading, error: visualError } = useVisualIntelligence(
-    demoMode ? null : recordingId, visualEnabled && activeTab === 'analysis',
+    demoMode ? null : recordingId, visualResultAvailable && activeTab === 'analysis',
   );
+  const visualSourcesStale = visualData?.source_validity?.status === 'stale';
+  const visualEnabled = visualResultAvailable && !visualSourcesStale;
 
   const load = () => {
     if (!recordingId) return Promise.resolve();
