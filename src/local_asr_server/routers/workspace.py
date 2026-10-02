@@ -12,7 +12,7 @@ from local_asr_server.meeting_preparation import MeetingPreparationManager
 from local_asr_server.recordings import RecordingConflict, RecordingNotFound
 from local_asr_server.routers.helpers import _build_meeting, _build_meetings, _build_projects
 from local_asr_server.routers.transcriptions import run_recording_transcription
-from local_asr_server.schemas import AnalysisPipelineRequest, TranscriptionJobRequest
+from local_asr_server.schemas import AnalysisPipelineRequest, MeetingPreparationRequest, TranscriptionJobRequest
 from local_asr_server.visual_intelligence.jobs import start_visual_intelligence_job
 
 
@@ -78,8 +78,13 @@ def get_meeting(recording_id: str, request: Request):
 
 
 @router.post("/v1/meetings/{recording_id}/prepare", status_code=202)
-def prepare_meeting(recording_id: str, request: Request):
+def prepare_meeting(
+    recording_id: str,
+    request: Request,
+    body: MeetingPreparationRequest | None = None,
+):
     services = get_services(request.app)
+    preparation = body or MeetingPreparationRequest()
     try:
         recording = services.recordings.get(recording_id, include_result=False)
     except RecordingNotFound as exc:
@@ -141,6 +146,7 @@ def prepare_meeting(recording_id: str, request: Request):
             start_transcription=start_transcription,
             start_pipeline=start_pipeline,
             start_visual=start_visual,
+            include_screenshots=preparation.include_screenshots,
         )
     except RecordingConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
