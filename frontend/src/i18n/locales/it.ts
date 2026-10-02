@@ -875,6 +875,8 @@ const it = {
     visualTimelineDesc: 'Eventi osservati e attribuzioni conservative, in ordine temporale.',
     visualTimelineLoading: 'Caricamento contesto visuale',
     visualTimelineUnavailable: 'Il dettaglio visuale non è disponibile. Il transcript resta utilizzabile.',
+    visualSourcesStaleTitle: 'Alcune evidenze visuali sono cambiate',
+    visualSourcesStaleDesc: 'Questo è un risultato storico basato su screenshot non più correnti. Rigenera il contesto schermo per usare le evidenze rimaste.',
     visualTimelineEmpty: 'Nessun evento visuale stabile è stato rilevato.',
     visualObservedTimeline: 'Timeline osservata',
     visualEvents: 'eventi',
