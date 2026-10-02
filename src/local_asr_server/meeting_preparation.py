@@ -320,8 +320,45 @@ class MeetingPreparationManager:
             self._start_analysis(parent_job_id, transcription_id, start_pipeline)
             return
         screenshots = self.services.recordings.list_screenshots(recording_id)
+        current_by_id = {
+            str(item.get("screenshot_id")): item
+            for item in screenshots
+            if item.get("screenshot_id")
+        }
+        selected_snapshot = [
+            item for item in result.get("screenshot_source_snapshot") or []
+            if isinstance(item, dict) and item.get("screenshot_id")
+        ]
+        if selected_snapshot:
+            selected = []
+            unavailable_selected = []
+            for snapshot in selected_snapshot:
+                screenshot_id = str(snapshot["screenshot_id"])
+                current = current_by_id.get(screenshot_id)
+                expected_sha = str(snapshot.get("sha256") or "")
+                current_sha = str((current or {}).get("sha256") or "")
+                if (
+                    current is None
+                    or not current.get("available")
+                    or (expected_sha and current_sha and expected_sha != current_sha)
+                ):
+                    unavailable_selected.append(screenshot_id)
+                    continue
+                selected.append(current)
+            screenshots = selected
+        else:
+            unavailable_selected = [
+                str(item.get("screenshot_id"))
+                for item in screenshots
+                if item.get("screenshot_id") and not item.get("available")
+            ]
         available = [item for item in screenshots if item.get("available")]
-        if start_visual is None or not screenshots:
+        if unavailable_selected:
+            self._append_warning(
+                parent_job_id,
+                f"screenshot_sources_unavailable:{len(unavailable_selected)}",
+            )
+        if start_visual is None or (not screenshots and not unavailable_selected):
             self._start_analysis(parent_job_id, transcription_id, start_pipeline)
             return
         if not available:
@@ -356,12 +393,12 @@ class MeetingPreparationManager:
             event_payload={
                 "phase": "visual",
                 "transcription_id": transcription_id,
-                "screenshot_count": len(screenshots),
+                "screenshot_count": len(selected_snapshot) if selected_snapshot else len(screenshots),
                 "available_screenshot_count": len(available),
             },
             progress_detail={
                 "phase": "visual",
-                "screenshot_count": len(screenshots),
+                "screenshot_count": len(selected_snapshot) if selected_snapshot else len(screenshots),
                 "available_screenshot_count": len(available),
             },
         )
