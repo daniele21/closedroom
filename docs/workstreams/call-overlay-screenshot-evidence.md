@@ -70,19 +70,26 @@ gli owner esistenti e non introducono queue o lifecycle paralleli.
 - Preparation identity include set/hash screenshot senza invalidare inutilmente ASR;
   visual failure produce warning e note testo-only utilizzabili.
 
-## Stato implementazione 2026-10-01
+## Stato implementazione 2026-10-02
 
 Implementazione CO-1..5 presente su work/call-overlay-screenshot-evidence.
-Il lavoro è partito dall'esatto dev=d34dfc0e. Durante il lavoro quel dev è stato
-promosso a main=741edb5 con tree equivalente e cancellato; dev è stato
-ripristinato a 741edb5 secondo il contratto repository e il branch è ora basato
-sullo stesso target. Draft PR di integrazione: #72.
+Il branch è basato su dev=741edb5 e non risulta indietro rispetto al target.
+Il precedente PR di integrazione #72 è stato chiuso intenzionalmente: per indicazione
+del maintainer la validazione di questo workstream non deve usare GitHub Actions e i
+test vanno eseguiti solo dopo il completamento delle attività implementative.
 
-CO-6 è attivo. Il primo remote preflight ha classificato STRONG e la repository
-validation è passata; i guard si sono fermati solo perché questo workstream superava
-il budget documentale 3000 token. Il piano è stato compattato prima di ripetere i gate.
-Il diff review ha inoltre individuato e corretto il rischio che i candidati manuali
-potessero essere aggiunti oltre il ceiling visuale.
+CO-6 resta attivo. La sessione finale disponibile in questo ambiente ha eseguito
+localmente un regression harness sui contratti corretti: 10 test Python PASS più il
+regression check Node sulla collocazione temporale degli screenshot PASS, inclusi
+missing/delete/replace, source-aware fingerprint, turni lunghi, overlap, silenzi e
+boundary timestamp. Sono passati anche py_compile del harness e node --check.
+
+Questa evidenza non equivale a una full repository validation: il runtime corrente
+non dispone di un checkout completo del repository né di macOS. Restano quindi da
+stabilire localmente, su un checkout completo compatibile, i gate repository-owned
+STRONG (suite completa, frontend lint/typecheck, FULL_MEDIA e build/smoke selezionati).
+Le prove TCC/ScreenCaptureKit/WKWebView/audio/MLX restano comunque RELEASE
+REAL_ENVIRONMENT come descritto sotto.
 
 ## Evidenza richiesta
 
