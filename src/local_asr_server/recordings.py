@@ -980,6 +980,64 @@ class RecordingStore:
             if artifact is not None and artifact.get("generation_id") != generation_id:
                 raise FileNotFoundError("Visual intelligence generation is incomplete")
 
+    def _visual_source_validity(
+        self,
+        recording_id: str,
+        document: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Project whether a persisted visual result still matches current screenshot evidence.
+
+        Visual artifacts are immutable history. This projection lets consumers distinguish
+        a historical result from one whose manual screenshot sources are still current.
+        """
+        sources = [
+            item
+            for item in document.get("manual_screenshot_sources") or []
+            if isinstance(item, dict) and item.get("screenshot_id")
+        ]
+        if not sources:
+            return {
+                "status": "current",
+                "manual_screenshot_count": 0,
+                "missing_screenshot_ids": [],
+                "unavailable_screenshot_ids": [],
+                "changed_screenshot_ids": [],
+            }
+
+        current = {
+            str(item.get("screenshot_id")): item
+            for item in self.list_screenshots(recording_id)
+            if item.get("screenshot_id")
+        }
+        missing: list[str] = []
+        unavailable: list[str] = []
+        changed: list[str] = []
+        for source in sources:
+            screenshot_id = str(source["screenshot_id"])
+            item = current.get(screenshot_id)
+            source_status = str(source.get("status") or "")
+            source_expected_asset = source_status != "asset_missing"
+            if item is None:
+                if source_expected_asset:
+                    missing.append(screenshot_id)
+                continue
+            if not item.get("available"):
+                if source_expected_asset:
+                    unavailable.append(screenshot_id)
+                continue
+            expected_sha = str(source.get("sha256") or "")
+            current_sha = str(item.get("sha256") or "")
+            if expected_sha and current_sha and expected_sha != current_sha:
+                changed.append(screenshot_id)
+
+        return {
+            "status": "stale" if (missing or unavailable or changed) else "current",
+            "manual_screenshot_count": len(sources),
+            "missing_screenshot_ids": missing,
+            "unavailable_screenshot_ids": unavailable,
+            "changed_screenshot_ids": changed,
+        }
+
     def get_visual_intelligence_v2(self, recording_id: str) -> dict[str, Any]:
         """Read the canonical v2 document without changing the legacy response."""
         session_dir, _ = self._load(recording_id)
@@ -1007,6 +1065,7 @@ class RecordingStore:
             "schema_version": 2,
             "summary": json.loads(summary_path.read_text(encoding="utf-8")),
             "document": document,
+            "source_validity": self._visual_source_validity(recording_id, document),
         }
         routing_path = session_dir / VISUAL_ROUTING_FILE
         if routing_path.exists():
