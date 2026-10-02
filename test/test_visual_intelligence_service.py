@@ -812,7 +812,7 @@ class VisualIntelligenceTests(unittest.TestCase):
             config = VisualRoutingConfig(mode="v2")
             candidates, _ = TaskAwareFrameRouter(config).route(frames, [])
             service = PostMeetingVisualService()
-            fingerprint = service._processing_fingerprint(candidates, "qwen3-vl-4b")
+            fingerprint = service._processing_fingerprint(candidates, frames, "qwen3-vl-4b")
             store.begin_visual_processing(
                 recording["id"], fingerprint, prompt_version=3,
             )
