@@ -38,6 +38,17 @@ class _Recordings:
     def __init__(self, count: int = 1) -> None:
         self.count = count
 
+    def list_screenshots(self, recording_id):
+        assert recording_id == "rec-1"
+        return [
+            {
+                "screenshot_id": f"shot-{index}",
+                "sha256": f"hash-{index}",
+                "available": True,
+            }
+            for index in range(self.count)
+        ]
+
     def get_visual_intelligence_v2(self, recording_id):
         assert recording_id == "rec-1"
         observations = []
