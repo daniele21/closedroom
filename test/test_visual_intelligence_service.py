@@ -807,7 +807,7 @@ class VisualIntelligenceTests(unittest.TestCase):
                 capture_mode="pc_only", capture_backend="native",
             )
             store.stage_visual_frame(recording["id"], 0, 0.0, self._jpeg("blue", pattern=True))
-            frames = store.list_visual_frames(recording["id"])
+            frames = store.list_visual_evidence_frames(recording["id"])
             session_dir = Path(frames[0]["path"]).parent.parent
             config = VisualRoutingConfig(mode="v2")
             candidates, _ = TaskAwareFrameRouter(config).route(frames, [])
