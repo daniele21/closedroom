@@ -279,15 +279,15 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
       <Card className="flex flex-col gap-5 p-5 sm:p-6">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
-            label={t('recording.titleLabel')}
+            label={t('recording.formTitleLabel')}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             disabled={recordingFlowLocked}
-            placeholder={t('recording.titlePlaceholder')}
+            placeholder={t('recording.formTitlePlaceholder')}
           />
           <div className="flex flex-col gap-1.5">
             <label htmlFor="new-meeting-project" className="text-sm font-medium text-text-secondary">
-              {t('recording.projectLabel')}
+              {t('recording.formProjectLabel')}
             </label>
             <input
               id="new-meeting-project"
@@ -295,7 +295,7 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
               value={projectName}
               onChange={(event) => setProjectName(event.target.value)}
               disabled={recordingFlowLocked}
-              placeholder={t('recording.projectPlaceholder')}
+              placeholder={t('recording.formProjectPlaceholder')}
               className="h-10 w-full rounded-lg border border-border-subtle bg-bg-surface px-3 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus:border-border-focus disabled:cursor-not-allowed disabled:opacity-60"
             />
             <datalist id="new-meeting-projects">
