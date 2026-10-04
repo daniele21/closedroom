@@ -86,9 +86,18 @@ export interface VisualIntelligenceResponse {
   routing?: VisualRoutingArtifact;
 }
 
+export interface VisualSourceValidity {
+  status: 'current' | 'stale';
+  manual_screenshot_count: number;
+  missing_screenshot_ids: string[];
+  unavailable_screenshot_ids: string[];
+  changed_screenshot_ids: string[];
+}
+
 export interface VisualIntelligenceResponseV2 {
   schema_version: 2;
   summary: Record<string, unknown>;
   document: VisualIntelligenceDocumentV2;
   routing?: VisualRoutingArtifact;
+  source_validity?: VisualSourceValidity;
 }

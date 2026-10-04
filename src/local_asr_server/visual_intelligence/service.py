@@ -15,6 +15,7 @@ from local_asr_server.settings import (
 )
 from local_asr_server.visual_intelligence.contracts import (
     FrameCandidate,
+    MAX_VISUAL_VLM_CANDIDATES,
     VisualProcessingProgress,
     VisualRoutingConfig,
     VisualTask,
@@ -55,6 +56,39 @@ VISUAL_PROMPT = """Osserva questo frame di una videoconferenza. Usa esclusivamen
 label e indicatori visibili; non dedurre identità dai volti. Restituisci solo JSON valido con:
 platform, layout, participants (array), active_speakers (array), evidence (array), confidence (0..1).
 Se un dato non è leggibile usa un valore unknown o un array vuoto. Non inventare nomi."""
+
+
+def visual_processing_identity(
+    settings: dict[str, Any] | None = None,
+    *,
+    routing_mode: str = "v2",
+) -> dict[str, Any]:
+    """Return non-secret material that invalidates reusable visual work."""
+    resolved = settings or load_settings()
+    from local_asr_server.local_llm_params import load_local_llm_params
+
+    configured_similarity_threshold = resolved.get(
+        "visual_frame_similarity_threshold",
+        DEFAULT_VISUAL_FRAME_SIMILARITY_THRESHOLD,
+    )
+    routing_config = VisualRoutingConfig(
+        mode=routing_mode,
+        dhash_distance=int(configured_similarity_threshold),
+    )
+    local_params = load_local_llm_params()
+    return {
+        "version": 1,
+        "model": str(resolved.get("visual_llm_model") or "qwen3-vl-4b"),
+        "routing_mode": routing_mode,
+        "routing_config": asdict(routing_config),
+        "prompt_versions": {
+            "meeting_ui": TASK_PROMPT_VERSION,
+            "meeting_state": TASK_PROMPT_VERSION,
+            "shared_content": TASK_PROMPT_VERSION,
+        },
+        "llm_parameters": local_params.get("chat_params", {}),
+        "local_ocr_adapter_version": 1,
+    }
 
 
 class VisualBackendUnavailable(RuntimeError):
@@ -111,24 +145,66 @@ class PostMeetingVisualService:
             )
             if settings.get("visual_intelligence_enabled"):
                 model = str(settings.get("visual_llm_model") or "qwen3-vl-4b")
+                missing_manual = len(unavailable_sources)
+                is_v2 = requested_routing_mode == "v2"
+                fallback_reason = (
+                    "manual_screenshot_assets_unavailable"
+                    if missing_manual
+                    else "no_visual_frames_captured"
+                )
                 summary = {
-                    "version": 1,
+                    "version": 2 if is_v2 else 1,
                     "status": "degraded",
                     "model": model,
                     "frame_count": 0,
                     "observation_count": 0,
                     "parse_errors": 0,
+                    "manual_screenshot_count": missing_manual,
+                    "unavailable_manual_screenshot_count": missing_manual,
                     **diagnostic(
                         "visual_intelligence",
                         "degraded",
                         requested_backend=model,
                         fallback_used=True,
-                        fallback_reason="no_visual_frames_captured",
-                        counts={"frames": 0, "observations": 0, "parse_errors": 0},
+                        fallback_reason=fallback_reason,
+                        counts={
+                            "frames": 0,
+                            "observations": 0,
+                            "parse_errors": 0,
+                            "manual_screenshots": missing_manual,
+                            "unavailable_manual_screenshots": missing_manual,
+                        },
                     ),
                 }
+                document = None
+                if is_v2:
+                    document = {
+                        "schema_version": 2,
+                        "observations": [],
+                        "candidate_errors": [],
+                        "speaker_intervals": [],
+                        "meeting_state_events": [],
+                        "share_sessions": [],
+                        "semantic_links": [],
+                        "routing_summary": {
+                            "manual_screenshot_candidates": 0,
+                            "unavailable_manual_screenshots": missing_manual,
+                        },
+                        "manual_screenshot_sources": [
+                            {
+                                "screenshot_id": source.get("screenshot_id"),
+                                "timestamp": source.get("timestamp"),
+                                "sha256": source.get("sha256"),
+                                "display_id": source.get("display_id"),
+                                "status": "asset_missing",
+                            }
+                            for source in unavailable_sources
+                        ],
+                        "model": model,
+                        "prompt_version": TASK_PROMPT_VERSION,
+                    }
                 services.recordings.replace_visual_intelligence_artifacts(
-                    recording_id, [], summary,
+                    recording_id, [], summary, document=document,
                 )
                 payload.setdefault("stats", {})["visual_intelligence"] = summary
             return payload
@@ -141,9 +217,20 @@ class PostMeetingVisualService:
             "visual_frame_similarity_threshold",
             DEFAULT_VISUAL_FRAME_SIMILARITY_THRESHOLD,
         )
+        manual_frames = [
+            frame for frame in frames
+            if frame.get("evidence_source") == "manual_screenshot"
+        ]
+        # Manual screenshots are deliberate evidence and each keeps a shared-content
+        # slot, but they remain inside the same hard visual work ceiling.
+        routed_candidate_budget = max(
+            1,
+            MAX_VISUAL_VLM_CANDIDATES - min(len(manual_frames), MAX_VISUAL_VLM_CANDIDATES - 1),
+        )
         routing_config = VisualRoutingConfig(
             mode=routing_mode,
             dhash_distance=int(configured_similarity_threshold),
+            max_candidates=routed_candidate_budget,
         )
         routing_summary = None
         routing_error = None
@@ -153,10 +240,6 @@ class PostMeetingVisualService:
                 router = TaskAwareFrameRouter(routing_config)
                 candidates, routing_summary = router.route(frames, payload.get("segments") or [])
                 existing = {(candidate.sequence, candidate.task) for candidate in candidates}
-                manual_frames = [
-                    frame for frame in frames
-                    if frame.get("evidence_source") == "manual_screenshot"
-                ]
                 for frame in manual_frames:
                     key = (int(frame["sequence"]), VisualTask.SHARED_CONTENT)
                     if key in existing:
@@ -169,6 +252,10 @@ class PostMeetingVisualService:
                     ))
                     existing.add(key)
                 candidates = sorted(candidates, key=lambda item: (item.timestamp, item.task.value))
+                if len(candidates) > MAX_VISUAL_VLM_CANDIDATES:
+                    # Defensive fail-closed check: store limits make this unreachable,
+                    # but a future producer must not silently escape the bounded budget.
+                    raise RuntimeError("visual_candidate_budget_exceeded")
                 routing_summary = {
                     **routing_summary,
                     "manual_screenshot_candidates": len(manual_frames),
@@ -194,7 +281,8 @@ class PostMeetingVisualService:
                     return self._process_v2(
                         services, recording_id, payload, frames, candidates, routing_summary,
                         model=model, progress_callback=progress_callback, routing_config=routing_config,
-                        routing_artifact=routing_artifact, cancel_requested=cancel_requested,
+                        routing_artifact=routing_artifact, unavailable_sources=unavailable_sources,
+                        cancel_requested=cancel_requested,
                     )
             except VisualProcessingCancelled:
                 raise
@@ -443,8 +531,10 @@ class PostMeetingVisualService:
 
     def _process_v2(
         self, services, recording_id, payload, frames, candidates, routing_summary, *, model,
-        progress_callback, routing_config, routing_artifact, cancel_requested=None,
+        progress_callback, routing_config, routing_artifact, unavailable_sources=None,
+        cancel_requested=None,
     ):
+        unavailable_sources = list(unavailable_sources or [])
         settings = load_settings()
         generation_id = f"visual-run-{uuid.uuid4()}"
         session_dir = services.recordings.session_dir(recording_id)
@@ -1021,7 +1111,7 @@ class PostMeetingVisualService:
                 },
             )
             observation = TaskAwareVisualProcessor.observation(
-                candidate, normalized, "macos-vision-ocr",
+                candidate, normalized, "macos-vision-ocr", source=frame,
             )
             observation["active_tile_index"] = tile_index
             observation["inference_backend"] = "local_ocr"

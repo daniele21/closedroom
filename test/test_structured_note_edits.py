@@ -148,6 +148,39 @@ class StructuredNoteEditTests(unittest.TestCase):
         self.assertEqual(retained["base_generated"]["text"], "Alex validates the release")
         self.assertEqual(retained["base_generated"]["source_refs"][0]["start"], 5.0)
 
+    def test_visual_source_identity_is_stable_and_changes_with_screenshot(self) -> None:
+        first_result = structured_result()
+        first_result["generated"]["actions"][0]["source_refs"] = [{
+            "source_type": "screenshot",
+            "source_id": "screenshot:shot-1",
+            "screenshot_id": "shot-1",
+            "timestamp": 8.0,
+            "evidence_basis": "visual_inference",
+        }]
+        first = ensure_editable_structured_notes(first_result, run_id="run-1")
+        first_id = first["generated"]["actions"][0]["item_id"]
+
+        same = ensure_editable_structured_notes(first_result, run_id="run-2")
+        self.assertEqual(same["generated"]["actions"][0]["item_id"], first_id)
+
+        changed_result = structured_result()
+        changed_result["generated"]["actions"][0]["source_refs"] = [{
+            "source_type": "screenshot",
+            "source_id": "screenshot:shot-2",
+            "screenshot_id": "shot-2",
+            "timestamp": 8.0,
+            "evidence_basis": "visual_inference",
+        }]
+        changed = ensure_editable_structured_notes(changed_result, run_id="run-3")
+        self.assertNotEqual(changed["generated"]["actions"][0]["item_id"], first_id)
+
+        transcript_only = ensure_editable_structured_notes(structured_result(), run_id="run-4")
+        transcript_again = ensure_editable_structured_notes(structured_result(), run_id="run-5")
+        self.assertEqual(
+            transcript_only["generated"]["actions"][0]["item_id"],
+            transcript_again["generated"]["actions"][0]["item_id"],
+        )
+
     def test_stale_edit_is_rejected_and_discard_restores_generated_value(self) -> None:
         current = ensure_editable_structured_notes(structured_result(), run_id="run-1")
         action = current["generated"]["actions"][0]

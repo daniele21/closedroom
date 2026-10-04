@@ -29,18 +29,42 @@
     }
   },
   "ui_evidence": {
-    "modes": ["assertions", "screenshots", "full_media"],
+    "modes": [
+      "assertions",
+      "screenshots",
+      "full_media"
+    ],
     "default_mode": "screenshots",
     "assertions_allowed_when_ui_incidental": true,
-    "full_media_triggers": ["material_ui_integration_outcome", "motion_or_animation", "timing_or_progression", "navigation_or_transition_sequence", "lifecycle_visibility", "release_acceptance"]
+    "full_media_triggers": [
+      "material_ui_integration_outcome",
+      "motion_or_animation",
+      "timing_or_progression",
+      "navigation_or_transition_sequence",
+      "lifecycle_visibility",
+      "release_acceptance"
+    ]
   },
-  "fidelity_order": ["host_or_fake", "simulated_or_emulated", "representative_virtual", "representative_physical", "target_environment"],
+  "fidelity_order": [
+    "host_or_fake",
+    "simulated_or_emulated",
+    "representative_virtual",
+    "representative_physical",
+    "target_environment"
+  ],
   "target_environments": [
     {
       "id": "closedroom-macos-apple-silicon",
       "platform": "macOS Apple Silicon",
       "description": "Supported ClosedRoom desktop target using the packaged app, loopback FastAPI runtime, WKWebView, native audio capture helpers and local MLX/FluidAudio runtimes.",
-      "material_dimensions": ["macOS version and TCC permissions", "arm64 Apple Silicon architecture", "packaged .app and native helper layout", "microphone and system-audio capture", "MLX/Metal and local model compatibility", "loopback server lifecycle and persistence"]
+      "material_dimensions": [
+        "macOS version and TCC permissions",
+        "arm64 Apple Silicon architecture",
+        "packaged .app and native helper layout",
+        "microphone and system-audio capture",
+        "MLX/Metal and local model compatibility",
+        "loopback server lifecycle and persistence"
+      ]
     }
   ],
   "execution_environments": [
@@ -50,8 +74,14 @@
       "automation": "automated",
       "platform": "Python test host",
       "artifact_surface": "source checkout with FastAPI/TestClient, persisted test stores, deterministic fixtures and mocked native/model boundaries",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "known_gaps": ["does not exercise the packaged .app or WKWebView process boundary", "does not prove real macOS TCC permissions or physical audio-device behavior", "does not prove production MLX/Metal model memory, latency or throughput"]
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "known_gaps": [
+        "does not exercise the packaged .app or WKWebView process boundary",
+        "does not prove real macOS TCC permissions or physical audio-device behavior",
+        "does not prove production MLX/Metal model memory, latency or throughput"
+      ]
     },
     {
       "id": "browser-macos-arm64-ci",
@@ -59,9 +89,15 @@
       "automation": "automated",
       "platform": "GitHub-hosted macOS arm64 with headless Chrome",
       "command": "node scripts/browser_meeting_ui_e2e.mjs",
-      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for saved-Meeting, preparation-recovery, verified-note-edit revision, complete archive-search and busy-AI recording-priority journeys, plus a synthetic demo-mode coherent-workspace journey across Today, Meeting and Projects with wide/compact/narrow resize assertions; ChromeDriver interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "known_gaps": ["does not exercise the packaged WKWebView process boundary", "deterministic API/demo fixtures do not prove the assembled FastAPI persistence/runtime path", "does not prove TCC, native capture, physical audio devices or production MLX/Metal behavior"]
+      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for call-overlay screenshot evidence, saved-Meeting, preparation-recovery, verified-note-edit revision, complete archive-search and busy-AI recording-priority journeys, plus a synthetic demo-mode coherent-workspace journey across Today, Meeting and Projects with wide/compact/narrow resize assertions; ChromeDriver interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "known_gaps": [
+        "does not exercise the packaged WKWebView process boundary",
+        "deterministic API/demo fixtures do not prove the assembled FastAPI persistence/runtime path",
+        "does not prove TCC, native capture, physical audio devices or production MLX/Metal behavior"
+      ]
     },
     {
       "id": "packaged-macos-arm64-ci",
@@ -69,8 +105,15 @@
       "automation": "automated",
       "platform": "GitHub-hosted macOS arm64",
       "artifact_surface": "finalized ad-hoc-signed ClosedRoom .app serving bundled FastAPI runtime and static frontend through the real bundle layout; lifecycle smoke also probes the authenticated meeting-search path to verify bundled SQLite FTS5 availability",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "known_gaps": ["non-Cocoa smoke does not assert interactive WKWebView rendering or window behavior", "hosted macOS does not prove user TCC prompts or physical audio devices", "ad-hoc signing does not prove production signing/notarization", "production MLX/Metal quality and representative performance remain separate evidence"]
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "known_gaps": [
+        "non-Cocoa smoke does not assert interactive WKWebView rendering or window behavior",
+        "hosted macOS does not prove user TCC prompts or physical audio devices",
+        "ad-hoc signing does not prove production signing/notarization",
+        "production MLX/Metal quality and representative performance remain separate evidence"
+      ]
     },
     {
       "id": "target-macos-real",
@@ -79,8 +122,14 @@
       "platform": "macOS Apple Silicon",
       "command": "python3 scripts/real_environment_ui_evidence.py --build",
       "artifact_surface": "successful finalized ClosedRoom .app for the exact clean checkout; built only when absent and then reused unchanged across TCC permission reruns, with isolated HOME, real WKWebView accessibility automation, TCC-backed capture, persistence, screenshots and journey recording",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "known_gaps": ["VoiceOver spoken-output quality and subjective usability still require human judgement", "ad-hoc signing is stable only while the same finalized app is reused; production signing/notarization remains separate evidence", "production MLX/Metal inference quality and performance remain separate evidence"]
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "known_gaps": [
+        "VoiceOver spoken-output quality and subjective usability still require human judgement",
+        "ad-hoc signing is stable only while the same finalized app is reused; production signing/notarization remains separate evidence",
+        "production MLX/Metal inference quality and performance remain separate evidence"
+      ]
     }
   ],
   "critical_journeys": [
@@ -89,12 +138,18 @@
       "claim": "A recording can be created, receive ordered chunks, finalize, update catalog state and remain discoverable after the owning store is reopened.",
       "ui_surface": false,
       "minimum_ui_evidence_mode": "assertions",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["source-contract-suite"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "source-contract-suite"
+      ],
       "minimum_automated_fidelity": "host_or_fake",
       "real_environment_confirmation": "conditional",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["real native capture and permission behavior are confirmed by target-macos-real when material"],
+      "residual_gaps": [
+        "real native capture and permission behavior are confirmed by target-macos-real when material"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -102,11 +157,17 @@
       "claim": "The public transcription workflow coordinates request/job state, transcription service behavior and persistence without losing or falsely completing work.",
       "ui_surface": false,
       "minimum_ui_evidence_mode": "assertions",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["source-contract-suite"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "source-contract-suite"
+      ],
       "minimum_automated_fidelity": "host_or_fake",
       "real_environment_confirmation": "conditional",
-      "residual_gaps": ["production MLX model quality, memory and Metal performance require representative Apple hardware"],
+      "residual_gaps": [
+        "production MLX model quality, memory and Metal performance require representative Apple hardware"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -114,12 +175,18 @@
       "claim": "Native capture capability, permission and lifecycle contracts fail safely and restore run-owned state across stop and error paths.",
       "ui_surface": false,
       "minimum_ui_evidence_mode": "assertions",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["source-contract-suite"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "source-contract-suite"
+      ],
       "minimum_automated_fidelity": "host_or_fake",
       "real_environment_confirmation": "required",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["TCC prompts, ScreenCaptureKit/AVFoundation behavior and physical audio devices require target-macos-real evidence"],
+      "residual_gaps": [
+        "TCC prompts, ScreenCaptureKit/AVFoundation behavior and physical audio devices require target-macos-real evidence"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -127,12 +194,41 @@
       "claim": "A finalized ClosedRoom .app is runnable, reaches loopback readiness, exposes the archive-search endpoint with bundled SQLite FTS5, and stops without leaking its listener or observed child processes.",
       "ui_surface": false,
       "minimum_ui_evidence_mode": "assertions",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["packaged-macos-arm64-ci"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "packaged-macos-arm64-ci"
+      ],
       "minimum_automated_fidelity": "representative_virtual",
       "real_environment_confirmation": "conditional",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["interactive WKWebView/focus and TCC/native-audio behavior require target-macos-real when material", "production signing and MLX/Metal performance remain separate evidence"],
+      "residual_gaps": [
+        "interactive WKWebView/focus and TCC/native-audio behavior require target-macos-real when material",
+        "production signing and MLX/Metal performance remain separate evidence"
+      ],
+      "automation_gap_reason": ""
+    },
+    {
+      "id": "call-overlay-screenshot-evidence",
+      "claim": "During an active call, the overlay exposes explicit display selection and a manual screenshot action; after persisted Stop the saved Meeting exposes the screenshot at its recording timestamp, opens the original, seeks audio from the same point and exposes screenshot-backed note evidence without changing transcript text.",
+      "ui_surface": true,
+      "minimum_ui_evidence_mode": "full_media",
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "browser-macos-arm64-ci",
+        "source-contract-suite"
+      ],
+      "minimum_automated_fidelity": "simulated_or_emulated",
+      "real_environment_confirmation": "required",
+      "real_environment_runner": "target-macos-real",
+      "residual_gaps": [
+        "browser fixtures do not prove real ScreenCaptureKit pixels, TCC permissions, display withdrawal or ClosedRoom overlay exclusion",
+        "headless Chrome does not prove packaged WKWebView/global-hotkey behavior while another application has focus",
+        "physical audio capture and representative local-VLM/Metal behavior remain target-Mac release evidence"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -140,12 +236,19 @@
       "claim": "A saved Meeting renders core transcript content without waiting for diagnostics or visual routes, keeps core content visible through accessory loading/failure, and recovers each accessory independently on retry.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["browser-macos-arm64-ci"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "browser-macos-arm64-ci"
+      ],
       "minimum_automated_fidelity": "simulated_or_emulated",
       "real_environment_confirmation": "conditional",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["packaged WKWebView rendering remains a release confirmation when the saved-Meeting interaction is release-critical", "TCC/native capture and model fidelity are outside this journey"],
+      "residual_gaps": [
+        "packaged WKWebView rendering remains a release confirmation when the saved-Meeting interaction is release-critical",
+        "TCC/native capture and model fidelity are outside this journey"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -153,12 +256,19 @@
       "claim": "A user can prepare notes with one durable action, read the transcript before notes finish, reconnect to the same parent work, preserve the transcript through notes failure, resume without rerunning ASR, and land on ready notes when the retry completes.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["browser-macos-arm64-ci"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "browser-macos-arm64-ci"
+      ],
       "minimum_automated_fidelity": "simulated_or_emulated",
       "real_environment_confirmation": "conditional",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["deterministic browser fixtures do not prove production ASR/LLM quality or latency", "packaged WKWebView rendering remains a release confirmation when this journey is release-critical"],
+      "residual_gaps": [
+        "deterministic browser fixtures do not prove production ASR/LLM quality or latency",
+        "packaged WKWebView rendering remains a release confirmation when this journey is release-critical"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -166,12 +276,20 @@
       "claim": "A user can open source evidence for generated notes, edit an action or decision, keep that correction across reload/restart, regenerate notes as a new revision, see ambiguous carry as an explicit conflict and resolve it deliberately without silent remapping.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["browser-macos-arm64-ci"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "browser-macos-arm64-ci"
+      ],
       "minimum_automated_fidelity": "simulated_or_emulated",
       "real_environment_confirmation": "conditional",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["deterministic browser fixtures do not prove the assembled FastAPI/CatalogStore restart path, which remains source-contract evidence at integration", "packaged WKWebView focus and accessibility remain release confirmation when material", "production LLM quality and revision frequency are outside this journey"],
+      "residual_gaps": [
+        "deterministic browser fixtures do not prove the assembled FastAPI/CatalogStore restart path, which remains source-contract evidence at integration",
+        "packaged WKWebView focus and accessibility remain release confirmation when material",
+        "production LLM quality and revision frequency are outside this journey"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -179,12 +297,21 @@
       "claim": "A user can search the complete local meeting archive beyond the Today preview, open a matching source meeting, navigate back and recover the query without loading the whole archive into React.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["browser-macos-arm64-ci", "source-contract-suite", "packaged-macos-arm64-ci"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "browser-macos-arm64-ci",
+        "source-contract-suite",
+        "packaged-macos-arm64-ci"
+      ],
       "minimum_automated_fidelity": "simulated_or_emulated",
       "real_environment_confirmation": "conditional",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["browser fixtures do not prove the assembled SQLite projection, which is covered by source-contract and packaged FTS5 evidence", "packaged WKWebView focus behavior remains release confirmation when material"],
+      "residual_gaps": [
+        "browser fixtures do not prove the assembled SQLite projection, which is covered by source-contract and packaged FTS5 evidence",
+        "packaged WKWebView focus behavior remains release confirmation when material"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -192,12 +319,21 @@
       "claim": "When managed AI work is already active, starting a meeting reserves capture priority without force-killing the active phase, shows a truthful cancellable preparation state, starts capture only after the safe boundary, holds queued heavy work during recording, and releases priority on Stop so queued work can resume.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["browser-macos-arm64-ci", "source-contract-suite"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "browser-macos-arm64-ci",
+        "source-contract-suite"
+      ],
       "minimum_automated_fidelity": "simulated_or_emulated",
       "real_environment_confirmation": "required",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["browser fixtures prove user-visible ordering but not physical microphone/system-audio capture", "source-contract tests prove scheduler ordering but not representative MLX/Metal pressure or thermal behavior", "packaged WKWebView and TCC-backed capture remain target-Mac release evidence"],
+      "residual_gaps": [
+        "browser fixtures prove user-visible ordering but not physical microphone/system-audio capture",
+        "source-contract tests prove scheduler ordering but not representative MLX/Metal pressure or thermal behavior",
+        "packaged WKWebView and TCC-backed capture remain target-Mac release evidence"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -205,12 +341,20 @@
       "claim": "Today, a saved Meeting and Projects share one stable application hierarchy across wide, compact and narrow windows: Meeting remains a child of Today, Projects is the second peer destination, New Meeting remains the persistent primary action, utility controls remain secondary, theme continuity survives navigation and the layout does not introduce page-wide horizontal overflow.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
-      "automated_environment_refs": ["browser-macos-arm64-ci"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "browser-macos-arm64-ci"
+      ],
       "minimum_automated_fidelity": "simulated_or_emulated",
       "real_environment_confirmation": "required",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["headless Chrome proves responsive hierarchy and interaction semantics but not the packaged WKWebView process boundary", "window chrome, keyboard/focus behavior, reduced-motion behavior and VoiceOver quality require target-macos-real release evidence", "this journey uses synthetic demo data and does not claim persistence/runtime fidelity"],
+      "residual_gaps": [
+        "headless Chrome proves responsive hierarchy and interaction semantics but not the packaged WKWebView process boundary",
+        "window chrome, keyboard/focus behavior, reduced-motion behavior and VoiceOver quality require target-macos-real release evidence",
+        "this journey uses synthetic demo data and does not claim persistence/runtime fidelity"
+      ],
       "automation_gap_reason": ""
     },
     {
@@ -218,12 +362,17 @@
       "claim": "A user can create a meeting, observe ready and active recording states, stop and save, and reach the persisted workspace through the real WKWebView and native capture path.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
-      "target_environment_refs": ["closedroom-macos-apple-silicon"],
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
       "automated_environment_refs": [],
       "minimum_automated_fidelity": "host_or_fake",
       "real_environment_confirmation": "required",
       "real_environment_runner": "target-macos-real",
-      "residual_gaps": ["VoiceOver spoken-output quality and subjective usability remain human evidence", "production signing/notarization and MLX/Metal inference quality remain outside this journey"],
+      "residual_gaps": [
+        "VoiceOver spoken-output quality and subjective usability remain human evidence",
+        "production signing/notarization and MLX/Metal inference quality remain outside this journey"
+      ],
       "automation_gap_reason": "Interactive WKWebView plus TCC-backed microphone/system-audio capture requires the target Mac; integration uses affected automated frontend/source/package evidence and carries this residual target-environment delta to release."
     }
   ]

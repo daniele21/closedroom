@@ -114,15 +114,46 @@ export default function TranscriptTextView({
     return segments.slice(start, start + SEGMENTS_PER_PAGE);
   }, [segments, currentPage]);
 
+  const screenshotPlacement = useMemo(() => {
+    const anchored = new Map<number, RecordingScreenshot[]>();
+    const standalone: RecordingScreenshot[] = [];
+    const ordered = [...screenshots].sort((a, b) => (
+      a.timestamp - b.timestamp || a.sequence - b.sequence || a.screenshot_id.localeCompare(b.screenshot_id)
+    ));
+
+    ordered.forEach((shot) => {
+      const candidates = segments
+        .filter((segment) => segment.start <= shot.timestamp && shot.timestamp <= segment.end)
+        .sort((a, b) => b.start - a.start || a.end - b.end || a.id - b.id);
+      const anchor = candidates[0];
+      if (!anchor) {
+        standalone.push(shot);
+        return;
+      }
+      const current = anchored.get(anchor.id) || [];
+      current.push(shot);
+      anchored.set(anchor.id, current);
+    });
+
+    return { anchored, standalone };
+  }, [screenshots, segments]);
+
   const timelineItems = useMemo(() => {
     const pageStartIndex = currentPage * SEGMENTS_PER_PAGE;
     const nextPageStart = segments[pageStartIndex + SEGMENTS_PER_PAGE]?.start;
-    const lowerBound = currentPage === 0 ? Number.NEGATIVE_INFINITY : (segments[pageStartIndex]?.start ?? Number.POSITIVE_INFINITY);
+    const lowerBound = currentPage === 0
+      ? Number.NEGATIVE_INFINITY
+      : (segments[pageStartIndex]?.start ?? Number.POSITIVE_INFINITY);
     const upperBound = nextPageStart ?? Number.POSITIVE_INFINITY;
 
-    const screenshotItems = screenshots
+    const screenshotItems = screenshotPlacement.standalone
       .filter((shot) => shot.timestamp >= lowerBound && shot.timestamp < upperBound)
-      .map((shot) => ({ kind: 'screenshot' as const, timestamp: shot.timestamp, sequence: shot.sequence, screenshot: shot }));
+      .map((shot) => ({
+        kind: 'screenshot' as const,
+        timestamp: shot.timestamp,
+        sequence: shot.sequence,
+        screenshot: shot,
+      }));
     const segmentItems = pageSegments.map((segment) => ({
       kind: 'segment' as const,
       timestamp: segment.start,
@@ -133,7 +164,45 @@ export default function TranscriptTextView({
       a.timestamp - b.timestamp
       || (a.kind === b.kind ? a.sequence - b.sequence : (a.kind === 'screenshot' ? -1 : 1))
     ));
-  }, [currentPage, pageSegments, screenshots, segments]);
+  }, [currentPage, pageSegments, screenshotPlacement.standalone, segments]);
+
+  const renderScreenshotMarker = (shot: RecordingScreenshot, compact = false) => (
+    <button
+      key={`screenshot-${shot.screenshot_id}`}
+      type="button"
+      onClick={() => onOpenScreenshot?.(shot)}
+      className={`group flex w-full items-center gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 text-left transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/10 ${
+        compact ? 'mt-2 px-2.5 py-1.5' : 'px-3 py-2'
+      }`}
+      aria-label={`Apri screenshot a ${formatTime(shot.timestamp)}`}
+      data-screenshot-id={shot.screenshot_id}
+      data-screenshot-timestamp={shot.timestamp}
+    >
+      <span className={`flex shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 ${
+        compact ? 'h-7 w-7' : 'h-8 w-8'
+      }`}>
+        <ImageIcon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">
+          Screenshot {shot.sequence + 1} · {formatTime(shot.timestamp)}
+        </span>
+        <span className="block truncate text-xs text-text-secondary">
+          {shot.available ? (shot.display_title || 'Schermo acquisito') : 'Immagine originale non disponibile'}
+        </span>
+      </span>
+      {shot.thumbnail_available && (
+        <img
+          src={shot.thumbnail_url}
+          alt=""
+          loading="lazy"
+          className={`shrink-0 rounded-md border border-border-subtle object-cover ${
+            compact ? 'h-8 w-12' : 'h-10 w-16'
+          }`}
+        />
+      )}
+    </button>
+  );
 
   /** Render text with search highlights */
   const renderHighlightedText = (text: string, segmentId: number) => {
@@ -287,36 +356,7 @@ export default function TranscriptTextView({
       <div className="flex flex-col gap-3">
         {timelineItems.map((item) => {
           if (item.kind === 'screenshot') {
-            const shot = item.screenshot;
-            return (
-              <button
-                key={`screenshot-${shot.screenshot_id}`}
-                type="button"
-                onClick={() => onOpenScreenshot?.(shot)}
-                className="group flex w-full items-center gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-left transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/10"
-                aria-label={`Apri screenshot a ${formatTime(shot.timestamp)}`}
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-300">
-                  <ImageIcon className="h-4 w-4" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">
-                    Screenshot · {formatTime(shot.timestamp)}
-                  </span>
-                  <span className="block truncate text-xs text-text-secondary">
-                    {shot.available ? (shot.display_title || 'Schermo acquisito') : 'Immagine originale non disponibile'}
-                  </span>
-                </span>
-                {shot.thumbnail_available && (
-                  <img
-                    src={shot.thumbnail_url}
-                    alt=""
-                    loading="lazy"
-                    className="h-10 w-16 shrink-0 rounded-md border border-border-subtle object-cover"
-                  />
-                )}
-              </button>
-            );
+            return renderScreenshotMarker(item.screenshot);
           }
 
           const seg = item.segment;
@@ -384,6 +424,10 @@ export default function TranscriptTextView({
               <p className="text-text-primary text-sm leading-relaxed font-medium">
                 {renderHighlightedText(seg.text, seg.id)}
               </p>
+
+              {(screenshotPlacement.anchored.get(seg.id) || []).map((shot) => (
+                renderScreenshotMarker(shot, true)
+              ))}
             </div>
           );
         })}

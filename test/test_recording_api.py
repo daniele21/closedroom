@@ -95,7 +95,21 @@ class RecordingApiTests(unittest.TestCase):
 
     def test_manual_screenshot_api_persists_before_success_and_retry_is_idempotent(self) -> None:
         class FakeCaptureManager:
-            def capture_screenshot(self, recording_id: str, *, request_id: str, display_id: int | None = None):
+            def begin_screenshot(self, recording_id: str) -> None:
+                return None
+
+            def finish_screenshot(self, recording_id: str) -> None:
+                return None
+
+            def capture_screenshot(
+                self,
+                recording_id: str,
+                *,
+                request_id: str,
+                display_id: int | None = None,
+                admission_held: bool = False,
+            ):
+                self.assert_admission = admission_held
                 return {
                     "request_id": request_id,
                     "recording_id": recording_id,
@@ -145,6 +159,47 @@ class RecordingApiTests(unittest.TestCase):
         thumbnail = self.client.get(first.json()["thumbnail_url"])
         self.assertEqual(original.content, b"\xff\xd8\xfforiginal")
         self.assertEqual(thumbnail.content, b"\xff\xd8\xffthumb")
+
+    def test_screenshot_failure_does_not_stop_or_mutate_recording(self) -> None:
+        class FailingCaptureManager:
+            def begin_screenshot(self, recording_id: str) -> None:
+                return None
+
+            def finish_screenshot(self, recording_id: str) -> None:
+                return None
+
+            def capture_screenshot(
+                self,
+                recording_id: str,
+                *,
+                request_id: str,
+                display_id: int | None = None,
+                admission_held: bool = False,
+            ):
+                raise RuntimeError("screen_capture_permission_required")
+
+        self.app.state.capture_manager = FailingCaptureManager()
+        created = self.client.post(
+            "/v1/recordings",
+            json={
+                "title": "Screenshot failure",
+                "mime_type": "audio/wav",
+                "capture_mode": "both",
+                "capture_backend": "native",
+            },
+        )
+        recording_id = created.json()["id"]
+
+        response = self.client.post(
+            f"/v1/recordings/{recording_id}/screenshots",
+            json={"request_id": "request-fail", "display_id": 7},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("screen_capture_permission_required", response.json()["detail"])
+        persisted = self.app.state.recording_store.get(recording_id)
+        self.assertEqual(persisted["status"], "recording")
+        self.assertEqual(persisted["screenshot_count"], 0)
 
     def test_visual_intelligence_v2_endpoint_preserves_v1_response(self) -> None:
         created = self.client.post(

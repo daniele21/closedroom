@@ -275,6 +275,88 @@ class RecordingStoreTests(unittest.TestCase):
         self.assertTrue(listed[0]["thumbnail_available"])
 
 
+    def test_visual_v2_marks_deleted_screenshot_source_as_stale_without_mutating_history(self) -> None:
+        recording = self.store.create(
+            title="Visual source validity",
+            mime_type="audio/wav",
+            model="test-model",
+            language="it",
+            capture_mode="both",
+            capture_backend="native",
+        )
+        saved = self.store.save_screenshot(
+            recording["id"],
+            request_id="validity-request",
+            capture={
+                "timestamp": 4.0,
+                "captured_uptime": 104.0,
+                "recording_ready_uptime": 100.0,
+                "captured_wall_time": 200.0,
+                "display_id": 7,
+                "display_title": "Screen 1",
+                "width": 1920,
+                "height": 1080,
+                "thumbnail_width": 640,
+                "thumbnail_height": 360,
+                "overlay_exclusion": "closedroom_windows",
+            },
+            original=b"\xff\xd8\xfforiginal",
+            thumbnail=b"\xff\xd8\xffthumb",
+        )
+        observation = {
+            "observation_id": "visual-manual-shared",
+            "sequence": 1_000_000_000,
+            "timestamp": 4.0,
+            "task": "shared_content",
+            "status": "valid",
+            "source": {
+                "kind": "manual_screenshot",
+                "screenshot_id": saved["screenshot_id"],
+                "sha256": saved["sha256"],
+            },
+        }
+        document = {
+            "schema_version": 2,
+            "observations": [observation],
+            "speaker_intervals": [],
+            "meeting_state_events": [],
+            "share_sessions": [],
+            "semantic_links": [],
+            "routing_summary": {},
+            "manual_screenshot_sources": [{
+                "screenshot_id": saved["screenshot_id"],
+                "timestamp": 4.0,
+                "sha256": saved["sha256"],
+                "display_id": 7,
+                "status": "processed",
+            }],
+            "model": "qwen",
+            "prompt_version": 3,
+        }
+        self.store.replace_visual_intelligence_artifacts(
+            recording["id"],
+            [observation],
+            {"version": 2, "status": "completed"},
+            document=document,
+        )
+
+        current = self.store.get_visual_intelligence_v2(recording["id"])
+        self.assertEqual(current["source_validity"]["status"], "current")
+
+        self.store.delete_screenshot(recording["id"], saved["screenshot_id"])
+        stale = self.store.get_visual_intelligence_v2(recording["id"])
+
+        self.assertEqual(stale["source_validity"]["status"], "stale")
+        self.assertEqual(
+            stale["source_validity"]["missing_screenshot_ids"],
+            [saved["screenshot_id"]],
+        )
+        self.assertEqual(
+            stale["document"]["manual_screenshot_sources"][0]["screenshot_id"],
+            saved["screenshot_id"],
+        )
+
+
     def test_restart_reconciles_screenshot_orphans_without_dropping_manifest_evidence(self) -> None:
         recording = self.store.create(
             title="Screenshot restart",

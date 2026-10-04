@@ -53,6 +53,8 @@ class CaptureSession:
     stopped: bool = False
     screenshot_display_id: int | None = None
     screenshot_lock: threading.Lock = field(default_factory=threading.Lock)
+    screenshot_condition: threading.Condition = field(default_factory=threading.Condition)
+    screenshot_inflight: int = 0
     accept_screenshots: bool = True
 
 
@@ -171,23 +173,61 @@ class NativeCaptureManager:
             })
         return {"displays": displays, "reason": payload.get("reason")}
 
+    def begin_screenshot(self, recording_id: str) -> None:
+        with self._lock:
+            session = self._sessions.get(recording_id)
+        if session is None or session.stopped:
+            raise RuntimeError("Native capture session is not active")
+        with session.screenshot_condition:
+            if not session.accept_screenshots or session.stopped:
+                raise RuntimeError("Screenshot capture is closing")
+            session.screenshot_inflight += 1
+
+    def finish_screenshot(self, recording_id: str) -> None:
+        with self._lock:
+            session = self._sessions.get(recording_id)
+        if session is None:
+            return
+        with session.screenshot_condition:
+            if session.screenshot_inflight > 0:
+                session.screenshot_inflight -= 1
+            session.screenshot_condition.notify_all()
+
     def capture_screenshot(
         self,
         recording_id: str,
         *,
         request_id: str,
         display_id: int | None = None,
+        admission_held: bool = False,
     ) -> dict[str, Any]:
         request_id = request_id.strip()
         if not request_id or len(request_id) > 128:
             raise ValueError("request_id must contain between 1 and 128 characters")
 
+        if not admission_held:
+            self.begin_screenshot(recording_id)
+        try:
+            return self._capture_screenshot_admitted(
+                recording_id,
+                request_id=request_id,
+                display_id=display_id,
+            )
+        finally:
+            if not admission_held:
+                self.finish_screenshot(recording_id)
+
+    def _capture_screenshot_admitted(
+        self,
+        recording_id: str,
+        *,
+        request_id: str,
+        display_id: int | None,
+    ) -> dict[str, Any]:
         with self._lock:
             session = self._sessions.get(recording_id)
         if session is None or session.stopped:
             raise RuntimeError("Native capture session is not active")
-        if not session.accept_screenshots:
-            raise RuntimeError("Screenshot capture is closing")
 
         display_payload = self.displays()
         displays = display_payload.get("displays") or []
@@ -447,11 +487,15 @@ class NativeCaptureManager:
         if session is None:
             return {"recording_id": recording_id, "backend": "native", "status": "not_active"}
 
-        session.accept_screenshots = False
-        screenshot_drained = session.screenshot_lock.acquire(timeout=10)
-        if screenshot_drained:
-            session.screenshot_lock.release()
-            
+        with session.screenshot_condition:
+            session.accept_screenshots = False
+            deadline = time.monotonic() + 10.0
+            while session.screenshot_inflight > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                session.screenshot_condition.wait(timeout=remaining)
+
         was_killed = False
         if session.process.poll() is None:
             session.process.terminate()

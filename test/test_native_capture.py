@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import stat
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -48,7 +49,7 @@ elif cmd == 'screenshot':
     }))
 elif cmd == 'start':
     print(json.dumps({'type': 'ready', 'recording_ready_uptime': 10.0}), flush=True)
-    time.sleep(0.05)
+    time.sleep(0.2)
     print(json.dumps({'type': 'stopped'}), flush=True)
 else:
     print(json.dumps({'type': 'stopped'}))
@@ -105,6 +106,34 @@ else:
         self.assertEqual(captured["original_bytes"], b"\xff\xd8\xfforiginal")
         self.assertEqual(captured["thumbnail_bytes"], b"\xff\xd8\xffthumb")
         self.assertEqual(manager.get_session("rec-shot").screenshot_display_id, 7)
+
+
+    def test_stop_waits_until_admitted_screenshot_persistence_finishes(self) -> None:
+        manager = NativeCaptureManager(helper_path=self.helper)
+        manager.start("rec-drain", self.root, "both")
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            session = manager.get_session("rec-drain")
+            if session and session.ready_event:
+                break
+            time.sleep(0.005)
+
+        manager.begin_screenshot("rec-drain")
+        result = {}
+
+        def stop_capture():
+            result.update(manager.stop("rec-drain"))
+
+        thread = threading.Thread(target=stop_capture)
+        thread.start()
+        time.sleep(0.03)
+        self.assertTrue(thread.is_alive())
+
+        manager.finish_screenshot("rec-drain")
+        thread.join(timeout=2.0)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result["status"], "stopped")
 
     def test_validate_audio_file_behavior(self) -> None:
         from local_asr_server.native_capture import validate_audio_file

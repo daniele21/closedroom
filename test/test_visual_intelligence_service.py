@@ -26,6 +26,7 @@ from local_asr_server.visual_intelligence.inference import (
 )
 from local_asr_server.visual_intelligence.service import PostMeetingVisualService
 from local_asr_server.visual_intelligence.contracts import (
+    MAX_VISUAL_VLM_CANDIDATES,
     VISUAL_GENERATION_STAGING_DIR,
     VISUAL_PROCESSING_CHECKPOINT,
     VISUAL_RECOVERY_TTL_SECONDS,
@@ -512,6 +513,149 @@ class VisualIntelligenceTests(unittest.TestCase):
             self.assertEqual(v2["document"], persisted["document"])
             self.assertEqual(len(store.list_visual_frames(recording["id"])), 3)
 
+
+    def test_v2_manual_screenshot_is_processed_with_source_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = RecordingStore(
+                root,
+                use_settings_dir=False,
+                catalog=CatalogStore(root / "catalog.db"),
+            )
+            recording = store.create(
+                title="Manual screenshot",
+                mime_type="audio/wav",
+                model="test",
+                language="it",
+                capture_mode="both",
+                capture_backend="native",
+            )
+            jpeg = self._jpeg("blue", pattern=True)
+            saved = store.save_screenshot(
+                recording["id"],
+                request_id="manual-shot",
+                capture={
+                    "timestamp": 17.25,
+                    "captured_uptime": 117.25,
+                    "recording_ready_uptime": 100.0,
+                    "captured_wall_time": 200.0,
+                    "display_id": 7,
+                    "display_title": "Screen 1",
+                    "width": 120,
+                    "height": 80,
+                    "thumbnail_width": 120,
+                    "thumbnail_height": 80,
+                    "overlay_exclusion": "closedroom_windows",
+                },
+                original=jpeg,
+                thumbnail=jpeg,
+            )
+            payload = {"segments": [], "stats": {}}
+            settings = {
+                "visual_intelligence_enabled": True,
+                "visual_llm_model": "qwen3-vl-4b",
+                "visual_routing_mode": "v2",
+                "visual_minimum_observations": 1,
+                "visual_minimum_margin": 0.0,
+                "visual_minimum_distinct_turns": 1,
+                "visual_minimum_temporal_support_seconds": 0.0,
+            }
+            client = _TaskAwareClient()
+            service = PostMeetingVisualService(client_factory=lambda **_: client)
+            with patch(
+                "local_asr_server.visual_intelligence.service.load_settings",
+                return_value=settings,
+            ), patch(
+                "local_asr_server.visual_intelligence.service.prepare_candidate_message",
+                side_effect=lambda candidate, _: [{"task": candidate.task.value}],
+            ):
+                service.process(
+                    SimpleNamespace(recordings=store, runtime=_Runtime()),
+                    recording["id"],
+                    payload,
+                )
+
+            document = store.get_visual_intelligence_v2(recording["id"])["document"]
+            shared = [
+                item for item in document["observations"]
+                if item.get("task") == "shared_content"
+                and (item.get("source") or {}).get("screenshot_id") == saved["screenshot_id"]
+            ]
+            self.assertEqual(len(shared), 1)
+            self.assertEqual(shared[0]["source"]["kind"], "manual_screenshot")
+            self.assertEqual(shared[0]["source"]["sha256"], saved["sha256"])
+            inventory = document["manual_screenshot_sources"]
+            self.assertEqual(inventory[0]["screenshot_id"], saved["screenshot_id"])
+            self.assertEqual(inventory[0]["status"], "processed")
+
+    def test_manual_screenshot_reserves_capacity_inside_visual_candidate_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = RecordingStore(
+                root,
+                use_settings_dir=False,
+                catalog=CatalogStore(root / "catalog.db"),
+            )
+            recording = store.create(
+                title="Budgeted screenshot",
+                mime_type="audio/wav",
+                model="test",
+                language="it",
+                capture_mode="both",
+                capture_backend="native",
+            )
+            jpeg = self._jpeg("blue", pattern=True)
+            store.save_screenshot(
+                recording["id"],
+                request_id="budget-shot",
+                capture={
+                    "timestamp": 4.0,
+                    "captured_uptime": 104.0,
+                    "recording_ready_uptime": 100.0,
+                    "captured_wall_time": 200.0,
+                    "display_id": 7,
+                    "display_title": "Screen 1",
+                    "width": 120,
+                    "height": 80,
+                    "thumbnail_width": 120,
+                    "thumbnail_height": 80,
+                    "overlay_exclusion": "closedroom_windows",
+                },
+                original=jpeg,
+                thumbnail=jpeg,
+            )
+            service = PostMeetingVisualService(
+                client_factory=lambda **_: _TaskAwareClient(),
+            )
+            with patch(
+                "local_asr_server.visual_intelligence.service.load_settings",
+                return_value={
+                    "visual_intelligence_enabled": True,
+                    "visual_llm_model": "qwen3-vl-4b",
+                    "visual_routing_mode": "v2",
+                },
+            ), patch(
+                "local_asr_server.visual_intelligence.service.TaskAwareFrameRouter",
+            ) as router_cls, patch(
+                "local_asr_server.visual_intelligence.service.prepare_candidate_message",
+                side_effect=lambda candidate, _: [{"task": candidate.task.value}],
+            ):
+                router_cls.return_value.route.return_value = (
+                    [],
+                    {"rejected_task_evaluations": 0},
+                )
+                service.process(
+                    SimpleNamespace(recordings=store, runtime=_Runtime()),
+                    recording["id"],
+                    {"segments": [], "stats": {}},
+                )
+
+            config = router_cls.call_args.args[0]
+            self.assertEqual(
+                config.max_candidates,
+                MAX_VISUAL_VLM_CANDIDATES - 1,
+            )
+
     def test_v2_progressive_ocr_bypasses_qwen_for_known_speaker_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -663,12 +807,12 @@ class VisualIntelligenceTests(unittest.TestCase):
                 capture_mode="pc_only", capture_backend="native",
             )
             store.stage_visual_frame(recording["id"], 0, 0.0, self._jpeg("blue", pattern=True))
-            frames = store.list_visual_frames(recording["id"])
+            frames = store.list_visual_evidence_frames(recording["id"])
             session_dir = Path(frames[0]["path"]).parent.parent
             config = VisualRoutingConfig(mode="v2")
             candidates, _ = TaskAwareFrameRouter(config).route(frames, [])
             service = PostMeetingVisualService()
-            fingerprint = service._processing_fingerprint(candidates, "qwen3-vl-4b")
+            fingerprint = service._processing_fingerprint(candidates, frames, "qwen3-vl-4b")
             store.begin_visual_processing(
                 recording["id"], fingerprint, prompt_version=3,
             )
@@ -905,6 +1049,62 @@ class VisualIntelligenceTests(unittest.TestCase):
             self.assertEqual(outcome["status"], "degraded")
             self.assertTrue(outcome["fallback_used"])
             self.assertEqual(outcome["fallback_reason"], "no_visual_frames_captured")
+
+    def test_v2_missing_manual_screenshot_is_explicit_in_visual_document(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = RecordingStore(root, use_settings_dir=False, catalog=CatalogStore(root / "catalog.db"))
+            recording = store.create(
+                title="Missing screenshot",
+                mime_type="audio/wav",
+                model="test",
+                language="it",
+                capture_mode="both",
+                capture_backend="native",
+            )
+            jpeg = self._jpeg("blue", pattern=True)
+            saved = store.save_screenshot(
+                recording["id"],
+                request_id="missing-shot",
+                capture={
+                    "timestamp": 9.0,
+                    "captured_uptime": 109.0,
+                    "recording_ready_uptime": 100.0,
+                    "captured_wall_time": 200.0,
+                    "display_id": 7,
+                    "display_title": "Screen 1",
+                    "width": 120,
+                    "height": 80,
+                    "thumbnail_width": 120,
+                    "thumbnail_height": 80,
+                    "overlay_exclusion": "closedroom_windows",
+                },
+                original=jpeg,
+                thumbnail=jpeg,
+            )
+            store.screenshot_asset_path(recording["id"], saved["screenshot_id"]).unlink()
+
+            service = PostMeetingVisualService()
+            with patch(
+                "local_asr_server.visual_intelligence.service.load_settings",
+                return_value={
+                    "visual_intelligence_enabled": True,
+                    "visual_llm_model": "qwen3-vl-4b",
+                    "visual_routing_mode": "v2",
+                },
+            ):
+                result = service.process(
+                    SimpleNamespace(recordings=store, runtime=_Runtime()),
+                    recording["id"],
+                    {"segments": [], "stats": {}},
+                )
+
+            outcome = result["stats"]["visual_intelligence"]
+            self.assertEqual(outcome["status"], "degraded")
+            self.assertEqual(outcome["fallback_reason"], "manual_screenshot_assets_unavailable")
+            document = store.get_visual_intelligence_v2(recording["id"])["document"]
+            self.assertEqual(document["manual_screenshot_sources"][0]["screenshot_id"], saved["screenshot_id"])
+            self.assertEqual(document["manual_screenshot_sources"][0]["status"], "asset_missing")
 
     def test_per_run_visual_override_takes_precedence_over_global_setting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

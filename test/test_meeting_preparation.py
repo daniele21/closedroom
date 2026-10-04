@@ -18,6 +18,7 @@ class FakeRecordings:
     def __init__(self, root: Path) -> None:
         self.audio = root / "mic.wav"
         self.audio.write_bytes(b"audio-source")
+        self.screenshots = []
         self.recording = {
             "id": "rec-1",
             "status": "recorded",
@@ -42,6 +43,10 @@ class FakeRecordings:
     def transcribable_tracks(self, recording_id: str):
         self.get(recording_id)
         return [(self.recording["audio_tracks"][0], self.audio)]
+
+    def list_screenshots(self, recording_id: str):
+        self.get(recording_id)
+        return list(self.screenshots)
 
 
 class FakeTranscriptionService:
@@ -428,6 +433,269 @@ class MeetingPreparationTests(unittest.TestCase):
         self.assertEqual(second_state["result"]["resumed_from_job_id"], first["id"])
         self.assertEqual(transcription_calls, [])
 
+    def test_visual_failure_degrades_to_text_notes_without_blocking_preparation(self) -> None:
+        self.transcriptions.current = self._transcription()
+        self.recordings.screenshots = [{
+            "screenshot_id": "shot-1",
+            "sequence": 0,
+            "timestamp": 8.0,
+            "sha256": "shot-hash",
+            "display_id": 7,
+            "capture_kind": "manual",
+            "available": True,
+        }]
+        visual_calls = []
+        analysis_calls = []
+
+        def failing_visual(transcription_id, callback):
+            visual_calls.append(transcription_id)
+            child = self.store.create(
+                job_id="visual-failed",
+                job_type="visual_intelligence",
+                scope_type="transcription",
+                scope_id=transcription_id,
+            )
+            snapshot = self.store.update(
+                child["id"],
+                status="failed",
+                current_step="failed",
+                error="visual backend unavailable",
+            )
+            callback(snapshot)
+            return snapshot
+
+        parent = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory(analysis_calls),
+            start_visual=failing_visual,
+        )
+        result = self.store.get(parent["id"])
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(visual_calls, ["trans-1"])
+        self.assertEqual(analysis_calls, ["analysis:trans-1"])
+        self.assertEqual(result["result"]["visual_status"], "failed")
+        self.assertTrue(any("visual backend unavailable" in warning for warning in result["result"]["warnings"]))
+        self.assertEqual(
+            [child["id"] for child in self.store.list_children(parent["id"], stage="visual")],
+            ["visual-failed"],
+        )
+
+    def test_screenshot_inclusion_choice_is_persisted_and_skips_visual_when_disabled(self) -> None:
+        self.transcriptions.current = self._transcription()
+        self.recordings.screenshots = [{
+            "screenshot_id": "shot-choice",
+            "sequence": 0,
+            "timestamp": 8.0,
+            "sha256": "shot-choice-hash",
+            "display_id": 7,
+            "capture_kind": "manual",
+            "available": True,
+        }]
+        visual_calls = []
+        analysis_calls = []
+
+        def unexpected_visual(transcription_id, _callback):
+            visual_calls.append(transcription_id)
+            raise AssertionError("visual stage must not start when screenshots are excluded")
+
+        excluded = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory(analysis_calls),
+            start_visual=unexpected_visual,
+            include_screenshots=False,
+        )
+        excluded_state = self.store.get(excluded["id"])
+
+        self.assertEqual(excluded_state["status"], "completed")
+        self.assertEqual(visual_calls, [])
+        self.assertEqual(excluded_state["result"]["visual_status"], "excluded")
+        self.assertFalse(excluded_state["result"]["include_screenshots"])
+        self.assertEqual(excluded_state["result"]["screenshot_count"], 0)
+        self.assertEqual(excluded_state["result"]["screenshot_source_snapshot"], [])
+        self.assertFalse(excluded_state["payload"]["include_screenshots"])
+
+        included = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory(analysis_calls),
+            include_screenshots=True,
+        )
+        self.assertNotEqual(included["id"], excluded["id"])
+        included_state = self.store.get(included["id"])
+        self.assertTrue(included_state["result"]["include_screenshots"])
+        self.assertEqual(included_state["result"]["screenshot_count"], 1)
+        self.assertEqual(
+            included_state["result"]["screenshot_source_snapshot"][0]["screenshot_id"],
+            "shot-choice",
+        )
+
+
+    def test_notes_retry_reuses_completed_visual_stage(self) -> None:
+        self.transcriptions.current = self._transcription()
+        self.recordings.screenshots = [{
+            "screenshot_id": "shot-retry",
+            "sequence": 0,
+            "timestamp": 8.0,
+            "sha256": "shot-retry-hash",
+            "display_id": 7,
+            "capture_kind": "manual",
+            "available": True,
+        }]
+        visual_calls = []
+        pipeline_calls = []
+
+        def completed_visual(transcription_id, callback):
+            visual_calls.append(transcription_id)
+            child = self.store.create(
+                job_id=f"visual-{len(visual_calls)}",
+                job_type="visual_intelligence",
+                scope_type="transcription",
+                scope_id=transcription_id,
+            )
+            snapshot = self.store.update(
+                child["id"],
+                status="completed",
+                current_step="completed",
+                progress=100,
+                result={"outcome_status": "completed"},
+            )
+            callback(snapshot)
+            return snapshot
+
+        def failing_pipeline(transcription_id, callback):
+            pipeline_calls.append(transcription_id)
+            job_id = "analysis-visual-retry-failed"
+            self.store.create(
+                job_id=job_id,
+                job_type="analysis",
+                scope_type="transcription",
+                scope_id=transcription_id,
+            )
+            snapshot = self.store.update(
+                job_id,
+                status="failed",
+                current_step="failed",
+                error="notes failed",
+            )
+            callback(snapshot)
+            return {
+                "pipeline_run_id": "pipeline-failed",
+                "pipeline_id": "meeting_default",
+                "status": "queued",
+                "jobs": [{"job_id": job_id, "status": "failed"}],
+            }
+
+        first = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=failing_pipeline,
+            start_visual=completed_visual,
+        )
+        self.assertEqual(self.store.get(first["id"])["status"], "failed")
+        self.assertEqual(visual_calls, ["trans-1"])
+
+        second = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory(pipeline_calls),
+            start_visual=completed_visual,
+        )
+        second_state = self.store.get(second["id"])
+
+        self.assertEqual(second_state["status"], "completed")
+        self.assertEqual(visual_calls, ["trans-1"])
+        self.assertEqual(second_state["result"]["visual_status"], "reused_completed")
+
+    def test_visual_model_change_invalidates_completed_preparation(self) -> None:
+        self.transcriptions.current = self._transcription()
+        self.recordings.screenshots = [{
+            "screenshot_id": "shot-model",
+            "sequence": 0,
+            "timestamp": 8.0,
+            "sha256": "shot-model-hash",
+            "display_id": 7,
+            "capture_kind": "manual",
+            "available": True,
+        }]
+
+        def completed_visual(transcription_id, callback):
+            job_id = f"visual-model-{len(self.store.list_jobs(job_type='visual_intelligence', limit=100))}"
+            self.store.create(
+                job_id=job_id,
+                job_type="visual_intelligence",
+                scope_type="transcription",
+                scope_id=transcription_id,
+            )
+            snapshot = self.store.update(
+                job_id,
+                status="completed",
+                current_step="completed",
+                progress=100,
+                result={"outcome_status": "completed"},
+            )
+            callback(snapshot)
+            return snapshot
+
+        self.settings["visual_llm_model"] = "visual-model-a"
+        first = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory([]),
+            start_visual=completed_visual,
+        )
+        self.assertEqual(self.store.get(first["id"])["status"], "completed")
+
+        self.settings["visual_llm_model"] = "visual-model-b"
+        second = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory([]),
+            start_visual=completed_visual,
+        )
+
+        self.assertNotEqual(second["id"], first["id"])
+        self.assertNotEqual(
+            self.store.get(second["id"])["result"]["visual_identity"],
+            self.store.get(first["id"])["result"]["visual_identity"],
+        )
+
+    def test_screenshot_identity_invalidates_completed_preparation_but_reuses_asr(self) -> None:
+        self.transcriptions.current = self._transcription()
+        transcription_calls = []
+        pipeline_calls = []
+        first = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory(transcription_calls),
+            start_pipeline=self._completed_pipeline_factory(pipeline_calls),
+        )
+        self.assertEqual(self.store.get(first["id"])["status"], "completed")
+
+        self.recordings.screenshots = [{
+            "screenshot_id": "shot-2",
+            "sequence": 0,
+            "timestamp": 12.0,
+            "sha256": "new-shot-hash",
+            "display_id": 7,
+            "capture_kind": "manual",
+            "available": False,
+        }]
+        second = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory(transcription_calls),
+            start_pipeline=self._completed_pipeline_factory(pipeline_calls),
+        )
+
+        self.assertNotEqual(second["id"], first["id"])
+        self.assertEqual(transcription_calls, [])
+        self.assertEqual(self.store.get(second["id"])["status"], "completed")
+        self.assertEqual(
+            self.store.get(second["id"])["result"]["visual_status"],
+            "skipped_assets_unavailable",
+        )
+
 
 class JobStorePreparationContractTests(unittest.TestCase):
     def test_existing_database_adds_dedupe_column_before_creating_index(self) -> None:
@@ -508,6 +776,7 @@ class JobStorePreparationContractTests(unittest.TestCase):
             )
             self.assertTrue(replacement_created)
             self.assertEqual(replacement["id"], "parent-3")
+
 
 
 if __name__ == "__main__":

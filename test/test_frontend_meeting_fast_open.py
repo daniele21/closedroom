@@ -27,7 +27,8 @@ class FrontendMeetingFastOpenContractTests(unittest.TestCase):
         self.assertIn("ApiClient.getMeetingDiagnostics(recordingId)", self.source)
         self.assertIn("activeTab !== 'analysis'", self.source)
         self.assertIn("ApiClient.recordingVisualFrames(recordingId)", self.source)
-        self.assertIn("visualEnabled && activeTab === 'analysis'", self.source)
+        self.assertIn("visualResultAvailable && activeTab === 'analysis'", self.source)
+        self.assertIn("visualData?.source_validity?.status === 'stale'", self.source)
 
     def test_stale_core_loads_are_ignored_and_terminal_reloads_are_coalesced(self) -> None:
         self.assertIn("loadGenerationRef", self.source)

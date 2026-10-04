@@ -96,6 +96,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [visualFramesError, setVisualFramesError] = useState<string | null>(null);
   const [screenshots, setScreenshots] = useState<RecordingScreenshot[]>([]);
   const [screenshotsState, setScreenshotsState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [includeScreenshots, setIncludeScreenshots] = useState(true);
   const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -129,10 +130,15 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
       }
     }, 100);
   };
-  const visualEnabled = meeting?.transcription?.stats?.visual_intelligence?.version === 2;
+  const visualResultAvailable = meeting?.transcription?.stats?.visual_intelligence?.version === 2;
+  const savedScreenshotCount = screenshots.length;
+  const availableScreenshotCount = screenshots.filter((item) => item.available).length;
+  const visualEvidenceCount = visualFrameCount + availableScreenshotCount;
   const { data: visualData, loading: visualLoading, error: visualError } = useVisualIntelligence(
-    demoMode ? null : recordingId, visualEnabled && activeTab === 'analysis',
+    demoMode ? null : recordingId, visualResultAvailable && activeTab === 'analysis',
   );
+  const visualSourcesStale = visualData?.source_validity?.status === 'stale';
+  const visualEnabled = visualResultAvailable && !visualSourcesStale;
 
   const load = () => {
     if (!recordingId) return Promise.resolve();
@@ -257,6 +263,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     setVisualFramesState('idle');
     setScreenshots([]);
     setScreenshotsState('idle');
+    setIncludeScreenshots(true);
     setVisualFramesError(null);
     userSelectedTabRef.current = false;
     void load();
@@ -264,6 +271,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
       loadGenerationRef.current += 1;
       diagnosticsGenerationRef.current += 1;
       visualFramesGenerationRef.current += 1;
+      screenshotsGenerationRef.current += 1;
     };
   }, [recordingId, demoMode, lang]);
 
@@ -277,11 +285,10 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
       !['transcript', 'analysis'].includes(activeTab)
       || !recordingId
       || demoMode
-      || !meeting?.transcription
       || screenshotsState !== 'idle'
     ) return;
     void loadScreenshots();
-  }, [activeTab, recordingId, demoMode, meeting?.transcription?.id, screenshotsState]);
+  }, [activeTab, recordingId, demoMode, screenshotsState]);
 
   useEffect(() => {
     if (
@@ -354,7 +361,10 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     setBusyAction('meeting_preparation');
     setError(null);
     try {
-      await prepareMeetingNotes(meeting.id);
+      const requestedIncludeScreenshots = canResumePreparation
+        ? latestPreparation?.result?.include_screenshots !== false
+        : includeScreenshots;
+      await prepareMeetingNotes(meeting.id, requestedIncludeScreenshots);
       await load();
     } catch (err: any) {
       setError(err?.message || (lang === 'it' ? 'Impossibile preparare le note' : 'Failed to prepare meeting notes'));
@@ -364,7 +374,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   };
 
   const startVisualContextAnalysis = async () => {
-    if (!meeting?.transcription || demoMode || isBusy || visualFrameCount <= 0) return;
+    if (!meeting?.transcription || demoMode || isBusy || visualEvidenceCount <= 0) return;
     setBusyAction('visual_intelligence');
     setError(null);
     try {
@@ -704,6 +714,29 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 {latestPreparation?.error && canResumePreparation && (
                   <p className="text-[10px] text-warning mt-1 line-clamp-2">{latestPreparation.error}</p>
                 )}
+                {savedScreenshotCount > 0 && (
+                  <label className="mt-2 inline-flex items-center gap-2 text-[11px] text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={canResumePreparation
+                        ? latestPreparation?.result?.include_screenshots !== false
+                        : includeScreenshots}
+                      disabled={canResumePreparation || busyAction === 'meeting_preparation'}
+                      onChange={(event) => setIncludeScreenshots(event.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-border-subtle accent-[var(--color-accent)]"
+                    />
+                    <span>
+                      {lang === 'it'
+                        ? `Includi ${savedScreenshotCount} screenshot`
+                        : `Include ${savedScreenshotCount} screenshot${savedScreenshotCount === 1 ? '' : 's'}`}
+                    </span>
+                    {canResumePreparation && (
+                      <span className="text-text-muted">
+                        {lang === 'it' ? '· stesse fonti del tentativo' : '· same sources as this attempt'}
+                      </span>
+                    )}
+                  </label>
+                )}
               </div>
             </div>
             <div className="flex w-full sm:w-auto items-center gap-2">
@@ -736,7 +769,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
         )}
 
-        {activeTab === 'analysis' && !isBusy && meeting.transcription && visualFrameCount > 0 && !visualEnabled && (
+        {activeTab === 'analysis' && !isBusy && meeting.transcription && visualEvidenceCount > 0 && !visualEnabled && (
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 rounded-xl border border-border-subtle bg-bg-surface/30">
             <div className="flex items-start gap-2.5 min-w-0">
               <Sparkles className="h-4 w-4 text-text-muted shrink-0 mt-0.5" aria-hidden="true" />
@@ -764,7 +797,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
         )}
 
-        {activeTab === 'analysis' && meeting.transcription && !visualEnabled && visualFramesState === 'error' && (
+        {activeTab === 'analysis' && meeting.transcription && !visualEnabled && visualEvidenceCount === 0 && visualFramesState === 'error' && screenshotsState !== 'loading' && (
           <div className="flex flex-col gap-2 rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 text-xs text-text-secondary sm:flex-row sm:items-center sm:justify-between" role="status">
             <div>
               <p className="font-semibold text-text-primary">

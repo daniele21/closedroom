@@ -25,9 +25,14 @@ async function requestPreparation(
   return response.json();
 }
 
-export function prepareMeetingNotes(recordingId: string): Promise<TranscriptionJob> {
+export function prepareMeetingNotes(
+  recordingId: string,
+  includeScreenshots = true,
+): Promise<TranscriptionJob> {
   return requestPreparation(`/v1/meetings/${recordingId}/prepare`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ include_screenshots: includeScreenshots }),
   });
 }
 

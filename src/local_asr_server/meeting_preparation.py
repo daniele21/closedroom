@@ -18,11 +18,12 @@ from local_asr_server.transcription_jobs import (
     TRANSCRIPTION_JOB_TYPE,
     VISUAL_INTELLIGENCE_JOB_TYPE,
 )
+from local_asr_server.visual_intelligence.service import visual_processing_identity
 
 
 MEETING_PREPARATION_JOB_TYPE = "meeting_preparation"
 MEETING_PREPARATION_PIPELINE = "meeting_default"
-PREPARATION_RESULT_VERSION = 2
+PREPARATION_RESULT_VERSION = 3
 
 logger = logging.getLogger("uvicorn.error")
 TerminalCallback = Callable[[dict[str, Any]], None]
@@ -63,12 +64,39 @@ class MeetingPreparationManager:
         start_transcription: StartTranscription,
         start_pipeline: StartPipeline,
         start_visual: StartVisual | None = None,
+        include_screenshots: bool = True,
     ) -> dict[str, Any]:
         # Resolve the recording before creating durable work so a bad id cannot
         # leave an orphan parent job.
         self.services.recordings.get(recording_id, include_result=False)
         transcription_request = TranscriptionJobRequest(visual_intelligence_enabled=False)
-        source_identity = self._source_identity(recording_id)
+        screenshots = self.services.recordings.list_screenshots(recording_id)
+        selected_screenshots = screenshots if include_screenshots else []
+        available_screenshots = [item for item in selected_screenshots if item.get("available")]
+        screenshot_source_snapshot = [
+            {
+                "screenshot_id": item.get("screenshot_id"),
+                "sha256": item.get("sha256"),
+                "timestamp": item.get("timestamp"),
+                "available": bool(item.get("available")),
+            }
+            for item in selected_screenshots
+        ]
+        audio_source_identity = self._audio_source_identity(recording_id)
+        source_identity = self._source_identity(
+            recording_id,
+            audio_source_identity=audio_source_identity,
+            screenshots=selected_screenshots,
+        )
+        visual_material = (
+            visual_processing_identity(load_settings())
+            if available_screenshots
+            else {
+                "version": 1,
+                "status": "excluded" if not include_screenshots else "not_applicable",
+            }
+        )
+        visual_identity = _hash_json(visual_material)
         asr_identity, asr_material = self._asr_identity(transcription_request)
         analysis_request = AnalysisPipelineRequest(
             recording_id=recording_id,
@@ -80,8 +108,10 @@ class MeetingPreparationManager:
             {
                 "version": PREPARATION_RESULT_VERSION,
                 "recording_id": recording_id,
+                "include_screenshots": include_screenshots,
                 "source_identity": source_identity,
                 "asr_identity": asr_identity,
+                "visual_identity": visual_identity,
                 "analysis_identity": analysis_identity,
             }
         )
@@ -113,6 +143,8 @@ class MeetingPreparationManager:
                 "recording_id": recording_id,
                 "pipeline_id": MEETING_PREPARATION_PIPELINE,
                 "preparation_key": preparation_key,
+                "include_screenshots": include_screenshots,
+                "screenshot_count": len(selected_screenshots),
             },
             current_step="preparing_transcript",
             progress=5,
@@ -124,7 +156,13 @@ class MeetingPreparationManager:
             "version": PREPARATION_RESULT_VERSION,
             "preparation_key": preparation_key,
             "source_identity": source_identity,
+            "audio_source_identity": audio_source_identity,
+            "include_screenshots": include_screenshots,
+            "screenshot_count": len(selected_screenshots),
+            "available_screenshot_count": len(available_screenshots),
+            "screenshot_source_snapshot": screenshot_source_snapshot,
             "asr_identity": asr_identity,
+            "visual_identity": visual_identity,
             "analysis_identity": analysis_identity,
             "pipeline_id": MEETING_PREPARATION_PIPELINE,
             "transcription_id": None,
@@ -149,7 +187,7 @@ class MeetingPreparationManager:
 
         reusable = self._reusable_transcription(
             recording_id,
-            source_identity=source_identity,
+            audio_source_identity=audio_source_identity,
             asr_identity=asr_identity,
             asr_material=asr_material,
         )
@@ -274,16 +312,62 @@ class MeetingPreparationManager:
         start_pipeline: StartPipeline,
         start_visual: StartVisual | None,
     ) -> None:
-        screenshots = self.services.recordings.list_screenshots(
-            (self.services.jobs.get(parent_job_id) or {}).get("scope_id") or ""
-        )
+        parent = self.services.jobs.get(parent_job_id)
+        recording_id = (parent or {}).get("scope_id") or ""
+        result = (parent or {}).get("result") or {}
+        if not result.get("include_screenshots", True):
+            self._merge_result(parent_job_id, visual_status="excluded")
+            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
+            return
+        screenshots = self.services.recordings.list_screenshots(recording_id)
+        current_by_id = {
+            str(item.get("screenshot_id")): item
+            for item in screenshots
+            if item.get("screenshot_id")
+        }
+        selected_snapshot = [
+            item for item in result.get("screenshot_source_snapshot") or []
+            if isinstance(item, dict) and item.get("screenshot_id")
+        ]
+        if selected_snapshot:
+            selected = []
+            unavailable_selected = []
+            for snapshot in selected_snapshot:
+                screenshot_id = str(snapshot["screenshot_id"])
+                current = current_by_id.get(screenshot_id)
+                expected_sha = str(snapshot.get("sha256") or "")
+                current_sha = str((current or {}).get("sha256") or "")
+                if (
+                    current is None
+                    or not current.get("available")
+                    or (expected_sha and current_sha and expected_sha != current_sha)
+                ):
+                    unavailable_selected.append(screenshot_id)
+                    continue
+                selected.append(current)
+            screenshots = selected
+        else:
+            unavailable_selected = [
+                str(item.get("screenshot_id"))
+                for item in screenshots
+                if item.get("screenshot_id") and not item.get("available")
+            ]
         available = [item for item in screenshots if item.get("available")]
+        if unavailable_selected:
+            self._append_warning(
+                parent_job_id,
+                f"screenshot_sources_unavailable:{len(unavailable_selected)}",
+            )
+        if unavailable_selected and not available:
+            self._append_warning(parent_job_id, "screenshot_assets_unavailable")
+            self._merge_result(parent_job_id, visual_status="skipped_assets_unavailable")
+            self._start_analysis(parent_job_id, transcription_id, start_pipeline)
+            return
         if start_visual is None or not screenshots:
             self._start_analysis(parent_job_id, transcription_id, start_pipeline)
             return
-        if not available:
-            self._append_warning(parent_job_id, "screenshot_assets_unavailable")
-            self._merge_result(parent_job_id, visual_status="skipped_assets_unavailable")
+
+        if self._reuse_completed_visual_stage(parent_job_id):
             self._start_analysis(parent_job_id, transcription_id, start_pipeline)
             return
 
@@ -309,12 +393,12 @@ class MeetingPreparationManager:
             event_payload={
                 "phase": "visual",
                 "transcription_id": transcription_id,
-                "screenshot_count": len(screenshots),
+                "screenshot_count": len(selected_snapshot) if selected_snapshot else len(screenshots),
                 "available_screenshot_count": len(available),
             },
             progress_detail={
                 "phase": "visual",
-                "screenshot_count": len(screenshots),
+                "screenshot_count": len(selected_snapshot) if selected_snapshot else len(screenshots),
                 "available_screenshot_count": len(available),
             },
         )
@@ -509,6 +593,31 @@ class MeetingPreparationManager:
         return len(current)
 
 
+    def _reuse_completed_visual_stage(self, parent_job_id: str) -> bool:
+        parent = self.services.jobs.get(parent_job_id)
+        if parent is None:
+            return False
+        previous_id = (parent.get("result") or {}).get("resumed_from_job_id")
+        if not previous_id:
+            return False
+        previous = self.services.jobs.get(previous_id)
+        previous_result = (previous or {}).get("result") or {}
+        visual_job_id = previous_result.get("visual_job_id")
+        if not visual_job_id:
+            return False
+        visual_job = self.services.jobs.get(visual_job_id)
+        if visual_job is None or visual_job.get("status") != "completed":
+            return False
+        outcome = (visual_job.get("result") or {}).get("outcome_status") or "completed"
+        self._merge_result(
+            parent_job_id,
+            visual_job_id=visual_job_id,
+            visual_status=f"reused_{outcome}",
+        )
+        for warning in previous_result.get("warnings") or []:
+            self._append_warning(parent_job_id, str(warning))
+        return True
+
     def _append_warning(self, parent_job_id: str, warning: str) -> None:
         parent = self.services.jobs.get(parent_job_id)
         if parent is None:
@@ -549,7 +658,8 @@ class MeetingPreparationManager:
             progress_detail={"phase": "failed"},
         )
 
-    def _source_identity(self, recording_id: str) -> str:
+    def _audio_source_identity(self, recording_id: str) -> str:
+        """Stable ASR source identity. Visual evidence must never invalidate it."""
         tracks = []
         for track, audio_path in self.services.recordings.transcribable_tracks(recording_id):
             chunks = track.get("chunks") or []
@@ -572,7 +682,18 @@ class MeetingPreparationManager:
             else:
                 source["sha256"] = _hash_file(audio_path)
             tracks.append(source)
-        screenshots = [
+        # Keep the pre-screenshot v1 material exactly stable for backward reuse.
+        return _hash_json({"version": 1, "tracks": tracks})
+
+    def _source_identity(
+        self,
+        recording_id: str,
+        *,
+        audio_source_identity: str | None = None,
+        screenshots: list[dict[str, Any]] | None = None,
+    ) -> str:
+        screenshots = screenshots if screenshots is not None else self.services.recordings.list_screenshots(recording_id)
+        screenshot_material = [
             {
                 "screenshot_id": item.get("screenshot_id"),
                 "sequence": item.get("sequence"),
@@ -582,12 +703,14 @@ class MeetingPreparationManager:
                 "capture_kind": item.get("capture_kind"),
                 "available": item.get("available"),
             }
-            for item in self.services.recordings.list_screenshots(recording_id)
+            for item in screenshots
         ]
         return _hash_json({
             "version": 2,
-            "tracks": tracks,
-            "screenshots": screenshots,
+            "audio_source_identity": (
+                audio_source_identity or self._audio_source_identity(recording_id)
+            ),
+            "screenshots": screenshot_material,
         })
 
     def _asr_identity(
@@ -631,7 +754,7 @@ class MeetingPreparationManager:
         self,
         recording_id: str,
         *,
-        source_identity: str,
+        audio_source_identity: str,
         asr_identity: str,
         asr_material: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -648,8 +771,12 @@ class MeetingPreparationManager:
             result = preparation.get("result") or {}
             if result.get("transcription_id") != transcription_id:
                 continue
+            prior_audio_identity = result.get("audio_source_identity")
+            if prior_audio_identity is None and int(result.get("version") or 1) < 2:
+                # v1 preparation source_identity contained audio only.
+                prior_audio_identity = result.get("source_identity")
             if (
-                result.get("source_identity") == source_identity
+                prior_audio_identity == audio_source_identity
                 and result.get("asr_identity") == asr_identity
             ):
                 return transcription

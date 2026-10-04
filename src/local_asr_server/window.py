@@ -113,6 +113,7 @@ class ClosedRoomWindowManager:
         self._delegate: Optional[ClosedRoomWindowDelegate] = None
         self._observer: Optional[ClosedRoomActivationObserver] = None
         self._key_event_monitor: Optional[objc.objc_object] = None
+        self._global_key_event_monitor: Optional[objc.objc_object] = None
 
     def show(self) -> None:
         """Show the native window, creating it if it doesn't exist yet."""
@@ -197,9 +198,9 @@ class ClosedRoomWindowManager:
         command_pressed = bool(modifiers & NSEventModifierFlagCommand)
         shift_pressed = bool(modifiers & NSEventModifierFlagShift)
 
-        if command_pressed and shift_pressed and characters == "s" and self.overlay_webview:
+        if command_pressed and shift_pressed and characters == "9" and self.overlay_webview:
             self.evaluate_overlay_js(self._keyboard_event_js(
-                key="s", code="KeyS", meta_key=True, shift_key=True,
+                key="9", code="Digit9", meta_key=True, shift_key=True,
             ))
         elif command_pressed and (key_code == 40 or characters == "k"):
             self._dispatch_keyboard_event_to_webview(key="k", code="KeyK", meta_key=True)
@@ -217,6 +218,28 @@ class ClosedRoomWindowManager:
         self._key_event_monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
             NSEventMaskKeyDown,
             self._handle_local_key_event,
+        )
+
+    def _handle_global_key_event(self, event) -> None:
+        """Route the screenshot shortcut while another application has focus."""
+        if not self.overlay_webview:
+            return
+        modifiers = int(event.modifierFlags())
+        characters = str(event.charactersIgnoringModifiers() or "").lower()
+        command_pressed = bool(modifiers & NSEventModifierFlagCommand)
+        shift_pressed = bool(modifiers & NSEventModifierFlagShift)
+        if command_pressed and shift_pressed and characters == "9":
+            self.evaluate_overlay_js(self._keyboard_event_js(
+                key="9", code="Digit9", meta_key=True, shift_key=True,
+            ))
+
+    def _install_global_key_monitor(self) -> None:
+        """Observe the screenshot shortcut without consuming the foreground app event."""
+        if self._global_key_event_monitor is not None:
+            return
+        self._global_key_event_monitor = NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
+            NSEventMaskKeyDown,
+            self._handle_global_key_event,
         )
 
     def show_loading(self) -> None:
@@ -481,6 +504,7 @@ class ClosedRoomWindowManager:
             None
         )
         self.overlay_drag_handle = drag_handle
+        self._install_global_key_monitor()
 
         # Load overlay hash route
         ns_url = NSURL.URLWithString_(f"{self.url}/#overlay")
@@ -496,6 +520,9 @@ class ClosedRoomWindowManager:
         if self._key_event_monitor is not None:
             NSEvent.removeMonitor_(self._key_event_monitor)
             self._key_event_monitor = None
+        if self._global_key_event_monitor is not None:
+            NSEvent.removeMonitor_(self._global_key_event_monitor)
+            self._global_key_event_monitor = None
         if self.window:
             self.window.setDelegate_(None)
             self.window.close()

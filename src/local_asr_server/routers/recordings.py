@@ -109,21 +109,26 @@ def capture_screenshot(recording_id: str, request: Request, body: ScreenshotCapt
         if existing is not None:
             return _screenshot_payload(recording_id, existing)
 
-        captured = services.capture.capture_screenshot(
-            recording_id,
-            request_id=body.request_id,
-            display_id=body.display_id,
-        )
-        original = captured.pop("original_bytes")
-        thumbnail = captured.pop("thumbnail_bytes")
-        saved = store.save_screenshot(
-            recording_id,
-            request_id=body.request_id,
-            capture=captured,
-            original=original,
-            thumbnail=thumbnail,
-        )
-        return _screenshot_payload(recording_id, saved)
+        services.capture.begin_screenshot(recording_id)
+        try:
+            captured = services.capture.capture_screenshot(
+                recording_id,
+                request_id=body.request_id,
+                display_id=body.display_id,
+                admission_held=True,
+            )
+            original = captured.pop("original_bytes")
+            thumbnail = captured.pop("thumbnail_bytes")
+            saved = store.save_screenshot(
+                recording_id,
+                request_id=body.request_id,
+                capture=captured,
+                original=original,
+                thumbnail=thumbnail,
+            )
+            return _screenshot_payload(recording_id, saved)
+        finally:
+            services.capture.finish_screenshot(recording_id)
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except ValueError as exc:

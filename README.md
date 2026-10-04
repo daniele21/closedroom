@@ -115,6 +115,8 @@ A normal ClosedRoom workflow does not require choosing models, audio devices or 
 
 Optional visual intelligence can be enabled for a specifically selected macOS window. It may contribute evidence for naming existing speaker clusters, but **audio diarization remains the source of who spoke when and uncertain identity mappings abstain rather than pretending certainty**.
 
+During native recording, the compact overlay can also save a **manual full-display screenshot** as local meeting evidence. The image is timestamped against the recording clock, reopens from the transcript/notes at that point, and stays separate from spoken evidence. This action is manual rather than continuous, and remote-provider selection does not silently send the screenshot outside the Mac.
+
 ![ClosedRoom speaker intelligence: audio diarization produces stable speaker clusters, while optional visual evidence can support conservative names or abstain](docs/assets/closedroom-speaker-intelligence.png)
 
 _Visual evidence may support naming an existing speaker cluster; it never replaces audio diarization, and low-confidence mappings remain unknown._

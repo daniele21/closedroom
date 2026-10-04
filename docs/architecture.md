@@ -152,6 +152,8 @@ sequenza già committata genera conflitto. Ogni sessione usa un lock dedicato e
 le scritture dei metadata sono atomiche. La selezione visuale è indipendente
 dalla scelta audio: nessuna sorgente visuale esplicita significa nessun frame.
 
+Durante una cattura nativa attiva l'overlay può richiedere anche uno screenshot manuale del monitor. È una one-shot ScreenCaptureKit separata dall'audio: il monitor è scelto esplicitamente quando ce n'è più di uno, le finestre ClosedRoom vengono escluse dal content filter e il timestamp canonico è `captured_uptime - recording_ready_uptime`. La risposta API arriva solo dopo il commit di originale, thumbnail e manifest nel `RecordingStore`; un `request_id` rende idempotente il retry. Stop chiude prima l'admission di nuovi screenshot e attende bounded gli scatti già ammessi, senza far dipendere la finalizzazione audio dall'inferenza.
+
 ### 5.2 Trascrizione e arricchimenti post-meeting
 
 Il normale percorso Meeting separa la trascrizione dall'arricchimento visuale.
@@ -380,6 +382,7 @@ CORS non è aperto implicitamente: le origin ammesse provengono da configurazion
 - sequenze chunk, hash, dimensioni e timestamp client;
 - finalizzazione, recovery, discard e sincronizzazione catalogo;
 - staging e cleanup dei frame visuali;
+- screenshot manuali, manifest versionato, thumbnail, idempotenza request e riconciliazione restart;
 - report qualità, intelligence e diarizzazione;
 - query canonica `active_recording()` usata anche dalla resource admission.
 
@@ -397,7 +400,11 @@ CORS non è aperto implicitamente: le origin ammesse provengono da configurazion
 ├── intelligence.json                  # metriche conversazionali
 ├── visual_observations.jsonl          # evidenze Qwen strutturate
 ├── visual_summary.json                # summary visual intelligence
-└── .visual-staging/                    # JPEG persistenti della registrazione
+├── screenshots/
+│   ├── manifest.json                  # screenshot manuali + provenance/timestamp/SHA
+│   ├── screenshot-....jpg             # originale
+│   └── screenshot-...-thumb.jpg       # thumbnail UI
+└── .visual-staging/                    # frame continui/opt-in esistenti
 ```
 
 Durante l'upload browser vengono usati file parziali. La finalizzazione rende
@@ -425,6 +432,7 @@ L'helper nativo può acquisire:
 - microfono con AVFoundation;
 - audio di sistema con ScreenCaptureKit;
 - frame JPEG a bassa frequenza da una sola finestra esplicitamente scelta.
+- screenshot full-display one-shot richiesti manualmente dall'overlay, con originale e thumbnail separati.
 
 La capacità di cattura visuale resta tecnicamente separata da quella audio.
 `NewRecordingPage` non espone toggle Qwen o modello visuale: presenta invece
@@ -504,7 +512,7 @@ la cattura è attiva.
 
 `PostMeetingVisualService` nel percorso on-demand:
 
-1. legge i frame ordinati dallo staging;
+1. legge le evidenze visuali ordinate dal `RecordingStore`: frame continui e, nel routing v2, screenshot manuali con provenance tipizzata;
 2. esegue routing task-aware `v2`, candidate detection e dedupe;
 3. applica un hard ceiling di 2048 work item dopo il dedupe, usando sampling deterministico sull'intera timeline se il limite viene superato;
 4. richiede a `RuntimeServiceManager` un modello con capability `image` solo quando serve inferenza;
@@ -604,7 +612,7 @@ In caso di evidenza insufficiente si astiene.
 Se la visual intelligence è richiesta ma non esiste alcun frame, l'esito è
 `degraded` con causa `no_visual_frames_captured`, non un successo implicito nei
 workflow tecnici; l'endpoint on-demand prodotto rifiuta invece l'avvio prima di
-creare il job quando non esistono frame.
+creare il job quando non esistono frame. Gli screenshot manuali non vengono eliminati dalla dedupe/cadenza: ciascun asset disponibile entra almeno come candidato `shared_content`; un asset mancante resta inventariato come `asset_missing`. Le osservazioni persistono `source.kind`, `screenshot_id`, SHA-256 e display così structured notes locali possono citarle senza confonderle con il parlato. La selezione di un provider cloud testuale non autorizza implicitamente l'invio dell'immagine o della sua interpretazione.
 
 ### Audio intelligence
 
