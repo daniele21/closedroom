@@ -441,6 +441,8 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     var onFatalError: ((String) -> Void)?
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "closedroom.native.system-audio")
+    private let stateLock = NSLock()
+    private var stopRequested = false
 
     func start() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -467,13 +469,26 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stop() async {
-        if let stream = stream {
-            try? await stream.stopCapture()
+        stateLock.lock()
+        stopRequested = true
+        let activeStream = stream
+        stateLock.unlock()
+
+        if let activeStream = activeStream {
+            try? await activeStream.stopCapture()
         }
+
+        stateLock.lock()
         stream = nil
+        stateLock.unlock()
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        stateLock.lock()
+        let expectedStop = stopRequested
+        stateLock.unlock()
+        if expectedStop { return }
+
         let msg = "ScreenCaptureKit session error: \(error.localizedDescription)"
         JSONEmitter.shared.emit([
             "type": "error",
@@ -498,7 +513,9 @@ final class VisualWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private let epochUptime: Double
     private let queue = DispatchQueue(label: "closedroom.native.visual-window")
     private let context = CIContext(options: [.cacheIntermediates: false])
+    private let stateLock = NSLock()
     private var stream: SCStream?
+    private var stopRequested = false
     private var sequence = 0
 
     init(windowID: Int, outputDir: URL, fps: Double, epochUptime: Double) {
@@ -555,11 +572,24 @@ final class VisualWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stop() async {
-        if let stream = stream { try? await stream.stopCapture() }
+        stateLock.lock()
+        stopRequested = true
+        let activeStream = stream
+        stateLock.unlock()
+
+        if let activeStream = activeStream { try? await activeStream.stopCapture() }
+
+        stateLock.lock()
         stream = nil
+        stateLock.unlock()
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        stateLock.lock()
+        let expectedStop = stopRequested
+        stateLock.unlock()
+        if expectedStop { return }
+
         onFatalError?("Visual ScreenCaptureKit session error: \(error.localizedDescription)")
     }
 
