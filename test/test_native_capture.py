@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from local_asr_server.native_capture import NativeCaptureManager
@@ -181,6 +182,21 @@ else:
 
         with self.assertRaises(ValueError):
             manager.ensure_permissions("browser")
+
+    def test_default_manager_refreshes_compiled_helper_on_macos(self) -> None:
+        manager = NativeCaptureManager()
+        with (
+            patch("local_asr_server.native_capture.sys.platform", "darwin"),
+            patch(
+                "local_asr_server.native_capture_helper.get_helper_binary",
+                return_value=str(self.helper),
+            ) as get_helper_binary,
+        ):
+            result = manager.capabilities()
+
+        self.assertTrue(result["available"])
+        self.assertEqual(manager.helper_path, self.helper)
+        self.assertGreaterEqual(get_helper_binary.call_count, 1)
 
 
 if __name__ == "__main__":
