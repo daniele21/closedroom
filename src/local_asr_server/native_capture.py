@@ -101,9 +101,18 @@ def validate_audio_file(file_path: Path) -> dict[str, Any]:
 
 class NativeCaptureManager:
     def __init__(self, helper_path: Path | None = None) -> None:
+        self._helper_path_overridden = helper_path is not None
         self.helper_path = helper_path or get_native_capture_helper_path()
         self._lock = threading.Lock()
         self._sessions: dict[str, CaptureSession] = {}
+
+    def _refresh_dev_helper(self) -> None:
+        """Compile the native helper when its Swift source changed in dev mode."""
+        if self._helper_path_overridden or sys.platform != "darwin":
+            return
+        from local_asr_server.native_capture_helper import get_helper_binary
+
+        self.helper_path = Path(get_helper_binary())
 
     def get_session(self, recording_id: str) -> CaptureSession | None:
         """Return the active capture session without exposing mutable storage."""
@@ -355,6 +364,7 @@ class NativeCaptureManager:
     ) -> dict[str, Any]:
         if mode not in VALID_NATIVE_MODES:
             raise ValueError(f"Invalid native capture mode: {mode}")
+        self._refresh_dev_helper()
         if not self.capabilities().get("available"):
             raise RuntimeError("Native capture helper is not available")
         with self._lock:
@@ -418,6 +428,7 @@ class NativeCaptureManager:
 
     def _run_json(self, args: list[str], *, fallback_reason: str) -> dict[str, Any]:
         try:
+            self._refresh_dev_helper()
             completed = subprocess.run(
                 [str(self.helper_path), *args],
                 capture_output=True,
