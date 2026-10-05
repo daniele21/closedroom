@@ -509,6 +509,20 @@ else:
         self.assertIsNone(session.process.poll())
         manager.cancel("rec-recovery")
 
+    def test_native_app_wires_only_overlay_window_into_capture_exclusion(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        window_source = (root / "src" / "local_asr_server" / "window.py").read_text(encoding="utf-8")
+        menubar_source = (root / "src" / "local_asr_server" / "menubar.py").read_text(encoding="utf-8")
+
+        self.assertIn('setTitle_("ClosedRoom Recording Overlay")', window_source)
+        self.assertIn("def screenshot_exclusion_window_ids(self) -> list[int]:", window_source)
+        self.assertIn("self._overlay_capture_window_id = window_id if window_id > 0 else None", window_source)
+        self.assertIn(
+            "set_screenshot_exclusion_provider(\n            self.app_instance.window_manager.screenshot_exclusion_window_ids",
+            menubar_source,
+        )
+
+
     def test_native_helper_excludes_only_exact_recording_overlay(self) -> None:
         helper_source = (
             Path(__file__).resolve().parents[1]
