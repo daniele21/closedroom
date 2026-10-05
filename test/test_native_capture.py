@@ -155,6 +155,7 @@ else:
         self.assertEqual(manager.displays()["displays"][0]["display_id"], 7)
         started = manager.start("rec-visual", self.root, "both", visual_window_id=42, visual_fps=1.0)
         self.assertEqual(started["status"], "starting")
+        manager.cancel("rec-visual")
 
 
     def test_manual_screenshot_uses_ready_uptime_and_persists_display_selection(self) -> None:
@@ -176,6 +177,7 @@ else:
         self.assertEqual(captured["original_bytes"], b"\xff\xd8\xfforiginal")
         self.assertEqual(captured["thumbnail_bytes"], b"\xff\xd8\xffthumb")
         self.assertEqual(manager.get_session("rec-shot").screenshot_display_id, 7)
+        manager.cancel("rec-shot")
 
 
     def test_stop_waits_until_admitted_screenshot_persistence_finishes(self) -> None:
@@ -224,7 +226,13 @@ else:
         manager = NativeCaptureManager(helper_path=self.helper)
         started = manager.start("rec-2", self.root, "both")
         self.assertEqual(started["status"], "starting")
-        
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            session = manager.get_session("rec-2")
+            if session and session.ready_event:
+                break
+            time.sleep(0.01)
+
         result = manager.stop("rec-2")
         self.assertEqual(result["status"], "stopped")
         
@@ -384,7 +392,8 @@ else:
             display_id=7,
         )
 
-        self.assertNotEqual(recovered["worker_pid"], original_worker_pid)
+        self.assertIsNotNone(original_worker_pid)
+        self.assertEqual(recovered["worker_pid"], session.screenshot_worker_pid)
         self.assertEqual(recovered["worker_restart_count"], 1)
         self.assertIsNone(session.process.poll())
         manager.cancel("rec-recovery")
