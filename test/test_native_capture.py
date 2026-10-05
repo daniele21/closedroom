@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import stat
+import subprocess
 import tempfile
 import threading
 import time
@@ -211,6 +212,66 @@ else:
         self.assertIn("SCScreenshotManager.captureImage(", helper_source)
         self.assertIn('"capture_backend": "screenshot_manager"', helper_source)
         self.assertIn("let capture = OneShotDisplayCapture(", helper_source)
+
+    def test_screenshot_cli_initializes_appkit_windowserver_context(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        helper_source = (
+            root
+            / "src"
+            / "local_asr_server"
+            / "native_capture_helper"
+            / "native_capture_helper.swift"
+        ).read_text(encoding="utf-8")
+        compile_source = (
+            root
+            / "src"
+            / "local_asr_server"
+            / "native_capture_helper"
+            / "compile.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("import AppKit", helper_source)
+        self.assertIn("let app = NSApplication.shared", helper_source)
+        self.assertIn("app.setActivationPolicy(.prohibited)", helper_source)
+        self.assertIn("Task { @MainActor in", helper_source)
+        self.assertIn("dispatchMain()", helper_source)
+        self.assertIn('"AppKit"', compile_source)
+
+    def test_manual_screenshot_timeout_is_reported_without_leaking_timeout_expired(self) -> None:
+        manager = NativeCaptureManager(helper_path=self.helper)
+        manager.start("rec-timeout", self.root, "both")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            session = manager.get_session("rec-timeout")
+            if session and session.ready_event:
+                break
+            time.sleep(0.01)
+
+        with (
+            patch.object(
+                manager,
+                "displays",
+                return_value={
+                    "displays": [{
+                        "display_id": 7,
+                        "source_id": -7,
+                        "title": "Screen 1",
+                        "width": 1920,
+                        "height": 1080,
+                    }]
+                },
+            ),
+            patch(
+                "local_asr_server.native_capture.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd=["helper", "screenshot"], timeout=15),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "screenshot_capture_timeout"):
+                manager.capture_screenshot(
+                    "rec-timeout",
+                    request_id="request-timeout",
+                    display_id=7,
+                )
 
 
 if __name__ == "__main__":
