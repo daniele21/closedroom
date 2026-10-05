@@ -67,6 +67,49 @@ class StreamingUploadTemporaryPathTests(unittest.TestCase):
 
 
 class SingleFileTranscriptionUseCaseTests(unittest.TestCase):
+    def test_diarization_settings_are_part_of_final_cache_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            audio = Path(temp) / "meeting.wav"
+            audio.write_bytes(b"audio")
+            use_case = SingleFileTranscriptionUseCase(_FakeTranscriptionService())
+            base = dict(
+                model="model-a",
+                language="it",
+                task="transcribe",
+                word_timestamps=False,
+                initial_prompt=None,
+                temperature=0.0,
+                condition_on_previous_text=False,
+                verbose=None,
+                vad_guided=True,
+                vad_post_filter=True,
+                asr_provider="local",
+                provider_options={},
+                public_provider_options={},
+            )
+
+            disabled = SingleFileTranscriptionRequest(**base)
+            local = SingleFileTranscriptionRequest(
+                **base,
+                diarization_provider="local",
+            )
+            remote_variant = SingleFileTranscriptionRequest(
+                **base,
+                diarization_provider="speechmatics",
+                diarization_region="eu",
+                diarization_model="enhanced",
+            )
+
+            disabled_key = use_case.cache_key(audio, disabled)
+            local_key = use_case.cache_key(audio, local)
+            remote_key = use_case.cache_key(audio, remote_variant)
+
+            self.assertNotEqual(disabled_key, local_key)
+            self.assertNotEqual(local_key, remote_key)
+            self.assertEqual(len(disabled_key), 64)
+            self.assertEqual(len(local_key), 64)
+            self.assertEqual(len(remote_key), 64)
+
     def test_run_owns_result_shape_diarization_and_persistence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
