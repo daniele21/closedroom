@@ -119,6 +119,13 @@ Implementato:
 - suite deterministica per 20 screenshot, stesso PID, display cache, timeout/recovery, atomic staging e API idempotency;
 - benchmark target-Mac `scripts/benchmark_screenshot_capture_core.py` e runner focalizzato `scripts/validate_capture_core.py`.
 
+Follow-up overlay/source-runtime 2026-10-05:
+- il redesign overlay e il nuovo endpoint `screenshot-display` erano presenti in `frontend/src` ma `local-asr serve` continuava a servire un bundle statico committed precedente;
+- source-mode `serve` e `app` ora fingerprintano frontend source/config e costruiscono automaticamente un bundle coerente in `.cache/frontend-static`, senza sporcare i file static tracked;
+- il backend distingue l'assenza del native window manager in `serve` come browser fallback atteso, quindi il frontend apre il popup senza warning fuorviante;
+- il browser overlay usa le dimensioni del nuovo control center e si ridimensiona localmente per dettagli/picker monitor;
+- la selezione monitor resta posseduta dalla CaptureSession tramite `PUT /v1/recordings/{id}/screenshot-display`, con optimistic UI protetta dagli heartbeat SSE.
+
 Ancora aperto:
 - SC-3: il restart su timeout è implementato; fallback automatico a backend alternativo non è ancora introdotto e va deciso dai benchmark reali;
 - SC-5: redesign implementato sul branch `work/overlay-control-center`; resta da validare su Mac exact-head prima dell'integrazione su `dev`;
