@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -60,17 +61,18 @@ def _ensure_dev_frontend_bundle(root: Path | None = None) -> bool:
 
     root = root or Path(__file__).resolve().parents[2]
     frontend_dir = root / "frontend"
-    static_dir = root / "src" / "local_asr_server" / "static"
     if not frontend_dir.is_dir():
         return False
 
     fingerprint = _frontend_source_fingerprint(frontend_dir)
     cache_dir = root / ".cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    static_dir = cache_dir / "frontend-static"
     marker = cache_dir / "frontend-build.sha256"
     current = marker.read_text(encoding="utf-8").strip() if marker.is_file() else ""
     static_ready = (static_dir / "index.html").is_file()
     if static_ready and current == fingerprint:
+        os.environ["CLOSEDROOM_DEV_STATIC_DIR"] = str(static_dir.resolve())
         return False
 
     if not (frontend_dir / "node_modules").is_dir():
@@ -92,10 +94,15 @@ def _ensure_dev_frontend_bundle(root: Path | None = None) -> bool:
         )
 
     print("Frontend sources changed; rebuilding ClosedRoom web UI...")
-    subprocess.run(command, cwd=frontend_dir, check=True)
+    build_env = {
+        **os.environ,
+        "CLOSEDROOM_FRONTEND_OUT_DIR": str(static_dir.resolve()),
+    }
+    subprocess.run(command, cwd=frontend_dir, check=True, env=build_env)
     if not (static_dir / "index.html").is_file():
-        raise RuntimeError("Frontend build completed without producing static/index.html")
+        raise RuntimeError("Frontend build completed without producing cached static/index.html")
     marker.write_text(fingerprint + "\n", encoding="utf-8")
+    os.environ["CLOSEDROOM_DEV_STATIC_DIR"] = str(static_dir.resolve())
     print("ClosedRoom web UI bundle is up to date.")
     return True
 
