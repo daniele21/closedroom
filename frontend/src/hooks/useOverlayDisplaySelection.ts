@@ -136,9 +136,11 @@ export function useOverlayDisplaySelection({
     await resizeRecordingOverlay(isExpanded, true);
   }, [captureBackend, displays.length, isExpanded, isRecording, loadDisplays]);
 
-  const closeDisplayPicker = useCallback(async () => {
+  const closeDisplayPicker = useCallback(async (resize = true) => {
     setIsDisplayPickerOpen(false);
-    await resizeRecordingOverlay(isExpanded, false);
+    if (resize) {
+      await resizeRecordingOverlay(isExpanded, false);
+    }
   }, [isExpanded]);
 
   const toggleDisplayPicker = useCallback(async () => {
