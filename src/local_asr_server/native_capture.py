@@ -195,6 +195,12 @@ class NativeCaptureManager:
                 None,
             )
         if active is not None:
+            if active.ready_event is None:
+                return {
+                    "displays": [],
+                    "reason": "recording_starting",
+                    "source": "worker_cache",
+                }
             try:
                 self._ensure_screenshot_worker(active)
             except Exception as exc:
@@ -297,6 +303,11 @@ class NativeCaptureManager:
         if session is None or session.stopped:
             raise RuntimeError("Native capture session is not active")
 
+        ready = session.ready_event or {}
+        ready_uptime = ready.get("recording_ready_uptime")
+        if ready_uptime is None:
+            raise RuntimeError("capture_not_ready")
+
         self._ensure_screenshot_worker(session)
         if not session.screenshot_worker_ready.wait(timeout=1.0):
             raise RuntimeError("screenshot_worker_not_ready")
@@ -319,11 +330,6 @@ class NativeCaptureManager:
         selected = int(selected)
         if selected not in by_id:
             raise RuntimeError("selected_display_unavailable")
-
-        ready = session.ready_event or {}
-        ready_uptime = ready.get("recording_ready_uptime")
-        if ready_uptime is None:
-            raise RuntimeError("capture_not_ready")
 
         with session.screenshot_lock:
             if session.stopped or not session.accept_screenshots:
