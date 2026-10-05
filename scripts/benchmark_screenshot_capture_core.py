@@ -32,26 +32,44 @@ def percentile(values: list[float], p: float) -> float | None:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
-def read_json_event(process: subprocess.Popen[str], timeout: float) -> dict[str, Any]:
+def read_json_event(
+    process: subprocess.Popen[str],
+    timeout: float,
+    *,
+    expected_type: str | None = None,
+    request_id: str | None = None,
+) -> dict[str, Any]:
     if process.stdout is None:
         raise RuntimeError("worker stdout unavailable")
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        line = process.stdout.readline()
-        if not line:
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    try:
+        while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise RuntimeError(f"worker exited with code {process.returncode}")
-            time.sleep(0.01)
-            continue
-        line = line.strip()
-        if not line or line.startswith("CR_SCREENSHOT_DIAG "):
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
+            remaining = max(0.0, deadline - time.monotonic())
+            if not selector.select(timeout=remaining):
+                break
+            line = process.stdout.readline()
+            if not line:
+                continue
+            line = line.strip()
+            if not line or line.startswith("CR_SCREENSHOT_DIAG "):
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if expected_type is not None and payload.get("type") != expected_type:
+                continue
+            if request_id is not None and payload.get("request_id") != request_id:
+                continue
             return payload
+    finally:
+        selector.close()
     raise TimeoutError("worker event timeout")
 
 
@@ -99,9 +117,11 @@ def main() -> int:
     }
 
     try:
-        ready = read_json_event(process, timeout=5.0)
-        if ready.get("type") != "screenshot_worker_ready":
-            raise RuntimeError(f"worker did not become ready: {ready}")
+        ready = read_json_event(
+            process,
+            timeout=5.0,
+            expected_type="screenshot_worker_ready",
+        )
         displays = [item for item in ready.get("displays") or [] if isinstance(item, dict)]
         if not displays:
             raise RuntimeError("worker reported no displays")
@@ -132,7 +152,11 @@ def main() -> int:
                 process.stdin.write(json.dumps(command, separators=(",", ":")) + "\n")
                 process.stdin.flush()
 
-                event = read_json_event(process, timeout=2.0)
+                event = read_json_event(
+                    process,
+                    timeout=2.0,
+                    request_id=request_id,
+                )
                 elapsed_ms = (time.monotonic() - started) * 1000.0
                 success = event.get("type") == "screenshot_completed"
                 report["samples"].append({
