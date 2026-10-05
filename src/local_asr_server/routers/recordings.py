@@ -15,7 +15,12 @@ from local_asr_server.recordings import (
     RecordingNotFound,
     RecordingStore,
 )
-from local_asr_server.schemas import CreateRecordingRequest, ScreenshotCaptureRequest, UpdateRecordingRequest
+from local_asr_server.schemas import (
+    CreateRecordingRequest,
+    ScreenshotCaptureRequest,
+    ScreenshotDisplaySelectionRequest,
+    UpdateRecordingRequest,
+)
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -102,6 +107,23 @@ def list_screenshots(recording_id: str, request: Request):
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.put("/v1/recordings/{recording_id}/screenshot-display")
+def select_screenshot_display(
+    recording_id: str,
+    request: Request,
+    body: ScreenshotDisplaySelectionRequest,
+):
+    try:
+        return get_services(request.app).capture.set_screenshot_display(
+            recording_id,
+            body.display_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
