@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from local_asr_server.catalog import CatalogStore
+from local_asr_server.recording_visual_artifacts import VisualArtifactStore
 from local_asr_server.recording_screenshot_artifacts import (
     MAX_SCREENSHOT_BYTES,
     MAX_SCREENSHOT_PIXELS,
@@ -111,6 +112,7 @@ class RecordingStore:
             conflict_error=RecordingConflict,
             not_found_error=RecordingNotFound,
         )
+        self._visual_artifacts = VisualArtifactStore()
         self._mark_interrupted_jobs()
         self._reconcile_screenshot_assets()
         self.sync_catalog()
@@ -791,66 +793,39 @@ class RecordingStore:
             session_dir, metadata = self._load(recording_id)
             if metadata["status"] != "recording":
                 raise RecordingConflict("Visual frames can only be staged while recording")
-            staging = session_dir / ".visual-staging"
-            staging.mkdir(mode=0o700, parents=True, exist_ok=True)
-            manifest = staging / "manifest.jsonl"
-            if manifest.exists():
-                lines = manifest.read_text(encoding="utf-8").splitlines()
-                if lines:
-                    previous = json.loads(lines[-1])
-                    if sequence <= int(previous["sequence"]) or timestamp < float(previous["timestamp"]):
-                        raise RecordingConflict("Visual frame sequence and timestamp must be monotonic")
-            path = staging / f"frame-{sequence:08d}.jpg"
-            if path.exists():
-                raise RecordingConflict(f"Visual frame sequence already exists: {sequence}")
-            self._write_bytes_atomic(path, content)
-            with manifest.open("a", encoding="utf-8") as output:
-                output.write(json.dumps({"sequence": sequence, "timestamp": timestamp, "file": path.name}) + "\n")
-                output.flush()
-                os.fsync(output.fileno())
-            return {"sequence": sequence, "timestamp": timestamp, "bytes": len(content)}
+            return self._visual_artifacts.stage_frame(
+                session_dir,
+                sequence=sequence,
+                timestamp=timestamp,
+                content=content,
+                write_bytes_atomic=self._write_bytes_atomic,
+                conflict_error=RecordingConflict,
+            )
 
     def list_visual_frames(self, recording_id: str) -> list[dict[str, Any]]:
         session_dir, _ = self._load(recording_id)
-        staging = session_dir / ".visual-staging"
-        manifest = staging / "manifest.jsonl"
-        if not manifest.exists():
-            return []
-        frames = []
-        for line in manifest.read_text(encoding="utf-8").splitlines():
-            item = json.loads(line)
-            path = (staging / str(item.get("file") or "")).resolve()
-            if path.parent == staging.resolve() and path.is_file():
-                frames.append({**item, "path": path})
-        return sorted(frames, key=lambda item: int(item["sequence"]))
+        return self._visual_artifacts.list_frames(session_dir)
 
     def reset_visual_observations(self, recording_id: str) -> None:
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            observations_path = session_dir / VISUAL_OBSERVATIONS_FILE
-            if observations_path.exists():
-                observations_path.unlink()
+            self._visual_artifacts.reset_observations(session_dir)
 
     def append_visual_observation(self, recording_id: str, observation: dict[str, Any]) -> None:
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            observations_path = session_dir / VISUAL_OBSERVATIONS_FILE
-            # Append observation
-            with observations_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(observation, ensure_ascii=False) + "\n")
+            self._visual_artifacts.append_observation(session_dir, observation)
 
     def save_visual_routing(self, recording_id: str, routing: dict[str, Any]) -> None:
         """Persist explainable frame-routing decisions without bloating catalog metadata."""
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            self._write_json_atomic(session_dir / VISUAL_ROUTING_FILE, routing)
+            self._write_json_atomic(self._visual_artifacts.routing_path(session_dir), routing)
 
     def reset_visual_routing(self, recording_id: str) -> None:
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            routing_path = session_dir / VISUAL_ROUTING_FILE
-            if routing_path.exists():
-                routing_path.unlink()
+            self._visual_artifacts.reset_routing(session_dir)
 
     def begin_visual_processing(
         self, recording_id: str, fingerprint: str, *, prompt_version: int | None = None,
@@ -858,8 +833,8 @@ class RecordingStore:
         """Start a v2 run or resume successful candidates left by a process crash."""
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            checkpoint_path = session_dir / VISUAL_PROCESSING_CHECKPOINT
-            observations_path = session_dir / VISUAL_OBSERVATIONS_FILE
+            checkpoint_path = self._visual_artifacts.checkpoint_path(session_dir)
+            observations_path = self._visual_artifacts.observations_path(session_dir)
             checkpoint = None
             if checkpoint_path.exists():
                 try:
@@ -868,7 +843,7 @@ class RecordingStore:
                     checkpoint = None
             if checkpoint and checkpoint.get("fingerprint") == fingerprint:
                 return self._validated_recovered_observations(
-                    self._read_valid_jsonl(observations_path), checkpoint,
+                    self._visual_artifacts.read_valid_jsonl(observations_path), checkpoint,
                 )
             self._write_text_atomic(observations_path, "")
             self._write_json_atomic(checkpoint_path, {
@@ -904,15 +879,13 @@ class RecordingStore:
     def finish_visual_processing(self, recording_id: str) -> None:
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            checkpoint_path = session_dir / VISUAL_PROCESSING_CHECKPOINT
-            if checkpoint_path.exists():
-                checkpoint_path.unlink()
+            self._visual_artifacts.checkpoint_path(session_dir).unlink(missing_ok=True)
 
     def mark_visual_processing_retryable(self, recording_id: str, reason: str) -> None:
         """Keep visual staging resumable and eligible for TTL cleanup after backend failure."""
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            checkpoint_path = session_dir / VISUAL_PROCESSING_CHECKPOINT
+            checkpoint_path = self._visual_artifacts.checkpoint_path(session_dir)
             checkpoint: dict[str, Any] = {}
             if checkpoint_path.exists():
                 try:
@@ -926,20 +899,6 @@ class RecordingStore:
                 "reason": reason,
                 "updated_at": _utc_now(),
             })
-
-    @staticmethod
-    def _read_valid_jsonl(path: Path) -> list[dict[str, Any]]:
-        if not path.exists():
-            return []
-        items = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(item, dict):
-                items.append(item)
-        return items
 
     def replace_visual_intelligence_artifacts(
         self, recording_id: str, observations: list[dict[str, Any]], summary: dict[str, Any],
