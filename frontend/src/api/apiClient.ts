@@ -1118,7 +1118,12 @@ export const ApiClient = {
     }
   },
 
-  async toggleOverlay(show: boolean): Promise<{ success: boolean; error?: string }> {
+  async toggleOverlay(show: boolean): Promise<{
+    success: boolean;
+    error?: string;
+    fallback?: 'browser' | null;
+    fallback_expected?: boolean;
+  }> {
     try {
       return (await request('/v1/system/window/overlay', {
         method: 'POST',
