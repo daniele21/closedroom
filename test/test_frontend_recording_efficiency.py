@@ -31,9 +31,13 @@ class FrontendRecordingEfficiencyContractTests(unittest.TestCase):
             len(re.findall(r"\}, RECORDING_TIMER_INTERVAL_MS\);", self.source)),
             2,
         )
-        self.assertEqual(
-            len(re.findall(r"\}, OVERLAY_STATUS_INTERVAL_MS\);", self.source)),
-            2,
+        self.assertIn(
+            "setInterval(postNativeStatus, OVERLAY_STATUS_INTERVAL_MS)",
+            self.source,
+        )
+        self.assertIn(
+            "setInterval(postBrowserStatus, OVERLAY_STATUS_INTERVAL_MS)",
+            self.source,
         )
         self.assertNotIn("}, 250);\n\n              // Start status broadcast", self.source)
         self.assertNotIn("}, 300);", self.source)
