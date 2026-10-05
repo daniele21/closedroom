@@ -1107,7 +1107,7 @@ func activeDisplayPayloads() -> [[String: Any]] {
             "title": "Screen \(index + 1)",
             "width": CGDisplayPixelsWide(displayID),
             "height": CGDisplayPixelsHigh(displayID),
-            "is_main": CGDisplayIsMain(displayID) != 0,
+            "is_main": CGDisplayIsMain(displayID),
         ]
     }
 }
@@ -1173,11 +1173,17 @@ actor ScreenshotWorkerService {
 
     func start() async throws {
         try await refreshSources(emitChange: false)
+        let backend: String
+        if #available(macOS 14.0, *) {
+            backend = "screenshot_manager"
+        } else {
+            backend = "scstream_fallback"
+        }
         JSONEmitter.shared.emit([
             "type": "screenshot_worker_ready",
             "recording_id": recordingID,
             "worker_pid": Int(ProcessInfo.processInfo.processIdentifier),
-            "capture_backend": #available(macOS 14.0, *) ? "screenshot_manager" : "scstream_fallback",
+            "capture_backend": backend,
             "displays": activeDisplayPayloads(),
         ])
     }
@@ -1462,9 +1468,6 @@ final class DisplayChangeMonitor {
         }, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    deinit {
-        CGDisplayRemoveReconfigurationCallback({ _, _, _ in }, nil)
-    }
 }
 
 func runScreenshotWorker(recordingID: String) {
