@@ -10,7 +10,9 @@ class NativeCaptureSwiftSourceTests(unittest.TestCase):
         sources = native_compile._swift_sources()
         self.assertGreaterEqual(len(sources), 2)
         self.assertEqual(sources[0].name, "native_capture_helper.swift")
-        self.assertIn("Support.swift", {source.name for source in sources})
+        source_names = {source.name for source in sources}
+        self.assertIn("Support.swift", source_names)
+        self.assertIn("PlatformDiagnostics.swift", source_names)
 
 
     def test_split_helper_uses_explicit_main_entry_point(self) -> None:
@@ -23,6 +25,7 @@ class NativeCaptureSwiftSourceTests(unittest.TestCase):
         expected_names = {source.name for source in sources}
         self.assertIn("native_capture_helper.swift", expected_names)
         self.assertIn("Support.swift", expected_names)
+        self.assertIn("PlatformDiagnostics.swift", expected_names)
         self.assertEqual(len(native_compile._swift_source_hash()), 64)
 
 
