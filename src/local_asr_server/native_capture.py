@@ -125,9 +125,15 @@ def validate_audio_file(file_path: Path) -> dict[str, Any]:
 
 
 class NativeCaptureManager:
-    def __init__(self, helper_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        helper_path: Path | None = None,
+        *,
+        ready_timeout_seconds: float = 8.0,
+    ) -> None:
         self._helper_path_overridden = helper_path is not None
         self.helper_path = helper_path or get_native_capture_helper_path()
+        self._ready_timeout_seconds = max(0.1, float(ready_timeout_seconds))
         self._lock = threading.Lock()
         self._sessions: dict[str, CaptureSession] = {}
 
@@ -721,6 +727,11 @@ class NativeCaptureManager:
             thread = threading.Thread(target=self._read_events, args=(session,), daemon=True)
             session.reader_thread = thread
             thread.start()
+            threading.Thread(
+                target=self._watch_recording_ready,
+                args=(session,),
+                daemon=True,
+            ).start()
             # Screenshot capture is deliberately not started on the recording
             # critical path. ScreenCaptureKit bootstrap for the screenshot worker
             # can contend with the recording helper during startup. The worker is
@@ -782,6 +793,49 @@ class NativeCaptureManager:
             return parsed if (parsed and isinstance(parsed, dict)) else {}
         except Exception as exc:
             return {"available": False, "backend": "native", "reason": fallback_reason, "error": str(exc)}
+
+    def _watch_recording_ready(self, session: CaptureSession) -> None:
+        deadline = time.monotonic() + self._ready_timeout_seconds
+        while time.monotonic() < deadline:
+            if session.ready_event is not None or session.stopped:
+                return
+            if session.process.poll() is not None:
+                return
+            time.sleep(0.05)
+
+        if session.ready_event is not None or session.stopped or session.process.poll() is not None:
+            return
+
+        event = {
+            "type": "error",
+            "source": "backend",
+            "reason": "capture_ready_timeout",
+            "message": (
+                "Native capture did not become ready within "
+                f"{self._ready_timeout_seconds:.1f} seconds."
+            ),
+        }
+        logger.error(
+            "Native recording helper ready timeout: recording=%s pid=%s timeout=%.1fs",
+            session.recording_id,
+            session.process.pid,
+            self._ready_timeout_seconds,
+        )
+        session.event_log.append(event)
+        session.warnings.append(event)
+        session.events.put(event)
+        session.stopped = True
+
+        if session.process.poll() is None:
+            session.process.terminate()
+            try:
+                session.process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                session.process.kill()
+                try:
+                    session.process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    pass
 
     def _read_events(self, session: CaptureSession) -> None:
         if session.process.stdout is None:
