@@ -3,7 +3,6 @@ from __future__ import annotations
 from local_asr_server.app_services import get_services
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -24,15 +23,16 @@ from local_asr_server.transcription_jobs import (
 from local_asr_server.settings import load_settings
 from local_asr_server.env import get_env_var
 from local_asr_server.services.transcription_service import TranscriptionService
+from local_asr_server.services.transcription_application import (
+    SingleFileTranscriptionRequest,
+    SingleFileTranscriptionUseCase,
+)
 from local_asr_server.transcriber import (
     str_to_bool,
-    generate_cache_key,
     hash_audio_file,
     get_cached_result,
-    save_cached_result,
     transcribe_file_sync,
     transcribe_stream_generator,
-    _clean_nan_values,
     VAD_GUIDED_DEFAULT,
     VAD_POST_FILTER_DEFAULT,
 )
@@ -251,99 +251,72 @@ async def transcribe_upload(
     )
     target_model = provider_model or model or request.app.state.default_model
     selected_diarization_provider = _normalize_diarization_provider(diarization_provider)
+    application_request = SingleFileTranscriptionRequest(
+        model=target_model,
+        language=language,
+        task=task,
+        word_timestamps=str_to_bool(word_timestamps),
+        initial_prompt=initial_prompt,
+        temperature=temperature,
+        condition_on_previous_text=str_to_bool(condition_on_previous_text, False),
+        verbose=None if verbose is None else str_to_bool(verbose),
+        vad_guided=str_to_bool(vad_guided, VAD_GUIDED_DEFAULT),
+        vad_post_filter=str_to_bool(vad_post_filter, VAD_POST_FILTER_DEFAULT),
+        asr_provider=provider,
+        provider_options=provider_options,
+        public_provider_options=public_options,
+        diarization_provider=selected_diarization_provider,
+        diarization_region=speechmatics_region,
+        diarization_model=speechmatics_model,
+    )
+    use_case = SingleFileTranscriptionUseCase(get_services(request.app).transcription)
 
-    logger.info(f"[/v1/audio/transcriptions] Received upload request. File: '{file.filename}', Size: {file.size if file.size else 'unknown'} bytes, Model: '{target_model}', Stream: {is_streaming}")
+    logger.info(
+        "[/v1/audio/transcriptions] Received upload request. File: %r, Size: %s bytes, "
+        "Model: %r, Stream: %s",
+        file.filename,
+        file.size if file.size else "unknown",
+        target_model,
+        is_streaming,
+    )
 
     suffix = Path(file.filename or "audio").suffix or ".audio"
-
     try:
         with tempfile_NamedTemporaryFile_patch(suffix=suffix) as tmp_path:
-            with open(tmp_path, "wb") as tmp:
-                content = await file.read()
-                tmp.write(content)
-            
-            logger.info(f"[/v1/audio/transcriptions] Saved uploaded file to temporary path: {tmp_path}")
-
-            # Caching mechanism
-            audio_hash = hashlib.sha256(content).hexdigest()
-            cache_key = generate_cache_key(
-                audio_hash=audio_hash,
-                model=target_model,
-                language=language,
-                task=task,
-                word_timestamps=word_timestamps,
-                initial_prompt=initial_prompt,
-                temperature=temperature,
-                condition_on_previous_text=condition_on_previous_text,
-                vad_guided=vad_guided,
-                vad_post_filter=vad_post_filter,
-                asr_provider=provider,
-                backend=_effective_backend(provider, target_model),
-                provider_options=public_options,
-                diarization_provider=selected_diarization_provider,
-                diarization_region=speechmatics_region,
-                diarization_model=speechmatics_model,
+            audio_path = Path(tmp_path)
+            audio_path.write_bytes(await file.read())
+            logger.info(
+                "[/v1/audio/transcriptions] Saved uploaded file to temporary path: %s",
+                audio_path,
             )
+            cache_key = use_case.cache_key(audio_path, application_request)
+            engine = lambda **kwargs: _transcribe_file(request.app, **kwargs)
 
-            cached_res = get_cached_result(cache_key)
-            if cached_res is not None:
-                logger.info(f"[/v1/audio/transcriptions] Cache hit! Returning cached result for key: {cache_key}")
-                # A hit may have been produced by the path or recording flow,
-                # which caches the engine result rather than this HTTP payload.
-                # Rehydrate the public response contract before returning it.
-                cached_res = {
-                    **cached_res,
-                    "language": cached_res.get("language", language),
-                    "model": cached_res.get("model", target_model),
-                    "backend": cached_res.get("backend", _effective_backend(provider, target_model)),
-                    "asr_provider": cached_res.get("asr_provider", provider),
-                    "provider_options": cached_res.get("provider_options", public_options),
-                    "stats": cached_res.get("stats", {"time_total_seconds": 0.0}),
-                }
-                cached_res = _apply_initial_diarization(
+            if is_streaming and get_cached_result(cache_key) is not None:
+                cached_res = use_case.run(
                     request.app,
-                    Path(tmp_path),
-                    cached_res,
-                    provider=selected_diarization_provider,
-                    speechmatics_region=speechmatics_region,
-                    speechmatics_model=speechmatics_model,
+                    audio_path,
+                    application_request,
+                    audio_filename=file.filename,
+                    recording_id=recording_id,
+                    engine=engine,
+                    started_at=started_at,
                 )
-                
-                # Cleanup temp file as it's not needed
-                try:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
-                        logger.info(f"[/v1/audio/transcriptions] Cleaned up temporary file: {tmp_path}")
-                except OSError as e:
-                    logger.warning(f"[/v1/audio/transcriptions] Failed to remove temp file {tmp_path}: {e}")
 
-                # Save to user's transcription folder as well
-                cached_res["recording_id"] = recording_id or cached_res.get("recording_id", "")
-                saved_meta = get_services(request.app).transcriptions.save(cached_res, audio_filename=file.filename, recording_id=recording_id)
-                cached_res["saved_id"] = saved_meta["id"]
-                cached_res["saved_file_path"] = str(get_services(request.app).transcriptions.root)
+                async def cached_event_generator():
+                    yield json.dumps({
+                        "type": "progress",
+                        "step": "loading_model",
+                        "message": "Caricamento risultato della trascrizione da cache locale...",
+                    }) + "\n"
+                    await asyncio.sleep(0.5)
+                    yield json.dumps({"type": "completed", "data": cached_res}) + "\n"
 
-                if is_streaming:
-                    async def cached_event_generator():
-                        yield json.dumps({
-                            "type": "progress",
-                            "step": "loading_model",
-                            "message": "Caricamento risultato della trascrizione da cache locale..."
-                        }) + "\n"
-                        await asyncio.sleep(0.5)
-                        yield json.dumps({
-                            "type": "completed",
-                            "data": cached_res
-                        }) + "\n"
-                    return StreamingResponse(cached_event_generator(), media_type="application/x-ndjson")
-                else:
-                    if response_format == "text":
-                        return PlainTextResponse(cached_res["text"])
-                    if response_format == "verbose_json":
-                        return JSONResponse(cached_res)
-                    return JSONResponse({"text": cached_res["text"]})
+                return StreamingResponse(
+                    cached_event_generator(),
+                    media_type="application/x-ndjson",
+                )
 
-            # Cache miss, proceed as normal
             if is_streaming:
                 if provider != ASR_PROVIDER_LOCAL:
                     async def cloud_event_generator():
@@ -351,173 +324,89 @@ async def transcribe_upload(
                             yield json.dumps({
                                 "type": "progress",
                                 "step": "submitting",
-                                "message": "Submitting cloud ASR job..."
+                                "message": "Submitting cloud ASR job...",
                             }) + "\n"
-                            result = await asyncio.to_thread(
-                                _transcribe_file,
+                            payload = await asyncio.to_thread(
+                                use_case.run,
                                 request.app,
-                                audio_path=tmp_path,
-                                model=target_model,
-                                language=language,
-                                task=task,
-                                word_timestamps=str_to_bool(word_timestamps),
-                                initial_prompt=initial_prompt,
-                                temperature=temperature,
-                                condition_on_previous_text=str_to_bool(condition_on_previous_text, False),
-                                verbose=None if verbose is None else str_to_bool(verbose),
-                                vad_guided=str_to_bool(vad_guided, VAD_GUIDED_DEFAULT),
-                                vad_post_filter=str_to_bool(vad_post_filter, VAD_POST_FILTER_DEFAULT),
-                                asr_provider=provider,
-                                provider_options=provider_options,
+                                audio_path,
+                                application_request,
+                                audio_filename=file.filename,
+                                recording_id=recording_id,
+                                engine=engine,
+                                started_at=started_at,
                             )
-                            elapsed = time.perf_counter() - started_at
-                            payload = _clean_nan_values({
-                                "text": result.get("text", ""),
-                                "language": result.get("language", language),
-                                "segments": result.get("segments", []),
-                                "metadata": result.get("metadata", {}),
-                                "model": result.get("model", target_model),
-                                "backend": result.get("backend", _effective_backend(provider, target_model)),
-                                "asr_provider": provider,
-                                "provider_options": public_options,
-                                "recording_id": recording_id or "",
-                                "stats": {
-                                    "time_total_seconds": elapsed,
-                                    **_asr_payload_metadata(provider, target_model, public_options),
-                                },
-                            })
-                            payload = _apply_initial_diarization(
+                            yield json.dumps({"type": "completed", "data": payload}) + "\n"
+                        except Exception as exc:
+                            yield json.dumps({"type": "error", "error": str(exc)}) + "\n"
+
+                    return StreamingResponse(
+                        cloud_event_generator(),
+                        media_type="application/x-ndjson",
+                    )
+
+                async def event_generator_wrapper():
+                    async for event in transcribe_stream_generator(
+                        audio_path=tmp_path,
+                        model=target_model,
+                        language=language,
+                        task=task,
+                        word_timestamps=word_timestamps,
+                        initial_prompt=initial_prompt,
+                        temperature=temperature,
+                        condition_on_previous_text=condition_on_previous_text,
+                        cache_key=cache_key,
+                        audio_filename=file.filename,
+                        recording_id=recording_id,
+                        transcription_store=get_services(request.app).transcriptions,
+                        started_at=started_at,
+                        vad_guided=vad_guided,
+                        vad_post_filter=vad_post_filter,
+                        asr_provider=provider,
+                        backend=_effective_backend(provider, target_model),
+                        provider_options=public_options,
+                        payload_postprocessor=(
+                            lambda source_path, payload: _apply_initial_diarization(
                                 request.app,
-                                Path(tmp_path),
+                                source_path,
                                 payload,
                                 provider=selected_diarization_provider,
                                 speechmatics_region=speechmatics_region,
                                 speechmatics_model=speechmatics_model,
                             )
-                            save_cached_result(cache_key, payload)
-                            saved_meta = get_services(request.app).transcriptions.save(payload, audio_filename=file.filename, recording_id=recording_id)
-                            payload["saved_id"] = saved_meta["id"]
-                            payload["saved_file_path"] = str(get_services(request.app).transcriptions.root)
-                            yield json.dumps({"type": "completed", "data": payload}) + "\n"
-                        except Exception as exc:
-                            yield json.dumps({"type": "error", "error": str(exc)}) + "\n"
-                    return StreamingResponse(cloud_event_generator(), media_type="application/x-ndjson")
+                        ) if selected_diarization_provider != DIARIZATION_PROVIDER_DISABLED else None,
+                    ):
+                        yield event
 
-                async def event_generator_wrapper():
-                    try:
-                        async for event in transcribe_stream_generator(
-                            audio_path=tmp_path,
-                            model=target_model,
-                            language=language,
-                            task=task,
-                            word_timestamps=word_timestamps,
-                            initial_prompt=initial_prompt,
-                            temperature=temperature,
-                            condition_on_previous_text=condition_on_previous_text,
-                            cache_key=cache_key,
-                            audio_filename=file.filename,
-                            recording_id=recording_id,
-                            transcription_store=get_services(request.app).transcriptions,
-                            started_at=started_at,
-                            vad_guided=vad_guided,
-                            vad_post_filter=vad_post_filter,
-                            asr_provider=provider,
-                            backend=_effective_backend(provider, target_model),
-                            provider_options=public_options,
-                            payload_postprocessor=(
-                                lambda audio_path, payload: _apply_initial_diarization(
-                                    request.app,
-                                    audio_path,
-                                    payload,
-                                    provider=selected_diarization_provider,
-                                    speechmatics_region=speechmatics_region,
-                                    speechmatics_model=speechmatics_model,
-                                )
-                            ) if selected_diarization_provider != DIARIZATION_PROVIDER_DISABLED else None,
-                        ):
-                            yield event
-                    finally:
-                        pass
-
-                return StreamingResponse(event_generator_wrapper(), media_type="application/x-ndjson")
-
-            logger.info(f"[/v1/audio/transcriptions] Running non-streaming transcription for {tmp_path} using {target_model}...")
-            try:
-                result = _transcribe_file(
-                    request.app,
-                    audio_path=tmp_path,
-                    model=target_model,
-                    language=language,
-                    task=task,
-                    word_timestamps=str_to_bool(word_timestamps),
-                    initial_prompt=initial_prompt,
-                    temperature=temperature,
-                    condition_on_previous_text=str_to_bool(condition_on_previous_text, False),
-                    verbose=None if verbose is None else str_to_bool(verbose),
-                    vad_guided=str_to_bool(vad_guided, VAD_GUIDED_DEFAULT),
-                    vad_post_filter=str_to_bool(vad_post_filter, VAD_POST_FILTER_DEFAULT),
-                    asr_provider=provider,
-                    provider_options=provider_options,
+                return StreamingResponse(
+                    event_generator_wrapper(),
+                    media_type="application/x-ndjson",
                 )
 
-                elapsed = time.perf_counter() - started_at
-                logger.info(f"[/v1/audio/transcriptions] Transcription completed in {elapsed:.2f} seconds")
-
-                payload = {
-                    "text": result.get("text", ""),
-                    "language": result.get("language", language),
-                    "segments": result.get("segments", []),
-                    "metadata": result.get("metadata", {}),
-                    "model": result.get("model", target_model),
-                    "backend": result.get("backend", _effective_backend(provider, target_model)),
-                    "asr_provider": provider,
-                    "provider_options": public_options,
-                    "recording_id": recording_id or "",
-                    "stats": {
-                        "time_total_seconds": elapsed,
-                        **_asr_payload_metadata(provider, target_model, public_options),
-                    },
-                }
-                payload = _clean_nan_values(payload)
-                payload = _apply_initial_diarization(
-                    request.app,
-                    Path(tmp_path),
-                    payload,
-                    provider=selected_diarization_provider,
-                    speechmatics_region=speechmatics_region,
-                    speechmatics_model=speechmatics_model,
-                )
-                save_cached_result(cache_key, payload)
-
-                saved_meta = get_services(request.app).transcriptions.save(payload, audio_filename=file.filename, recording_id=recording_id)
-                payload["saved_id"] = saved_meta["id"]
-                payload["saved_file_path"] = str(get_services(request.app).transcriptions.root)
-
-                if response_format == "text":
-                    return PlainTextResponse(payload["text"])
-
-                if response_format == "verbose_json":
-                    return JSONResponse(payload)
-
-                return JSONResponse({"text": payload["text"]})
-            finally:
-                pass
-
+            payload = use_case.run(
+                request.app,
+                audio_path,
+                application_request,
+                audio_filename=file.filename,
+                recording_id=recording_id,
+                engine=engine,
+                started_at=started_at,
+            )
+            if response_format == "text":
+                return PlainTextResponse(payload["text"])
+            if response_format == "verbose_json":
+                return JSONResponse(payload)
+            return JSONResponse({"text": payload["text"]})
     except Exception as exc:
-        logger.error(f"[/v1/audio/transcriptions] Request failed: {exc}", exc_info=True)
+        logger.error(
+            "[/v1/audio/transcriptions] Request failed: %s",
+            exc,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=500,
             detail=f"Transcription failed: {exc}",
         ) from exc
-
-    finally:
-        if not is_streaming and 'cached_res' in locals() and cached_res is None:
-            try:
-                if "tmp_path" in locals() and os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-                    logger.info(f"[/v1/audio/transcriptions] Cleaned up temporary file: {tmp_path}")
-            except OSError as e:
-                logger.warning(f"[/v1/audio/transcriptions] Failed to remove temp file {tmp_path}: {e}")
 
 
 @router.post("/v1/audio/transcriptions/path")

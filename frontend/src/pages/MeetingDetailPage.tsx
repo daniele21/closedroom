@@ -16,7 +16,7 @@ import {
   Users,
   XCircle,
 } from 'lucide-react';
-import { ApiClient, AnalysisRun, Meeting, MeetingDiagnostics, RecordingScreenshot } from '../api/apiClient';
+import { ApiClient, AnalysisRun, Meeting, RecordingScreenshot } from '../api/apiClient';
 import { createVisualIntelligenceJob, cancelVisualIntelligenceJob } from '../api/visualJobs';
 import { prepareMeetingNotes, cancelMeetingPreparation } from '../api/meetingPreparation';
 import { ANALYSIS_TYPE_LABELS, ANALYSIS_TYPE_ORDER } from '../api/config';
@@ -39,6 +39,7 @@ import { useVisualIntelligence } from '../hooks/useVisualIntelligence';
 import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
 import { SpeakerDiarizationEditor } from '../components/meeting/SpeakerDiarizationEditor';
 import TranscriptTextView from '../components/transcription/TranscriptTextView';
+import { useMeetingAccessories } from '../hooks/useMeetingAccessories';
 
 interface MeetingDetailPageProps {
   recordingId: string | null;
@@ -47,8 +48,6 @@ interface MeetingDetailPageProps {
 }
 
 type MeetingTab = 'transcript' | 'analysis' | 'speakers';
-type VisualFramesState = 'idle' | 'loading' | 'ready' | 'error';
-
 const activeJobStatuses = new Set(['queued', 'running', 'waiting_for_service', 'retrying', 'cancelling']);
 const recoverablePreparationStatuses = new Set(['failed', 'interrupted']);
 const meetingTabs: MeetingTab[] = ['transcript', 'analysis', 'speakers'];
@@ -96,14 +95,6 @@ function preparationProgressLabel(step: string, lang: string): string {
 export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = false }: MeetingDetailPageProps) {
   const { t, lang } = useTranslation();
   const [meeting, setMeeting] = useState<Meeting | null>(null);
-  const [diagnosticReport, setDiagnosticReport] = useState<MeetingDiagnostics | null>(null);
-  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
-  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
-  const [visualFrameCount, setVisualFrameCount] = useState(0);
-  const [visualFramesState, setVisualFramesState] = useState<VisualFramesState>('idle');
-  const [visualFramesError, setVisualFramesError] = useState<string | null>(null);
-  const [screenshots, setScreenshots] = useState<RecordingScreenshot[]>([]);
-  const [screenshotsState, setScreenshotsState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
   const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
   const [showAllScreenshots, setShowAllScreenshots] = useState(false);
@@ -118,6 +109,19 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   const [activeTab, setActiveTab] = useState<MeetingTab>('transcript');
   const [currentTime, setCurrentTime] = useState(0);
+  const {
+    diagnosticReport,
+    diagnosticsLoading,
+    diagnosticsError,
+    loadDiagnostics,
+    visualFrameCount,
+    visualFramesState,
+    visualFramesError,
+    loadVisualFrames,
+    screenshots,
+    screenshotsState,
+    loadScreenshots,
+  } = useMeetingAccessories({ recordingId, demoMode, lang });
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabListRef = useRef<HTMLDivElement | null>(null);
   const analysisMenuRef = useRef<HTMLDivElement | null>(null);
@@ -125,9 +129,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const loadGenerationRef = useRef(0);
   const loadInFlightRef = useRef<{ key: string; generation: number; promise: Promise<void> } | null>(null);
   const loadQueuedRef = useRef(false);
-  const diagnosticsGenerationRef = useRef(0);
-  const visualFramesGenerationRef = useRef(0);
-  const screenshotsGenerationRef = useRef(0);
   const userSelectedTabRef = useRef(false);
 
   const handleTimestampClick = (time: number) => {
@@ -207,83 +208,15 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     return promise;
   };
 
-  const loadDiagnostics = async () => {
-    if (!recordingId || demoMode) return;
-    const generation = ++diagnosticsGenerationRef.current;
-    setDiagnosticsLoading(true);
-    setDiagnosticsError(null);
-    try {
-      const report = await ApiClient.getMeetingDiagnostics(recordingId);
-      if (generation !== diagnosticsGenerationRef.current) return;
-      setDiagnosticReport(report);
-    } catch (err: any) {
-      if (generation !== diagnosticsGenerationRef.current) return;
-      setDiagnosticsError(
-        err?.message || (lang === 'it' ? 'Diagnostica dettagliata non disponibile' : 'Detailed diagnostics unavailable'),
-      );
-    } finally {
-      if (generation === diagnosticsGenerationRef.current) {
-        setDiagnosticsLoading(false);
-      }
-    }
-  };
-
-
-  const loadScreenshots = async () => {
-    if (!recordingId || demoMode) return;
-    const generation = ++screenshotsGenerationRef.current;
-    setScreenshotsState('loading');
-    try {
-      const payload = await ApiClient.recordingScreenshots(recordingId);
-      if (generation !== screenshotsGenerationRef.current) return;
-      setScreenshots(payload.items || []);
-      setScreenshotsState('ready');
-    } catch {
-      if (generation !== screenshotsGenerationRef.current) return;
-      setScreenshots([]);
-      setScreenshotsState('error');
-    }
-  };
-
-  const loadVisualFrames = async () => {
-    if (!recordingId || demoMode) return;
-    const generation = ++visualFramesGenerationRef.current;
-    setVisualFramesState('loading');
-    setVisualFramesError(null);
-    try {
-      const visualFrames = await ApiClient.recordingVisualFrames(recordingId);
-      if (generation !== visualFramesGenerationRef.current) return;
-      setVisualFrameCount(visualFrames.total || 0);
-      setVisualFramesState('ready');
-    } catch (err: any) {
-      if (generation !== visualFramesGenerationRef.current) return;
-      setVisualFramesError(
-        err?.message || (lang === 'it' ? 'Contesto schermo non disponibile' : 'Screen context unavailable'),
-      );
-      setVisualFramesState('error');
-    }
-  };
-
   useEffect(() => {
     setLoading(true);
     setMeeting(null);
-    setDiagnosticReport(null);
-    setDiagnosticsLoading(false);
-    setDiagnosticsError(null);
-    setVisualFrameCount(0);
-    setVisualFramesState('idle');
-    setScreenshots([]);
-    setScreenshotsState('idle');
     setIncludeScreenshots(true);
     setShowAllScreenshots(false);
-    setVisualFramesError(null);
     userSelectedTabRef.current = false;
     void load();
     return () => {
       loadGenerationRef.current += 1;
-      diagnosticsGenerationRef.current += 1;
-      visualFramesGenerationRef.current += 1;
-      screenshotsGenerationRef.current += 1;
     };
   }, [recordingId, demoMode, lang]);
 
