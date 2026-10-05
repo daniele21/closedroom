@@ -198,6 +198,20 @@ else:
         self.assertEqual(manager.helper_path, self.helper)
         self.assertGreaterEqual(get_helper_binary.call_count, 1)
 
+    def test_native_helper_uses_screenshot_manager_for_macos_14_one_shot_capture(self) -> None:
+        helper_source = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "local_asr_server"
+            / "native_capture_helper"
+            / "native_capture_helper.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("@available(macOS 14.0, *)", helper_source)
+        self.assertIn("SCScreenshotManager.captureImage(", helper_source)
+        self.assertIn('"capture_backend": "screenshot_manager"', helper_source)
+        self.assertIn("let capture = OneShotDisplayCapture(", helper_source)
+
 
 if __name__ == "__main__":
     unittest.main()
