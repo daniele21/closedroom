@@ -10,10 +10,15 @@ from local_asr_server.services.transcription_application import (
     SingleFileTranscriptionRequest,
     SingleFileTranscriptionUseCase,
 )
+from local_asr_server.services.transcription_service import TranscriptionService
 from local_asr_server.routers.transcriptions import tempfile_NamedTemporaryFile_patch
 
 
 class _FakeTranscriptionService:
+    @staticmethod
+    def cache_key(audio_path: Path, **options) -> str:
+        return TranscriptionService.cache_key(audio_path, **options)
+
     @staticmethod
     def backend(provider: str, model: str) -> str:
         return f"{provider}:{model}"
