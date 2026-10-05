@@ -13,6 +13,15 @@ from pathlib import Path
 from typing import Any
 
 from local_asr_server.catalog import CatalogStore
+from local_asr_server.recording_screenshot_artifacts import (
+    MAX_SCREENSHOT_BYTES,
+    MAX_SCREENSHOT_PIXELS,
+    MAX_SCREENSHOT_THUMBNAIL_BYTES,
+    MAX_SCREENSHOTS_PER_RECORDING,
+    MIN_SCREENSHOT_FREE_BYTES,
+    SCREENSHOT_MANIFEST_VERSION,
+    ScreenshotArtifactStore,
+)
 logger = logging.getLogger("uvicorn.error")
 
 from local_asr_server.visual_intelligence.contracts import (
@@ -40,13 +49,6 @@ VALID_STATUSES = {
 
 VALID_CAPTURE_MODES = {"both", "mic_only", "pc_only", "legacy_mixed"}
 VALID_TRACK_IDS = {"mixed", "mic", "system"}
-
-SCREENSHOT_MANIFEST_VERSION = 1
-MAX_SCREENSHOT_BYTES = 25 * 1024 * 1024
-MAX_SCREENSHOT_THUMBNAIL_BYTES = 2 * 1024 * 1024
-MAX_SCREENSHOT_PIXELS = 100_000_000
-MAX_SCREENSHOTS_PER_RECORDING = 200
-MIN_SCREENSHOT_FREE_BYTES = 32 * 1024 * 1024
 
 TRACK_LABELS = {
     "mixed": "Conversazione",
@@ -105,6 +107,10 @@ class RecordingStore:
             raise PermissionError(f"Recording directory is not writable: {curr_root}")
         self._locks_guard = threading.Lock()
         self._locks: dict[str, threading.Lock] = {}
+        self._screenshot_artifacts = ScreenshotArtifactStore(
+            conflict_error=RecordingConflict,
+            not_found_error=RecordingNotFound,
+        )
         self._mark_interrupted_jobs()
         self._reconcile_screenshot_assets()
         self.sync_catalog()
@@ -391,9 +397,9 @@ class RecordingStore:
             return None
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            manifest = self._read_screenshot_manifest(session_dir, recording_id)
+            manifest = self._screenshot_artifacts.read_manifest(session_dir, recording_id)
             item = next((entry for entry in manifest["items"] if entry.get("request_id") == request_id), None)
-            return self._public_screenshot(session_dir, item) if item is not None else None
+            return self._screenshot_artifacts.public(session_dir, item) if item is not None else None
 
     def reserve_screenshot_capture(
         self,
@@ -409,14 +415,14 @@ class RecordingStore:
             session_dir, metadata = self._load(recording_id)
             if metadata["status"] != "recording":
                 raise RecordingConflict("Screenshots can only be captured while recording")
-            manifest = self._read_screenshot_manifest(session_dir, recording_id)
+            manifest = self._screenshot_artifacts.read_manifest(session_dir, recording_id)
             existing = next(
                 (entry for entry in manifest["items"] if entry.get("request_id") == request_id),
                 None,
             )
             if existing is not None:
                 return {
-                    "existing": self._public_screenshot(session_dir, existing),
+                    "existing": self._screenshot_artifacts.public(session_dir, existing),
                     "token": None,
                     "original_path": None,
                     "thumbnail_path": None,
@@ -431,7 +437,7 @@ class RecordingStore:
             staging_dir = session_dir / ".screenshot-capture-temp"
             staging_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
             token = uuid.uuid4().hex
-            original_path, thumbnail_path = self._screenshot_staging_paths(session_dir, token)
+            original_path, thumbnail_path = self._screenshot_artifacts.staging_paths(session_dir, token)
             original_path.unlink(missing_ok=True)
             thumbnail_path.unlink(missing_ok=True)
             return {
@@ -451,7 +457,7 @@ class RecordingStore:
         try:
             with self._lock_for(recording_id):
                 session_dir, _ = self._load(recording_id)
-                original_path, thumbnail_path = self._screenshot_staging_paths(session_dir, token)
+                original_path, thumbnail_path = self._screenshot_artifacts.staging_paths(session_dir, token)
                 original_path.unlink(missing_ok=True)
                 thumbnail_path.unlink(missing_ok=True)
                 try:
@@ -493,7 +499,7 @@ class RecordingStore:
             session_dir, metadata = self._load(recording_id)
             if metadata["status"] != "recording":
                 raise RecordingConflict("Screenshots can only be captured while recording")
-            original_staging, thumbnail_staging = self._screenshot_staging_paths(session_dir, token)
+            original_staging, thumbnail_staging = self._screenshot_artifacts.staging_paths(session_dir, token)
             if not original_staging.is_file() or not thumbnail_staging.is_file():
                 raise RecordingConflict("Screenshot staging assets are missing")
 
@@ -510,7 +516,7 @@ class RecordingStore:
                 if handle.read(3) != b"\xff\xd8\xff":
                     raise RecordingConflict("Screenshot thumbnail must be JPEG")
 
-            manifest = self._read_screenshot_manifest(session_dir, recording_id)
+            manifest = self._screenshot_artifacts.read_manifest(session_dir, recording_id)
             existing = next(
                 (entry for entry in manifest["items"] if entry.get("request_id") == request_id),
                 None,
@@ -518,7 +524,7 @@ class RecordingStore:
             if existing is not None:
                 original_staging.unlink(missing_ok=True)
                 thumbnail_staging.unlink(missing_ok=True)
-                return self._public_screenshot(session_dir, existing)
+                return self._screenshot_artifacts.public(session_dir, existing)
             if len(manifest["items"]) >= MAX_SCREENSHOTS_PER_RECORDING:
                 raise RecordingConflict(
                     f"Screenshot limit reached ({MAX_SCREENSHOTS_PER_RECORDING} per recording)"
@@ -536,7 +542,7 @@ class RecordingStore:
                 default=-1,
             ) + 1
             screenshot_id = str(uuid.uuid4())
-            screenshots_dir = self._screenshots_dir(session_dir)
+            screenshots_dir = self._screenshot_artifacts.directory(session_dir)
             screenshots_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
             original_name = f"screenshot-{sequence:04d}-{screenshot_id}.jpg"
             thumbnail_name = f"screenshot-{sequence:04d}-{screenshot_id}-thumb.jpg"
@@ -583,13 +589,13 @@ class RecordingStore:
                 "created_at": _utc_now(),
             }
             manifest["items"].append(entry)
-            self._write_json_atomic(self._screenshot_manifest_path(session_dir), manifest)
+            self._write_json_atomic(self._screenshot_artifacts.manifest_path(session_dir), manifest)
             metadata["screenshot_count"] = len(manifest["items"])
             metadata["screenshot_manifest_version"] = SCREENSHOT_MANIFEST_VERSION
             metadata["screenshot_revision"] = int(metadata.get("screenshot_revision") or 0) + 1
             self._write_metadata(session_dir, metadata)
             self._upsert_catalog(metadata)
-            return self._public_screenshot(session_dir, entry)
+            return self._screenshot_artifacts.public(session_dir, entry)
 
     def save_screenshot(
         self,
@@ -621,10 +627,10 @@ class RecordingStore:
             session_dir, metadata = self._load(recording_id)
             if metadata["status"] != "recording":
                 raise RecordingConflict("Screenshots can only be captured while recording")
-            manifest = self._read_screenshot_manifest(session_dir, recording_id)
+            manifest = self._screenshot_artifacts.read_manifest(session_dir, recording_id)
             existing = next((entry for entry in manifest["items"] if entry.get("request_id") == request_id), None)
             if existing is not None:
-                return self._public_screenshot(session_dir, existing)
+                return self._screenshot_artifacts.public(session_dir, existing)
             if len(manifest["items"]) >= MAX_SCREENSHOTS_PER_RECORDING:
                 raise RecordingConflict(
                     f"Screenshot limit reached ({MAX_SCREENSHOTS_PER_RECORDING} per recording)"
@@ -636,7 +642,7 @@ class RecordingStore:
 
             sequence = max((int(entry.get("sequence") or -1) for entry in manifest["items"]), default=-1) + 1
             screenshot_id = str(uuid.uuid4())
-            screenshots_dir = self._screenshots_dir(session_dir)
+            screenshots_dir = self._screenshot_artifacts.directory(session_dir)
             screenshots_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
             original_name = f"screenshot-{sequence:04d}-{screenshot_id}.jpg"
             thumbnail_name = f"screenshot-{sequence:04d}-{screenshot_id}-thumb.jpg"
@@ -675,20 +681,20 @@ class RecordingStore:
                 "created_at": _utc_now(),
             }
             manifest["items"].append(entry)
-            self._write_json_atomic(self._screenshot_manifest_path(session_dir), manifest)
+            self._write_json_atomic(self._screenshot_artifacts.manifest_path(session_dir), manifest)
             metadata["screenshot_count"] = len(manifest["items"])
             metadata["screenshot_manifest_version"] = SCREENSHOT_MANIFEST_VERSION
             metadata["screenshot_revision"] = int(metadata.get("screenshot_revision") or 0) + 1
             self._write_metadata(session_dir, metadata)
             self._upsert_catalog(metadata)
-            return self._public_screenshot(session_dir, entry)
+            return self._screenshot_artifacts.public(session_dir, entry)
 
     def list_screenshots(self, recording_id: str) -> list[dict[str, Any]]:
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            manifest = self._read_screenshot_manifest(session_dir, recording_id)
+            manifest = self._screenshot_artifacts.read_manifest(session_dir, recording_id)
             return [
-                self._public_screenshot(session_dir, item)
+                self._screenshot_artifacts.public(session_dir, item)
                 for item in sorted(
                     manifest["items"],
                     key=lambda item: (float(item.get("timestamp") or 0.0), int(item.get("sequence") or 0)),
@@ -698,81 +704,29 @@ class RecordingStore:
     def screenshot_asset_path(self, recording_id: str, screenshot_id: str, *, thumbnail: bool = False) -> Path:
         with self._lock_for(recording_id):
             session_dir, _ = self._load(recording_id)
-            manifest = self._read_screenshot_manifest(session_dir, recording_id)
-            item = next((entry for entry in manifest["items"] if entry.get("screenshot_id") == screenshot_id), None)
-            if item is None:
-                raise RecordingNotFound(screenshot_id)
-            key = "thumbnail_file" if thumbnail else "original_file"
-            screenshots_dir = self._screenshots_dir(session_dir).resolve()
-            path = (screenshots_dir / str(item.get(key) or "")).resolve()
-            if screenshots_dir not in path.parents or not path.is_file():
-                raise RecordingNotFound(screenshot_id)
-            return path
+            manifest = self._screenshot_artifacts.read_manifest(session_dir, recording_id)
+            return self._screenshot_artifacts.asset_path(
+                session_dir,
+                manifest,
+                screenshot_id,
+                thumbnail=thumbnail,
+            )
 
     def delete_screenshot(self, recording_id: str, screenshot_id: str) -> None:
         with self._lock_for(recording_id):
             session_dir, metadata = self._load(recording_id)
-            manifest = self._read_screenshot_manifest(session_dir, recording_id)
+            manifest = self._screenshot_artifacts.read_manifest(session_dir, recording_id)
             item = next((entry for entry in manifest["items"] if entry.get("screenshot_id") == screenshot_id), None)
             if item is None:
                 raise RecordingNotFound(screenshot_id)
-            screenshots_dir = self._screenshots_dir(session_dir).resolve()
-            for key in ("original_file", "thumbnail_file"):
-                path = (screenshots_dir / str(item.get(key) or "")).resolve()
-                if screenshots_dir in path.parents:
-                    path.unlink(missing_ok=True)
+            self._screenshot_artifacts.delete_assets(session_dir, item)
             manifest["items"] = [entry for entry in manifest["items"] if entry.get("screenshot_id") != screenshot_id]
-            self._write_json_atomic(self._screenshot_manifest_path(session_dir), manifest)
+            self._write_json_atomic(self._screenshot_artifacts.manifest_path(session_dir), manifest)
             metadata["screenshot_count"] = len(manifest["items"])
             metadata["screenshot_manifest_version"] = SCREENSHOT_MANIFEST_VERSION
             metadata["screenshot_revision"] = int(metadata.get("screenshot_revision") or 0) + 1
             self._write_metadata(session_dir, metadata)
             self._upsert_catalog(metadata)
-
-    def _screenshot_staging_paths(self, session_dir: Path, token: str) -> tuple[Path, Path]:
-        staging_dir = session_dir / ".screenshot-capture-temp"
-        return (
-            staging_dir / f"{token}.jpg",
-            staging_dir / f"{token}-thumb.jpg",
-        )
-
-    def _screenshots_dir(self, session_dir: Path) -> Path:
-        return session_dir / "screenshots"
-
-    def _screenshot_manifest_path(self, session_dir: Path) -> Path:
-        return self._screenshots_dir(session_dir) / "manifest.json"
-
-    def _read_screenshot_manifest(self, session_dir: Path, recording_id: str) -> dict[str, Any]:
-        manifest_path = self._screenshot_manifest_path(session_dir)
-        if not manifest_path.exists():
-            return {"schema_version": SCREENSHOT_MANIFEST_VERSION, "recording_id": recording_id, "items": []}
-        try:
-            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RecordingConflict("Screenshot manifest is unreadable") from exc
-        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-            raise RecordingConflict("Screenshot manifest is invalid")
-        version = int(payload.get("schema_version") or SCREENSHOT_MANIFEST_VERSION)
-        if version != SCREENSHOT_MANIFEST_VERSION:
-            raise RecordingConflict(f"Unsupported screenshot manifest version: {version}")
-        return {
-            "schema_version": version,
-            "recording_id": recording_id,
-            "items": [item for item in payload["items"] if isinstance(item, dict)],
-        }
-
-    def _public_screenshot(self, session_dir: Path, item: dict[str, Any]) -> dict[str, Any]:
-        screenshots_dir = self._screenshots_dir(session_dir).resolve()
-        original = (screenshots_dir / str(item.get("original_file") or "")).resolve()
-        thumbnail = (screenshots_dir / str(item.get("thumbnail_file") or "")).resolve()
-        original_ok = screenshots_dir in original.parents and original.is_file()
-        thumbnail_ok = screenshots_dir in thumbnail.parents and thumbnail.is_file()
-        return {
-            key: value
-            for key, value in item.items()
-            if key not in {"original_file", "thumbnail_file"}
-        } | {"available": original_ok, "thumbnail_available": thumbnail_ok}
-
 
     def list_visual_evidence_frames(self, recording_id: str) -> list[dict[str, Any]]:
         """Return post-meeting visual inputs with stable source provenance.
@@ -1675,7 +1629,7 @@ class RecordingStore:
         """
         for metadata_path in self.root.glob("*/*/metadata.json"):
             session_dir = metadata_path.parent
-            screenshots_dir = self._screenshots_dir(session_dir)
+            screenshots_dir = self._screenshot_artifacts.directory(session_dir)
             shutil.rmtree(session_dir / ".screenshot-capture-temp", ignore_errors=True)
             if not screenshots_dir.exists():
                 continue
@@ -1683,14 +1637,14 @@ class RecordingStore:
                 with metadata_path.open("r", encoding="utf-8") as metadata_file:
                     metadata = json.load(metadata_file)
                 recording_id = str(metadata.get("id") or session_dir.name)
-                manifest_path = self._screenshot_manifest_path(session_dir)
+                manifest_path = self._screenshot_artifacts.manifest_path(session_dir)
                 if not manifest_path.exists():
                     for candidate in screenshots_dir.iterdir():
                         if candidate.is_file() and candidate.name.endswith(".tmp"):
                             candidate.unlink(missing_ok=True)
                     continue
 
-                manifest = self._read_screenshot_manifest(session_dir, recording_id)
+                manifest = self._screenshot_artifacts.read_manifest(session_dir, recording_id)
                 referenced: set[str] = {"manifest.json"}
                 for item in manifest["items"]:
                     for key in ("original_file", "thumbnail_file"):
