@@ -3,21 +3,32 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import subprocess
-import sys
 
 
-DETERMINISTIC_TESTS = [
-    "test.test_native_capture",
-    "test.test_screenshot_capture_core",
-    "test.test_recording_api.RecordingApiTests.test_screenshot_api_uses_store_owned_staging_and_is_idempotent",
-    "test.test_frontend_call_screenshot_evidence",
+DETERMINISTIC_TEST_PATTERNS = [
+    "test_native_capture.py",
+    "test_screenshot_capture_core.py",
+    "test_recording_api.py",
+    "test_frontend_call_screenshot_evidence.py",
 ]
 
 
-def run(command: list[str]) -> int:
+def run(command: list[str], *, env: dict[str, str] | None = None) -> int:
     print("$ " + " ".join(command), flush=True)
-    return subprocess.run(command, check=False).returncode
+    return subprocess.run(command, check=False, env=env).returncode
+
+
+def uv_python_command(*args: str) -> list[str]:
+    uv = shutil.which("uv")
+    if uv is None:
+        raise RuntimeError(
+            "uv is required for capture-core validation; "
+            "ClosedRoom supports Python >=3.10,<3.14 and must not inherit an arbitrary global Python."
+        )
+    return [uv, "run", "python", *args]
 
 
 def main() -> int:
@@ -28,28 +39,38 @@ def main() -> int:
     parser.add_argument("--enforce-slo", action="store_true")
     args = parser.parse_args()
 
-    test_command = [
-        sys.executable,
-        "-m",
-        "unittest",
-        *DETERMINISTIC_TESTS,
-        "-v",
-    ]
-    status = run(test_command)
-    if status != 0 or not args.real:
-        return status
+    env = {**os.environ, "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR", ".cache/uv")}
 
-    benchmark = [
-        sys.executable,
+    for pattern in DETERMINISTIC_TEST_PATTERNS:
+        status = run(
+            uv_python_command(
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "test",
+                "-p",
+                pattern,
+                "-v",
+            ),
+            env=env,
+        )
+        if status != 0:
+            return status
+
+    if not args.real:
+        return 0
+
+    benchmark = uv_python_command(
         "scripts/benchmark_screenshot_capture_core.py",
         "--shots",
         str(args.shots),
         "--interval",
         str(args.interval),
-    ]
+    )
     if args.enforce_slo:
         benchmark.append("--enforce-slo")
-    return run(benchmark)
+    return run(benchmark, env=env)
 
 
 if __name__ == "__main__":
