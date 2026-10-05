@@ -29,6 +29,7 @@ class _FakeProcess:
     def __init__(self, lines: list[str]) -> None:
         self.stdout = _FakeStdout(lines)
         self.returncode = 0
+        self.pid = 4242
 
     def wait(self, timeout: float | None = None) -> int:
         return self.returncode
