@@ -67,6 +67,11 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         ):
             self.assertIn(evidence, self.e2e)
 
+    def test_failed_api_response_body_is_consumed_once(self) -> None:
+        self.assertIn("const bodyText = await response.text();", self.client)
+        self.assertIn("JSON.parse(bodyText)", self.client)
+        self.assertNotIn("const payload = await response.json();", self.client)
+
 
 if __name__ == "__main__":
     unittest.main()
