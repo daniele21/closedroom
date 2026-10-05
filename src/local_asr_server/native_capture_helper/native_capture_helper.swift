@@ -1297,7 +1297,10 @@ actor ScreenshotWorkerService {
         var display = displays[displayID]
         var size = dimensions[displayID]
         let missingExcludedWindow = excludedWindowIDs.contains { windowsByID[$0] == nil }
-        if filter == nil || display == nil || size == nil || missingExcludedWindow {
+        let missingExactOverlayFallback = excludedWindowIDs.isEmpty && !windowsByID.values.contains {
+            ($0.title ?? "") == screenshotOverlayWindowTitle
+        }
+        if filter == nil || display == nil || size == nil || missingExcludedWindow || missingExactOverlayFallback {
             do {
                 try await refreshSources(emitChange: false)
                 filter = filters[displayID]
