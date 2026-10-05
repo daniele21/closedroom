@@ -46,6 +46,43 @@ final class JSONEmitter {
     }
 }
 
+final class ScreenshotDiagnosticTrace {
+    private let traceID: String
+    private let startedUptime = ProcessInfo.processInfo.systemUptime
+    private let lock = NSLock()
+
+    init(traceID: String) {
+        self.traceID = traceID
+    }
+
+    func emit(_ stage: String, fields: [String: Any] = [:]) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var payload = fields
+        payload["type"] = "screenshot_diagnostic"
+        payload["trace_id"] = traceID
+        payload["stage"] = stage
+        payload["elapsed_ms"] = Int(
+            max(0.0, ProcessInfo.processInfo.systemUptime - startedUptime) * 1000.0
+        )
+        payload["pid"] = Int(ProcessInfo.processInfo.processIdentifier)
+        payload["main_thread"] = Thread.isMainThread
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+            let prefix = "CR_SCREENSHOT_DIAG ".data(using: .utf8)!
+            FileHandle.standardError.write(prefix)
+            FileHandle.standardError.write(data)
+            FileHandle.standardError.write(Data([0x0A]))
+        } catch {
+            let fallback = "CR_SCREENSHOT_DIAG {\"type\":\"screenshot_diagnostic\",\"stage\":\"serialization_failed\"}\n"
+            FileHandle.standardError.write(fallback.data(using: .utf8)!)
+        }
+    }
+}
+
+
 func calculateDB(from sampleBuffer: CMSampleBuffer) -> Float {
     guard CMSampleBufferDataIsReady(sampleBuffer) else { return -120.0 }
     
@@ -875,14 +912,30 @@ func captureDisplayScreenshotWithManager(
     displayID: CGDirectDisplayID,
     originalURL: URL,
     thumbnailURL: URL,
-    recordingReadyUptime: Double
+    recordingReadyUptime: Double,
+    diagnostics: ScreenshotDiagnosticTrace
 ) async throws -> [String: Any] {
+    diagnostics.emit("shareable_content_begin")
     let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+    diagnostics.emit("shareable_content_ready", fields: [
+        "display_count": content.displays.count,
+        "window_count": content.windows.count,
+    ])
+
     guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+        diagnostics.emit("display_not_found", fields: [
+            "requested_display_id": Int(displayID),
+            "display_count": content.displays.count,
+        ])
         throw NSError(domain: "ClosedRoomNativeCapture", code: 60, userInfo: [
             NSLocalizedDescriptionKey: "Selected screenshot display is no longer available"
         ])
     }
+    diagnostics.emit("display_selected", fields: [
+        "display_id": Int(displayID),
+        "width": Int(display.width),
+        "height": Int(display.height),
+    ])
 
     let ownPID = ProcessInfo.processInfo.processIdentifier
     let excludedWindows = content.windows.filter { window in
@@ -896,56 +949,88 @@ func captureDisplayScreenshotWithManager(
             || title.contains("closedroom")
     }
     let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+    diagnostics.emit("content_filter_ready", fields: [
+        "excluded_window_count": excludedWindows.count,
+    ])
+
     let configuration = SCStreamConfiguration()
     configuration.width = max(2, Int(display.width))
     configuration.height = max(2, Int(display.height))
     configuration.showsCursor = false
     configuration.capturesAudio = false
     configuration.captureResolution = .best
+    diagnostics.emit("capture_configuration_ready", fields: [
+        "width": configuration.width,
+        "height": configuration.height,
+        "shows_cursor": configuration.showsCursor,
+        "captures_audio": configuration.capturesAudio,
+    ])
 
+    diagnostics.emit("capture_image_begin")
     let cgImage = try await SCScreenshotManager.captureImage(
         contentFilter: filter,
         configuration: configuration
     )
+    diagnostics.emit("capture_image_completed", fields: [
+        "width": cgImage.width,
+        "height": cgImage.height,
+    ])
+
     let capturedUptime = ProcessInfo.processInfo.systemUptime
     let capturedWallTime = Date().timeIntervalSince1970
     let image = CIImage(cgImage: cgImage)
+    let context = CIContext(options: [.cacheIntermediates: false])
     let qualityKey = CIImageRepresentationOption(
         rawValue: kCGImageDestinationLossyCompressionQuality as String
     )
 
-    guard let original = CIContext(options: [.cacheIntermediates: false]).jpegRepresentation(
+    diagnostics.emit("original_encode_begin")
+    guard let original = context.jpegRepresentation(
         of: image,
         colorSpace: CGColorSpaceCreateDeviceRGB(),
         options: [qualityKey: 0.92]
     ) else {
+        diagnostics.emit("original_encode_failed")
         throw NSError(domain: "ClosedRoomNativeCapture", code: 61, userInfo: [
             NSLocalizedDescriptionKey: "Unable to encode screenshot"
         ])
     }
+    diagnostics.emit("original_encode_completed", fields: ["bytes": original.count])
 
     let width = cgImage.width
     let height = cgImage.height
     let scale = min(1.0, 640.0 / Double(max(width, height)))
     let thumbnailImage = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-    guard let thumbnail = CIContext(options: [.cacheIntermediates: false]).jpegRepresentation(
+    diagnostics.emit("thumbnail_encode_begin")
+    guard let thumbnail = context.jpegRepresentation(
         of: thumbnailImage,
         colorSpace: CGColorSpaceCreateDeviceRGB(),
         options: [qualityKey: 0.78]
     ) else {
+        diagnostics.emit("thumbnail_encode_failed")
         throw NSError(domain: "ClosedRoomNativeCapture", code: 62, userInfo: [
             NSLocalizedDescriptionKey: "Unable to encode screenshot thumbnail"
         ])
     }
+    diagnostics.emit("thumbnail_encode_completed", fields: ["bytes": thumbnail.count])
 
+    diagnostics.emit("file_write_begin")
     do {
         try original.write(to: originalURL, options: .atomic)
         try thumbnail.write(to: thumbnailURL, options: .atomic)
     } catch {
+        diagnostics.emit("file_write_failed", fields: [
+            "error_domain": (error as NSError).domain,
+            "error_code": (error as NSError).code,
+        ])
         try? FileManager.default.removeItem(at: originalURL)
         try? FileManager.default.removeItem(at: thumbnailURL)
         throw error
     }
+    diagnostics.emit("files_written", fields: [
+        "original_bytes": original.count,
+        "thumbnail_bytes": thumbnail.count,
+    ])
 
     return [
         "type": "screenshot",
@@ -968,17 +1053,21 @@ func captureDisplayScreenshot(
     displayID: CGDirectDisplayID,
     originalURL: URL,
     thumbnailURL: URL,
-    recordingReadyUptime: Double
+    recordingReadyUptime: Double,
+    diagnostics: ScreenshotDiagnosticTrace
 ) async throws -> [String: Any] {
     if #available(macOS 14.0, *) {
+        diagnostics.emit("capture_backend_selected", fields: ["backend": "screenshot_manager"])
         return try await captureDisplayScreenshotWithManager(
             displayID: displayID,
             originalURL: originalURL,
             thumbnailURL: thumbnailURL,
-            recordingReadyUptime: recordingReadyUptime
+            recordingReadyUptime: recordingReadyUptime,
+            diagnostics: diagnostics
         )
     }
 
+    diagnostics.emit("capture_backend_selected", fields: ["backend": "scstream_fallback"])
     let capture = OneShotDisplayCapture(
         displayID: displayID,
         originalURL: originalURL,
@@ -1004,39 +1093,71 @@ func runScreenshot(
     displayID: Int,
     recordingReadyUptime: Double,
     originalFile: String,
-    thumbnailFile: String
+    thumbnailFile: String,
+    traceID: String
 ) {
+    let diagnostics = ScreenshotDiagnosticTrace(traceID: traceID)
+    let processInfo = ProcessInfo.processInfo
+    let signature = getCodeSignatureInfo()
+    let screenCaptureAllowed = CGPreflightScreenCaptureAccess()
+    diagnostics.emit("command_received", fields: [
+        "display_id": displayID,
+        "process_name": processInfo.processName,
+        "executable_name": URL(fileURLWithPath: Bundle.main.executablePath ?? CommandLine.arguments.first ?? "").lastPathComponent,
+        "bundle_identifier": Bundle.main.bundleIdentifier ?? "",
+        "bundle_is_app": Bundle.main.bundleURL.pathExtension.lowercased() == "app",
+        "screen_capture_preflight": screenCaptureAllowed,
+        "code_signature": signature["signature"] ?? "unsigned",
+        "signing_identifier": signature["identifier"] ?? "",
+        "team_id": signature["team_id"] ?? "",
+        "macos_version": processInfo.operatingSystemVersionString,
+    ])
+
     guard #available(macOS 13.0, *) else {
+        diagnostics.emit("macos_version_rejected")
         JSONEmitter.shared.emitAndExit([
             "type": "error",
             "reason": "macos_13_required",
             "message": "Screenshot capture requires macOS 13.0 or later"
         ], exitCode: 3)
     }
-    guard CGPreflightScreenCaptureAccess() else {
+    guard screenCaptureAllowed else {
+        diagnostics.emit("screen_capture_permission_rejected")
         JSONEmitter.shared.emitAndExit([
             "type": "error",
             "reason": "screen_capture_permission_required",
             "message": "Screen Recording permission is required for screenshots"
         ], exitCode: 3)
     }
+    diagnostics.emit("screen_capture_permission_ready")
 
     // SCScreenshotManager is WindowServer-backed. A standalone CLI must
     // initialize AppKit before requesting a frame or the capture callback can
     // remain pending indefinitely even though shareable-content discovery works.
+    diagnostics.emit("appkit_initializing")
     let app = NSApplication.shared
     app.setActivationPolicy(.prohibited)
+    diagnostics.emit("appkit_ready")
 
     Task { @MainActor in
+        diagnostics.emit("main_actor_entered")
         do {
             let result = try await captureDisplayScreenshot(
                 displayID: CGDirectDisplayID(displayID),
                 originalURL: URL(fileURLWithPath: originalFile),
                 thumbnailURL: URL(fileURLWithPath: thumbnailFile),
-                recordingReadyUptime: recordingReadyUptime
+                recordingReadyUptime: recordingReadyUptime,
+                diagnostics: diagnostics
             )
+            diagnostics.emit("command_completed")
             JSONEmitter.shared.emitAndExit(result, exitCode: 0)
         } catch {
+            let nsError = error as NSError
+            diagnostics.emit("command_failed", fields: [
+                "error_domain": nsError.domain,
+                "error_code": nsError.code,
+                "error_description": nsError.localizedDescription,
+            ])
             JSONEmitter.shared.emitAndExit([
                 "type": "error",
                 "reason": "screenshot_capture_failed",
@@ -1044,6 +1165,7 @@ func runScreenshot(
             ], exitCode: 4)
         }
     }
+    diagnostics.emit("dispatch_main_entering")
     dispatchMain()
 }
 
@@ -1520,11 +1642,13 @@ case "screenshot":
             "message": "Missing required screenshot arguments"
         ], exitCode: 2)
     }
+    let traceID = requireArg("--trace-id", in: args) ?? UUID().uuidString
     runScreenshot(
         displayID: displayID,
         recordingReadyUptime: recordingReadyUptime,
         originalFile: originalFile,
-        thumbnailFile: thumbnailFile
+        thumbnailFile: thumbnailFile,
+        traceID: traceID
     )
 case "start":
     guard let recordingID = requireArg("--recording-id", in: args),
