@@ -90,17 +90,42 @@ Questi sono target da validare, non risultati già provati:
 
 | ID | Outcome | Owner | Dipende da | State |
 | --- | --- | --- | --- | --- |
-| SC-0 | baseline metriche e trace current path | native manager/helper | — | ACTIVE |
-| SC-1 | protocollo JSONL + ScreenshotWorker persistente | helper + manager | — | ACTIVE |
-| SC-2 | DisplayRegistry cached senza ScreenCaptureKit hot-path | helper + manager + API | SC-1 | ACTIVE |
-| SC-3 | timeout locale, health, restart e backend fallback | worker | SC-1 | PLANNED |
-| SC-4 | staging/atomic commit RecordingStore senza read/write duplicato | RecordingStore + API | SC-1 | PLANNED |
-| SC-5 | overlay state/feedback rapido e no refresh display ridondanti | frontend | SC-2 | PLANNED |
-| SC-6 | capture-core deterministic suite + benchmark harness | tests/scripts | SC-1..5 | ACTIVE |
+| SC-0 | baseline metriche e trace current path | native manager/helper | — | DONE |
+| SC-1 | protocollo JSONL + ScreenshotWorker persistente | helper + manager | — | IMPLEMENTED_PENDING_VALIDATION |
+| SC-2 | DisplayRegistry cached senza ScreenCaptureKit hot-path | helper + manager + API | SC-1 | IMPLEMENTED_PENDING_VALIDATION |
+| SC-3 | timeout locale, health, restart e backend fallback | worker | SC-1 | PARTIAL_PENDING_VALIDATION |
+| SC-4 | staging/atomic commit RecordingStore senza read/write duplicato | RecordingStore + API | SC-1 | IMPLEMENTED_PENDING_VALIDATION |
+| SC-5 | overlay state/feedback rapido e no refresh display ridondanti | frontend | SC-2 | PARTIAL_PENDING_VALIDATION |
+| SC-6 | capture-core deterministic suite + benchmark harness | tests/scripts | SC-1..5 | IMPLEMENTED_PENDING_EXECUTION |
 | SC-7 | target-Mac burst/perf/TCC/audio-continuity evidence | real environment | SC-1..6 | PLANNED |
 | SC-8 | rimozione runtime path one-shot subprocess legacy | manager/helper | SC-7 | PLANNED |
 
 SC-1, SC-2 e SC-6 sono intenzionalmente sviluppabili in parallelo dopo il contratto sopra.
+
+## Stato implementazione 2026-10-05
+
+Prima ondata implementata sul branch `work/screenshot-capture-core`, senza integrazione su `dev`.
+
+Implementato:
+- worker screenshot persistente separato dal recording worker, con JSONL stdin/stdout;
+- warm-up AppKit/TCC/ScreenCaptureKit una volta per recording e cache dei content filter;
+- display cache posseduta dal worker con callback CoreGraphics per reconfiguration;
+- `GET /v1/capture/displays` usa la cache durante recording e non esegue discovery subprocess;
+- timeout interno one-shot a 1.2s e restart isolato del worker su timeout;
+- audio worker resta un failure domain separato e non viene riavviato da screenshot failure;
+- RecordingStore riserva staging paths e promuove gli asset con `os.replace`, evitando JPEG round-trip in RAM Python e seconda scrittura;
+- metriche tecniche capture/encode/write/roundtrip/persist e worker restart count;
+- overlay stabilizzato per evitare ricreazioni del callback display dovute alla selezione monitor;
+- suite deterministica per 20 screenshot, stesso PID, display cache, timeout/recovery, atomic staging e API idempotency;
+- benchmark target-Mac `scripts/benchmark_screenshot_capture_core.py` e runner focalizzato `scripts/validate_capture_core.py`.
+
+Ancora aperto:
+- SC-3: il restart su timeout è implementato; fallback automatico a backend alternativo non è ancora introdotto e va deciso dai benchmark reali;
+- SC-5: il churn callback è ridotto, ma lo stato UX esplicito worker warming/ready resta da rifinire dopo evidenza reale sulla warm-up latency;
+- SC-7: TCC, ScreenCaptureKit reale, 20-shot burst, p50/p95, multi-display e continuità audio richiedono target Mac;
+- SC-8: il comando standalone one-shot resta presente come diagnostica/legacy finché il nuovo path non è validato.
+
+Validazione: non ancora dichiarata. In questo ambiente il repository non è disponibile come checkout locale e l'accesso Git via DNS non è disponibile; per indicazione del maintainer non si usano GitHub Actions come sostituto. I gate deterministici, frontend typecheck/lint, compilazione Swift e packaged-app restano quindi PENDING finché non possono essere eseguiti localmente sull'exact head. Nessun PASS viene inferito dalla sola review del sorgente.
 
 ## Contratto worker
 
