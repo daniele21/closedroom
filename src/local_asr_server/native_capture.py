@@ -32,6 +32,19 @@ VALID_NATIVE_MODES = {"both", "mic_only", "pc_only"}
 logger = logging.getLogger("local_asr_server.native_capture")
 
 
+def _bounded_process_output(value: str | bytes | None, *, limit: int = 12_000) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    else:
+        text = str(value)
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return "...[truncated]..." + text[-limit:]
+
+
 def mode_permission_ok(payload: dict[str, Any], mode: str) -> bool:
     modes = payload.get("modes") or {}
     mode_info = modes.get(mode) or {}
@@ -276,18 +289,34 @@ class NativeCaptureManager:
             temp_dir = session.output_dir / ".screenshot-capture-temp"
             temp_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
             token = uuid.uuid4().hex
+            trace_id = f"shot-{token[:12]}"
             original_path = temp_dir / f"{token}.jpg"
             thumbnail_path = temp_dir / f"{token}-thumb.jpg"
             try:
                 cmd = [
                     str(self.helper_path),
                     "screenshot",
+                    "--trace-id", trace_id,
                     "--display-id", str(selected),
                     "--recording-ready-uptime", str(float(ready_uptime)),
                     "--original-file", str(original_path),
                     "--thumbnail-file", str(thumbnail_path),
                 ]
-                logger.debug("Executing native screenshot helper: %s", " ".join(cmd))
+                logger.info(
+                    "Native screenshot helper launch: trace_id=%s recording=%s display=%s "
+                    "display_size=%sx%s capture_mode=%s active_capture_pid=%s "
+                    "active_capture_alive=%s runtime_bundled=%s helper_cached_dev=%s",
+                    trace_id,
+                    recording_id,
+                    selected,
+                    by_id[selected].get("width", 0),
+                    by_id[selected].get("height", 0),
+                    session.mode,
+                    getattr(session.process, "pid", None),
+                    session.process.poll() is None,
+                    bool(getattr(sys, "frozen", False)),
+                    ".cache/native-capture-helper" in str(self.helper_path),
+                )
                 try:
                     completed = subprocess.run(
                         cmd,
@@ -297,14 +326,33 @@ class NativeCaptureManager:
                         check=False,
                     )
                 except subprocess.TimeoutExpired as exc:
+                    timeout_stdout = _bounded_process_output(exc.stdout)
+                    timeout_stderr = _bounded_process_output(exc.stderr)
                     logger.error(
-                        "Native screenshot helper timed out after %.1fs for recording %s display %s",
+                        "Native screenshot helper timed out after %.1fs: trace_id=%s recording=%s "
+                        "display=%s active_capture_pid=%s active_capture_alive=%s",
                         float(exc.timeout or 15),
+                        trace_id,
                         recording_id,
                         selected,
+                        getattr(session.process, "pid", None),
+                        session.process.poll() is None,
                     )
-                    raise RuntimeError("screenshot_capture_timeout") from exc
+                    logger.error(
+                        "Native screenshot timeout diagnostics: trace_id=%s stderr=%s stdout=%s",
+                        trace_id,
+                        timeout_stderr or "<empty>",
+                        timeout_stdout or "<empty>",
+                    )
+                    raise RuntimeError(f"screenshot_capture_timeout:{trace_id}") from exc
                 stdout = completed.stdout.strip()
+                stderr = completed.stderr.strip()
+                if stderr:
+                    logger.info(
+                        "Native screenshot helper diagnostics: trace_id=%s %s",
+                        trace_id,
+                        _bounded_process_output(stderr),
+                    )
                 parsed: dict[str, Any] = {}
                 if stdout:
                     try:
@@ -318,7 +366,7 @@ class NativeCaptureManager:
                     message = parsed.get("message") or completed.stderr.strip() or reason
                     logger.error(
                         "Native screenshot helper failed (exit code %d): reason=%s message=%s stderr=%s stdout=%s",
-                        completed.returncode, reason, message, completed.stderr.strip(), stdout,
+                        completed.returncode, reason, message, stderr, stdout,
                     )
                     raise RuntimeError(f"{reason}: {message}")
                 if not original_path.is_file() or not thumbnail_path.is_file():
@@ -327,8 +375,11 @@ class NativeCaptureManager:
                     raise RuntimeError("screenshot_capture_missing_output")
                 captured_uptime = float(parsed.get("captured_uptime"))
                 logger.info(
-                    "Native screenshot successful: display=%s (%s), original_size=%d bytes, thumb_size=%d bytes",
-                    selected, by_id[selected].get("title"), original_path.stat().st_size, thumbnail_path.stat().st_size,
+                    "Native screenshot successful: trace_id=%s display=%s original_size=%d bytes thumb_size=%d bytes",
+                    trace_id,
+                    selected,
+                    original_path.stat().st_size,
+                    thumbnail_path.stat().st_size,
                 )
                 return {
                     **parsed,
