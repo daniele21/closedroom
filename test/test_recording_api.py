@@ -164,6 +164,39 @@ class RecordingApiTests(unittest.TestCase):
         self.assertEqual(original.content, b"\xff\xd8\xfforiginal")
         self.assertEqual(thumbnail.content, b"\xff\xd8\xffthumb")
 
+    def test_screenshot_display_selection_endpoint_updates_capture_owner(self) -> None:
+        class FakeCaptureManager:
+            def __init__(self) -> None:
+                self.selected = None
+
+            def set_screenshot_display(self, recording_id: str, display_id: int) -> dict:
+                self.selected = (recording_id, display_id)
+                return {
+                    "recording_id": recording_id,
+                    "display_id": display_id,
+                    "display": {
+                        "display_id": display_id,
+                        "source_id": -display_id,
+                        "title": "Screen 2",
+                        "width": 2560,
+                        "height": 1440,
+                        "is_main": False,
+                    },
+                }
+
+        fake = FakeCaptureManager()
+        self.app.state.capture_manager = fake
+
+        response = self.client.put(
+            "/v1/recordings/rec-display-owner/screenshot-display",
+            json={"display_id": 11},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["display_id"], 11)
+        self.assertEqual(fake.selected, ("rec-display-owner", 11))
+
+
     def test_screenshot_failure_does_not_stop_or_mutate_recording(self) -> None:
         class FailingCaptureManager:
             def begin_screenshot(self, recording_id: str) -> None:
