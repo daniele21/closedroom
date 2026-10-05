@@ -1,4 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  AlertTriangle,
+  Camera,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Mic,
+  Monitor,
+  Square,
+  Volume2,
+  X,
+} from 'lucide-react';
 import { ApiClient, CaptureDisplay } from '../api/apiClient';
 import { useTranslation } from '../i18n/i18n';
 
@@ -23,6 +36,10 @@ export default function RecordingOverlayPage() {
   const [screenshotCount, setScreenshotCount] = useState(0);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
   const [lastScreenshotAt, setLastScreenshotAt] = useState<number | null>(null);
+  const [isDisplayPickerOpen, setIsDisplayPickerOpen] = useState(false);
+  const [pendingDisplayId, setPendingDisplayId] = useState<number | null>(null);
+  const [isSelectingDisplay, setIsSelectingDisplay] = useState(false);
+  const [screenshotFeedback, setScreenshotFeedback] = useState<'idle' | 'saved'>('idle');
 
   const logOverlay = useCallback((level: 'info' | 'warn' | 'error', message: string, data?: any) => {
     console[level === 'warn' ? 'warn' : level === 'error' ? 'error' : 'log'](`[Overlay] ${message}`, data || '');
@@ -57,6 +74,9 @@ export default function RecordingOverlayPage() {
   const timerIntervalRef = useRef<any>(null);
   const startedAtRef = useRef<number | null>(null);
   const selectedDisplayIdRef = useRef<number | null>(null);
+  const pendingDisplayIdRef = useRef<number | null>(null);
+  const displayPickerRef = useRef<HTMLDivElement | null>(null);
+  const screenshotFeedbackTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     selectedDisplayIdRef.current = selectedDisplayId;
@@ -108,10 +128,13 @@ export default function RecordingOverlayPage() {
         : (selectedDisplayIdRef.current ?? (storedId && available.some(d => d.display_id === storedId) ? storedId : null));
 
       if (preferred && available.some((display) => display.display_id === preferred)) {
+        selectedDisplayIdRef.current = preferred;
         setSelectedDisplayId(preferred);
       } else if (available.length > 0) {
+        selectedDisplayIdRef.current = available[0].display_id;
         setSelectedDisplayId(available[0].display_id);
       } else {
+        selectedDisplayIdRef.current = null;
         setSelectedDisplayId(null);
       }
     } catch (err) {
@@ -156,7 +179,19 @@ export default function RecordingOverlayPage() {
         setSignalLevelSystem(formatDb(data.system_db));
         setWarnings(data.warnings || []);
         setScreenshotCount(data.screenshot_count || 0);
-        if (data.screenshot_display_id) setSelectedDisplayId(data.screenshot_display_id);
+        const backendDisplayId = data.screenshot_display_id ? Number(data.screenshot_display_id) : null;
+        const pendingSelection = pendingDisplayIdRef.current;
+        if (
+          backendDisplayId !== null
+          && (pendingSelection === null || backendDisplayId === pendingSelection)
+        ) {
+          selectedDisplayIdRef.current = backendDisplayId;
+          setSelectedDisplayId(backendDisplayId);
+          if (pendingSelection === backendDisplayId) {
+            pendingDisplayIdRef.current = null;
+            setPendingDisplayId(null);
+          }
+        }
 
         if (data.started_at && !startedAtRef.current) {
           startedAtRef.current = recordingStartedAtMs(data.started_at);
@@ -192,9 +227,22 @@ export default function RecordingOverlayPage() {
         setBytesWritten(activeData.bytes_written || 0);
         setWarnings(activeData.warnings || []);
         setScreenshotCount(activeData.screenshot_count || 0);
-        setSelectedDisplayId(activeData.screenshot_display_id || null);
+        const backendDisplayId = activeData.screenshot_display_id ?? null;
+        const pendingSelection = pendingDisplayIdRef.current;
+        if (
+          backendDisplayId !== null
+          && (pendingSelection === null || backendDisplayId === pendingSelection)
+        ) {
+          selectedDisplayIdRef.current = backendDisplayId;
+          setSelectedDisplayId(backendDisplayId);
+          if (pendingSelection === backendDisplayId) {
+            pendingDisplayIdRef.current = null;
+            setPendingDisplayId(null);
+          }
+        }
         if ((activeData.capture_backend || 'browser') === 'native') {
-          void loadDisplays(activeData.screenshot_display_id || null);
+          const preferredDisplayId = pendingSelection ?? backendDisplayId ?? selectedDisplayIdRef.current;
+          void loadDisplays(preferredDisplayId ?? undefined);
         }
         
         const startedAtMs = recordingStartedAtMs(activeData.started_at);
@@ -311,6 +359,7 @@ export default function RecordingOverlayPage() {
         eventSourceRef.current = null;
       }
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (screenshotFeedbackTimerRef.current) window.clearTimeout(screenshotFeedbackTimerRef.current);
     };
   }, [checkActiveRecording, connectSSE, loadDisplays]);
 
@@ -429,7 +478,15 @@ export default function RecordingOverlayPage() {
       if (typeof saved.timestamp === 'number') {
         setLastScreenshotAt(saved.timestamp);
       }
-      if (saved.display_id) setSelectedDisplayId(saved.display_id);
+      if (saved.display_id) {
+        selectedDisplayIdRef.current = saved.display_id;
+        setSelectedDisplayId(saved.display_id);
+      }
+      setScreenshotFeedback('saved');
+      if (screenshotFeedbackTimerRef.current) window.clearTimeout(screenshotFeedbackTimerRef.current);
+      screenshotFeedbackTimerRef.current = window.setTimeout(() => {
+        setScreenshotFeedback('idle');
+      }, 1200);
       logOverlay('info', 'Screenshot captured and stored successfully', {
         screenshot_id: saved.screenshot_id,
         sequence: saved.sequence,
