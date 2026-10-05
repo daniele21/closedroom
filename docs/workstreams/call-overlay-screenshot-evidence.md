@@ -70,6 +70,13 @@ gli owner esistenti e non introducono queue o lifecycle paralleli.
 - Preparation identity include set/hash screenshot senza invalidare inutilmente ASR;
   visual failure produce warning e note testo-only utilizzabili.
 
+## Follow-up architetturale 2026-10-05
+
+La robustezza e la latenza della cattura manuale sono ora possedute dal workstream dedicato
+`docs/workstreams/screenshot-capture-core.md`. Il presente workstream mantiene i contratti UX,
+persistenza, transcript/provenance e analisi; il nuovo workstream sostituisce il boundary runtime
+one-shot basato su subprocess con un capture core persistente, isolato e misurato.
+
 ## Stato implementazione 2026-10-02
 
 Implementazione CO-1..5 presente su work/call-overlay-screenshot-evidence.
