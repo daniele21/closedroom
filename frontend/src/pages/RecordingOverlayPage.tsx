@@ -12,8 +12,12 @@ import {
   Volume2,
   X,
 } from 'lucide-react';
-import { ApiClient, CaptureDisplay } from '../api/apiClient';
+import { ApiClient } from '../api/apiClient';
 import { useTranslation } from '../i18n/i18n';
+import {
+  resizeRecordingOverlay,
+  useOverlayDisplaySelection,
+} from '../hooks/useOverlayDisplaySelection';
 
 export default function RecordingOverlayPage() {
   const { t } = useTranslation();
@@ -31,14 +35,9 @@ export default function RecordingOverlayPage() {
   const [bytesWritten, setBytesWritten] = useState(0);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [displays, setDisplays] = useState<CaptureDisplay[]>([]);
-  const [selectedDisplayId, setSelectedDisplayId] = useState<number | null>(null);
   const [screenshotCount, setScreenshotCount] = useState(0);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
   const [lastScreenshotAt, setLastScreenshotAt] = useState<number | null>(null);
-  const [isDisplayPickerOpen, setIsDisplayPickerOpen] = useState(false);
-  const [pendingDisplayId, setPendingDisplayId] = useState<number | null>(null);
-  const [isSelectingDisplay, setIsSelectingDisplay] = useState(false);
   const [screenshotFeedback, setScreenshotFeedback] = useState<'idle' | 'saved'>('idle');
 
   const logOverlay = useCallback((level: 'info' | 'warn' | 'error', message: string, data?: any) => {
@@ -81,14 +80,7 @@ export default function RecordingOverlayPage() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const timerIntervalRef = useRef<any>(null);
   const startedAtRef = useRef<number | null>(null);
-  const selectedDisplayIdRef = useRef<number | null>(null);
-  const pendingDisplayIdRef = useRef<number | null>(null);
-  const displayPickerRef = useRef<HTMLDivElement | null>(null);
   const screenshotFeedbackTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    selectedDisplayIdRef.current = selectedDisplayId;
-  }, [selectedDisplayId]);
 
   // Formatter helpers
   const formatBytes = (bytes: number) => {
@@ -110,41 +102,29 @@ export default function RecordingOverlayPage() {
     return null;
   };
 
-  const loadDisplays = useCallback(async (
-    preferredDisplayId?: number | null,
-    _autoSelectSingle = true,
-  ) => {
-    try {
-      const payload = await ApiClient.captureDisplays();
-      const available = payload.displays || [];
-      setDisplays(available);
-
-      let storedId: number | null = null;
-      try {
-        const stored = localStorage.getItem('asr-overlay-preferred-display-id');
-        storedId = stored ? parseInt(stored, 10) : null;
-      } catch {}
-
-      const preferred = preferredDisplayId !== undefined
-        ? preferredDisplayId
-        : (selectedDisplayIdRef.current ?? (storedId && available.some(d => d.display_id === storedId) ? storedId : null));
-
-      if (preferred && available.some((display) => display.display_id === preferred)) {
-        selectedDisplayIdRef.current = preferred;
-        setSelectedDisplayId(preferred);
-      } else if (available.length > 0) {
-        selectedDisplayIdRef.current = available[0].display_id;
-        setSelectedDisplayId(available[0].display_id);
-      } else {
-        selectedDisplayIdRef.current = null;
-        setSelectedDisplayId(null);
-      }
-    } catch (err) {
-      console.warn('Unable to load screenshot displays:', err);
-      setDisplays([]);
-      setSelectedDisplayId(null);
-    }
-  }, []);
+  const {
+    displays,
+    selectedDisplayId,
+    pendingDisplayId,
+    isDisplayPickerOpen,
+    isSelectingDisplay,
+    displayPickerRef,
+    loadDisplays,
+    reconcileBackendDisplayId,
+    applyCapturedDisplay,
+    ensureSelectedDisplay,
+    openDisplayPicker,
+    closeDisplayPicker,
+    toggleDisplayPicker,
+    handleSelectDisplay,
+  } = useOverlayDisplaySelection({
+    recordingId,
+    captureBackend,
+    isRecording,
+    isExpanded,
+    logOverlay,
+    onError: setErrorMsg,
+  });
 
   const connectSSE = useCallback((recId: string) => {
     if (eventSourceRef.current) {
@@ -182,18 +162,7 @@ export default function RecordingOverlayPage() {
         setWarnings(data.warnings || []);
         setScreenshotCount(data.screenshot_count || 0);
         const backendDisplayId = data.screenshot_display_id ? Number(data.screenshot_display_id) : null;
-        const pendingSelection = pendingDisplayIdRef.current;
-        if (
-          backendDisplayId !== null
-          && (pendingSelection === null || backendDisplayId === pendingSelection)
-        ) {
-          selectedDisplayIdRef.current = backendDisplayId;
-          setSelectedDisplayId(backendDisplayId);
-          if (pendingSelection === backendDisplayId) {
-            pendingDisplayIdRef.current = null;
-            setPendingDisplayId(null);
-          }
-        }
+        reconcileBackendDisplayId(backendDisplayId);
 
         if (data.started_at && !startedAtRef.current) {
           startedAtRef.current = recordingStartedAtMs(data.started_at);
@@ -230,20 +199,8 @@ export default function RecordingOverlayPage() {
         setWarnings(activeData.warnings || []);
         setScreenshotCount(activeData.screenshot_count || 0);
         const backendDisplayId = activeData.screenshot_display_id ?? null;
-        const pendingSelection = pendingDisplayIdRef.current;
-        if (
-          backendDisplayId !== null
-          && (pendingSelection === null || backendDisplayId === pendingSelection)
-        ) {
-          selectedDisplayIdRef.current = backendDisplayId;
-          setSelectedDisplayId(backendDisplayId);
-          if (pendingSelection === backendDisplayId) {
-            pendingDisplayIdRef.current = null;
-            setPendingDisplayId(null);
-          }
-        }
+        const preferredDisplayId = reconcileBackendDisplayId(backendDisplayId);
         if ((activeData.capture_backend || 'browser') === 'native') {
-          const preferredDisplayId = pendingSelection ?? backendDisplayId ?? selectedDisplayIdRef.current;
           void loadDisplays(preferredDisplayId ?? undefined);
         }
         
@@ -452,17 +409,12 @@ export default function RecordingOverlayPage() {
       void checkActiveRecording();
       return;
     }
-    let targetDisplayId = selectedDisplayId;
+    const targetDisplayId = await ensureSelectedDisplay();
     if (targetDisplayId === null) {
-      if (displays.length > 0) {
-        targetDisplayId = displays[0].display_id;
-        setSelectedDisplayId(targetDisplayId);
-      } else {
-        const msg = t('recording.screenshotChooseMonitorError') || 'Nessun monitor disponibile per lo screenshot.';
-        setErrorMsg(msg);
-        logOverlay('warn', 'Screenshot blocked: no displays available');
-        return;
-      }
+      const msg = t('recording.screenshotChooseMonitorError') || 'Nessun monitor disponibile per lo screenshot.';
+      setErrorMsg(msg);
+      logOverlay('warn', 'Screenshot blocked: no displays available');
+      return;
     }
 
     setIsCapturingScreenshot(true);
@@ -480,10 +432,7 @@ export default function RecordingOverlayPage() {
       if (typeof saved.timestamp === 'number') {
         setLastScreenshotAt(saved.timestamp);
       }
-      if (saved.display_id) {
-        selectedDisplayIdRef.current = saved.display_id;
-        setSelectedDisplayId(saved.display_id);
-      }
+      applyCapturedDisplay(saved.display_id);
       setScreenshotFeedback('saved');
       if (screenshotFeedbackTimerRef.current) window.clearTimeout(screenshotFeedbackTimerRef.current);
       screenshotFeedbackTimerRef.current = window.setTimeout(() => {
@@ -500,14 +449,10 @@ export default function RecordingOverlayPage() {
       logOverlay('error', 'Screenshot capture failed with error', { error: message });
       if (message.includes('selected_display_unavailable')) {
         setErrorMsg(t('recording.screenshotDisplayUnavailable'));
-        await loadDisplays(undefined, false);
-        setIsDisplayPickerOpen(true);
-        void resizeOverlayForState(isExpanded, true);
+        await openDisplayPicker();
       } else if (message.includes('display_selection_required')) {
         setErrorMsg(t('recording.screenshotChooseMonitorError'));
-        await loadDisplays(undefined, false);
-        setIsDisplayPickerOpen(true);
-        void resizeOverlayForState(isExpanded, true);
+        await openDisplayPicker();
       } else {
         setErrorMsg(message);
       }
@@ -527,76 +472,6 @@ export default function RecordingOverlayPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
-  const resizeOverlayForState = useCallback(async (
-    expanded: boolean,
-    displayPickerOpen: boolean,
-  ) => {
-    const width = 420;
-    const height = displayPickerOpen ? 300 : expanded ? 238 : 118;
-    if (window.name === 'ClosedRoomOverlay') {
-      window.resizeTo(width, height + 52);
-      return;
-    }
-    try {
-      await ApiClient.resizeOverlay(width, height);
-    } catch (err) {
-      console.warn('Resize overlay window failed:', err);
-    }
-  }, []);
-
-  const handleSelectDisplay = async (displayId: number) => {
-    if (!recordingId || captureBackend !== 'native') return;
-
-    const previousDisplayId = selectedDisplayIdRef.current;
-    pendingDisplayIdRef.current = displayId;
-    setPendingDisplayId(displayId);
-    selectedDisplayIdRef.current = displayId;
-    setSelectedDisplayId(displayId);
-    setIsSelectingDisplay(true);
-    setErrorMsg(null);
-
-    try {
-      const result = await ApiClient.selectScreenshotDisplay(recordingId, displayId);
-      selectedDisplayIdRef.current = result.display_id;
-      setSelectedDisplayId(result.display_id);
-      pendingDisplayIdRef.current = null;
-      setPendingDisplayId(null);
-      try {
-        localStorage.setItem('asr-overlay-preferred-display-id', String(result.display_id));
-      } catch {}
-      logOverlay('info', 'Screenshot display changed', {
-        recordingId,
-        displayId: result.display_id,
-      });
-      setIsDisplayPickerOpen(false);
-      await resizeOverlayForState(isExpanded, false);
-    } catch (err: any) {
-      pendingDisplayIdRef.current = null;
-      setPendingDisplayId(null);
-      selectedDisplayIdRef.current = previousDisplayId;
-      setSelectedDisplayId(previousDisplayId);
-      const message = String(err?.message || t('recording.screenshotDisplayUnavailable'));
-      setErrorMsg(message);
-      logOverlay('error', 'Screenshot display change failed', {
-        recordingId,
-        requestedDisplayId: displayId,
-        error: message,
-      });
-    } finally {
-      setIsSelectingDisplay(false);
-    }
-  };
-
-  const toggleDisplayPicker = async () => {
-    if (!isRecording || captureBackend !== 'native') return;
-    if (displays.length === 0) {
-      await loadDisplays();
-    }
-    const next = !isDisplayPickerOpen;
-    setIsDisplayPickerOpen(next);
-    await resizeOverlayForState(isExpanded, next);
-  };
-
   const handleCloseOverlay = async () => {
     if (window.name === 'ClosedRoomOverlay') {
       window.close();
@@ -608,26 +483,13 @@ export default function RecordingOverlayPage() {
   const toggleExpand = async () => {
     const nextState = !isExpanded;
     setIsExpanded(nextState);
-    setIsDisplayPickerOpen(false);
-    await resizeOverlayForState(nextState, false);
+    await closeDisplayPicker(false);
+    await resizeRecordingOverlay(nextState, false);
   };
 
   useEffect(() => {
-    void resizeOverlayForState(false, false);
-  }, [resizeOverlayForState]);
-
-  useEffect(() => {
-    if (!isDisplayPickerOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (displayPickerRef.current && !displayPickerRef.current.contains(target)) {
-        setIsDisplayPickerOpen(false);
-        void resizeOverlayForState(isExpanded, false);
-      }
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [isDisplayPickerOpen, isExpanded, resizeOverlayForState]);
+    void resizeRecordingOverlay(false, false);
+  }, []);
 
   const getDeviceHealth = (dbStr: string) => {
     const val = parseFloat(dbStr.replace(' dB', ''));
