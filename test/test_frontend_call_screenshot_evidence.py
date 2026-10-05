@@ -52,6 +52,16 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("ref.source_type === 'screenshot'", self.notes)
         self.assertIn("onOpenScreenshot(screenshot)", self.notes)
 
+    def test_meeting_surfaces_saved_screenshots_as_progressive_gallery(self) -> None:
+        self.assertIn('data-meeting-screenshot-gallery="true"', self.meeting)
+        self.assertIn("screenshots.slice(0, 6)", self.meeting)
+        self.assertIn("setShowAllScreenshots((value) => !value)", self.meeting)
+        self.assertIn("src={shot.thumbnail_url}", self.meeting)
+        self.assertIn("onClick={() => setSelectedScreenshot(shot)}", self.meeting)
+        self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.meeting)
+        self.assertIn("src={selectedScreenshot.original_url}", self.meeting)
+        self.assertIn("handleTimestampClick(selectedScreenshot.timestamp)", self.meeting)
+
     def test_prepare_notes_exposes_and_persists_screenshot_inclusion_choice(self) -> None:
         self.assertIn("Includi ${savedScreenshotCount} screenshot", self.meeting)
         self.assertIn("includeScreenshots", self.meeting)
