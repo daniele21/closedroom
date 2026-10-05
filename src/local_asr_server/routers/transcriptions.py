@@ -29,7 +29,6 @@ from local_asr_server.services.transcription_application import (
 )
 from local_asr_server.transcriber import (
     str_to_bool,
-    hash_audio_file,
     get_cached_result,
     transcribe_file_sync,
     transcribe_stream_generator,
@@ -78,20 +77,6 @@ def _transcribe_file(app: Any, **kwargs: Any) -> dict[str, Any]:
     return transcribe_file_sync(**kwargs)
 
 
-def _cache_key_for_audio_file(audio_path: Path, **options: Any) -> str:
-    return TranscriptionService.cache_key(audio_path, **options)
-
-
-def _transcribe_audio_file_with_cache(app: Any, audio_path: Path, **options: Any) -> dict[str, Any]:
-    service = getattr(getattr(app, "state", None), "transcription_service", None)
-    service = service or TranscriptionService()
-    return service.transcribe_cached(
-        audio_path,
-        engine=lambda **kwargs: _transcribe_file(app, **kwargs),
-        **options,
-    )
-
-
 def _effective_backend(provider: str, model: str) -> str:
     return TranscriptionService.backend(provider, model)
 
@@ -113,10 +98,6 @@ def _effective_asr(
         speechmatics_model=speechmatics_model,
         speechmatics_diarization=speechmatics_diarization,
     )
-
-
-def _asr_payload_metadata(provider: str, model: str, public_options: dict[str, Any]) -> dict[str, Any]:
-    return TranscriptionService.payload_metadata(provider, model, public_options)
 
 
 def _normalize_diarization_provider(provider: str | None) -> str:
@@ -433,81 +414,66 @@ def transcribe_path(request: Request, body: TranscribePathRequest):
     )
     target_model = provider_model or body.model or request.app.state.default_model
     selected_diarization_provider = _normalize_diarization_provider(body.diarization_provider)
+    application_request = SingleFileTranscriptionRequest(
+        model=target_model,
+        language=body.language,
+        task=body.task,
+        word_timestamps=body.word_timestamps,
+        initial_prompt=body.initial_prompt,
+        temperature=body.temperature,
+        condition_on_previous_text=body.condition_on_previous_text,
+        verbose=body.verbose,
+        vad_guided=body.vad_guided,
+        vad_post_filter=body.vad_post_filter,
+        asr_provider=provider,
+        provider_options=provider_options,
+        public_provider_options=public_options,
+        diarization_provider=selected_diarization_provider,
+        diarization_region=body.speechmatics_region,
+        diarization_model=body.speechmatics_model,
+    )
+    use_case = SingleFileTranscriptionUseCase(get_services(request.app).transcription)
 
     audio_path = Path(body.file).expanduser()
-    logger.info(f"[/v1/audio/transcriptions/path] Received request for file: '{audio_path}', Model: '{target_model}'")
-
+    logger.info(
+        "[/v1/audio/transcriptions/path] Received request for file: %r, Model: %r",
+        str(audio_path),
+        target_model,
+    )
     if not audio_path.exists():
-        logger.error(f"[/v1/audio/transcriptions/path] File not found: '{audio_path}'")
-        raise HTTPException(
-            status_code=404,
-            detail=f"Audio file not found: {audio_path}",
-        )
+        logger.error("[/v1/audio/transcriptions/path] File not found: %r", str(audio_path))
+        raise HTTPException(status_code=404, detail=f"Audio file not found: {audio_path}")
 
     try:
-        result = _transcribe_audio_file_with_cache(
+        payload = use_case.run(
             request.app,
             audio_path,
-            model=target_model,
-            language=body.language,
-            task=body.task,
-            word_timestamps=body.word_timestamps,
-            initial_prompt=body.initial_prompt,
-            temperature=body.temperature,
-            condition_on_previous_text=body.condition_on_previous_text,
-            verbose=body.verbose,
-            vad_guided=body.vad_guided,
-            vad_post_filter=body.vad_post_filter,
-            asr_provider=provider,
-            provider_options=provider_options,
+            application_request,
+            audio_filename=audio_path.name,
+            recording_id=None,
+            engine=lambda **kwargs: _transcribe_file(request.app, **kwargs),
+            started_at=started_at,
         )
-
         elapsed = time.perf_counter() - started_at
-        logger.info(f"[/v1/audio/transcriptions/path] Finished processing. Time taken: {elapsed:.2f} seconds")
-
-        payload = {
-            "text": result.get("text", ""),
-            "language": result.get("language", body.language),
-            "segments": result.get("segments", []),
-            "metadata": result.get("metadata", {}),
-            "model": result.get("model", target_model),
-            "backend": result.get("backend", _effective_backend(provider, target_model)),
-            "asr_provider": provider,
-            "provider_options": public_options,
-            "stats": {
-                "time_total_seconds": elapsed,
-                **_asr_payload_metadata(provider, target_model, public_options),
-            },
-        }
-        payload = _apply_initial_diarization(
-            request.app,
-            audio_path,
-            payload,
-            provider=selected_diarization_provider,
-            speechmatics_region=body.speechmatics_region,
-            speechmatics_model=body.speechmatics_model,
+        logger.info(
+            "[/v1/audio/transcriptions/path] Finished processing. Time taken: %.2f seconds",
+            elapsed,
         )
-
-        saved_meta = get_services(request.app).transcriptions.save(payload, audio_filename=audio_path.name)
-        payload["saved_id"] = saved_meta["id"]
-        payload["saved_file_path"] = str(get_services(request.app).transcriptions.root)
-
         if body.response_format == "text":
             return PlainTextResponse(payload["text"])
-
         if body.response_format == "verbose_json":
             return JSONResponse(payload)
-
         return JSONResponse({"text": payload["text"]})
-
     except Exception as exc:
-        logger.error(f"[/v1/audio/transcriptions/path] Transcription failed: {exc}", exc_info=True)
+        logger.error(
+            "[/v1/audio/transcriptions/path] Transcription failed: %s",
+            exc,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=500,
             detail=f"Transcription failed: {exc}",
         ) from exc
-    finally:
-        pass
 
 
 @router.post("/v1/recordings/{recording_id}/transcriptions")
