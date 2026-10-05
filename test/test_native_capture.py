@@ -236,6 +236,21 @@ else:
         self.assertIn("Task { @MainActor in", helper_source)
         self.assertIn("dispatchMain()", helper_source)
         self.assertIn('"AppKit"', compile_source)
+        self.assertIn("CR_SCREENSHOT_DIAG", helper_source)
+        for stage in (
+            "command_received",
+            "appkit_ready",
+            "main_actor_entered",
+            "shareable_content_begin",
+            "shareable_content_ready",
+            "display_selected",
+            "capture_image_begin",
+            "capture_image_completed",
+            "files_written",
+            "command_completed",
+            "command_failed",
+        ):
+            self.assertIn(f'"{stage}"', helper_source)
 
     def test_manual_screenshot_timeout_is_reported_without_leaking_timeout_expired(self) -> None:
         manager = NativeCaptureManager(helper_path=self.helper)
@@ -247,6 +262,15 @@ else:
                 break
             time.sleep(0.01)
 
+        timeout = subprocess.TimeoutExpired(
+            cmd=["helper", "screenshot"],
+            timeout=15,
+            output=b"",
+            stderr=(
+                b'CR_SCREENSHOT_DIAG {"trace_id":"shot-test",'
+                b'"stage":"capture_image_begin","elapsed_ms":12}\n'
+            ),
+        )
         with (
             patch.object(
                 manager,
@@ -263,15 +287,20 @@ else:
             ),
             patch(
                 "local_asr_server.native_capture.subprocess.run",
-                side_effect=subprocess.TimeoutExpired(cmd=["helper", "screenshot"], timeout=15),
+                side_effect=timeout,
             ),
+            patch("local_asr_server.native_capture.logger.error") as log_error,
         ):
-            with self.assertRaisesRegex(RuntimeError, "screenshot_capture_timeout"):
+            with self.assertRaisesRegex(RuntimeError, r"screenshot_capture_timeout:shot-"):
                 manager.capture_screenshot(
                     "rec-timeout",
                     request_id="request-timeout",
                     display_id=7,
                 )
+
+        rendered_logs = " ".join(str(call) for call in log_error.call_args_list)
+        self.assertIn("capture_image_begin", rendered_logs)
+        self.assertIn("Native screenshot timeout diagnostics", rendered_logs)
 
 
 if __name__ == "__main__":
