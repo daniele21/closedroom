@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,7 +48,7 @@ class CliFrontendBundleTests(unittest.TestCase):
         (frontend / "public" / "logo.svg").write_text("<svg/>\n", encoding="utf-8")
         (frontend / "package.json").write_text('{"scripts":{"build":"vite build"}}\n', encoding="utf-8")
         (frontend / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
-        static = root / "src" / "local_asr_server" / "static"
+        static = root / ".cache" / "frontend-static"
         static.mkdir(parents=True)
         (static / "index.html").write_text("<html/>\n", encoding="utf-8")
         return temp, root
@@ -67,12 +68,15 @@ class CliFrontendBundleTests(unittest.TestCase):
         temp, root = self._make_root()
         try:
             with (
+                patch.dict(os.environ, {}, clear=False),
                 patch("local_asr_server.paths.is_bundled", return_value=False),
                 patch("local_asr_server.cli.shutil.which", side_effect=lambda name: f"/usr/bin/{name}" if name == "pnpm" else None),
                 patch("local_asr_server.cli.subprocess.run") as run,
             ):
                 self.assertTrue(_ensure_dev_frontend_bundle(root))
                 run.assert_called_once()
+                expected_static = str((root / ".cache" / "frontend-static").resolve())
+                self.assertEqual(os.environ["CLOSEDROOM_DEV_STATIC_DIR"], expected_static)
                 self.assertFalse(_ensure_dev_frontend_bundle(root))
                 run.assert_called_once()
         finally:
