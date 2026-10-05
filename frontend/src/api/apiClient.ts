@@ -1034,6 +1034,17 @@ export const ApiClient = {
     return (await request(`/v1/recordings/${recordingId}/screenshots`)).json();
   },
 
+  async selectScreenshotDisplay(
+    recordingId: string,
+    displayId: number,
+  ): Promise<{ recording_id: string; display_id: number; display: CaptureDisplay }> {
+    return (await request(`/v1/recordings/${recordingId}/screenshot-display`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_id: displayId }),
+    })).json();
+  },
+
   async captureScreenshot(recordingId: string, requestId: string, displayId?: number): Promise<RecordingScreenshot> {
     return (await request(`/v1/recordings/${recordingId}/screenshots`, {
       method: 'POST',
