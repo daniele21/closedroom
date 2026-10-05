@@ -120,7 +120,7 @@ elif cmd == 'start':
         time.sleep(1)
 else:
     print(json.dumps({'type': 'stopped'}))
-"""""",
+""",
             encoding="utf-8",
         )
         self.helper.chmod(self.helper.stat().st_mode | stat.S_IXUSR)
