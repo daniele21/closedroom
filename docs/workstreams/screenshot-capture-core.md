@@ -167,6 +167,7 @@ Acceptance:
 - compact overlay resta azionabile senza aprire Details;
 - screenshot del display conserva tutte le finestre visibili, inclusa la finestra principale ClosedRoom se presente;
 - viene escluso solo il recording overlay: window ID nativo esplicito come owner primario, titolo esatto `ClosedRoom Recording Overlay` come fallback browser/race-safe;
+- il window ID dell'overlay viene acquisito quando l'NSPanel diventa visibile e riusato dal capture manager: nessun hop sincrono al main thread nell'hot path dello screenshot;
 - matching fuzzy per process/app/bundle/title `contains("closedroom")` è vietato perché può rimuovere finestre utente intere;
 - nessuna preview live/continuous screen capture viene introdotta.
 
