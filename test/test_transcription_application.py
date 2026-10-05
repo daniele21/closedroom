@@ -10,6 +10,7 @@ from local_asr_server.services.transcription_application import (
     SingleFileTranscriptionRequest,
     SingleFileTranscriptionUseCase,
 )
+from local_asr_server.routers.transcriptions import tempfile_NamedTemporaryFile_patch
 
 
 class _FakeTranscriptionService:
@@ -45,6 +46,24 @@ class _FakeDiarization:
             "provider": kwargs["provider"],
         }
         return result
+
+
+class StreamingUploadTemporaryPathTests(unittest.TestCase):
+    def test_default_temporary_path_is_cleaned_on_context_exit(self) -> None:
+        with tempfile_NamedTemporaryFile_patch(suffix=".wav") as raw_path:
+            path = Path(raw_path)
+            path.write_bytes(b"audio")
+            self.assertTrue(path.exists())
+        self.assertFalse(path.exists())
+
+    def test_streaming_can_take_cleanup_ownership(self) -> None:
+        with tempfile_NamedTemporaryFile_patch(suffix=".wav", cleanup=False) as raw_path:
+            path = Path(raw_path)
+            path.write_bytes(b"audio")
+        try:
+            self.assertTrue(path.exists())
+        finally:
+            path.unlink(missing_ok=True)
 
 
 class SingleFileTranscriptionUseCaseTests(unittest.TestCase):
