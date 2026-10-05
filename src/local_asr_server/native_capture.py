@@ -267,6 +267,43 @@ class NativeCaptureManager:
                 session.screenshot_inflight -= 1
             session.screenshot_condition.notify_all()
 
+    def set_screenshot_display(self, recording_id: str, display_id: int) -> dict[str, Any]:
+        with self._lock:
+            session = self._sessions.get(recording_id)
+        if session is None or session.stopped:
+            raise RuntimeError("Native capture session is not active")
+        if session.ready_event is None:
+            raise RuntimeError("capture_not_ready")
+
+        self._ensure_screenshot_worker(session)
+        if not session.screenshot_worker_ready.wait(timeout=1.0):
+            raise RuntimeError("screenshot_worker_not_ready")
+
+        display_id = int(display_id)
+        with session.screenshot_worker_lock:
+            displays = [dict(item) for item in session.screenshot_worker_displays]
+        selected = next(
+            (item for item in displays if int(item.get("display_id") or 0) == display_id),
+            None,
+        )
+        if selected is None:
+            raise RuntimeError("selected_display_unavailable")
+
+        with session.screenshot_lock:
+            session.screenshot_display_id = display_id
+
+        logger.info(
+            "Screenshot display selected: recording=%s display=%s title=%s",
+            recording_id,
+            display_id,
+            selected.get("title"),
+        )
+        return {
+            "recording_id": recording_id,
+            "display_id": display_id,
+            "display": selected,
+        }
+
     def capture_screenshot(
         self,
         recording_id: str,
