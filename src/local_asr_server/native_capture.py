@@ -72,6 +72,15 @@ class CaptureSession:
     screenshot_condition: threading.Condition = field(default_factory=threading.Condition)
     screenshot_inflight: int = 0
     accept_screenshots: bool = True
+    screenshot_worker_process: subprocess.Popen[str] | None = None
+    screenshot_worker_reader_thread: threading.Thread | None = None
+    screenshot_worker_ready: threading.Event = field(default_factory=threading.Event)
+    screenshot_worker_displays: list[dict[str, Any]] = field(default_factory=list)
+    screenshot_worker_pid: int | None = None
+    screenshot_worker_restarts: int = 0
+    screenshot_worker_lock: threading.Lock = field(default_factory=threading.Lock)
+    screenshot_command_lock: threading.Lock = field(default_factory=threading.Lock)
+    screenshot_pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
 
 
 def validate_audio_file(file_path: Path) -> dict[str, Any]:
@@ -180,6 +189,26 @@ class NativeCaptureManager:
         return self._run_json(["windows"], fallback_reason="window_listing_failed")
 
     def displays(self) -> dict[str, Any]:
+        with self._lock:
+            active = next(
+                (session for session in self._sessions.values() if not session.stopped),
+                None,
+            )
+        if active is not None:
+            active.screenshot_worker_ready.wait(timeout=0.25)
+            with active.screenshot_worker_lock:
+                cached = [dict(item) for item in active.screenshot_worker_displays]
+                worker = active.screenshot_worker_process
+                worker_alive = worker is not None and worker.poll() is None
+            if cached:
+                return {"displays": cached, "reason": None, "source": "worker_cache"}
+            if worker_alive:
+                return {
+                    "displays": [],
+                    "reason": "screenshot_worker_starting",
+                    "source": "worker_cache",
+                }
+
         payload = self.windows()
         displays: list[dict[str, Any]] = []
         for item in payload.get("windows") or []:
@@ -195,8 +224,9 @@ class NativeCaptureManager:
                 "title": item.get("title") or f"Display {display_id}",
                 "width": int(item.get("width") or 0),
                 "height": int(item.get("height") or 0),
+                "is_main": bool(item.get("is_main", False)),
             })
-        return {"displays": displays, "reason": payload.get("reason")}
+        return {"displays": displays, "reason": payload.get("reason"), "source": "legacy_discovery"}
 
     def begin_screenshot(self, recording_id: str) -> None:
         with self._lock:
@@ -254,19 +284,25 @@ class NativeCaptureManager:
         if session is None or session.stopped:
             raise RuntimeError("Native capture session is not active")
 
-        display_payload = self.displays()
-        displays = display_payload.get("displays") or []
+        self._ensure_screenshot_worker(session)
+        if not session.screenshot_worker_ready.wait(timeout=1.0):
+            raise RuntimeError("screenshot_worker_not_ready")
+
+        with session.screenshot_worker_lock:
+            displays = [dict(item) for item in session.screenshot_worker_displays]
         by_id = {int(item["display_id"]): item for item in displays}
         selected = display_id if display_id is not None else session.screenshot_display_id
         if selected is None:
             if displays:
-                selected = int(displays[0]["display_id"])
+                main = next((item for item in displays if item.get("is_main")), displays[0])
+                selected = int(main["display_id"])
                 logger.info(
-                    "No display explicitly selected for recording %s; defaulting to display_id=%s (%s)",
-                    recording_id, selected, displays[0].get("title", ""),
+                    "No display explicitly selected for recording %s; defaulting to display_id=%s",
+                    recording_id,
+                    selected,
                 )
             else:
-                raise RuntimeError(display_payload.get("reason") or "no_display_available")
+                raise RuntimeError("no_display_available")
         selected = int(selected)
         if selected not in by_id:
             raise RuntimeError("selected_display_unavailable")
@@ -276,14 +312,8 @@ class NativeCaptureManager:
         if ready_uptime is None:
             raise RuntimeError("capture_not_ready")
 
-        logger.info(
-            "Screenshot requested for recording %s: display_id=%s, ready_uptime=%s",
-            recording_id, selected, ready_uptime,
-        )
-
         with session.screenshot_lock:
             if session.stopped or not session.accept_screenshots:
-                logger.warning("Screenshot capture rejected: session is closing or stopped for %s", recording_id)
                 raise RuntimeError("Screenshot capture is closing")
             session.screenshot_display_id = selected
             temp_dir = session.output_dir / ".screenshot-capture-temp"
@@ -292,97 +322,72 @@ class NativeCaptureManager:
             trace_id = f"shot-{token[:12]}"
             original_path = temp_dir / f"{token}.jpg"
             thumbnail_path = temp_dir / f"{token}-thumb.jpg"
+            waiter: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
+            with session.screenshot_worker_lock:
+                session.screenshot_pending[request_id] = waiter
+                worker_pid = session.screenshot_worker_pid
+                restart_count = session.screenshot_worker_restarts
+
+            command = {
+                "type": "capture_screenshot",
+                "recording_id": recording_id,
+                "request_id": request_id,
+                "trace_id": trace_id,
+                "display_id": selected,
+                "recording_ready_uptime": float(ready_uptime),
+                "original_file": str(original_path),
+                "thumbnail_file": str(thumbnail_path),
+            }
+            roundtrip_start = time.monotonic()
             try:
-                cmd = [
-                    str(self.helper_path),
-                    "screenshot",
-                    "--trace-id", trace_id,
-                    "--display-id", str(selected),
-                    "--recording-ready-uptime", str(float(ready_uptime)),
-                    "--original-file", str(original_path),
-                    "--thumbnail-file", str(thumbnail_path),
-                ]
                 logger.info(
-                    "Native screenshot helper launch: trace_id=%s recording=%s display=%s "
-                    "display_size=%sx%s capture_mode=%s active_capture_pid=%s "
-                    "active_capture_alive=%s runtime_bundled=%s helper_cached_dev=%s",
+                    "Screenshot dispatch: trace_id=%s recording=%s display=%s worker_pid=%s restart_count=%s",
                     trace_id,
                     recording_id,
                     selected,
-                    by_id[selected].get("width", 0),
-                    by_id[selected].get("height", 0),
-                    session.mode,
-                    getattr(session.process, "pid", None),
-                    session.process.poll() is None,
-                    bool(getattr(sys, "frozen", False)),
-                    ".cache/native-capture-helper" in str(self.helper_path),
+                    worker_pid,
+                    restart_count,
                 )
+                self._send_screenshot_worker_command(session, command)
                 try:
-                    completed = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=15,
-                        check=False,
-                    )
-                except subprocess.TimeoutExpired as exc:
-                    timeout_stdout = _bounded_process_output(exc.stdout)
-                    timeout_stderr = _bounded_process_output(exc.stderr)
+                    event = waiter.get(timeout=1.6)
+                except queue.Empty as exc:
                     logger.error(
-                        "Native screenshot helper timed out after %.1fs: trace_id=%s recording=%s "
-                        "display=%s active_capture_pid=%s active_capture_alive=%s",
-                        float(exc.timeout or 15),
+                        "Screenshot worker response timeout: trace_id=%s recording=%s display=%s worker_pid=%s",
                         trace_id,
                         recording_id,
                         selected,
-                        getattr(session.process, "pid", None),
-                        session.process.poll() is None,
+                        worker_pid,
                     )
-                    logger.error(
-                        "Native screenshot timeout diagnostics: trace_id=%s stderr=%s stdout=%s",
-                        trace_id,
-                        timeout_stderr or "<empty>",
-                        timeout_stdout or "<empty>",
-                    )
+                    self._restart_screenshot_worker(session, reason="request_timeout")
                     raise RuntimeError(f"screenshot_capture_timeout:{trace_id}") from exc
-                stdout = completed.stdout.strip()
-                stderr = completed.stderr.strip()
-                if stderr:
-                    logger.info(
-                        "Native screenshot helper diagnostics: trace_id=%s %s",
-                        trace_id,
-                        _bounded_process_output(stderr),
-                    )
-                parsed: dict[str, Any] = {}
-                if stdout:
-                    try:
-                        candidate = json.loads(stdout.splitlines()[-1])
-                        if isinstance(candidate, dict):
-                            parsed = candidate
-                    except (json.JSONDecodeError, IndexError):
-                        parsed = {}
-                if completed.returncode != 0:
-                    reason = parsed.get("reason") or "screenshot_capture_failed"
-                    message = parsed.get("message") or completed.stderr.strip() or reason
-                    logger.error(
-                        "Native screenshot helper failed (exit code %d): reason=%s message=%s stderr=%s stdout=%s",
-                        completed.returncode, reason, message, stderr, stdout,
-                    )
+
+                event_type = str(event.get("type") or "")
+                if event_type != "screenshot_completed":
+                    reason = str(event.get("reason") or "screenshot_capture_failed")
+                    message = str(event.get("message") or reason)
+                    if reason == "screenshot_capture_timeout":
+                        self._restart_screenshot_worker(session, reason=reason)
                     raise RuntimeError(f"{reason}: {message}")
+
                 if not original_path.is_file() or not thumbnail_path.is_file():
-                    logger.error("Screenshot files missing after helper success: orig=%s, thumb=%s",
-                                 original_path.is_file(), thumbnail_path.is_file())
                     raise RuntimeError("screenshot_capture_missing_output")
-                captured_uptime = float(parsed.get("captured_uptime"))
+
+                captured_uptime = float(event.get("captured_uptime"))
+                roundtrip_ms = int((time.monotonic() - roundtrip_start) * 1000.0)
                 logger.info(
-                    "Native screenshot successful: trace_id=%s display=%s original_size=%d bytes thumb_size=%d bytes",
+                    "Screenshot completed: trace_id=%s worker_pid=%s display=%s roundtrip_ms=%s "
+                    "capture_ms=%s encode_ms=%s write_ms=%s",
                     trace_id,
+                    worker_pid,
                     selected,
-                    original_path.stat().st_size,
-                    thumbnail_path.stat().st_size,
+                    roundtrip_ms,
+                    event.get("capture_ms"),
+                    event.get("encode_ms"),
+                    event.get("write_ms"),
                 )
                 return {
-                    **parsed,
+                    **event,
                     "request_id": request_id,
                     "recording_id": recording_id,
                     "display_id": selected,
@@ -390,16 +395,207 @@ class NativeCaptureManager:
                     "captured_uptime": captured_uptime,
                     "recording_ready_uptime": float(ready_uptime),
                     "timestamp": max(0.0, captured_uptime - float(ready_uptime)),
+                    "roundtrip_ms": roundtrip_ms,
+                    "worker_pid": worker_pid,
+                    "worker_restart_count": restart_count,
                     "original_bytes": original_path.read_bytes(),
                     "thumbnail_bytes": thumbnail_path.read_bytes(),
                 }
             finally:
+                with session.screenshot_worker_lock:
+                    session.screenshot_pending.pop(request_id, None)
                 original_path.unlink(missing_ok=True)
                 thumbnail_path.unlink(missing_ok=True)
                 try:
                     temp_dir.rmdir()
                 except OSError:
                     pass
+
+    def _ensure_screenshot_worker(self, session: CaptureSession) -> None:
+        with session.screenshot_worker_lock:
+            worker = session.screenshot_worker_process
+            alive = worker is not None and worker.poll() is None
+        if alive:
+            return
+        self._start_screenshot_worker(session)
+
+    def _start_screenshot_worker(self, session: CaptureSession) -> None:
+        command = [
+            str(self.helper_path),
+            "screenshot-worker",
+            "--recording-id",
+            session.recording_id,
+        ]
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+        with session.screenshot_worker_lock:
+            session.screenshot_worker_process = process
+            session.screenshot_worker_pid = process.pid
+            session.screenshot_worker_ready.clear()
+            session.screenshot_worker_displays = []
+        thread = threading.Thread(
+            target=self._read_screenshot_worker_events,
+            args=(session, process),
+            daemon=True,
+        )
+        session.screenshot_worker_reader_thread = thread
+        thread.start()
+        logger.info(
+            "Screenshot worker started: recording=%s pid=%s restart_count=%s",
+            session.recording_id,
+            process.pid,
+            session.screenshot_worker_restarts,
+        )
+
+    def _read_screenshot_worker_events(
+        self,
+        session: CaptureSession,
+        process: subprocess.Popen[str],
+    ) -> None:
+        if process.stdout is None:
+            return
+        try:
+            for raw in process.stdout:
+                line = raw.strip()
+                if not line:
+                    continue
+                if line.startswith("CR_SCREENSHOT_DIAG "):
+                    logger.info("Screenshot worker diagnostic: %s", _bounded_process_output(line))
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Screenshot worker emitted non-JSON output for recording %s: %s",
+                        session.recording_id,
+                        _bounded_process_output(line),
+                    )
+                    continue
+                event_type = str(event.get("type") or "")
+                if event_type == "screenshot_worker_ready":
+                    displays = event.get("displays") if isinstance(event.get("displays"), list) else []
+                    with session.screenshot_worker_lock:
+                        if session.screenshot_worker_process is process:
+                            session.screenshot_worker_pid = int(event.get("worker_pid") or process.pid)
+                            session.screenshot_worker_displays = [
+                                dict(item) for item in displays if isinstance(item, dict)
+                            ]
+                            session.screenshot_worker_ready.set()
+                    logger.info(
+                        "Screenshot worker ready: recording=%s pid=%s displays=%s backend=%s",
+                        session.recording_id,
+                        event.get("worker_pid"),
+                        len(displays),
+                        event.get("capture_backend"),
+                    )
+                elif event_type == "displays_changed":
+                    displays = event.get("displays") if isinstance(event.get("displays"), list) else []
+                    with session.screenshot_worker_lock:
+                        if session.screenshot_worker_process is process:
+                            session.screenshot_worker_displays = [
+                                dict(item) for item in displays if isinstance(item, dict)
+                            ]
+                elif event_type in {"screenshot_completed", "screenshot_failed"}:
+                    request_id = str(event.get("request_id") or "")
+                    with session.screenshot_worker_lock:
+                        waiter = session.screenshot_pending.get(request_id)
+                    if waiter is not None:
+                        try:
+                            waiter.put_nowait(event)
+                        except queue.Full:
+                            pass
+                elif event_type in {"screenshot_worker_warning", "screenshot_worker_error"}:
+                    logger.warning(
+                        "Screenshot worker event: recording=%s type=%s reason=%s message=%s",
+                        session.recording_id,
+                        event_type,
+                        event.get("reason"),
+                        event.get("message"),
+                    )
+        finally:
+            try:
+                process.stdout.close()
+            except Exception:
+                pass
+            with session.screenshot_worker_lock:
+                if session.screenshot_worker_process is process:
+                    session.screenshot_worker_ready.clear()
+                pending = list(session.screenshot_pending.values())
+            for waiter in pending:
+                try:
+                    waiter.put_nowait({
+                        "type": "screenshot_failed",
+                        "reason": "screenshot_worker_stopped",
+                        "message": "Screenshot worker stopped before completing the request",
+                        "recoverable": True,
+                    })
+                except queue.Full:
+                    pass
+
+    def _send_screenshot_worker_command(
+        self,
+        session: CaptureSession,
+        payload: dict[str, Any],
+    ) -> None:
+        with session.screenshot_command_lock:
+            with session.screenshot_worker_lock:
+                worker = session.screenshot_worker_process
+            if worker is None or worker.poll() is not None or worker.stdin is None:
+                raise RuntimeError("screenshot_worker_unavailable")
+            try:
+                worker.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
+                worker.stdin.flush()
+            except (BrokenPipeError, OSError) as exc:
+                raise RuntimeError("screenshot_worker_unavailable") from exc
+
+    def _stop_screenshot_worker(self, session: CaptureSession, *, graceful: bool) -> None:
+        with session.screenshot_worker_lock:
+            worker = session.screenshot_worker_process
+            thread = session.screenshot_worker_reader_thread
+        if worker is None:
+            return
+        if worker.poll() is None and graceful:
+            try:
+                self._send_screenshot_worker_command(session, {"type": "shutdown"})
+                worker.wait(timeout=1.0)
+            except Exception:
+                pass
+        if worker.poll() is None:
+            worker.terminate()
+            try:
+                worker.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                worker.kill()
+                worker.wait(timeout=1.0)
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=1.0)
+        with session.screenshot_worker_lock:
+            if session.screenshot_worker_process is worker:
+                session.screenshot_worker_process = None
+                session.screenshot_worker_reader_thread = None
+                session.screenshot_worker_pid = None
+                session.screenshot_worker_ready.clear()
+                session.screenshot_worker_displays = []
+
+    def _restart_screenshot_worker(self, session: CaptureSession, *, reason: str) -> None:
+        logger.warning(
+            "Restarting screenshot worker: recording=%s reason=%s previous_pid=%s",
+            session.recording_id,
+            reason,
+            session.screenshot_worker_pid,
+        )
+        self._stop_screenshot_worker(session, graceful=False)
+        with session.screenshot_worker_lock:
+            session.screenshot_worker_restarts += 1
+        if not session.stopped and session.accept_screenshots:
+            self._start_screenshot_worker(session)
 
     def ensure_permissions(self, mode: str) -> dict[str, Any]:
         if mode not in VALID_NATIVE_MODES:
@@ -483,6 +679,14 @@ class NativeCaptureManager:
             thread = threading.Thread(target=self._read_events, args=(session,), daemon=True)
             session.reader_thread = thread
             thread.start()
+            try:
+                self._start_screenshot_worker(session)
+            except Exception as exc:
+                logger.warning(
+                    "Screenshot worker failed to start for recording %s; audio capture continues: %s",
+                    recording_id,
+                    exc,
+                )
             return {
                 "recording_id": recording_id,
                 "capture_session_id": str(uuid.uuid4()),
@@ -589,6 +793,8 @@ class NativeCaptureManager:
                 if remaining <= 0:
                     break
                 session.screenshot_condition.wait(timeout=remaining)
+
+        self._stop_screenshot_worker(session, graceful=True)
 
         was_killed = False
         if session.process.poll() is None:
