@@ -856,6 +856,88 @@ class RecordingApiTests(unittest.TestCase):
         self.assertTrue(res.json().get("success"))
 
 
+    def test_screenshot_api_uses_store_owned_staging_and_is_idempotent(self) -> None:
+        created = self.client.post(
+            "/v1/recordings",
+            json={
+                "title": "Screenshot API",
+                "mime_type": "audio/wav",
+                "language": "it",
+                "capture_mode": "both",
+                "capture_backend": "native",
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        recording_id = created.json()["id"]
+
+        class FakeCapture:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def begin_screenshot(self, _recording_id: str) -> None:
+                return None
+
+            def finish_screenshot(self, _recording_id: str) -> None:
+                return None
+
+            def capture_screenshot(
+                self,
+                _recording_id: str,
+                *,
+                request_id: str,
+                display_id: int | None,
+                admission_held: bool,
+                original_path: Path,
+                thumbnail_path: Path,
+            ) -> dict:
+                self.calls += 1
+                self.last_paths = (original_path, thumbnail_path)
+                original_path.write_bytes(b"\xff\xd8\xfforiginal")
+                thumbnail_path.write_bytes(b"\xff\xd8\xffthumb")
+                return {
+                    "request_id": request_id,
+                    "display_id": display_id or 7,
+                    "display_title": "Screen 1",
+                    "captured_uptime": 12.5,
+                    "captured_wall_time": 1000.0,
+                    "recording_ready_uptime": 10.0,
+                    "timestamp": 2.5,
+                    "width": 1920,
+                    "height": 1080,
+                    "thumbnail_width": 640,
+                    "thumbnail_height": 360,
+                    "overlay_exclusion": "closedroom_applications",
+                    "capture_ms": 80,
+                    "encode_ms": 20,
+                    "write_ms": 5,
+                    "roundtrip_ms": 120,
+                    "worker_restart_count": 0,
+                }
+
+        fake = FakeCapture()
+        self.app.state.capture_manager = fake
+        body = {"request_id": "api-shot-1", "display_id": 7}
+
+        first = self.client.post(
+            f"/v1/recordings/{recording_id}/screenshots",
+            json=body,
+        )
+        second = self.client.post(
+            f"/v1/recordings/{recording_id}/screenshots",
+            json=body,
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(fake.calls, 1)
+        self.assertEqual(
+            first.json()["screenshot_id"],
+            second.json()["screenshot_id"],
+        )
+        self.assertEqual(first.json()["capture_ms"], 80)
+        self.assertEqual(first.json()["roundtrip_ms"], 120)
+        self.assertFalse(fake.last_paths[0].exists())
+        self.assertFalse(fake.last_paths[1].exists())
+
 if __name__ == "__main__":
     unittest.main()
-
