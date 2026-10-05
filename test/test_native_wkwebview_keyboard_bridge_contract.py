@@ -50,7 +50,8 @@ class NativeWKWebViewKeyboardBridgeContractTest(unittest.TestCase):
     def test_screenshot_exclusion_exports_only_cached_native_overlay_window_id(self) -> None:
         self.assertIn('setTitle_("ClosedRoom Recording Overlay")', self.window)
         self.assertIn("def screenshot_exclusion_window_ids(self) -> list[int]:", self.window)
-        self.assertIn("self._overlay_capture_window_id = int(self.overlay_window.windowNumber())", self.window)
+        self.assertIn("window_id = int(self.overlay_window.windowNumber())", self.window)
+        self.assertIn("self._overlay_capture_window_id = window_id if window_id > 0 else None", self.window)
         self.assertIn("if not self._overlay_visible or self._overlay_capture_window_id is None:", self.window)
         self.assertNotIn("run_on_main_thread(_read, wait=True)", self.window)
 
