@@ -203,7 +203,7 @@ class NativeCaptureManager:
                     active.recording_id,
                     exc,
                 )
-            active.screenshot_worker_ready.wait(timeout=0.25)
+            active.screenshot_worker_ready.wait(timeout=1.0)
             with active.screenshot_worker_lock:
                 cached = [dict(item) for item in active.screenshot_worker_displays]
                 worker = active.screenshot_worker_process
