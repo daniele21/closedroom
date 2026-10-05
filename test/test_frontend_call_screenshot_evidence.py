@@ -37,6 +37,19 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("screenshot_count?: number", self.client)
         self.assertIn("/screenshots", self.client)
 
+    def test_overlay_display_selection_has_backend_owner_and_modern_control_center(self) -> None:
+        self.assertIn("ApiClient.selectScreenshotDisplay(recordingId, displayId)", self.overlay)
+        self.assertIn("/screenshot-display", self.client)
+        self.assertIn("pendingDisplayIdRef.current", self.overlay)
+        self.assertIn("pendingSelection === null || backendDisplayId === pendingSelection", self.overlay)
+        self.assertIn('data-overlay-control-center="true"', self.overlay)
+        self.assertIn('data-display-selector="true"', self.overlay)
+        self.assertIn('data-display-picker="true"', self.overlay)
+        self.assertIn('data-screenshot-action="true"', self.overlay)
+        self.assertNotIn("<select", self.overlay)
+        self.assertIn("display.width} × {display.height", self.overlay)
+        self.assertIn("screenshotFeedback === 'saved'", self.overlay)
+
     def test_transcript_keeps_asr_segments_immutable_and_anchors_screenshot_by_time(self) -> None:
         self.assertIn("segment.start <= shot.timestamp && shot.timestamp <= segment.end", self.transcript)
         self.assertIn("screenshotPlacement.anchored.get(seg.id)", self.transcript)
