@@ -947,7 +947,7 @@ export default function RecordingOverlayPage() {
           </div>
           {visualCaptureLabel && (
             <div className="col-span-2 truncate rounded bg-cyan-300/8 px-2 py-1 text-cyan-100/75" title={visualCaptureLabel}>
-              Visual capture: {visualCaptureLabel}
+              {t('recording.visualCaptureActive')}: {visualCaptureLabel}
             </div>
           )}
         </div>
