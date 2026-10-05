@@ -357,6 +357,14 @@ else:
             / "native_capture_helper"
             / "compile.py"
         ).read_text(encoding="utf-8")
+        support_source = (
+            root
+            / "src"
+            / "local_asr_server"
+            / "native_capture_helper"
+            / "Support.swift"
+        ).read_text(encoding="utf-8")
+        combined_source = helper_source + support_source
 
         self.assertIn("import AppKit", helper_source)
         self.assertIn("let app = NSApplication.shared", helper_source)
@@ -364,7 +372,7 @@ else:
         self.assertIn("Task { @MainActor in", helper_source)
         self.assertIn("dispatchMain()", helper_source)
         self.assertIn('"AppKit"', compile_source)
-        self.assertIn("CR_SCREENSHOT_DIAG", helper_source)
+        self.assertIn("CR_SCREENSHOT_DIAG", support_source)
         for stage in (
             "command_received",
             "appkit_ready",
@@ -378,7 +386,7 @@ else:
             "command_completed",
             "command_failed",
         ):
-            self.assertIn(f'"{stage}"', helper_source)
+            self.assertIn(f'"{stage}"', combined_source)
 
     def test_recording_ready_timeout_emits_error_and_stops_hung_helper(self) -> None:
         manager = NativeCaptureManager(
