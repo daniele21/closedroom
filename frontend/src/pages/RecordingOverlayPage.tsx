@@ -494,12 +494,12 @@ export default function RecordingOverlayPage() {
         setErrorMsg(t('recording.screenshotDisplayUnavailable'));
         await loadDisplays(undefined, false);
         setIsDisplayPickerOpen(true);
-        void ApiClient.resizeOverlay(420, 300);
+        void resizeOverlayForState(isExpanded, true);
       } else if (message.includes('display_selection_required')) {
         setErrorMsg(t('recording.screenshotChooseMonitorError'));
         await loadDisplays(undefined, false);
         setIsDisplayPickerOpen(true);
-        void ApiClient.resizeOverlay(420, 300);
+        void resizeOverlayForState(isExpanded, true);
       } else {
         setErrorMsg(message);
       }
@@ -525,6 +525,10 @@ export default function RecordingOverlayPage() {
   ) => {
     const width = 420;
     const height = displayPickerOpen ? 300 : expanded ? 238 : 118;
+    if (window.name === 'ClosedRoomOverlay') {
+      window.resizeTo(width, height + 52);
+      return;
+    }
     try {
       await ApiClient.resizeOverlay(width, height);
     } catch (err) {
