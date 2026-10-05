@@ -372,7 +372,12 @@ def toggle_overlay_window(request: Request, body: OverlayRequest):
     window_manager = getattr(request.app.state, "window_manager", None)
     logger.info("Toggle overlay window: show=%s, has_window_manager=%s", body.show, bool(window_manager))
     if not window_manager:
-        return {"success": False, "error": "Native window manager not available"}
+        return {
+            "success": False,
+            "error": "Native window manager not available",
+            "fallback": "browser",
+            "fallback_expected": True,
+        }
         
     from local_asr_server.window import run_on_main_thread
     
@@ -381,7 +386,11 @@ def toggle_overlay_window(request: Request, body: OverlayRequest):
     else:
         run_on_main_thread(window_manager.hide_overlay)
         
-    return {"success": True}
+    return {
+        "success": True,
+        "fallback": None,
+        "fallback_expected": False,
+    }
 
 
 @router.post("/v1/system/window/overlay/resize")
