@@ -324,13 +324,35 @@ else:
         ):
             self.assertIn(f'"{stage}"', helper_source)
 
+    def test_recording_start_does_not_boot_screenshot_worker_before_ready(self) -> None:
+        manager = NativeCaptureManager(helper_path=self.helper)
+        manager.start("rec-start-critical", self.root, "both")
+        session = manager.get_session("rec-start-critical")
+        self.assertIsNotNone(session)
+
+        self.assertIsNone(session.screenshot_worker_process)
+        if session.ready_event is None:
+            payload = manager.displays()
+            self.assertEqual(payload["reason"], "recording_starting")
+            self.assertIsNone(session.screenshot_worker_process)
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and session.ready_event is None:
+            time.sleep(0.01)
+        self.assertIsNotNone(session.ready_event)
+
+        payload = manager.displays()
+        self.assertEqual(payload["source"], "worker_cache")
+        self.assertTrue(session.screenshot_worker_ready.is_set())
+        manager.cancel("rec-start-critical")
+
     def test_repeated_screenshots_reuse_one_worker_process(self) -> None:
         manager = NativeCaptureManager(helper_path=self.helper)
         manager.start("rec-burst", self.root, "both")
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
             session = manager.get_session("rec-burst")
-            if session and session.ready_event and session.screenshot_worker_ready.is_set():
+            if session and session.ready_event:
                 break
             time.sleep(0.01)
 
@@ -359,8 +381,11 @@ else:
         manager.start("rec-display-cache", self.root, "both")
         session = manager.get_session("rec-display-cache")
         self.assertIsNotNone(session)
-        self.assertTrue(session.screenshot_worker_ready.wait(timeout=2.0))
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and session.ready_event is None:
+            time.sleep(0.01)
 
+        self.assertIsNone(session.screenshot_worker_process)
         with patch.object(manager, "windows", side_effect=AssertionError("legacy discovery used")):
             payload = manager.displays()
 
@@ -374,11 +399,13 @@ else:
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
             session = manager.get_session("rec-recovery")
-            if session and session.ready_event and session.screenshot_worker_ready.is_set():
+            if session and session.ready_event:
                 break
             time.sleep(0.01)
 
         session = manager.get_session("rec-recovery")
+        manager.displays()
+        self.assertTrue(session.screenshot_worker_ready.wait(timeout=2.0))
         original_worker_pid = session.screenshot_worker_pid
         with self.assertRaisesRegex(RuntimeError, r"screenshot_capture_timeout:shot-"):
             manager.capture_screenshot(
