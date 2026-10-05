@@ -334,14 +334,18 @@ else:
                 break
             time.sleep(0.01)
 
-        captures = [
-            manager.capture_screenshot(
-                "rec-burst",
-                request_id=f"request-{index}",
-                display_id=7,
-            )
-            for index in range(20)
-        ]
+        with patch(
+            "local_asr_server.native_capture.subprocess.run",
+            side_effect=AssertionError("legacy subprocess used during screenshot hot path"),
+        ):
+            captures = [
+                manager.capture_screenshot(
+                    "rec-burst",
+                    request_id=f"request-{index}",
+                    display_id=7,
+                )
+                for index in range(20)
+            ]
         worker_pids = {capture["worker_pid"] for capture in captures}
 
         self.assertEqual(len(worker_pids), 1)
