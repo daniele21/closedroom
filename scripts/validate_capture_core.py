@@ -6,6 +6,7 @@ import argparse
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 
 DETERMINISTIC_TEST_PATTERNS = [
@@ -16,9 +17,27 @@ DETERMINISTIC_TEST_PATTERNS = [
 ]
 
 
-def run(command: list[str], *, env: dict[str, str] | None = None) -> int:
-    print("$ " + " ".join(command), flush=True)
-    return subprocess.run(command, check=False, env=env).returncode
+def run(
+    command: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> int:
+    prefix = f"[{cwd}] " if cwd is not None else ""
+    print(prefix + "$ " + " ".join(command), flush=True)
+    return subprocess.run(command, check=False, env=env, cwd=cwd).returncode
+
+
+def pnpm_command(*args: str) -> list[str]:
+    corepack = shutil.which("corepack")
+    if corepack is not None:
+        return [corepack, "pnpm", *args]
+    pnpm = shutil.which("pnpm")
+    if pnpm is None:
+        raise RuntimeError(
+            "pnpm (or corepack) is required for capture-core frontend validation."
+        )
+    return [pnpm, *args]
 
 
 def uv_python_command(*args: str) -> list[str]:
@@ -54,6 +73,16 @@ def main() -> int:
                 "-v",
             ),
             env=env,
+        )
+        if status != 0:
+            return status
+
+    frontend_dir = Path("frontend")
+    for frontend_command in (("lint",), ("build",)):
+        status = run(
+            pnpm_command(*frontend_command),
+            env=env,
+            cwd=frontend_dir,
         )
         if status != 0:
             return status
