@@ -195,6 +195,14 @@ class NativeCaptureManager:
                 None,
             )
         if active is not None:
+            try:
+                self._ensure_screenshot_worker(active)
+            except Exception as exc:
+                logger.warning(
+                    "Screenshot worker unavailable while listing displays for recording %s: %s",
+                    active.recording_id,
+                    exc,
+                )
             active.screenshot_worker_ready.wait(timeout=0.25)
             with active.screenshot_worker_lock:
                 cached = [dict(item) for item in active.screenshot_worker_displays]
@@ -202,12 +210,11 @@ class NativeCaptureManager:
                 worker_alive = worker is not None and worker.poll() is None
             if cached:
                 return {"displays": cached, "reason": None, "source": "worker_cache"}
-            if worker_alive:
-                return {
-                    "displays": [],
-                    "reason": "screenshot_worker_starting",
-                    "source": "worker_cache",
-                }
+            return {
+                "displays": [],
+                "reason": "screenshot_worker_starting" if worker_alive else "screenshot_worker_unavailable",
+                "source": "worker_cache",
+            }
 
         payload = self.windows()
         displays: list[dict[str, Any]] = []
@@ -525,9 +532,12 @@ class NativeCaptureManager:
             except Exception:
                 pass
             with session.screenshot_worker_lock:
-                if session.screenshot_worker_process is process:
+                is_current = session.screenshot_worker_process is process
+                if is_current:
                     session.screenshot_worker_ready.clear()
-                pending = list(session.screenshot_pending.values())
+                    pending = list(session.screenshot_pending.values())
+                else:
+                    pending = []
             for waiter in pending:
                 try:
                     waiter.put_nowait({
