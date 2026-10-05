@@ -395,6 +395,202 @@ class RecordingStore:
             item = next((entry for entry in manifest["items"] if entry.get("request_id") == request_id), None)
             return self._public_screenshot(session_dir, item) if item is not None else None
 
+    def reserve_screenshot_capture(
+        self,
+        recording_id: str,
+        *,
+        request_id: str,
+    ) -> dict[str, Any]:
+        """Reserve RecordingStore-owned staging paths for one manual screenshot."""
+        request_id = request_id.strip()
+        if not request_id or len(request_id) > 128:
+            raise RecordingConflict("Invalid screenshot request_id")
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            if metadata["status"] != "recording":
+                raise RecordingConflict("Screenshots can only be captured while recording")
+            manifest = self._read_screenshot_manifest(session_dir, recording_id)
+            existing = next(
+                (entry for entry in manifest["items"] if entry.get("request_id") == request_id),
+                None,
+            )
+            if existing is not None:
+                return {
+                    "existing": self._public_screenshot(session_dir, existing),
+                    "token": None,
+                    "original_path": None,
+                    "thumbnail_path": None,
+                }
+            if len(manifest["items"]) >= MAX_SCREENSHOTS_PER_RECORDING:
+                raise RecordingConflict(
+                    f"Screenshot limit reached ({MAX_SCREENSHOTS_PER_RECORDING} per recording)"
+                )
+            if shutil.disk_usage(session_dir).free < MIN_SCREENSHOT_FREE_BYTES:
+                raise OSError("Insufficient disk space to capture screenshot")
+
+            staging_dir = session_dir / ".screenshot-capture-temp"
+            staging_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            token = uuid.uuid4().hex
+            original_path, thumbnail_path = self._screenshot_staging_paths(session_dir, token)
+            original_path.unlink(missing_ok=True)
+            thumbnail_path.unlink(missing_ok=True)
+            return {
+                "existing": None,
+                "token": token,
+                "original_path": original_path,
+                "thumbnail_path": thumbnail_path,
+            }
+
+    def discard_screenshot_capture(self, recording_id: str, token: str | None) -> None:
+        if not token:
+            return
+        try:
+            uuid.UUID(hex=token)
+        except (ValueError, AttributeError):
+            return
+        try:
+            with self._lock_for(recording_id):
+                session_dir, _ = self._load(recording_id)
+                original_path, thumbnail_path = self._screenshot_staging_paths(session_dir, token)
+                original_path.unlink(missing_ok=True)
+                thumbnail_path.unlink(missing_ok=True)
+                try:
+                    original_path.parent.rmdir()
+                except OSError:
+                    pass
+        except RecordingNotFound:
+            return
+
+    def commit_screenshot_capture(
+        self,
+        recording_id: str,
+        *,
+        request_id: str,
+        token: str,
+        capture: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically promote worker-written staging assets without copying them through Python RAM."""
+        request_id = request_id.strip()
+        if not request_id or len(request_id) > 128:
+            raise RecordingConflict("Invalid screenshot request_id")
+        try:
+            parsed_token = uuid.UUID(hex=token)
+        except (ValueError, AttributeError) as exc:
+            raise RecordingConflict("Invalid screenshot staging token") from exc
+        token = parsed_token.hex
+
+        width = int(capture.get("width") or 0)
+        height = int(capture.get("height") or 0)
+        if width <= 0 or height <= 0 or width * height > MAX_SCREENSHOT_PIXELS:
+            raise RecordingConflict("Screenshot dimensions are invalid or exceed the pixel limit")
+        timestamp = float(capture.get("timestamp") or 0.0)
+        captured_uptime = float(capture.get("captured_uptime") or 0.0)
+        if timestamp < 0 or captured_uptime <= 0:
+            raise RecordingConflict("Screenshot capture timestamp is invalid")
+
+        persist_started = time.monotonic()
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            if metadata["status"] != "recording":
+                raise RecordingConflict("Screenshots can only be captured while recording")
+            original_staging, thumbnail_staging = self._screenshot_staging_paths(session_dir, token)
+            if not original_staging.is_file() or not thumbnail_staging.is_file():
+                raise RecordingConflict("Screenshot staging assets are missing")
+
+            original_size = original_staging.stat().st_size
+            thumbnail_size = thumbnail_staging.stat().st_size
+            if original_size <= 0 or original_size > MAX_SCREENSHOT_BYTES:
+                raise RecordingConflict("Screenshot original must be a JPEG no larger than 25 MB")
+            if thumbnail_size <= 0 or thumbnail_size > MAX_SCREENSHOT_THUMBNAIL_BYTES:
+                raise RecordingConflict("Screenshot thumbnail must be a JPEG no larger than 2 MB")
+            with original_staging.open("rb") as handle:
+                if handle.read(3) != b"\xff\xd8\xff":
+                    raise RecordingConflict("Screenshot original must be JPEG")
+            with thumbnail_staging.open("rb") as handle:
+                if handle.read(3) != b"\xff\xd8\xff":
+                    raise RecordingConflict("Screenshot thumbnail must be JPEG")
+
+            manifest = self._read_screenshot_manifest(session_dir, recording_id)
+            existing = next(
+                (entry for entry in manifest["items"] if entry.get("request_id") == request_id),
+                None,
+            )
+            if existing is not None:
+                original_staging.unlink(missing_ok=True)
+                thumbnail_staging.unlink(missing_ok=True)
+                return self._public_screenshot(session_dir, existing)
+            if len(manifest["items"]) >= MAX_SCREENSHOTS_PER_RECORDING:
+                raise RecordingConflict(
+                    f"Screenshot limit reached ({MAX_SCREENSHOTS_PER_RECORDING} per recording)"
+                )
+            if shutil.disk_usage(session_dir).free < MIN_SCREENSHOT_FREE_BYTES:
+                raise OSError("Insufficient disk space to persist screenshot")
+
+            digest = hashlib.sha256()
+            with original_staging.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+
+            sequence = max(
+                (int(entry.get("sequence") or -1) for entry in manifest["items"]),
+                default=-1,
+            ) + 1
+            screenshot_id = str(uuid.uuid4())
+            screenshots_dir = self._screenshots_dir(session_dir)
+            screenshots_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            original_name = f"screenshot-{sequence:04d}-{screenshot_id}.jpg"
+            thumbnail_name = f"screenshot-{sequence:04d}-{screenshot_id}-thumb.jpg"
+            original_path = screenshots_dir / original_name
+            thumbnail_path = screenshots_dir / thumbnail_name
+
+            os.replace(str(original_staging), str(original_path))
+            try:
+                os.replace(str(thumbnail_staging), str(thumbnail_path))
+            except Exception:
+                original_path.unlink(missing_ok=True)
+                raise
+
+            persist_ms = int((time.monotonic() - persist_started) * 1000.0)
+            entry = {
+                "screenshot_id": screenshot_id,
+                "recording_id": recording_id,
+                "request_id": request_id,
+                "sequence": sequence,
+                "capture_kind": "manual",
+                "timestamp": timestamp,
+                "captured_uptime": captured_uptime,
+                "captured_wall_time": capture.get("captured_wall_time"),
+                "recording_ready_uptime": capture.get("recording_ready_uptime"),
+                "display_id": int(capture.get("display_id") or 0),
+                "display_title": capture.get("display_title"),
+                "format": "image/jpeg",
+                "width": width,
+                "height": height,
+                "thumbnail_width": int(capture.get("thumbnail_width") or 0),
+                "thumbnail_height": int(capture.get("thumbnail_height") or 0),
+                "bytes": original_size,
+                "thumbnail_bytes": thumbnail_size,
+                "sha256": digest.hexdigest(),
+                "original_file": original_name,
+                "thumbnail_file": thumbnail_name,
+                "overlay_exclusion": capture.get("overlay_exclusion") or "unknown",
+                "capture_ms": capture.get("capture_ms"),
+                "encode_ms": capture.get("encode_ms"),
+                "worker_write_ms": capture.get("write_ms"),
+                "roundtrip_ms": capture.get("roundtrip_ms"),
+                "persist_ms": persist_ms,
+                "worker_restart_count": capture.get("worker_restart_count"),
+                "created_at": _utc_now(),
+            }
+            manifest["items"].append(entry)
+            self._write_json_atomic(self._screenshot_manifest_path(session_dir), manifest)
+            metadata["screenshot_count"] = len(manifest["items"])
+            metadata["screenshot_manifest_version"] = SCREENSHOT_MANIFEST_VERSION
+            metadata["screenshot_revision"] = int(metadata.get("screenshot_revision") or 0) + 1
+            self._write_metadata(session_dir, metadata)
+            self._upsert_catalog(metadata)
+            return self._public_screenshot(session_dir, entry)
+
     def save_screenshot(
         self,
         recording_id: str,
@@ -532,6 +728,13 @@ class RecordingStore:
             metadata["screenshot_revision"] = int(metadata.get("screenshot_revision") or 0) + 1
             self._write_metadata(session_dir, metadata)
             self._upsert_catalog(metadata)
+
+    def _screenshot_staging_paths(self, session_dir: Path, token: str) -> tuple[Path, Path]:
+        staging_dir = session_dir / ".screenshot-capture-temp"
+        return (
+            staging_dir / f"{token}.jpg",
+            staging_dir / f"{token}-thumb.jpg",
+        )
 
     def _screenshots_dir(self, session_dir: Path) -> Path:
         return session_dir / "screenshots"
