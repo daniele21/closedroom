@@ -7,6 +7,7 @@ import {
   FileText,
   History,
   Info,
+  Images,
   ListChecks,
   Loader2,
   PlayCircle,
@@ -72,6 +73,13 @@ function meetingStatusLabel(status: string, lang: string): string {
   return labels[status]?.[lang === 'it' ? 'it' : 'en'] || status;
 }
 
+function screenshotTimestampLabel(seconds: number): string {
+  const safe = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(safe / 60);
+  const remaining = Math.floor(safe % 60);
+  return `${minutes}:${String(remaining).padStart(2, '0')}`;
+}
+
 function preparationProgressLabel(step: string, lang: string): string {
   if (step === 'preparing_transcript') {
     return lang === 'it' ? 'Preparazione trascrizione' : 'Preparing transcript';
@@ -98,6 +106,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [screenshotsState, setScreenshotsState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
   const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
+  const [showAllScreenshots, setShowAllScreenshots] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [selectedAnalysisType, setSelectedAnalysisType] = useState('meeting_brief');
@@ -133,6 +142,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const visualResultAvailable = meeting?.transcription?.stats?.visual_intelligence?.version === 2;
   const savedScreenshotCount = screenshots.length;
   const availableScreenshotCount = screenshots.filter((item) => item.available).length;
+  const visibleScreenshots = showAllScreenshots ? screenshots : screenshots.slice(0, 6);
+  const hiddenScreenshotCount = Math.max(0, savedScreenshotCount - visibleScreenshots.length);
   const visualEvidenceCount = visualFrameCount + availableScreenshotCount;
   const { data: visualData, loading: visualLoading, error: visualError } = useVisualIntelligence(
     demoMode ? null : recordingId, visualResultAvailable && activeTab === 'analysis',
@@ -264,6 +275,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     setScreenshots([]);
     setScreenshotsState('idle');
     setIncludeScreenshots(true);
+    setShowAllScreenshots(false);
     setVisualFramesError(null);
     userSelectedTabRef.current = false;
     void load();
@@ -281,14 +293,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   }, [detailsOpen, recordingId, demoMode, diagnosticReport, diagnosticsLoading, diagnosticsError]);
 
   useEffect(() => {
-    if (
-      !['transcript', 'analysis'].includes(activeTab)
-      || !recordingId
-      || demoMode
-      || screenshotsState !== 'idle'
-    ) return;
+    if (!recordingId || demoMode || screenshotsState !== 'idle') return;
     void loadScreenshots();
-  }, [activeTab, recordingId, demoMode, screenshotsState]);
+  }, [recordingId, demoMode, screenshotsState]);
 
   useEffect(() => {
     if (
@@ -767,6 +774,134 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
               </Button>
             </div>
           </div>
+        )}
+
+        {!demoMode && screenshotsState === 'loading' && (
+          <section
+            className="rounded-xl border border-border-subtle bg-bg-surface/40 px-4 py-4"
+            aria-label={lang === 'it' ? 'Screenshot del meeting' : 'Meeting screenshots'}
+            aria-busy="true"
+          >
+            <div className="flex items-center gap-2 text-xs text-text-muted">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <span>{lang === 'it' ? 'Caricamento screenshot…' : 'Loading screenshots…'}</span>
+            </div>
+          </section>
+        )}
+
+        {!demoMode && screenshotsState === 'error' && (
+          <section className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <Images className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                <div>
+                  <p className="text-xs font-semibold text-text-primary">
+                    {lang === 'it' ? 'Screenshot non disponibili' : 'Screenshots unavailable'}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-text-muted">
+                    {lang === 'it'
+                      ? 'ClosedRoom non è riuscito a caricare le immagini salvate per questo meeting.'
+                      : 'ClosedRoom could not load the images saved for this meeting.'}
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={loadScreenshots}>
+                {lang === 'it' ? 'Riprova' : 'Retry'}
+              </Button>
+            </div>
+          </section>
+        )}
+
+        {!demoMode && screenshotsState === 'ready' && savedScreenshotCount > 0 && (
+          <section
+            data-meeting-screenshot-gallery="true"
+            className="rounded-xl border border-border-subtle bg-bg-elevated/60 p-4"
+            aria-labelledby="meeting-screenshots-title"
+          >
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-2.5">
+                <Images className="mt-0.5 h-4.5 w-4.5 shrink-0 text-accent" aria-hidden="true" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 id="meeting-screenshots-title" className="text-xs font-semibold text-text-primary">
+                      {lang === 'it' ? 'Screenshot del meeting' : 'Meeting screenshots'}
+                    </h3>
+                    <Badge variant="idle">{savedScreenshotCount}</Badge>
+                  </div>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
+                    {lang === 'it'
+                      ? 'Catture manuali salvate durante la registrazione. Aprine una per ingrandirla o andare al punto esatto dell’audio.'
+                      : 'Manual captures saved during recording. Open one to enlarge it or jump to the exact point in the audio.'}
+                  </p>
+                </div>
+              </div>
+              {savedScreenshotCount > 6 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowAllScreenshots((value) => !value)}
+                  aria-expanded={showAllScreenshots}
+                  className="shrink-0"
+                >
+                  {showAllScreenshots
+                    ? (lang === 'it' ? 'Mostra meno' : 'Show less')
+                    : (lang === 'it' ? `Mostra tutti (${savedScreenshotCount})` : `Show all (${savedScreenshotCount})`)}
+                  <ChevronDown
+                    className={cn('h-3.5 w-3.5 transition-transform', showAllScreenshots && 'rotate-180')}
+                    aria-hidden="true"
+                  />
+                </Button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
+              {visibleScreenshots.map((shot) => (
+                <button
+                  key={shot.screenshot_id}
+                  type="button"
+                  onClick={() => setSelectedScreenshot(shot)}
+                  className="group relative overflow-hidden rounded-lg border border-border-subtle bg-bg-surface text-left transition hover:border-border-focus hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  aria-label={
+                    lang === 'it'
+                      ? `Apri screenshot a ${screenshotTimestampLabel(shot.timestamp)}`
+                      : `Open screenshot at ${screenshotTimestampLabel(shot.timestamp)}`
+                  }
+                  title={shot.display_title || undefined}
+                >
+                  <div className="aspect-video overflow-hidden bg-bg-surface">
+                    {shot.available && shot.thumbnail_available ? (
+                      <img
+                        src={shot.thumbnail_url}
+                        alt=""
+                        loading="lazy"
+                        className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-text-muted">
+                        {lang === 'it' ? 'Immagine non disponibile' : 'Image unavailable'}
+                      </div>
+                    )}
+                  </div>
+                  <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-2.5 pb-2 pt-5 text-white">
+                    <span className="font-mono text-[11px] font-semibold tabular-nums">
+                      {screenshotTimestampLabel(shot.timestamp)}
+                    </span>
+                    <span className="truncate text-[9px] text-white/75">
+                      {shot.sequence + 1}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {!showAllScreenshots && hiddenScreenshotCount > 0 && (
+              <p className="mt-2.5 text-right text-[10px] text-text-muted">
+                {lang === 'it'
+                  ? `+${hiddenScreenshotCount} screenshot non mostrati`
+                  : `+${hiddenScreenshotCount} more screenshot${hiddenScreenshotCount === 1 ? '' : 's'}`}
+              </p>
+            )}
+          </section>
         )}
 
         {activeTab === 'analysis' && !isBusy && meeting.transcription && visualEvidenceCount > 0 && !visualEnabled && (
