@@ -50,6 +50,10 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("window.resizeTo(width, height + 52)", self.overlay)
         self.assertIn("resizeOverlayForState(isExpanded, true)", self.overlay)
 
+    def test_browser_overlay_has_exact_capture_exclusion_title(self) -> None:
+        self.assertIn("document.title = 'ClosedRoom Recording Overlay'", self.overlay)
+        self.assertNotIn("document.title.includes('ClosedRoom')", self.overlay)
+
     def test_overlay_display_selection_has_backend_owner_and_modern_control_center(self) -> None:
         self.assertIn("ApiClient.selectScreenshotDisplay(recordingId, displayId)", self.overlay)
         self.assertIn("/screenshot-display", self.client)
