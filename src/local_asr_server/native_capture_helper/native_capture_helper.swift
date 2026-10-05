@@ -869,6 +869,99 @@ final class OneShotDisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 }
 
+@available(macOS 14.0, *)
+func captureDisplayScreenshotWithManager(
+    displayID: CGDirectDisplayID,
+    originalURL: URL,
+    thumbnailURL: URL,
+    recordingReadyUptime: Double
+) async throws -> [String: Any] {
+    let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+    guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+        throw NSError(domain: "ClosedRoomNativeCapture", code: 60, userInfo: [
+            NSLocalizedDescriptionKey: "Selected screenshot display is no longer available"
+        ])
+    }
+
+    let ownPID = ProcessInfo.processInfo.processIdentifier
+    let excludedWindows = content.windows.filter { window in
+        let app = window.owningApplication
+        let bundle = (app?.bundleIdentifier ?? "").lowercased()
+        let name = (app?.applicationName ?? "").lowercased()
+        let title = (window.title ?? "").lowercased()
+        return app?.processID == ownPID
+            || bundle.contains("closedroom")
+            || name.contains("closedroom")
+            || title.contains("closedroom")
+    }
+    let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+    let configuration = SCStreamConfiguration()
+    configuration.width = max(2, Int(display.width))
+    configuration.height = max(2, Int(display.height))
+    configuration.showsCursor = false
+    configuration.capturesAudio = false
+    configuration.captureResolution = .best
+
+    let cgImage = try await SCScreenshotManager.captureImage(
+        contentFilter: filter,
+        configuration: configuration
+    )
+    let capturedUptime = ProcessInfo.processInfo.systemUptime
+    let capturedWallTime = Date().timeIntervalSince1970
+    let image = CIImage(cgImage: cgImage)
+    let qualityKey = CIImageRepresentationOption(
+        rawValue: kCGImageDestinationLossyCompressionQuality as String
+    )
+
+    guard let original = CIContext(options: [.cacheIntermediates: false]).jpegRepresentation(
+        of: image,
+        colorSpace: CGColorSpaceCreateDeviceRGB(),
+        options: [qualityKey: 0.92]
+    ) else {
+        throw NSError(domain: "ClosedRoomNativeCapture", code: 61, userInfo: [
+            NSLocalizedDescriptionKey: "Unable to encode screenshot"
+        ])
+    }
+
+    let width = cgImage.width
+    let height = cgImage.height
+    let scale = min(1.0, 640.0 / Double(max(width, height)))
+    let thumbnailImage = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+    guard let thumbnail = CIContext(options: [.cacheIntermediates: false]).jpegRepresentation(
+        of: thumbnailImage,
+        colorSpace: CGColorSpaceCreateDeviceRGB(),
+        options: [qualityKey: 0.78]
+    ) else {
+        throw NSError(domain: "ClosedRoomNativeCapture", code: 62, userInfo: [
+            NSLocalizedDescriptionKey: "Unable to encode screenshot thumbnail"
+        ])
+    }
+
+    do {
+        try original.write(to: originalURL, options: .atomic)
+        try thumbnail.write(to: thumbnailURL, options: .atomic)
+    } catch {
+        try? FileManager.default.removeItem(at: originalURL)
+        try? FileManager.default.removeItem(at: thumbnailURL)
+        throw error
+    }
+
+    return [
+        "type": "screenshot",
+        "display_id": Int(displayID),
+        "captured_uptime": capturedUptime,
+        "captured_wall_time": capturedWallTime,
+        "timestamp": max(0.0, capturedUptime - recordingReadyUptime),
+        "width": width,
+        "height": height,
+        "thumbnail_width": max(1, Int(Double(width) * scale)),
+        "thumbnail_height": max(1, Int(Double(height) * scale)),
+        "format": "image/jpeg",
+        "overlay_exclusion": "closedroom_windows",
+        "capture_backend": "screenshot_manager",
+    ]
+}
+
 @available(macOS 13.0, *)
 func captureDisplayScreenshot(
     displayID: CGDirectDisplayID,
@@ -876,6 +969,15 @@ func captureDisplayScreenshot(
     thumbnailURL: URL,
     recordingReadyUptime: Double
 ) async throws -> [String: Any] {
+    if #available(macOS 14.0, *) {
+        return try await captureDisplayScreenshotWithManager(
+            displayID: displayID,
+            originalURL: originalURL,
+            thumbnailURL: thumbnailURL,
+            recordingReadyUptime: recordingReadyUptime
+        )
+    }
+
     let capture = OneShotDisplayCapture(
         displayID: displayID,
         originalURL: originalURL,
