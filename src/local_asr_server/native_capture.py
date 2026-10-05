@@ -711,6 +711,12 @@ class NativeCaptureManager:
                 process=process,
                 output_dir=output_dir,
             )
+            logger.info(
+                "Native recording helper started: recording=%s pid=%s mode=%s screenshot_worker=deferred",
+                recording_id,
+                process.pid,
+                mode,
+            )
             self._sessions[recording_id] = session
             thread = threading.Thread(target=self._read_events, args=(session,), daemon=True)
             session.reader_thread = thread
@@ -793,6 +799,12 @@ class NativeCaptureManager:
                 session.event_log.append(event)
                 if event.get("type") == "ready":
                     session.ready_event = event
+                    logger.info(
+                        "Native recording helper ready: recording=%s pid=%s ready_uptime=%s",
+                        session.recording_id,
+                        session.process.pid,
+                        event.get("recording_ready_uptime"),
+                    )
                 elif event.get("type") == "track_first_sample":
                     session.track_ready[event["source"]] = event
                 elif event.get("type") == "track_first_written_sample":
@@ -811,6 +823,13 @@ class NativeCaptureManager:
         finally:
             session.process.stdout.close()
             session.stopped = True
+            if session.ready_event is None:
+                logger.error(
+                    "Native recording helper exited before ready: recording=%s pid=%s returncode=%s",
+                    session.recording_id,
+                    session.process.pid,
+                    session.process.poll(),
+                )
             self._stop_screenshot_worker(session, graceful=False)
 
     def _terminate(self, recording_id: str, *, cancel: bool) -> dict[str, Any]:
