@@ -19,7 +19,7 @@ class NativeCaptureManagerTests(unittest.TestCase):
         self.helper = self.root / "helper.py"
         self.helper.write_text(
             """#!/usr/bin/env python3
-import json, sys, time
+import json, os, signal, sys, time
 from pathlib import Path
 
 cmd = sys.argv[1]
@@ -27,6 +27,11 @@ cmd = sys.argv[1]
 def arg(name):
     idx = sys.argv.index(name)
     return sys.argv[idx + 1]
+
+def stopped_and_exit(signum=None, frame=None):
+    print(json.dumps({'type': 'stopped'}), flush=True)
+    raise SystemExit(0)
+
 if cmd == 'capabilities':
     print(json.dumps({'available': True, 'backend': 'native', 'modes': ['both']}))
 elif cmd == 'permissions':
@@ -40,6 +45,64 @@ elif cmd == 'windows':
         {'id': -7, 'display_id': 7, 'kind': 'display', 'title': 'Screen 1', 'application_name': 'Full Screen', 'bundle_identifier': 'com.apple.displays', 'width': 1920, 'height': 1080},
         {'id': 42, 'kind': 'window', 'title': 'Meet', 'application_name': 'Chrome', 'bundle_identifier': 'com.google.Chrome'}
     ]}))
+elif cmd == 'screenshot-worker':
+    recording_id = arg('--recording-id')
+    print(json.dumps({
+        'type': 'screenshot_worker_ready',
+        'recording_id': recording_id,
+        'worker_pid': os.getpid(),
+        'capture_backend': 'fake',
+        'displays': [{
+            'display_id': 7, 'source_id': -7, 'kind': 'display', 'title': 'Screen 1',
+            'width': 1920, 'height': 1080, 'is_main': True,
+        }],
+    }), flush=True)
+    for line in sys.stdin:
+        payload = json.loads(line)
+        if payload.get('type') == 'shutdown':
+            print(json.dumps({'type': 'screenshot_worker_stopped', 'recording_id': recording_id}), flush=True)
+            break
+        if payload.get('type') == 'refresh_displays':
+            print(json.dumps({
+                'type': 'displays_changed',
+                'recording_id': recording_id,
+                'displays': [{
+                    'display_id': 7, 'source_id': -7, 'kind': 'display', 'title': 'Screen 1',
+                    'width': 1920, 'height': 1080, 'is_main': True,
+                }],
+            }), flush=True)
+            continue
+        if payload.get('type') != 'capture_screenshot':
+            continue
+        request_id = payload.get('request_id', '')
+        if request_id == 'request-timeout':
+            time.sleep(5)
+            continue
+        original = Path(payload['original_file'])
+        thumbnail = Path(payload['thumbnail_file'])
+        original.write_bytes(b'\\xff\\xd8\\xfforiginal')
+        thumbnail.write_bytes(b'\\xff\\xd8\\xffthumb')
+        print(json.dumps({
+            'type': 'screenshot_completed',
+            'recording_id': recording_id,
+            'request_id': request_id,
+            'trace_id': payload.get('trace_id'),
+            'worker_pid': os.getpid(),
+            'display_id': int(payload['display_id']),
+            'captured_uptime': float(payload['recording_ready_uptime']) + 2.5,
+            'captured_wall_time': 1000.0,
+            'width': 1920,
+            'height': 1080,
+            'thumbnail_width': 640,
+            'thumbnail_height': 360,
+            'format': 'image/jpeg',
+            'overlay_exclusion': 'closedroom_applications',
+            'capture_backend': 'fake',
+            'capture_ms': 4,
+            'encode_ms': 2,
+            'write_ms': 1,
+            'total_ms': 7,
+        }), flush=True)
 elif cmd == 'screenshot':
     Path(arg('--original-file')).write_bytes(b'\\xff\\xd8\\xfforiginal')
     Path(arg('--thumbnail-file')).write_bytes(b'\\xff\\xd8\\xffthumb')
@@ -50,12 +113,14 @@ elif cmd == 'screenshot':
         'format': 'image/jpeg', 'overlay_exclusion': 'closedroom_windows'
     }))
 elif cmd == 'start':
+    signal.signal(signal.SIGTERM, stopped_and_exit)
+    signal.signal(signal.SIGINT, stopped_and_exit)
     print(json.dumps({'type': 'ready', 'recording_ready_uptime': 10.0}), flush=True)
-    time.sleep(0.2)
-    print(json.dumps({'type': 'stopped'}), flush=True)
+    while True:
+        time.sleep(1)
 else:
     print(json.dumps({'type': 'stopped'}))
-""",
+"""""",
             encoding="utf-8",
         )
         self.helper.chmod(self.helper.stat().st_mode | stat.S_IXUSR)
@@ -69,16 +134,19 @@ else:
         self.assertTrue(manager.capabilities()["available"])
         started = manager.start("rec-1", self.root, "both")
 
-        events = []
         deadline = time.monotonic() + 2.0
+        events = []
         while time.monotonic() < deadline:
             events.extend(manager.drain_events("rec-1"))
-            if any(event.get("type") in {"stopped", "error"} for event in events):
+            if any(event.get("type") == "ready" for event in events):
                 break
             time.sleep(0.01)
+        stopped = manager.stop("rec-1")
+        events.extend(stopped["events"])
 
         self.assertEqual(started["backend"], "native")
-        self.assertEqual([event["type"] for event in events], ["ready", "stopped"])
+        self.assertIn("ready", [event["type"] for event in events])
+        self.assertIn("stopped", [event["type"] for event in events])
 
     def test_lists_windows_and_starts_visual_capture(self) -> None:
         manager = NativeCaptureManager(helper_path=self.helper)
@@ -157,10 +225,6 @@ else:
         started = manager.start("rec-2", self.root, "both")
         self.assertEqual(started["status"], "starting")
         
-        # Let the process finish
-        time.sleep(0.5)
-        
-        # Stop session
         result = manager.stop("rec-2")
         self.assertEqual(result["status"], "stopped")
         
@@ -252,55 +316,99 @@ else:
         ):
             self.assertIn(f'"{stage}"', helper_source)
 
-    def test_manual_screenshot_timeout_is_reported_without_leaking_timeout_expired(self) -> None:
+    def test_repeated_screenshots_reuse_one_worker_process(self) -> None:
         manager = NativeCaptureManager(helper_path=self.helper)
-        manager.start("rec-timeout", self.root, "both")
+        manager.start("rec-burst", self.root, "both")
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            session = manager.get_session("rec-timeout")
-            if session and session.ready_event:
+            session = manager.get_session("rec-burst")
+            if session and session.ready_event and session.screenshot_worker_ready.is_set():
                 break
             time.sleep(0.01)
 
-        timeout = subprocess.TimeoutExpired(
-            cmd=["helper", "screenshot"],
-            timeout=15,
-            output=b"",
-            stderr=(
-                b'CR_SCREENSHOT_DIAG {"trace_id":"shot-test",'
-                b'"stage":"capture_image_begin","elapsed_ms":12}\n'
-            ),
-        )
-        with (
-            patch.object(
-                manager,
-                "displays",
-                return_value={
-                    "displays": [{
-                        "display_id": 7,
-                        "source_id": -7,
-                        "title": "Screen 1",
-                        "width": 1920,
-                        "height": 1080,
-                    }]
-                },
-            ),
-            patch(
-                "local_asr_server.native_capture.subprocess.run",
-                side_effect=timeout,
-            ),
-            patch("local_asr_server.native_capture.logger.error") as log_error,
-        ):
-            with self.assertRaisesRegex(RuntimeError, r"screenshot_capture_timeout:shot-"):
-                manager.capture_screenshot(
-                    "rec-timeout",
-                    request_id="request-timeout",
-                    display_id=7,
-                )
+        captures = [
+            manager.capture_screenshot(
+                "rec-burst",
+                request_id=f"request-{index}",
+                display_id=7,
+            )
+            for index in range(20)
+        ]
+        worker_pids = {capture["worker_pid"] for capture in captures}
 
-        rendered_logs = " ".join(str(call) for call in log_error.call_args_list)
-        self.assertIn("capture_image_begin", rendered_logs)
-        self.assertIn("Native screenshot timeout diagnostics", rendered_logs)
+        self.assertEqual(len(worker_pids), 1)
+        self.assertEqual(manager.get_session("rec-burst").screenshot_worker_restarts, 0)
+        self.assertTrue(all(capture["roundtrip_ms"] >= 0 for capture in captures))
+        self.assertTrue(all(capture["capture_ms"] == 4 for capture in captures))
+        manager.cancel("rec-burst")
+
+    def test_active_display_listing_uses_worker_cache_not_legacy_discovery(self) -> None:
+        manager = NativeCaptureManager(helper_path=self.helper)
+        manager.start("rec-display-cache", self.root, "both")
+        session = manager.get_session("rec-display-cache")
+        self.assertIsNotNone(session)
+        self.assertTrue(session.screenshot_worker_ready.wait(timeout=2.0))
+
+        with patch.object(manager, "windows", side_effect=AssertionError("legacy discovery used")):
+            payload = manager.displays()
+
+        self.assertEqual(payload["source"], "worker_cache")
+        self.assertEqual(payload["displays"][0]["display_id"], 7)
+        manager.cancel("rec-display-cache")
+
+    def test_screenshot_worker_timeout_restarts_without_stopping_audio_capture(self) -> None:
+        manager = NativeCaptureManager(helper_path=self.helper)
+        manager.start("rec-recovery", self.root, "both")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            session = manager.get_session("rec-recovery")
+            if session and session.ready_event and session.screenshot_worker_ready.is_set():
+                break
+            time.sleep(0.01)
+
+        session = manager.get_session("rec-recovery")
+        original_worker_pid = session.screenshot_worker_pid
+        with self.assertRaisesRegex(RuntimeError, r"screenshot_capture_timeout:shot-"):
+            manager.capture_screenshot(
+                "rec-recovery",
+                request_id="request-timeout",
+                display_id=7,
+            )
+
+        self.assertIsNone(session.process.poll())
+        self.assertEqual(session.screenshot_worker_restarts, 1)
+        self.assertTrue(session.screenshot_worker_ready.wait(timeout=2.0))
+        recovered = manager.capture_screenshot(
+            "rec-recovery",
+            request_id="request-after-timeout",
+            display_id=7,
+        )
+
+        self.assertNotEqual(recovered["worker_pid"], original_worker_pid)
+        self.assertEqual(recovered["worker_restart_count"], 1)
+        self.assertIsNone(session.process.poll())
+        manager.cancel("rec-recovery")
+
+    def test_native_helper_contains_persistent_screenshot_worker_contract(self) -> None:
+        helper_source = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "local_asr_server"
+            / "native_capture_helper"
+            / "native_capture_helper.swift"
+        ).read_text(encoding="utf-8")
+
+        for token in (
+            'case "screenshot-worker"',
+            '"screenshot_worker_ready"',
+            '"capture_screenshot"',
+            '"screenshot_completed"',
+            '"screenshot_failed"',
+            '"displays_changed"',
+            "captureImageBounded(",
+            "timeoutSeconds: 1.2",
+        ):
+            self.assertIn(token, helper_source)
 
 
 if __name__ == "__main__":
