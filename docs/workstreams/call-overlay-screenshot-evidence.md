@@ -55,8 +55,11 @@ gli owner esistenti e non introducono queue o lifecycle paralleli.
 
 - Screenshot usa captured_uptime - recording_ready_uptime, request ID idempotente,
   limiti byte/pixel/count/spazio e cleanup dei residui propri.
-- ClosedRoom è escluso dal content filter; permission/display loss produce errore
-  recuperabile senza cambiare sorgente o fermare l'audio.
+- Solo il recording overlay ClosedRoom è escluso dal content filter; la finestra principale
+  ClosedRoom e tutte le altre finestre visibili del monitor restano catturabili. L'identità primaria
+  è il window ID nativo esplicito; il titolo esatto `ClosedRoom Recording Overlay` è un fallback
+  limitato per browser/race. Nessun matching fuzzy su app/bundle/titolo. Permission/display loss
+  produce errore recuperabile senza cambiare sorgente o fermare l'audio.
 - Restart riconcilia manifest/file; delete/discard segue il proprietario RecordingStore.
 - Overlay distingue recording, screenshot saving/failure e stopping; ACK non equivale
   a salvataggio. Click e shortcut invocano lo stesso comando.

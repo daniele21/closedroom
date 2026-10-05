@@ -47,6 +47,14 @@ class NativeWKWebViewKeyboardBridgeContractTest(unittest.TestCase):
         self.assertIn("NSEvent.removeMonitor_(self._global_key_event_monitor)", self.window)
         self.assertIn('key="9", code="Digit9", meta_key=True, shift_key=True', self.window)
 
+    def test_screenshot_exclusion_exports_only_cached_native_overlay_window_id(self) -> None:
+        self.assertIn('setTitle_("ClosedRoom Recording Overlay")', self.window)
+        self.assertIn("def screenshot_exclusion_window_ids(self) -> list[int]:", self.window)
+        self.assertIn("window_id = int(self.overlay_window.windowNumber())", self.window)
+        self.assertIn("self._overlay_capture_window_id = window_id if window_id > 0 else None", self.window)
+        self.assertIn("if not self._overlay_visible or self._overlay_capture_window_id is None:", self.window)
+        self.assertNotIn("run_on_main_thread(_read, wait=True)", self.window)
+
     def test_frontend_shortcuts_remain_supported_but_release_smoke_uses_search_outcome(self) -> None:
         self.assertIn("window.addEventListener('keydown', handleKeyDown)", self.dashboard)
         self.assertIn("setIsSearchOpen(true)", self.dashboard)

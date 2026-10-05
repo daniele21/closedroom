@@ -752,6 +752,19 @@ final class VisualWindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 }
 
 
+private let screenshotOverlayWindowTitle = "ClosedRoom Recording Overlay"
+
+@available(macOS 13.0, *)
+func screenshotExcludedWindows(
+    _ windows: [SCWindow],
+    explicitWindowIDs: Set<CGWindowID>
+) -> [SCWindow] {
+    windows.filter { window in
+        explicitWindowIDs.contains(window.windowID)
+            || (window.title ?? "") == screenshotOverlayWindowTitle
+    }
+}
+
 @available(macOS 13.0, *)
 final class OneShotDisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     var onComplete: ((Result<[String: Any], Error>) -> Void)?
@@ -759,6 +772,7 @@ final class OneShotDisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private let originalURL: URL
     private let thumbnailURL: URL
     private let recordingReadyUptime: Double
+    private let excludedWindowIDs: Set<CGWindowID>
     private let queue = DispatchQueue(label: "closedroom.native.screenshot")
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let lock = NSLock()
@@ -769,12 +783,14 @@ final class OneShotDisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         displayID: CGDirectDisplayID,
         originalURL: URL,
         thumbnailURL: URL,
-        recordingReadyUptime: Double
+        recordingReadyUptime: Double,
+        excludedWindowIDs: Set<CGWindowID> = []
     ) {
         self.displayID = displayID
         self.originalURL = originalURL
         self.thumbnailURL = thumbnailURL
         self.recordingReadyUptime = recordingReadyUptime
+        self.excludedWindowIDs = excludedWindowIDs
     }
 
     func start() async throws {
@@ -785,13 +801,10 @@ final class OneShotDisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             ])
         }
 
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        let excludedWindows = content.windows.filter { window in
-            let app = window.owningApplication
-            let bundle = (app?.bundleIdentifier ?? "").lowercased()
-            let name = (app?.applicationName ?? "").lowercased()
-            return app?.processID == ownPID || bundle.contains("closedroom") || name.contains("closedroom")
-        }
+        let excludedWindows = screenshotExcludedWindows(
+            content.windows,
+            explicitWindowIDs: excludedWindowIDs
+        )
         let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
         let configuration = SCStreamConfiguration()
         configuration.width = max(2, Int(display.width))
@@ -876,7 +889,7 @@ final class OneShotDisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                 "thumbnail_width": max(1, Int(Double(width) * scale)),
                 "thumbnail_height": max(1, Int(Double(height) * scale)),
                 "format": "image/jpeg",
-                "overlay_exclusion": "closedroom_windows",
+                "overlay_exclusion": "recording_overlay",
             ]))
         } catch {
             try? FileManager.default.removeItem(at: originalURL)
@@ -913,7 +926,8 @@ func captureDisplayScreenshotWithManager(
     originalURL: URL,
     thumbnailURL: URL,
     recordingReadyUptime: Double,
-    diagnostics: ScreenshotDiagnosticTrace
+    diagnostics: ScreenshotDiagnosticTrace,
+    excludedWindowIDs: Set<CGWindowID> = []
 ) async throws -> [String: Any] {
     diagnostics.emit("shareable_content_begin")
     let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
@@ -937,17 +951,10 @@ func captureDisplayScreenshotWithManager(
         "height": Int(display.height),
     ])
 
-    let ownPID = ProcessInfo.processInfo.processIdentifier
-    let excludedWindows = content.windows.filter { window in
-        let app = window.owningApplication
-        let bundle = (app?.bundleIdentifier ?? "").lowercased()
-        let name = (app?.applicationName ?? "").lowercased()
-        let title = (window.title ?? "").lowercased()
-        return app?.processID == ownPID
-            || bundle.contains("closedroom")
-            || name.contains("closedroom")
-            || title.contains("closedroom")
-    }
+    let excludedWindows = screenshotExcludedWindows(
+        content.windows,
+        explicitWindowIDs: excludedWindowIDs
+    )
     let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
     diagnostics.emit("content_filter_ready", fields: [
         "excluded_window_count": excludedWindows.count,
@@ -1043,7 +1050,7 @@ func captureDisplayScreenshotWithManager(
         "thumbnail_width": max(1, Int(Double(width) * scale)),
         "thumbnail_height": max(1, Int(Double(height) * scale)),
         "format": "image/jpeg",
-        "overlay_exclusion": "closedroom_windows",
+        "overlay_exclusion": "recording_overlay",
         "capture_backend": "screenshot_manager",
     ]
 }
@@ -1054,7 +1061,8 @@ func captureDisplayScreenshot(
     originalURL: URL,
     thumbnailURL: URL,
     recordingReadyUptime: Double,
-    diagnostics: ScreenshotDiagnosticTrace
+    diagnostics: ScreenshotDiagnosticTrace,
+    excludedWindowIDs: Set<CGWindowID> = []
 ) async throws -> [String: Any] {
     if #available(macOS 14.0, *) {
         diagnostics.emit("capture_backend_selected", fields: ["backend": "screenshot_manager"])
@@ -1063,7 +1071,8 @@ func captureDisplayScreenshot(
             originalURL: originalURL,
             thumbnailURL: thumbnailURL,
             recordingReadyUptime: recordingReadyUptime,
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            excludedWindowIDs: excludedWindowIDs
         )
     }
 
@@ -1072,7 +1081,8 @@ func captureDisplayScreenshot(
         displayID: displayID,
         originalURL: originalURL,
         thumbnailURL: thumbnailURL,
-        recordingReadyUptime: recordingReadyUptime
+        recordingReadyUptime: recordingReadyUptime,
+        excludedWindowIDs: excludedWindowIDs
     )
     return try await withCheckedThrowingContinuation { continuation in
         capture.onComplete = { [capture] result in
@@ -1165,6 +1175,8 @@ actor ScreenshotWorkerService {
     private let recordingID: String
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var filters: [CGDirectDisplayID: SCContentFilter] = [:]
+    private var displays: [CGDirectDisplayID: SCDisplay] = [:]
+    private var windowsByID: [CGWindowID: SCWindow] = [:]
     private var dimensions: [CGDirectDisplayID: (Int, Int)] = [:]
 
     init(recordingID: String) {
@@ -1190,19 +1202,13 @@ actor ScreenshotWorkerService {
 
     func refreshSources(emitChange: Bool = true) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        let excludedWindows = content.windows.filter { window in
-            let app = window.owningApplication
-            let bundle = (app?.bundleIdentifier ?? "").lowercased()
-            let name = (app?.applicationName ?? "").lowercased()
-            let title = (window.title ?? "").lowercased()
-            return app?.processID == ownPID
-                || bundle.contains("closedroom")
-                || name.contains("closedroom")
-                || title.contains("closedroom")
-        }
+        let excludedWindows = screenshotExcludedWindows(
+            content.windows,
+            explicitWindowIDs: []
+        )
 
         var nextFilters: [CGDirectDisplayID: SCContentFilter] = [:]
+        var nextDisplays: [CGDirectDisplayID: SCDisplay] = [:]
         var nextDimensions: [CGDirectDisplayID: (Int, Int)] = [:]
         for display in content.displays {
             let filter = SCContentFilter(
@@ -1210,9 +1216,12 @@ actor ScreenshotWorkerService {
                 excludingWindows: excludedWindows
             )
             nextFilters[display.displayID] = filter
+            nextDisplays[display.displayID] = display
             nextDimensions[display.displayID] = (Int(display.width), Int(display.height))
         }
         filters = nextFilters
+        displays = nextDisplays
+        windowsByID = Dictionary(uniqueKeysWithValues: content.windows.map { ($0.windowID, $0) })
         dimensions = nextDimensions
 
         if emitChange {
@@ -1281,17 +1290,34 @@ actor ScreenshotWorkerService {
 
         let displayID = CGDirectDisplayID(displayIDValue.uint32Value)
         let recordingReadyUptime = readyUptimeValue.doubleValue
+        let excludedWindowIDs = Set(
+            (payload["excluded_window_ids"] as? [NSNumber] ?? []).map { CGWindowID($0.uint32Value) }
+        )
         var filter = filters[displayID]
+        var display = displays[displayID]
         var size = dimensions[displayID]
-        if filter == nil || size == nil {
+        let missingExcludedWindow = excludedWindowIDs.contains { windowsByID[$0] == nil }
+        let missingExactOverlayFallback = excludedWindowIDs.isEmpty && !windowsByID.values.contains {
+            ($0.title ?? "") == screenshotOverlayWindowTitle
+        }
+        if filter == nil || display == nil || size == nil || missingExcludedWindow || missingExactOverlayFallback {
             do {
-                try await refreshSources()
+                try await refreshSources(emitChange: false)
                 filter = filters[displayID]
+                display = displays[displayID]
                 size = dimensions[displayID]
             } catch {
                 emitFailure(requestID: requestID, traceID: traceID, error: error, startedUptime: startedUptime)
                 return
             }
+        }
+
+        if let display {
+            let excludedWindows = screenshotExcludedWindows(
+                Array(windowsByID.values),
+                explicitWindowIDs: excludedWindowIDs
+            )
+            filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
         }
 
         guard let filter, let size else {
@@ -1388,7 +1414,7 @@ actor ScreenshotWorkerService {
                     "thumbnail_width": max(1, Int(Double(width) * scale)),
                     "thumbnail_height": max(1, Int(Double(height) * scale)),
                     "format": "image/jpeg",
-                    "overlay_exclusion": "closedroom_applications",
+                    "overlay_exclusion": "recording_overlay",
                     "capture_backend": "screenshot_manager",
                     "capture_ms": captureMS,
                     "encode_ms": encodeMS,
@@ -1407,7 +1433,8 @@ actor ScreenshotWorkerService {
                     originalURL: originalURL,
                     thumbnailURL: thumbnailURL,
                     recordingReadyUptime: recordingReadyUptime,
-                    diagnostics: diagnostics
+                    diagnostics: diagnostics,
+                    excludedWindowIDs: excludedWindowIDs
                 )
                 JSONEmitter.shared.emit([
                     "type": "screenshot_completed",

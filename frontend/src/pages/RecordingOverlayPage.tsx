@@ -53,6 +53,14 @@ export default function RecordingOverlayPage() {
     });
   }, [logOverlay]);
 
+  useEffect(() => {
+    const previousTitle = document.title;
+    document.title = 'ClosedRoom Recording Overlay';
+    return () => {
+      document.title = previousTitle;
+    };
+  }, []);
+
   // Dynamic body class for transparency
   useEffect(() => {
     document.documentElement.classList.add('overlay-active');
@@ -939,7 +947,7 @@ export default function RecordingOverlayPage() {
           </div>
           {visualCaptureLabel && (
             <div className="col-span-2 truncate rounded bg-cyan-300/8 px-2 py-1 text-cyan-100/75" title={visualCaptureLabel}>
-              Visual capture: {visualCaptureLabel}
+              {t('recording.visualCaptureActive')}: {visualCaptureLabel}
             </div>
           )}
         </div>

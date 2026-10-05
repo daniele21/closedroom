@@ -13,7 +13,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from local_asr_server.runtime.capture_events import (
     BoundedCaptureEventHistory,
@@ -130,10 +130,12 @@ class NativeCaptureManager:
         helper_path: Path | None = None,
         *,
         ready_timeout_seconds: float = 8.0,
+        screenshot_exclusion_provider: Callable[[], list[int]] | None = None,
     ) -> None:
         self._helper_path_overridden = helper_path is not None
         self.helper_path = helper_path or get_native_capture_helper_path()
         self._ready_timeout_seconds = max(0.1, float(ready_timeout_seconds))
+        self._screenshot_exclusion_provider = screenshot_exclusion_provider
         self._lock = threading.Lock()
         self._sessions: dict[str, CaptureSession] = {}
 
@@ -150,6 +152,36 @@ class NativeCaptureManager:
 
         with self._lock:
             return self._sessions.get(recording_id)
+
+    def set_screenshot_exclusion_provider(
+        self,
+        provider: Callable[[], list[int]] | None,
+    ) -> None:
+        """Install the UI-owned provider for windows that must stay out of screenshots."""
+        self._screenshot_exclusion_provider = provider
+
+    def _screenshot_exclusion_window_ids(self) -> list[int]:
+        provider = self._screenshot_exclusion_provider
+        if provider is None:
+            return []
+        try:
+            raw_ids = provider() or []
+        except Exception:
+            logger.exception("Screenshot exclusion provider failed")
+            return []
+
+        result: list[int] = []
+        seen: set[int] = set()
+        for raw_id in raw_ids:
+            try:
+                window_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if window_id <= 0 or window_id in seen:
+                continue
+            seen.add(window_id)
+            result.append(window_id)
+        return result
 
     def capabilities(self) -> dict[str, Any]:
         if sys.platform != "darwin":
@@ -405,6 +437,7 @@ class NativeCaptureManager:
                 "trace_id": trace_id,
                 "display_id": selected,
                 "recording_ready_uptime": float(ready_uptime),
+                "excluded_window_ids": self._screenshot_exclusion_window_ids(),
                 "original_file": str(original_path),
                 "thumbnail_file": str(thumbnail_path),
             }
