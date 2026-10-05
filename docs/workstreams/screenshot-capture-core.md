@@ -7,279 +7,185 @@ Created: 2026-10-05
 
 ## Outcome
 
-Lo screenshot manuale durante una registrazione ClosedRoom deve essere percepito come istantaneo,
-ripetibile e affidabile: il click produce feedback immediato, la cattura one-shot viene eseguita
-localmente senza process churn per ogni click, viene persistita una sola volta e non può
-interrompere l'audio.
+Lo screenshot manuale durante una registrazione deve essere rapido, ripetibile e affidabile:
+feedback immediato, cattura one-shot locale, persistenza singola e nessuna interruzione audio.
 
-Il workstream sostituisce il path produttivo basato su `subprocess.run(helper screenshot ...)`
-con un worker screenshot persistente e isolato, posseduto da `NativeCaptureManager`, mantenendo
-RecordingStore come owner della persistenza e il boundary local-first.
+Il path produttivo usa un worker screenshot persistente posseduto da `NativeCaptureManager`;
+`RecordingStore` resta owner di asset, manifest, limiti, idempotenza, cleanup e recovery.
 
 ## Assi
 
 - PRODUCT: PRODUCT_FEATURE
 - DELIVERY: ITERATION durante implementazione; INTEGRATION solo dopo gate richiesti
 - VALIDATION: STRONG
-- EXECUTION: AGENT_LOCAL per gate deterministici; REAL_ENVIRONMENT per TCC/ScreenCaptureKit,
-  latenza reale, multi-display e continuità audio
+- EXECUTION: AGENT_LOCAL/REMOTE_AUTOMATED per gate deterministici; REAL_ENVIRONMENT per
+  TCC/ScreenCaptureKit, latenza reale, multi-display e continuità audio
 
-## Problema osservato
+## Architettura e invarianti
 
-L'implementazione corrente:
-- apre processi helper separati per display discovery e screenshot;
-- inizializza AppKit/TCC/ScreenCaptureKit ripetutamente;
-- interroga `SCShareableContent` nell'hot path;
-- scrive JPEG temporanei, li rilegge in Python e li riscrive via RecordingStore;
-- può riuscire una volta e andare in timeout alla cattura successiva;
-- usa un timeout esterno di 15s incompatibile con l'esperienza attesa.
+Una recording session ha due failure domain distinti:
+1. recording worker persistente per mic + system audio;
+2. screenshot worker persistente per display registry + cattura one-shot.
 
-## Architettura target
+Hot path:
 
-Una recording session possiede due failure domain nativi distinti:
+`click -> API -> worker command -> one-shot capture -> encode -> RecordingStore commit -> 201`
 
-1. Recording worker persistente: microfono + audio di sistema.
-2. Screenshot worker persistente: AppKit/TCC/display registry + cattura one-shot.
+Invarianti:
+- local-first, nessun cloud transfer o fallback remoto;
+- nessuna cattura continua quando l'utente non scatta;
+- screenshot failure non ferma né riavvia il recording audio;
+- nessun process spawn, TCC bootstrap o display discovery subprocess per click;
+- Stop chiude admission e drena bounded gli screenshot già ammessi;
+- display selection resta esplicita, senza silent switch;
+- timestamp = `captured_uptime - recording_ready_uptime`;
+- log/metriche contengono solo dati tecnici, mai pixel/OCR/transcript/window title;
+- il comando standalone `helper screenshot` è solo diagnostico/legacy.
 
-Il worker screenshot:
-- nasce una volta per recording e resta idle finché l'utente non scatta;
-- comunica via JSONL stdin/stdout;
-- serializza le richieste;
-- non mantiene screen recording continuo;
-- può essere riavviato senza interrompere audio;
-- espone display state cached;
-- emette metriche tecniche privacy-safe.
-
-Hot path target:
-
-`click -> API -> command worker -> one-shot capture -> encode -> RecordingStore commit -> 201`
-
-Non devono esserci process spawn, TCC bootstrap o display discovery ScreenCaptureKit per singolo click.
-
-## Invarianti
-
-- Nessun cloud transfer o fallback remoto.
-- Nessuna cattura continua dello schermo quando l'utente non preme screenshot.
-- Screenshot failure non ferma né degrada il recording audio.
-- RecordingStore resta owner di asset, manifest, limiti, idempotenza, cleanup e recovery.
-- Nessun contenuto immagine/OCR/titolo finestra nei log o metriche.
-- Stop chiude admission screenshot e drena bounded le richieste già ammesse.
-- Display selection resta esplicita; nessun cambio monitor silenzioso.
-- Timestamp continua a derivare da `captured_uptime - recording_ready_uptime`.
-- Il path standalone `helper screenshot` può restare solo diagnostico, non produttivo.
-
-## SLO iniziali
-
-Questi sono target da validare, non risultati già provati:
+## SLO
 
 | Metrica | Target |
 | --- | ---: |
-| feedback UI al click | p95 < 50 ms |
-| dispatch backend -> worker | p95 < 10 ms |
-| click -> frame | p50 < 250 ms |
-| click -> frame | p95 < 500 ms |
-| click -> persisted | p50 < 300 ms |
-| click -> persisted | p95 < 700 ms |
+| feedback UI | p95 < 50 ms |
+| backend -> worker | p95 < 10 ms |
+| click -> frame | p50 < 250 ms, p95 < 500 ms |
+| click -> persisted | p50 < 300 ms, p95 < 700 ms |
 | failure detection/recovery | < 1.5 s |
-| 20 screenshot consecutivi | 20/20 success |
-| audio interruption dovuta a screenshot | 0 |
-| process spawn per screenshot | 0 |
-| display discovery subprocess per screenshot | 0 |
+| 20 screenshot consecutivi | 20/20 |
+| audio interruption | 0 |
+| process/discovery spawn per click | 0 |
 
 ## Work graph
 
-| ID | Outcome | Owner | Dipende da | State |
-| --- | --- | --- | --- | --- |
-| SC-0 | baseline metriche e trace current path | native manager/helper | — | DONE |
-| SC-1 | protocollo JSONL + ScreenshotWorker persistente | helper + manager | — | DONE |
-| SC-2 | DisplayRegistry cached senza ScreenCaptureKit hot-path | helper + manager + API | SC-1 | DONE |
-| SC-3 | timeout locale, health, restart e backend fallback | worker | SC-1 | PARTIAL_REAL_ENV_PENDING |
-| SC-4 | staging/atomic commit RecordingStore senza read/write duplicato | RecordingStore + API | SC-1 | DONE |
-| SC-5 | overlay control center, display ownership e feedback rapido | frontend + capture manager | SC-2 | IMPLEMENTED_PENDING_VALIDATION |
-| SC-6 | capture-core deterministic suite + benchmark harness | tests/scripts | SC-1..5 | DONE |
-| SC-7 | target-Mac burst/perf/TCC/audio-continuity evidence | real environment | SC-1..6 | PARTIAL_REAL_ENV_PASS |
-| SC-8 | rimozione runtime path one-shot subprocess legacy | manager/helper | SC-7 | PLANNED |
-
-SC-1, SC-2 e SC-6 sono intenzionalmente sviluppabili in parallelo dopo il contratto sopra.
+| ID | Outcome | State |
+| --- | --- | --- |
+| SC-0 | baseline metriche/trace | DONE |
+| SC-1 | protocollo JSONL + worker persistente | DONE |
+| SC-2 | display registry cached | DONE |
+| SC-3 | timeout, health, restart, decisione backend fallback | PARTIAL_REAL_ENV_PENDING |
+| SC-4 | staging/atomic commit RecordingStore | DONE |
+| SC-5 | overlay control center + display ownership | IMPLEMENTED_PENDING_VALIDATION |
+| SC-6 | suite deterministica + benchmark harness | DONE |
+| SC-7 | target-Mac burst/perf/TCC/audio continuity | PARTIAL_REAL_ENV_PASS |
+| SC-8 | rimozione runtime path one-shot legacy | PLANNED |
 
 ## Stato implementazione 2026-10-05
 
-Prima ondata implementata e integrata su `dev`.
-
 Implementato:
-- worker screenshot persistente separato dal recording worker, con JSONL stdin/stdout;
-- warm-up AppKit/TCC/ScreenCaptureKit una volta per recording e cache dei content filter;
-- display cache posseduta dal worker con callback CoreGraphics per reconfiguration;
-- `GET /v1/capture/displays` usa la cache durante recording e non esegue discovery subprocess;
-- timeout interno one-shot a 1.2s e restart isolato del worker su timeout;
-- audio worker resta un failure domain separato e non viene riavviato da screenshot failure;
-- RecordingStore riserva staging paths e promuove gli asset con `os.replace`, evitando JPEG round-trip in RAM Python e seconda scrittura;
-- metriche tecniche capture/encode/write/roundtrip/persist e worker restart count;
-- overlay stabilizzato per evitare ricreazioni del callback display dovute alla selezione monitor;
-- suite deterministica per 20 screenshot, stesso PID, display cache, timeout/recovery, atomic staging e API idempotency;
-- benchmark target-Mac `scripts/benchmark_screenshot_capture_core.py` e runner focalizzato `scripts/validate_capture_core.py`.
+- un solo screenshot worker per recording, separato dall'audio;
+- AppKit/TCC/ScreenCaptureKit warm-up e display/filter cache;
+- `GET /v1/capture/displays` usa la cache durante recording;
+- timeout one-shot 1.2s e restart isolato del worker;
+- staging paths + `os.replace` senza JPEG round-trip in Python;
+- metriche capture/encode/write/roundtrip/persist e restart count;
+- suite per 20 screenshot, stesso PID, timeout/recovery, staging/idempotenza;
+- benchmark `scripts/benchmark_screenshot_capture_core.py`;
+- runner `scripts/validate_capture_core.py`;
+- source mode ricostruisce bundle frontend coerente in `.cache/frontend-static`;
+- browser fallback overlay è atteso quando manca il native window manager;
+- display scelto è posseduto dalla `CaptureSession` via
+  `PUT /v1/recordings/{id}/screenshot-display`.
 
-Follow-up overlay/source-runtime 2026-10-05:
-- il redesign overlay e il nuovo endpoint `screenshot-display` erano presenti in `frontend/src` ma `local-asr serve` continuava a servire un bundle statico committed precedente;
-- source-mode `serve` e `app` ora fingerprintano frontend source/config e costruiscono automaticamente un bundle coerente in `.cache/frontend-static`, senza sporcare i file static tracked;
-- il backend distingue l'assenza del native window manager in `serve` come browser fallback atteso, quindi il frontend apre il popup senza warning fuorviante;
-- il browser overlay usa le dimensioni del nuovo control center e si ridimensiona localmente per dettagli/picker monitor;
-- la selezione monitor resta posseduta dalla CaptureSession tramite `PUT /v1/recordings/{id}/screenshot-display`, con optimistic UI protetta dagli heartbeat SSE.
+Aperto:
+- SC-3: decidere eventuale backend fallback dai benchmark reali;
+- SC-5: validazione exact-head dell'overlay;
+- SC-7: matrice target-Mac completa;
+- SC-8: rimozione/diagnostic-only del legacy one-shot.
 
-Ancora aperto:
-- SC-3: il restart su timeout è implementato; fallback automatico a backend alternativo non è ancora introdotto e va deciso dai benchmark reali;
-- SC-5: redesign implementato sul branch `work/overlay-control-center`; resta da validare su Mac exact-head prima dell'integrazione su `dev`;
-- SC-7: TCC, ScreenCaptureKit reale, 20-shot burst, p50/p95, multi-display e continuità audio richiedono target Mac;
-- SC-8: il comando standalone one-shot resta presente come diagnostica/legacy finché il nuovo path non è validato.
+## Evidenza corrente
 
-Validazione capture-core aggiornata 2026-10-05:
+Ultimo REAL_ENVIRONMENT PASS precedente: `11ffb8343a475333a9fd3cdf8216e305c06eebfa`,
+con `python3 scripts/validate_capture_core.py --real --enforce-slo`: deterministic suite,
+20-shot persistent-worker benchmark e SLO PASS.
 
-- ultimo exact-head REAL_ENVIRONMENT PASS precedente: `11ffb8343a475333a9fd3cdf8216e305c06eebfa`;
-- comando eseguito sul target Mac: `python3 scripts/validate_capture_core.py --real --enforce-slo`;
-- deterministic capture-core suite: PASS su quell'head;
-- REAL_ENVIRONMENT persistent-worker benchmark: PASS su quell'head;
-- enforced benchmark SLO: PASS su quell'head, quindi 20 screenshot richiesti completati, singolo worker PID mantenuto e p95 entro il limite configurato dal runner;
-- nessuna GitHub Action usata come sostituto dell'evidenza locale.
+Quell'evidenza è STALE per l'HEAD corrente perché il lifecycle è poi cambiato per evitare
+bootstrap concorrente del ScreenshotWorker prima dell'evento audio `ready`.
+Non usarla come exact-head readiness.
 
-Il 2026-10-05 il native capture lifecycle è stato modificato dopo quell'evidenza per rimuovere il bootstrap concorrente del ScreenshotWorker dal critical path di recording startup e per impedire warm-up screenshot prima dell'evento audio `ready`. L'evidenza precedente resta utile come baseline del worker screenshot ma è STALE per l'exact HEAD corrente. La suite capture-core + REAL_ENVIRONMENT deve essere rieseguita sul nuovo head prima di una nuova readiness claim.
+SC-7 resta parziale: manca ancora evidenza completa per recording `both` concorrente,
+multi-display, fullscreen/Spaces, TCC deny/grant/relaunch e recovery reale.
 
-SC-7 resta inoltre parziale: il benchmark reale prova il worker ScreenCaptureKit e la latenza sul target Mac, ma non copre ancora l'intera matrice prevista (recording `both` contemporaneo con continuità audio misurata, alternanza multi-display, fullscreen/Spaces, TCC deny/grant/relaunch e recovery reale dopo fault). Non inferire release readiness complessiva dal solo PASS capture-core.
+## Overlay e screenshot exclusion
 
-## Overlay control center follow-up 2026-10-05
+La `CaptureSession` possiede il display del prossimo screenshot. Il compact overlay espone
+timer, health mic/system, display target, screenshot e Stop; diagnostica estesa resta nei Details.
+Il display picker è esplicito e un heartbeat SSE stale non può fare rollback di una selezione
+in-flight.
 
-Il redesign dell'overlay separa controlli meeting da diagnostica tecnica.
-
-Invarianti introdotte:
-- la `CaptureSession` è l'owner canonico del display selezionato per il prossimo screenshot;
-- il frontend cambia display tramite `PUT /v1/recordings/{recording_id}/screenshot-display`;
-- il cambio è optimistic ma un valore SSE precedente non può fare rollback mentre la selezione è in-flight;
-- la preferenza in `localStorage` vale solo come default locale per sessioni future, non come stato canonico della sessione attiva;
-- il compact overlay mostra solo recording/timer, health mic/system, display target, screenshot e stop;
-- monitor selection è sempre accessibile tramite picker dedicato; nessun `<select>` browser legacy;
-- diagnostica come backend, bytes e raw dB resta solo nella vista espansa;
-- screenshot success produce feedback breve `Saved`;
-- display disconnected apre il picker e richiede una nuova scelta esplicita, senza silent switch.
+Contratto di cattura:
+- lo screenshot conserva tutte le finestre visibili del display selezionato;
+- la finestra principale ClosedRoom resta catturabile;
+- viene escluso solo il recording overlay;
+- native: identità primaria = window ID esatto dell'`NSPanel`;
+- browser/race fallback = titolo esatto `ClosedRoom Recording Overlay`;
+- matching fuzzy su process/app/bundle/title `contains("closedroom")` è vietato;
+- l'ID native viene acquisito quando l'overlay diventa visibile e riusato dal capture manager,
+  senza hop sincrono al Cocoa main thread nell'hot path;
+- nessuna preview/live screen capture viene introdotta.
 
 Acceptance:
-- selezione Display A -> Display B resta B dopo heartbeat SSE;
-- screenshot successivo usa B anche quando il caller non passa un display override;
-- invalid/disconnected display viene rifiutato dal backend;
-- compact overlay resta azionabile senza aprire Details;
-- screenshot del display conserva tutte le finestre visibili, inclusa la finestra principale ClosedRoom se presente;
-- viene escluso solo il recording overlay: window ID nativo esplicito come owner primario, titolo esatto `ClosedRoom Recording Overlay` come fallback browser/race-safe;
-- il window ID dell'overlay viene acquisito quando l'NSPanel diventa visibile e riusato dal capture manager: nessun hop sincrono al main thread nell'hot path dello screenshot;
-- matching fuzzy per process/app/bundle/title `contains("closedroom")` è vietato perché può rimuovere finestre utente intere;
-- nessuna preview live/continuous screen capture viene introdotta.
+- Display A -> B resta B dopo heartbeat SSE;
+- screenshot successivo senza override usa B;
+- display invalid/disconnected viene rifiutato;
+- Chrome/VS Code/main ClosedRoom visibili restano nello screenshot;
+- recording overlay non compare nello screenshot.
 
-## Contratto worker
+## Worker contract
 
 Startup:
-- Python avvia un solo screenshot worker per recording.
-- Worker inizializza AppKit/TCC e pubblica `screenshot_worker_ready` con PID/backend/displays.
-- CaptureSession conserva process, reader, cached displays, pending requests e health.
+- Python avvia il worker dopo audio `ready`;
+- worker pubblica `screenshot_worker_ready` con PID/backend/displays;
+- sessione conserva process, reader, cache, pending requests e health.
 
-Command:
-```json
-{"type":"capture_screenshot","request_id":"...","display_id":1,"original_file":"...","thumbnail_file":"...","recording_ready_uptime":123.4}
-```
+Command essenziale:
+`capture_screenshot(request_id, display_id, excluded_window_ids, output paths, ready_uptime)`.
 
-Success:
-```json
-{"type":"screenshot_completed","request_id":"...","display_id":1,"captured_uptime":124.1,"width":3024,"height":1964,"capture_ms":120,"encode_ms":45}
-```
-
-Failure:
-```json
-{"type":"screenshot_failed","request_id":"...","reason":"capture_timeout","recoverable":true}
-```
-
-Display state:
-```json
-{"type":"displays_changed","displays":[{"display_id":1,"width":3024,"height":1964,"is_main":true}]}
-```
-
-## Performance instrumentation
-
-Per ogni screenshot, solo dati tecnici:
-- trace/request id
-- worker PID/restart count/backend
-- dispatch_ms
-- display_lookup_ms
-- capture_ms
-- original_encode_ms
-- thumbnail_encode_ms
-- persist_ms
-- total_ms
-- success/failure reason
-
-Mai pixel, OCR, transcript, window title o meeting content.
+Success espone ID/display/timestamp/dimensioni e metriche; failure espone reason/recoverable.
+`displays_changed` aggiorna la cache senza cambiare silenziosamente il display selezionato.
 
 ## Test contract
 
-### Deterministici
+Deterministico:
+- worker start/ready/stop e stesso PID 1..20;
+- nessun subprocess legacy nell'hot path;
+- exact overlay exclusion IDs sanitizzati/deduplicati;
+- nessun fuzzy matching ClosedRoom;
+- timeout non ferma audio, restart recupera il click successivo;
+- display cache e disconnected display;
+- Stop drena screenshot admitted;
+- staging cleanup/persistenza/idempotenza;
+- frontend feedback e display ownership;
+- browser/native overlay identity esatta.
 
-- worker start/ready/stop
-- stesso worker PID per screenshot 1..N
-- 20 screenshot command/response senza process spawn
-- request correlation e idempotenza
-- timeout request non ferma recording worker
-- timeout/restart -> screenshot successivo recupera
-- display cache serve API senza nuovo helper
-- monitor rimosso -> selected_display_unavailable senza silent switch
-- Stop durante screenshot drena bounded
-- staging cleanup su success/failure/timeout
-- persistence singola e manifest coerente
-- API 5 screenshot -> 5 asset/timestamp crescenti
-- duplicate request -> un solo asset
-- frontend loading/success/failure/retry senza refresh display ridondanti
-
-### Benchmark host/fake
-
-Misurare overhead infrastrutturale senza attribuirlo a ScreenCaptureKit:
-- IPC roundtrip
-- commit RecordingStore
-- N=20 latency distribution
-- process spawn count = 0
-
-### REAL_ENVIRONMENT
-
-Sul target Mac:
-- 20 screenshot stesso display;
-- intervalli 0.5s / 2s / 10s;
-- alternanza tra due display;
-- recording `both` attivo durante burst;
-- zero audio gaps/restart;
-- latency p50/p95 e failure rate;
-- CPU/RSS bounded;
+REAL_ENVIRONMENT:
+- 20 screenshot stesso display a intervalli diversi;
+- alternanza multi-display;
+- recording `both` durante burst e zero audio gap/restart;
+- p50/p95/failure rate + CPU/RSS bounded;
 - TCC deny/grant/relaunch;
 - fullscreen/Spaces/display withdrawal;
-- worker recovery dopo timeout/errore simulabile.
+- recovery dopo fault;
+- prova visiva: finestre utente presenti, solo recording overlay escluso.
 
 ## Validation
 
-Il selector deve restare STRONG perché il blast radius include native lifecycle, ScreenCaptureKit,
-concurrency, persistence e runtime resources.
+Il selector resta STRONG: native lifecycle, ScreenCaptureKit, concurrency, persistence e runtime.
 
-Durante sviluppo:
-- non usare GitHub Actions;
-- eseguire i test solo dopo il completamento dell'ondata implementativa;
-- usare i comandi repository-owned e un capture-core selector rapido.
-
-Prima di integrazione:
-- full diff e target/base fresh;
-- source tests richiesti dal profilo;
-- packaged-app gate;
-- affected E2E call-overlay-screenshot-evidence;
-- REAL_ENVIRONMENT resta evidenza separata e non può essere sostituita da fixture.
+Durante sviluppo usare il capture-core selector rapido. Per INTEGRATION servono:
+- head/tree/base freschi e full diff;
+- source tests e repository gates richiesti dal selector;
+- packaged-app gate quando selezionato;
+- affected E2E `call-overlay-screenshot-evidence`;
+- REAL_ENVIRONMENT resta separato e non può essere sostituito da fixture.
 
 ## Done
 
-Il workstream è completabile solo quando:
-- il path produttivo non crea processi per screenshot;
-- display discovery non è nell'hot path;
-- 20-shot deterministic suite è verde;
-- persistence evita il doppio I/O;
+Chiudere il workstream solo quando:
+- hot path senza process/discovery spawn;
+- 20-shot deterministic suite verde;
+- persistenza singola e cleanup coerente;
 - failure recovery non interrompe audio;
-- performance evidence espone p50/p95 e rispetta gli SLO approvati;
-- target-Mac conferma ScreenCaptureKit/TCC e continuità audio;
-- il path legacy one-shot subprocess è rimosso dal prodotto o marcato diagnostic-only.
+- SLO p50/p95 approvati;
+- target-Mac conferma ScreenCaptureKit/TCC/audio continuity;
+- screenshot preserva tutte le finestre utente ed esclude solo l'overlay;
+- legacy one-shot è rimosso dal prodotto o diagnostic-only.
