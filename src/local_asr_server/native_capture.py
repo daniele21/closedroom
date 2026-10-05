@@ -288,13 +288,22 @@ class NativeCaptureManager:
                     "--thumbnail-file", str(thumbnail_path),
                 ]
                 logger.debug("Executing native screenshot helper: %s", " ".join(cmd))
-                completed = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                    check=False,
-                )
+                try:
+                    completed = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    logger.error(
+                        "Native screenshot helper timed out after %.1fs for recording %s display %s",
+                        float(exc.timeout or 15),
+                        recording_id,
+                        selected,
+                    )
+                    raise RuntimeError("screenshot_capture_timeout") from exc
                 stdout = completed.stdout.strip()
                 parsed: dict[str, Any] = {}
                 if stdout:
