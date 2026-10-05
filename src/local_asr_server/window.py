@@ -383,6 +383,8 @@ class ClosedRoomWindowManager:
 
         if self.overlay_window:
             self.overlay_window.makeKeyAndOrderFront_(None)
+            window_id = int(self.overlay_window.windowNumber())
+            self._overlay_capture_window_id = window_id if window_id > 0 else None
             self._overlay_visible = True
             self.evaluate_overlay_js("window.dispatchEvent(new CustomEvent('overlay-shown'));")
             logger.info("Showing overlay window.")
@@ -473,7 +475,6 @@ class ClosedRoomWindowManager:
             rect, style_mask, NSBackingStoreBuffered, False
         )
         self.overlay_window.setTitle_("ClosedRoom Recording Overlay")
-        self._overlay_capture_window_id = int(self.overlay_window.windowNumber())
         
         # Configure floating panel behavior
         self.overlay_window.setLevel_(NSFloatingWindowLevel)
