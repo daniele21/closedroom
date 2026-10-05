@@ -709,14 +709,11 @@ class NativeCaptureManager:
             thread = threading.Thread(target=self._read_events, args=(session,), daemon=True)
             session.reader_thread = thread
             thread.start()
-            try:
-                self._start_screenshot_worker(session)
-            except Exception as exc:
-                logger.warning(
-                    "Screenshot worker failed to start for recording %s; audio capture continues: %s",
-                    recording_id,
-                    exc,
-                )
+            # Screenshot capture is deliberately not started on the recording
+            # critical path. ScreenCaptureKit bootstrap for the screenshot worker
+            # can contend with the recording helper during startup. The worker is
+            # warmed lazily by displays()/capture_screenshot() after audio emits
+            # its authoritative ready event.
             return {
                 "recording_id": recording_id,
                 "capture_session_id": str(uuid.uuid4()),
