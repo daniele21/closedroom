@@ -57,6 +57,8 @@ def compile_helper(force: bool = False) -> str:
         "AVFoundation",
         "-framework",
         "ScreenCaptureKit",
+        "-framework",
+        "AppKit",
     ]
     module_cache = _CACHE_DIR / "clang-module-cache"
     module_cache.mkdir(parents=True, exist_ok=True)
