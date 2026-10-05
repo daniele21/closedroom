@@ -815,12 +815,12 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         {!demoMode && screenshotsState === 'ready' && savedScreenshotCount > 0 && (
           <section
             data-meeting-screenshot-gallery="true"
-            className="rounded-xl border border-border-subtle bg-bg-elevated/60 p-4"
+            className="rounded-xl border border-border-subtle bg-bg-elevated p-4"
             aria-labelledby="meeting-screenshots-title"
           >
             <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-2.5">
-                <Images className="mt-0.5 h-4.5 w-4.5 shrink-0 text-accent" aria-hidden="true" />
+                <Images className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 id="meeting-screenshots-title" className="text-xs font-semibold text-text-primary">
@@ -882,7 +882,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                       </div>
                     )}
                   </div>
-                  <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-2.5 pb-2 pt-5 text-white">
+                  <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-2.5 pb-2 pt-5 text-white">
                     <span className="font-mono text-[11px] font-semibold tabular-nums">
                       {screenshotTimestampLabel(shot.timestamp)}
                     </span>
