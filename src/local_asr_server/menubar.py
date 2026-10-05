@@ -142,6 +142,9 @@ class _ServerThread(threading.Thread):
         )
         self._app = app
         app.state.window_manager = self.app_instance.window_manager
+        app.state.capture_manager.set_screenshot_exclusion_provider(
+            self.app_instance.window_manager.screenshot_exclusion_window_ids
+        )
 
         uvicorn_log_level = os.environ.get("CLOSEDROOM_LOG_LEVEL", "info").lower()
         config = uvicorn.Config(
