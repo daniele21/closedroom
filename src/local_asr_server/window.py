@@ -486,6 +486,7 @@ class ClosedRoomWindowManager:
         self.overlay_window = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             rect, style_mask, NSBackingStoreBuffered, False
         )
+        self.overlay_window.setTitle_("ClosedRoom Recording Overlay")
         
         # Configure floating panel behavior
         self.overlay_window.setLevel_(NSFloatingWindowLevel)
