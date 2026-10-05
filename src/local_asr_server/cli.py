@@ -51,14 +51,14 @@ def _frontend_source_fingerprint(frontend_dir: Path) -> str:
     return digest.hexdigest()
 
 
-def _ensure_dev_frontend_bundle() -> bool:
+def _ensure_dev_frontend_bundle(root: Path | None = None) -> bool:
     """Build source-mode web UI when frontend inputs changed."""
     from local_asr_server.paths import is_bundled
 
     if is_bundled():
         return False
 
-    root = Path(__file__).resolve().parents[2]
+    root = root or Path(__file__).resolve().parents[2]
     frontend_dir = root / "frontend"
     static_dir = root / "src" / "local_asr_server" / "static"
     if not frontend_dir.is_dir():
