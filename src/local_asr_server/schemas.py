@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel
 
 from local_asr_server.asr_provider import VAD_GUIDED_DEFAULT, VAD_POST_FILTER_DEFAULT
@@ -234,3 +234,10 @@ class DiarizationJobRequest(BaseModel):
 
 class MockDataRequest(BaseModel):
     lang: str = "it"
+
+
+class ClientLogRequest(BaseModel):
+    level: str = "info"
+    source: str = "frontend"
+    message: str
+    data: Optional[dict[str, Any]] = None

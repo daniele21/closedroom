@@ -342,6 +342,11 @@ class ClosedRoomWindowManager:
         content_rect = self.window.contentView().frame()
         self.webview = WKWebView.alloc().initWithFrame_(content_rect)
         self.webview.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        if hasattr(self.webview, "setInspectable_"):
+            try:
+                self.webview.setInspectable_(True)
+            except Exception:
+                pass
         self.window.setContentView_(self.webview)
         self._install_local_key_monitor()
 
@@ -376,6 +381,7 @@ class ClosedRoomWindowManager:
 
         if self.overlay_window:
             self.overlay_window.makeKeyAndOrderFront_(None)
+            self.evaluate_overlay_js("window.dispatchEvent(new CustomEvent('overlay-shown'));")
             logger.info("Showing overlay window.")
 
     def hide_overlay(self) -> None:
@@ -476,6 +482,11 @@ class ClosedRoomWindowManager:
         content_rect = self.overlay_window.contentView().frame()
         self.overlay_webview = WKWebView.alloc().initWithFrame_(content_rect)
         self.overlay_webview.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        if hasattr(self.overlay_webview, "setInspectable_"):
+            try:
+                self.overlay_webview.setInspectable_(True)
+            except Exception:
+                pass
         
         # Set transparent webview background (works for WebKit)
         self.overlay_webview.setValue_forKey_(False, "drawsBackground")

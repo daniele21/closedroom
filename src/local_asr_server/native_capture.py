@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import shutil
@@ -27,6 +28,8 @@ from local_asr_server.paths import (
 
 
 VALID_NATIVE_MODES = {"both", "mic_only", "pc_only"}
+
+logger = logging.getLogger("local_asr_server.native_capture")
 
 
 def mode_permission_ok(payload: dict[str, Any], mode: str) -> bool:
@@ -243,10 +246,12 @@ class NativeCaptureManager:
         by_id = {int(item["display_id"]): item for item in displays}
         selected = display_id if display_id is not None else session.screenshot_display_id
         if selected is None:
-            if len(displays) == 1:
+            if displays:
                 selected = int(displays[0]["display_id"])
-            elif len(displays) > 1:
-                raise RuntimeError("display_selection_required")
+                logger.info(
+                    "No display explicitly selected for recording %s; defaulting to display_id=%s (%s)",
+                    recording_id, selected, displays[0].get("title", ""),
+                )
             else:
                 raise RuntimeError(display_payload.get("reason") or "no_display_available")
         selected = int(selected)
@@ -258,8 +263,14 @@ class NativeCaptureManager:
         if ready_uptime is None:
             raise RuntimeError("capture_not_ready")
 
+        logger.info(
+            "Screenshot requested for recording %s: display_id=%s, ready_uptime=%s",
+            recording_id, selected, ready_uptime,
+        )
+
         with session.screenshot_lock:
             if session.stopped or not session.accept_screenshots:
+                logger.warning("Screenshot capture rejected: session is closing or stopped for %s", recording_id)
                 raise RuntimeError("Screenshot capture is closing")
             session.screenshot_display_id = selected
             temp_dir = session.output_dir / ".screenshot-capture-temp"
@@ -268,15 +279,17 @@ class NativeCaptureManager:
             original_path = temp_dir / f"{token}.jpg"
             thumbnail_path = temp_dir / f"{token}-thumb.jpg"
             try:
+                cmd = [
+                    str(self.helper_path),
+                    "screenshot",
+                    "--display-id", str(selected),
+                    "--recording-ready-uptime", str(float(ready_uptime)),
+                    "--original-file", str(original_path),
+                    "--thumbnail-file", str(thumbnail_path),
+                ]
+                logger.debug("Executing native screenshot helper: %s", " ".join(cmd))
                 completed = subprocess.run(
-                    [
-                        str(self.helper_path),
-                        "screenshot",
-                        "--display-id", str(selected),
-                        "--recording-ready-uptime", str(float(ready_uptime)),
-                        "--original-file", str(original_path),
-                        "--thumbnail-file", str(thumbnail_path),
-                    ],
+                    cmd,
                     capture_output=True,
                     text=True,
                     timeout=15,
@@ -294,10 +307,20 @@ class NativeCaptureManager:
                 if completed.returncode != 0:
                     reason = parsed.get("reason") or "screenshot_capture_failed"
                     message = parsed.get("message") or completed.stderr.strip() or reason
+                    logger.error(
+                        "Native screenshot helper failed (exit code %d): reason=%s message=%s stderr=%s stdout=%s",
+                        completed.returncode, reason, message, completed.stderr.strip(), stdout,
+                    )
                     raise RuntimeError(f"{reason}: {message}")
                 if not original_path.is_file() or not thumbnail_path.is_file():
+                    logger.error("Screenshot files missing after helper success: orig=%s, thumb=%s",
+                                 original_path.is_file(), thumbnail_path.is_file())
                     raise RuntimeError("screenshot_capture_missing_output")
                 captured_uptime = float(parsed.get("captured_uptime"))
+                logger.info(
+                    "Native screenshot successful: display=%s (%s), original_size=%d bytes, thumb_size=%d bytes",
+                    selected, by_id[selected].get("title"), original_path.stat().st_size, thumbnail_path.stat().st_size,
+                )
                 return {
                     **parsed,
                     "request_id": request_id,

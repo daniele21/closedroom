@@ -143,11 +143,12 @@ class _ServerThread(threading.Thread):
         self._app = app
         app.state.window_manager = self.app_instance.window_manager
 
+        uvicorn_log_level = os.environ.get("CLOSEDROOM_LOG_LEVEL", "info").lower()
         config = uvicorn.Config(
             app,
             host="127.0.0.1",
             port=self.port,
-            log_level="warning",
+            log_level=uvicorn_log_level,
             loop="asyncio",
         )
         self._server = uvicorn.Server(config)
@@ -709,7 +710,12 @@ def main() -> None:
             "  uv pip install rumps"
         )
 
-    logging.basicConfig(level=logging.WARNING)
+    log_level_name = os.environ.get("CLOSEDROOM_LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
     ClosedRoomApp().run()
 
 

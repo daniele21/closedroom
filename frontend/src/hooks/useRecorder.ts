@@ -317,6 +317,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     bcRef.current?.postMessage({
       type: 'status',
       isRecording: false,
+      recordingId: null,
+      captureBackend: 'browser',
       timer: '00:00',
       signalLevel: '-∞ dB',
       signalLevelMic: '-∞ dB',
@@ -332,6 +334,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     releaseMedia();
 
     const sessionId = sessionIdRef.current;
+    void ApiClient.logClientEvent('info', 'recorder', 'stopRecording requested', { sessionId, backend: captureBackendRef.current });
     try {
       await Promise.all(Array.from(uploadChainsRef.current.values()));
       if (sessionId) {
@@ -401,6 +404,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         bc.postMessage({
           type: 'status',
           isRecording: isRecordingRef.current,
+          recordingId: sessionIdRef.current,
+          captureBackend: captureBackendRef.current,
           timer: timerRef.current,
           signalLevel: signalLevelRef.current,
           signalLevelMic: signalLevelMicRef.current,
@@ -497,6 +502,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     setStatusState('working');
     setProgressText(t('recording.audioSetupStatus'));
     visualCaptureLabelRef.current = visualWindowId !== undefined ? visualCaptureLabel : '';
+    void ApiClient.logClientEvent('info', 'recorder', 'startRecording called', { mode, title, visualWindowId });
 
     const cancelled = () => cancelStartRequestedRef.current;
 
@@ -575,6 +581,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         sessionIdRef.current = session.id;
         localStorage.setItem('asr-active-recording-id', session.id);
         
+        void ApiClient.logClientEvent('info', 'recorder', 'Starting native capture on backend', { sessionId: session.id, mode });
         await ApiClient.startNativeCapture(session.id, mode, visualWindowId);
         captureLeaseCommittedRef.current = true;
         
@@ -588,6 +595,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
           try {
             const data = JSON.parse(e.data);
             if (data.type === 'ready') {
+              void ApiClient.logClientEvent('info', 'recorder', 'Native capture ready event received', { sessionId: session.id });
               // Capture helper is ready, we can start the timers and show the overlay now!
               startedAtRef.current = Date.now();
               
@@ -599,10 +607,12 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
               }, RECORDING_TIMER_INTERVAL_MS);
 
               // The overlay needs human-scale status updates, not display-rate telemetry.
-              broadcastIntervalRef.current = setInterval(() => {
+              const postNativeStatus = () => {
                 bcRef.current?.postMessage({
                   type: 'status',
                   isRecording: true,
+                  recordingId: sessionIdRef.current,
+                  captureBackend: captureBackendRef.current,
                   timer: timerRef.current,
                   signalLevel: signalLevelRef.current,
                   signalLevelMic: signalLevelMicRef.current,
@@ -610,7 +620,9 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                   progressText: progressTextRef.current,
                   visualCaptureLabel: visualCaptureLabelRef.current
                 });
-              }, OVERLAY_STATUS_INTERVAL_MS);
+              };
+              postNativeStatus();
+              broadcastIntervalRef.current = setInterval(postNativeStatus, OVERLAY_STATUS_INTERVAL_MS);
 
               // Request showing the native overlay panel
               ApiClient.toggleOverlay(true).then((res) => {
@@ -639,6 +651,11 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                 currentSysDbRef.current = dbVal;
               }
             } else if (data.type === 'error') {
+              void ApiClient.logClientEvent('error', 'recorder', 'Native capture error event received', { sessionId: session.id, data });
+              if (data.source === 'system' && mode === 'both') {
+                showToast(t('recording.systemAudioUnavailableContinuingMic') || 'Audio di sistema interrotto. La registrazione continua con il microfono.', 'warning');
+                return;
+              }
               eventSource.close();
               releaseMedia();
               ApiClient.cancelNativeCapture(session.id).catch(() => {});
@@ -926,10 +943,12 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       }, RECORDING_TIMER_INTERVAL_MS);
 
       // The overlay needs human-scale status updates, not display-rate telemetry.
-      broadcastIntervalRef.current = setInterval(() => {
+      const postBrowserStatus = () => {
         bcRef.current?.postMessage({
           type: 'status',
           isRecording: true,
+          recordingId: sessionIdRef.current,
+          captureBackend: captureBackendRef.current,
           timer: timerRef.current,
           signalLevel: signalLevelRef.current,
           signalLevelMic: signalLevelMicRef.current,
@@ -937,7 +956,9 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
           progressText: progressTextRef.current,
           visualCaptureLabel: visualCaptureLabelRef.current
         });
-      }, OVERLAY_STATUS_INTERVAL_MS);
+      };
+      postBrowserStatus();
+      broadcastIntervalRef.current = setInterval(postBrowserStatus, OVERLAY_STATUS_INTERVAL_MS);
 
       // Request showing the native overlay panel, fallback to browser window.open if unavailable
       ApiClient.toggleOverlay(true).then((res) => {

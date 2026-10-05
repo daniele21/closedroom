@@ -36,4 +36,6 @@ def configure_application_logging(fallback_dir: Path | None = None) -> str:
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
         handler.set_name(APP_LOG_HANDLER_NAME)
         root.addHandler(handler)
+    if root.level > logging.INFO:
+        root.setLevel(logging.INFO)
     return str(log_file)

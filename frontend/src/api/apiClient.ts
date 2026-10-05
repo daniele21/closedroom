@@ -1132,5 +1132,17 @@ export const ApiClient = {
     return (await request('/v1/system/clear-mock-data', {
       method: 'POST'
     })).json();
+  },
+
+  async logClientEvent(level: 'info' | 'warn' | 'error', source: string, message: string, data?: any): Promise<void> {
+    try {
+      await request('/v1/system/client-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level, source, message, data }),
+      });
+    } catch {
+      // Best-effort client logging
+    }
   }
 };

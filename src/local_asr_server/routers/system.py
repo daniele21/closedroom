@@ -20,6 +20,7 @@ from local_asr_server.schemas import (
     OverlayResizeRequest,
     CaptureEnsurePermissionsRequest,
     CaptureStartRequest,
+    ClientLogRequest,
 )
 from local_asr_server.asr_provider import asr_catalog
 from local_asr_server.macos_permissions import accessibility_status
@@ -369,6 +370,7 @@ def llm_runtime_logs(request: Request, tail: int = Query(default=200, ge=1, le=2
 @router.post("/v1/system/window/overlay")
 def toggle_overlay_window(request: Request, body: OverlayRequest):
     window_manager = getattr(request.app.state, "window_manager", None)
+    logger.info("Toggle overlay window: show=%s, has_window_manager=%s", body.show, bool(window_manager))
     if not window_manager:
         return {"success": False, "error": "Native window manager not available"}
         
@@ -385,11 +387,26 @@ def toggle_overlay_window(request: Request, body: OverlayRequest):
 @router.post("/v1/system/window/overlay/resize")
 def resize_overlay_window(request: Request, body: OverlayResizeRequest):
     window_manager = getattr(request.app.state, "window_manager", None)
+    logger.info("Resize overlay window: %dx%d, has_window_manager=%s", body.width, body.height, bool(window_manager))
     if not window_manager:
         return {"success": False, "error": "Native window manager not available"}
         
     from local_asr_server.window import run_on_main_thread
     run_on_main_thread(lambda: window_manager.set_overlay_size(body.width, body.height))
+    return {"success": True}
+
+
+@router.post("/v1/system/client-log")
+def client_log(body: ClientLogRequest):
+    lvl = (body.level or "info").lower()
+    details = f" | data={json.dumps(body.data)}" if body.data else ""
+    msg = f"[FRONTEND:{body.source.upper()}] {body.message}{details}"
+    if lvl == "error":
+        logger.error(msg)
+    elif lvl in ("warn", "warning"):
+        logger.warning(msg)
+    else:
+        logger.info(msg)
     return {"success": True}
 
 

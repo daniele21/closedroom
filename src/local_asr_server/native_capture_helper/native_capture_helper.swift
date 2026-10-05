@@ -463,8 +463,11 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         return stopRequested
     }
 
+    private var reconnectCount = 0
+    private let maxReconnects = 5
+
     func start() async throws {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
         guard let display = content.displays.first else {
             throw NSError(domain: "ClosedRoomNativeCapture", code: 10, userInfo: [
                 NSLocalizedDescriptionKey: "No display available for ScreenCaptureKit audio capture"
@@ -473,8 +476,8 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
-        configuration.width = 2
-        configuration.height = 2
+        configuration.width = 64
+        configuration.height = 64
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         configuration.capturesAudio = true
         configuration.excludesCurrentProcessAudio = true
@@ -484,7 +487,23 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try await stream.startCapture()
+        stateLock.lock()
         self.stream = stream
+        stateLock.unlock()
+    }
+
+    func restart() async throws {
+        let activeStream = beginStop()
+        if let activeStream = activeStream {
+            try? await activeStream.stopCapture()
+        }
+        finishStop()
+
+        stateLock.lock()
+        stopRequested = false
+        stateLock.unlock()
+
+        try await start()
     }
 
     func stop() async {
@@ -498,13 +517,58 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         if isStopRequested() { return }
 
+        let nsError = error as NSError
+        let isInterrupted = (
+            nsError.domain == SCStreamErrorDomain ||
+            nsError.domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain" ||
+            nsError.code == SCStreamError.failedApplicationConnectionInterrupted.rawValue ||
+            nsError.code == SCStreamError.failedApplicationConnectionInvalid.rawValue ||
+            nsError.code == -3805 ||
+            nsError.code == -3804
+        )
+
+        if isInterrupted {
+            Task {
+                var backoff: UInt64 = 400_000_000 // 400ms
+                while self.reconnectCount < self.maxReconnects && !self.isStopRequested() {
+                    self.reconnectCount += 1
+                    let retryMsg = "ScreenCaptureKit audio stream interrupted (\(error.localizedDescription)). Reconnecting (\(self.reconnectCount)/\(self.maxReconnects))..."
+                    JSONEmitter.shared.emit([
+                        "type": "warning",
+                        "source": "system",
+                        "message": retryMsg
+                    ])
+                    try? await Task.sleep(nanoseconds: backoff)
+                    guard !self.isStopRequested() else { return }
+                    do {
+                        try await self.restart()
+                        self.reconnectCount = 0
+                        JSONEmitter.shared.emit([
+                            "type": "info",
+                            "source": "system",
+                            "message": "ScreenCaptureKit audio stream reconnected successfully."
+                        ])
+                        return
+                    } catch {
+                        JSONEmitter.shared.emit([
+                            "type": "warning",
+                            "source": "system",
+                            "message": "ScreenCaptureKit reconnect attempt \(self.reconnectCount) failed (\(error.localizedDescription)). Retrying..."
+                        ])
+                        backoff = min(backoff * 2, 2_000_000_000)
+                    }
+                }
+
+                if !self.isStopRequested() {
+                    let msg = "ScreenCaptureKit audio stream ended after \(self.maxReconnects) reconnection attempts: \(error.localizedDescription)"
+                    self.onFatalError?(msg)
+                }
+            }
+            return
+        }
+
         let msg = "ScreenCaptureKit session error: \(error.localizedDescription)"
-        JSONEmitter.shared.emit([
-            "type": "error",
-            "source": "system",
-            "message": msg
-        ])
-        onFatalError?(msg)
+        self.onFatalError?(msg)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -775,7 +839,7 @@ final class OneShotDisplayCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                 "thumbnail_height": max(1, Int(Double(height) * scale)),
                 "format": "image/jpeg",
                 "overlay_exclusion": "closedroom_windows",
-            ])))
+            ]))
         } catch {
             try? FileManager.default.removeItem(at: originalURL)
             try? FileManager.default.removeItem(at: thumbnailURL)
@@ -1016,7 +1080,17 @@ final class NativeCaptureRun {
                 self?.handleSample(sampleBuffer, source: .system)
             }
             capture.onFatalError = { [weak self] errMsg in
-                self?.stopAndExit(cancelled: true, errorMsg: errMsg)
+                guard let self = self else { return }
+                if self.mode == "both" && self.microphoneCapture != nil {
+                    JSONEmitter.shared.emit([
+                        "type": "warning",
+                        "source": "system",
+                        "message": "System audio capture stopped (\(errMsg)). Recording continues with microphone audio."
+                    ])
+                    self.systemCapture = nil
+                } else {
+                    self.stopAndExit(cancelled: true, errorMsg: errMsg)
+                }
             }
             systemCapture = capture
         }

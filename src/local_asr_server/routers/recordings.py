@@ -35,8 +35,13 @@ def create_recording(request: Request, body: CreateRecordingRequest):
             capture_mode=body.capture_mode or "legacy_mixed",
             capture_backend=body.capture_backend or "browser",
         )
+        logger.info(
+            "Created recording session %s (title=%r, backend=%s, mode=%s)",
+            res.get("id"), body.title, body.capture_backend, body.capture_mode,
+        )
         return res
     except OSError as exc:
+        logger.error("Failed to create recording session: %s", exc)
         raise HTTPException(status_code=507, detail=str(exc)) from exc
 
 
@@ -102,11 +107,16 @@ def list_screenshots(recording_id: str, request: Request):
 
 @router.post("/v1/recordings/{recording_id}/screenshots", status_code=201)
 def capture_screenshot(recording_id: str, request: Request, body: ScreenshotCaptureRequest):
+    logger.info(
+        "Screenshot requested for recording=%s: request_id=%s, display_id=%s",
+        recording_id, body.request_id, body.display_id,
+    )
     services = get_services(request.app)
     store = services.recordings
     try:
         existing = store.screenshot_for_request(recording_id, body.request_id)
         if existing is not None:
+            logger.info("Returning existing screenshot for request_id=%s", body.request_id)
             return _screenshot_payload(recording_id, existing)
 
         services.capture.begin_screenshot(recording_id)
@@ -126,18 +136,27 @@ def capture_screenshot(recording_id: str, request: Request, body: ScreenshotCapt
                 original=original,
                 thumbnail=thumbnail,
             )
+            logger.info(
+                "Screenshot successfully saved: recording=%s, id=%s, seq=%s, timestamp=%.2fs",
+                recording_id, saved.get("id"), saved.get("sequence"), saved.get("timestamp", 0),
+            )
             return _screenshot_payload(recording_id, saved)
         finally:
             services.capture.finish_screenshot(recording_id)
     except RecordingNotFound as exc:
+        logger.error("Screenshot failed: Recording %s not found", recording_id)
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except ValueError as exc:
+        logger.error("Screenshot failed (ValueError) for recording %s: %s", recording_id, exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RecordingConflict as exc:
+        logger.error("Screenshot failed (RecordingConflict) for recording %s: %s", recording_id, exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except RuntimeError as exc:
+        logger.error("Screenshot failed (RuntimeError) for recording %s: %s", recording_id, exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OSError as exc:
+        logger.error("Screenshot failed (OSError) for recording %s: %s", recording_id, exc)
         raise HTTPException(status_code=507, detail=str(exc)) from exc
 
 
@@ -580,7 +599,10 @@ def get_recording_project(recording_id: str, request: Request):
 
 @router.post("/v1/recordings/{recording_id}/control/stop", status_code=202)
 def control_stop_recording(recording_id: str, request: Request):
-    recording = get_services(request.app).recordings.get(recording_id, include_result=False)
+    try:
+        recording = get_services(request.app).recordings.get(recording_id, include_result=False)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
     backend = recording.get("capture_backend", "browser")
     
     # Check if there is an active native session to be absolutely sure

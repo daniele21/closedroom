@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ApiClient, CaptureDisplay } from '../api/apiClient';
 import { useTranslation } from '../i18n/i18n';
 
@@ -23,6 +23,18 @@ export default function RecordingOverlayPage() {
   const [screenshotCount, setScreenshotCount] = useState(0);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
   const [lastScreenshotAt, setLastScreenshotAt] = useState<number | null>(null);
+
+  const logOverlay = useCallback((level: 'info' | 'warn' | 'error', message: string, data?: any) => {
+    console[level === 'warn' ? 'warn' : level === 'error' ? 'error' : 'log'](`[Overlay] ${message}`, data || '');
+    ApiClient.logClientEvent(level, 'overlay', message, data).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    logOverlay('info', 'Overlay view mounted', {
+      hash: window.location.hash,
+      name: window.name,
+    });
+  }, [logOverlay]);
 
   // Dynamic body class for transparency
   useEffect(() => {
@@ -71,18 +83,28 @@ export default function RecordingOverlayPage() {
     return null;
   };
 
-  const loadDisplays = async (
+  const loadDisplays = useCallback(async (
     preferredDisplayId?: number | null,
-    autoSelectSingle = true,
+    _autoSelectSingle = true,
   ) => {
     try {
       const payload = await ApiClient.captureDisplays();
       const available = payload.displays || [];
       setDisplays(available);
-      const preferred = preferredDisplayId === undefined ? selectedDisplayId : preferredDisplayId;
+
+      let storedId: number | null = null;
+      try {
+        const stored = localStorage.getItem('asr-overlay-preferred-display-id');
+        storedId = stored ? parseInt(stored, 10) : null;
+      } catch {}
+
+      const preferred = preferredDisplayId !== undefined
+        ? preferredDisplayId
+        : (selectedDisplayId ?? (storedId && available.some(d => d.display_id === storedId) ? storedId : null));
+
       if (preferred && available.some((display) => display.display_id === preferred)) {
         setSelectedDisplayId(preferred);
-      } else if (autoSelectSingle && available.length === 1) {
+      } else if (available.length > 0) {
         setSelectedDisplayId(available[0].display_id);
       } else {
         setSelectedDisplayId(null);
@@ -92,7 +114,120 @@ export default function RecordingOverlayPage() {
       setDisplays([]);
       setSelectedDisplayId(null);
     }
-  };
+  }, [selectedDisplayId]);
+
+  const connectSSE = useCallback((recId: string) => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    
+    const sse = new EventSource(`/v1/recordings/${recId}/overlay/events`);
+    eventSourceRef.current = sse;
+
+    sse.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (!data.active) {
+          setIsRecording(false);
+          setIsStopping(false);
+          setRecordingId(null);
+          setScreenshotCount(0);
+          setLastScreenshotAt(null);
+          if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+          setTimer('00:00');
+          sse.close();
+          eventSourceRef.current = null;
+          
+          if (window.name === 'ClosedRoomOverlay') {
+            setTimeout(() => window.close(), 1000);
+          }
+          return;
+        }
+
+        setIsRecording(true);
+        setBytesWritten(data.bytes_written || 0);
+        setSignalLevelMic(formatDb(data.mic_db));
+        setSignalLevelSystem(formatDb(data.system_db));
+        setWarnings(data.warnings || []);
+        setScreenshotCount(data.screenshot_count || 0);
+        if (data.screenshot_display_id) setSelectedDisplayId(data.screenshot_display_id);
+
+        if (data.started_at && !startedAtRef.current) {
+          startedAtRef.current = recordingStartedAtMs(data.started_at);
+        }
+      } catch (err) {
+        console.error('Error parsing SSE event:', err);
+      }
+    };
+
+    sse.onerror = (err) => {
+      console.warn('SSE event stream error, falling back:', err);
+      sse.close();
+      eventSourceRef.current = null;
+    };
+  }, []);
+
+  const checkActiveRecording = useCallback(async () => {
+    try {
+      const activeData = await ApiClient.getActiveRecording();
+      logOverlay('info', 'Checked active recording from backend', {
+        active: activeData.active,
+        recordingId: activeData.recording_id,
+        captureBackend: activeData.capture_backend,
+        screenshotCount: activeData.screenshot_count,
+        selectedDisplayId: activeData.screenshot_display_id,
+      });
+      if (activeData.active && activeData.recording_id) {
+        setRecordingId(activeData.recording_id);
+        setIsRecording(true);
+        setTitle(activeData.title || 'Registrazione');
+        setCaptureBackend(activeData.capture_backend || 'browser');
+        setCaptureMode(activeData.capture_mode || 'both');
+        setBytesWritten(activeData.bytes_written || 0);
+        setWarnings(activeData.warnings || []);
+        setScreenshotCount(activeData.screenshot_count || 0);
+        setSelectedDisplayId(activeData.screenshot_display_id || null);
+        if ((activeData.capture_backend || 'browser') === 'native') {
+          void loadDisplays(activeData.screenshot_display_id || null);
+        }
+        
+        const startedAtMs = recordingStartedAtMs(activeData.started_at);
+        if (startedAtMs) {
+          startedAtRef.current = startedAtMs;
+          if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+          timerIntervalRef.current = setInterval(() => {
+            if (startedAtRef.current) {
+              const elapsed = Math.floor((Date.now() - startedAtRef.current) / 1000);
+              const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+              const secs = (elapsed % 60).toString().padStart(2, '0');
+              setTimer(`${mins}:${secs}`);
+            }
+          }, 500);
+        }
+
+        connectSSE(activeData.recording_id);
+      } else {
+        setIsRecording(false);
+        setRecordingId(null);
+        setScreenshotCount(0);
+        setLastScreenshotAt(null);
+        setTimer('00:00');
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+        const bc = new BroadcastChannel('closedroom-recording');
+        bc.postMessage({ type: 'request-status' });
+        bc.close();
+      }
+    } catch (err) {
+      console.error('Failed to get active recording from backend, falling back to BroadcastChannel:', err);
+      const bc = new BroadcastChannel('closedroom-recording');
+      bc.postMessage({ type: 'request-status' });
+      bc.close();
+    }
+  }, [connectSSE, loadDisplays, logOverlay]);
 
   // Poll/Check state on mount and connect SSE/BroadcastChannel
   useEffect(() => {
@@ -103,23 +238,47 @@ export default function RecordingOverlayPage() {
       if (!data) return;
 
       if (data.type === 'status') {
-        // If we get status, update state (useful for browser capture where SSE is not active,
-        // or as local fast sync for signal levels)
         setIsRecording(data.isRecording);
         setTimer(data.timer);
         setSignalLevelMic(data.signalLevelMic || '-∞ dB');
         setSignalLevelSystem(data.signalLevelSystem || '-∞ dB');
         setVisualCaptureLabel(data.visualCaptureLabel || '');
 
-        // Auto-close browser popup after a short delay when recording completes
-        if (!data.isRecording && window.name === 'ClosedRoomOverlay') {
-          setTimeout(() => {
-            window.close();
-          }, 1500);
+        if (data.isRecording) {
+          if (data.captureBackend) {
+            setCaptureBackend(data.captureBackend);
+          }
+          if (data.recordingId) {
+            setRecordingId((prevId) => {
+              if (prevId !== data.recordingId) {
+                setScreenshotCount(0);
+                setLastScreenshotAt(null);
+                setErrorMsg(null);
+                connectSSE(data.recordingId);
+                if (data.captureBackend === 'native') {
+                  void loadDisplays();
+                }
+              }
+              return data.recordingId;
+            });
+          } else {
+            void checkActiveRecording();
+          }
+        } else {
+          setRecordingId(null);
+          setScreenshotCount(0);
+          setLastScreenshotAt(null);
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+          }
+          if (window.name === 'ClosedRoomOverlay') {
+            setTimeout(() => {
+              window.close();
+            }, 1500);
+          }
         }
       } else if (data.type === 'ack' && data.action === 'stop') {
-        // ACK only means the stop command was received. Persisted backend state
-        // remains authoritative for completion; do not show a saved state yet.
         void ApiClient.getActiveRecording()
           .then((active) => {
             if (!active.active) setIsStopping(false);
@@ -128,111 +287,27 @@ export default function RecordingOverlayPage() {
       }
     };
 
+    const handleOverlayShown = () => {
+      logOverlay('info', 'overlay-shown event fired');
+      void checkActiveRecording();
+    };
+
     bc.addEventListener('message', handleBroadcastMessage);
+    window.addEventListener('overlay-shown', handleOverlayShown);
 
-    // Initial check of active recording via backend
-    const checkActiveRecording = async () => {
-      try {
-        const activeData = await ApiClient.getActiveRecording();
-        if (activeData.active && activeData.recording_id) {
-          setRecordingId(activeData.recording_id);
-          setIsRecording(true);
-          setTitle(activeData.title || 'Registrazione');
-          setCaptureBackend(activeData.capture_backend || 'browser');
-          setCaptureMode(activeData.capture_mode || 'both');
-          setBytesWritten(activeData.bytes_written || 0);
-          setWarnings(activeData.warnings || []);
-          setScreenshotCount(activeData.screenshot_count || 0);
-          setSelectedDisplayId(activeData.screenshot_display_id || null);
-          if ((activeData.capture_backend || 'browser') === 'native') {
-            void loadDisplays(activeData.screenshot_display_id || null);
-          }
-          
-          const startedAtMs = recordingStartedAtMs(activeData.started_at);
-          if (startedAtMs) {
-            startedAtRef.current = startedAtMs;
-            // Setup local smooth timer
-            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-            timerIntervalRef.current = setInterval(() => {
-              if (startedAtRef.current) {
-                const elapsed = Math.floor((Date.now() - startedAtRef.current) / 1000);
-                const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
-                const secs = (elapsed % 60).toString().padStart(2, '0');
-                setTimer(`${mins}:${secs}`);
-              }
-            }, 500);
-          }
-
-          // Connect SSE event stream for native capture (or unified active stream)
-          connectSSE(activeData.recording_id);
-        } else {
-          setIsRecording(false);
-          setTimer('00:00');
-          // Request status via BC in case it's a browser capture and server is out of sync
-          bc.postMessage({ type: 'request-status' });
-        }
-      } catch (err) {
-        console.error('Failed to get active recording from backend, falling back to BroadcastChannel:', err);
-        bc.postMessage({ type: 'request-status' });
-      }
-    };
-
-    const connectSSE = (recId: string) => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-      
-      const sse = new EventSource(`/v1/recordings/${recId}/overlay/events`);
-      eventSourceRef.current = sse;
-
-      sse.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (!data.active) {
-            setIsRecording(false);
-            setIsStopping(false);
-            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-            setTimer('00:00');
-            sse.close();
-            
-            // Auto close if popup window
-            if (window.name === 'ClosedRoomOverlay') {
-              setTimeout(() => window.close(), 1000);
-            }
-            return;
-          }
-
-          setIsRecording(true);
-          setBytesWritten(data.bytes_written || 0);
-          setSignalLevelMic(formatDb(data.mic_db));
-          setSignalLevelSystem(formatDb(data.system_db));
-          setWarnings(data.warnings || []);
-          setScreenshotCount(data.screenshot_count || 0);
-          if (data.screenshot_display_id) setSelectedDisplayId(data.screenshot_display_id);
-
-          if (data.started_at && !startedAtRef.current) {
-            startedAtRef.current = recordingStartedAtMs(data.started_at);
-          }
-        } catch (err) {
-          console.error('Error parsing SSE event:', err);
-        }
-      };
-
-      sse.onerror = (err) => {
-        console.warn('SSE event stream error, falling back:', err);
-        sse.close();
-      };
-    };
-
-    checkActiveRecording();
+    void checkActiveRecording();
 
     return () => {
       bc.removeEventListener('message', handleBroadcastMessage);
+      window.removeEventListener('overlay-shown', handleOverlayShown);
       bc.close();
-      if (eventSourceRef.current) eventSourceRef.current.close();
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
-  }, []);
+  }, [checkActiveRecording, connectSSE, loadDisplays]);
 
   const handleStop = async () => {
     setIsStopping(true);
@@ -284,28 +359,81 @@ export default function RecordingOverlayPage() {
   };
 
   const handleCaptureScreenshot = async () => {
-    if (!recordingId || captureBackend !== 'native' || !isRecording || isStopping || isCapturingScreenshot) return;
-    if (selectedDisplayId === null) {
-      setErrorMsg(t('recording.screenshotChooseMonitorError'));
-      setIsExpanded(true);
-      void ApiClient.resizeOverlay(320, 300);
+    logOverlay('info', 'Screenshot action invoked (button click or ⌘⇧9)', {
+      recordingId,
+      captureBackend,
+      isRecording,
+      isStopping,
+      isCapturingScreenshot,
+      selectedDisplayId,
+      displayCount: displays.length,
+    });
+
+    if (isStopping) {
+      logOverlay('warn', 'Screenshot ignored: recording is stopping');
       return;
+    }
+    if (isCapturingScreenshot) {
+      logOverlay('warn', 'Screenshot ignored: capture already in flight');
+      return;
+    }
+    if (!isRecording) {
+      const msg = 'Nessuna registrazione attiva. Avvia prima una registrazione per scattare screenshot.';
+      setErrorMsg(msg);
+      logOverlay('warn', 'Screenshot blocked: not currently recording');
+      return;
+    }
+    if (captureBackend !== 'native') {
+      const msg = `Screenshot non supportato: backend attivo è "${captureBackend}". Richiede acquisizione nativa.`;
+      setErrorMsg(msg);
+      logOverlay('warn', 'Screenshot blocked: captureBackend is not native', { captureBackend });
+      return;
+    }
+    if (!recordingId) {
+      const msg = 'ID sessione non trovato. Ricontrollo stato registrazione...';
+      setErrorMsg(msg);
+      logOverlay('warn', 'Screenshot blocked: missing recordingId');
+      void checkActiveRecording();
+      return;
+    }
+    let targetDisplayId = selectedDisplayId;
+    if (targetDisplayId === null) {
+      if (displays.length > 0) {
+        targetDisplayId = displays[0].display_id;
+        setSelectedDisplayId(targetDisplayId);
+      } else {
+        const msg = t('recording.screenshotChooseMonitorError') || 'Nessun monitor disponibile per lo screenshot.';
+        setErrorMsg(msg);
+        logOverlay('warn', 'Screenshot blocked: no displays available');
+        return;
+      }
     }
 
     setIsCapturingScreenshot(true);
     setErrorMsg(null);
     const requestId = `overlay-${recordingId}-${crypto.randomUUID()}`;
+    logOverlay('info', 'Sending captureScreenshot API request', { recordingId, requestId, selectedDisplayId: targetDisplayId });
     try {
       const saved = await ApiClient.captureScreenshot(
         recordingId,
         requestId,
-        selectedDisplayId ?? undefined,
+        targetDisplayId,
       );
-      setScreenshotCount((count) => Math.max(count + 1, saved.sequence + 1));
-      setLastScreenshotAt(saved.timestamp);
+      const nextSeq = typeof saved.sequence === 'number' ? saved.sequence + 1 : screenshotCount + 1;
+      setScreenshotCount(nextSeq);
+      if (typeof saved.timestamp === 'number') {
+        setLastScreenshotAt(saved.timestamp);
+      }
       if (saved.display_id) setSelectedDisplayId(saved.display_id);
+      logOverlay('info', 'Screenshot captured and stored successfully', {
+        screenshot_id: saved.screenshot_id,
+        sequence: saved.sequence,
+        timestamp: saved.timestamp,
+        displayId: saved.display_id,
+      });
     } catch (err: any) {
       const message = String(err?.message || t('recording.screenshotFailed'));
+      logOverlay('error', 'Screenshot capture failed with error', { error: message });
       if (message.includes('selected_display_unavailable')) {
         setErrorMsg(t('recording.screenshotDisplayUnavailable'));
         await loadDisplays(null, false);
@@ -431,7 +559,13 @@ export default function RecordingOverlayPage() {
               {captureBackend === 'native' && displays.length > 0 ? (
                 <select
                   value={selectedDisplayId ?? ''}
-                  onChange={(event) => setSelectedDisplayId(event.target.value ? Number(event.target.value) : null)}
+                  onChange={(event) => {
+                    const id = event.target.value ? Number(event.target.value) : null;
+                    setSelectedDisplayId(id);
+                    if (id !== null) {
+                      try { localStorage.setItem('asr-overlay-preferred-display-id', String(id)); } catch {}
+                    }
+                  }}
                   className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-1.5 py-1 text-[10px] text-white"
                   aria-label={t('recording.screenshotMonitor')}
                 >
@@ -504,8 +638,26 @@ export default function RecordingOverlayPage() {
                   ? `${t('recording.statusRecording').replace('...', '')}: ${title || t('recording.noActiveRecording')}`
                   : t('recording.statusReady') || 'In attesa...'}
               </span>
-              {errorMsg && <span className="text-red-400 text-[9px] shrink-0 font-semibold">⚠️ Errore</span>}
             </div>
+            {errorMsg && (
+              <div
+                className="flex items-center justify-between gap-1 rounded bg-red-950/80 border border-red-500/40 px-1.5 py-0.5 text-[9px] text-red-200"
+                title={errorMsg}
+              >
+                <span className="truncate">⚠️ {errorMsg}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setErrorMsg(null);
+                  }}
+                  className="text-red-400 hover:text-white shrink-0 px-1 font-bold"
+                  aria-label="Chiudi errore"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             {visualCaptureLabel && (
               <div
                 className="flex min-w-0 items-center gap-1 rounded border border-cyan-300/20 bg-cyan-300/10 px-1.5 py-0.5 text-[9px] text-cyan-100"
@@ -556,14 +708,23 @@ export default function RecordingOverlayPage() {
         <button
           onClick={handleCaptureScreenshot}
           disabled={
-            captureBackend !== 'native'
-            || !isRecording
-            || isStopping
+            isStopping
             || isCapturingScreenshot
-            || selectedDisplayId === null
           }
-          className="h-9 min-w-9 rounded-lg border border-white/10 bg-white/10 px-2 text-[10px] font-semibold text-white/90 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-          title={captureBackend === 'native' ? t('recording.screenshotShortcut') : t('recording.screenshotNativeOnly')}
+          className={`h-9 min-w-9 rounded-lg border px-2 text-[10px] font-semibold transition ${
+            !isRecording || captureBackend !== 'native'
+              ? 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10'
+              : 'border-white/10 bg-white/10 text-white/90 hover:bg-white/15 active:scale-95'
+          } disabled:cursor-not-allowed disabled:opacity-40`}
+          title={
+            !isRecording
+              ? 'Nessuna registrazione in corso. Clicca per info.'
+              : captureBackend !== 'native'
+              ? t('recording.screenshotNativeOnly')
+              : selectedDisplayId === null && displays.length > 1
+              ? t('recording.screenshotChooseMonitorError')
+              : t('recording.screenshotShortcut')
+          }
           aria-label={t('recording.screenshotAction')}
         >
           {isCapturingScreenshot ? '…' : `▣ ${screenshotCount}`}

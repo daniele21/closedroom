@@ -837,6 +837,25 @@ class RecordingApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertFalse(res.json()["active"])
 
+    def test_control_stop_unknown_recording_returns_404(self) -> None:
+        res = self.client.post("/v1/recordings/non-existent-recording-id/control/stop")
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res.json()["detail"], "Recording not found")
+
+    def test_client_log_endpoint_records_events(self) -> None:
+        res = self.client.post(
+            "/v1/system/client-log",
+            json={
+                "level": "info",
+                "source": "overlay",
+                "message": "Overlay test event",
+                "data": {"count": 1},
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json().get("success"))
+
 
 if __name__ == "__main__":
     unittest.main()
+
