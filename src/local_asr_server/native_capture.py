@@ -808,6 +808,7 @@ class NativeCaptureManager:
         finally:
             session.process.stdout.close()
             session.stopped = True
+            self._stop_screenshot_worker(session, graceful=False)
 
     def _terminate(self, recording_id: str, *, cancel: bool) -> dict[str, Any]:
         with self._lock:
