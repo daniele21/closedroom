@@ -621,12 +621,14 @@ async function request(url: string, options: RequestInit = {}, retrying = false)
   }
 
   let detail = `HTTP ${response.status}`;
-  try {
-    const payload = await response.json();
-    detail = payload.detail || detail;
-  } catch {
-    const text = await response.text();
-    if (text) detail = text;
+  const bodyText = await response.text();
+  if (bodyText) {
+    try {
+      const payload = JSON.parse(bodyText);
+      detail = payload.detail || detail;
+    } catch {
+      detail = bodyText;
+    }
   }
   throw new Error(detail);
 }
