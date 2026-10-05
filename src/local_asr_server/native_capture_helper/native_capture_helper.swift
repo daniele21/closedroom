@@ -2011,62 +2011,67 @@ func runStart(recordingID: String, outputDir: String, mode: String, visualWindow
     RunLoop.main.run()
 }
 
-let args = Array(CommandLine.arguments.dropFirst())
-guard let command = args.first else {
-    JSONEmitter.shared.emitAndExit(["type": "error", "message": "Missing command"], exitCode: 1)
-}
-
-switch command {
-case "capabilities":
-    JSONEmitter.shared.emitAndExit(capabilityPayload(), exitCode: 0)
-case "permissions":
-    JSONEmitter.shared.emitAndExit(permissionsPayload(), exitCode: 0)
-case "request-permissions":
-    requestPermissions()
-case "diagnostics":
-    JSONEmitter.shared.emitAndExit(diagnosticsPayload(), exitCode: 0)
-case "windows":
-    runWindows()
-case "screenshot-worker":
-    guard let recordingID = requireArg("--recording-id", in: args) else {
-        JSONEmitter.shared.emitAndExit([
-            "type": "screenshot_worker_error",
-            "reason": "invalid_worker_arguments",
-            "message": "Missing --recording-id"
-        ], exitCode: 2)
+@main
+struct ClosedRoomNativeCaptureMain {
+    static func main() {
+        let args = Array(CommandLine.arguments.dropFirst())
+        guard let command = args.first else {
+            JSONEmitter.shared.emitAndExit(["type": "error", "message": "Missing command"], exitCode: 1)
+        }
+        
+        switch command {
+        case "capabilities":
+            JSONEmitter.shared.emitAndExit(capabilityPayload(), exitCode: 0)
+        case "permissions":
+            JSONEmitter.shared.emitAndExit(permissionsPayload(), exitCode: 0)
+        case "request-permissions":
+            requestPermissions()
+        case "diagnostics":
+            JSONEmitter.shared.emitAndExit(diagnosticsPayload(), exitCode: 0)
+        case "windows":
+            runWindows()
+        case "screenshot-worker":
+            guard let recordingID = requireArg("--recording-id", in: args) else {
+                JSONEmitter.shared.emitAndExit([
+                    "type": "screenshot_worker_error",
+                    "reason": "invalid_worker_arguments",
+                    "message": "Missing --recording-id"
+                ], exitCode: 2)
+            }
+            runScreenshotWorker(recordingID: recordingID)
+        case "screenshot":
+            guard let displayID = requireArg("--display-id", in: args).flatMap({ Int($0) }),
+                  let recordingReadyUptime = requireArg("--recording-ready-uptime", in: args).flatMap({ Double($0) }),
+                  let originalFile = requireArg("--original-file", in: args),
+                  let thumbnailFile = requireArg("--thumbnail-file", in: args) else {
+                JSONEmitter.shared.emitAndExit([
+                    "type": "error",
+                    "reason": "invalid_screenshot_arguments",
+                    "message": "Missing required screenshot arguments"
+                ], exitCode: 2)
+            }
+            let traceID = requireArg("--trace-id", in: args) ?? UUID().uuidString
+            runScreenshot(
+                displayID: displayID,
+                recordingReadyUptime: recordingReadyUptime,
+                originalFile: originalFile,
+                thumbnailFile: thumbnailFile,
+                traceID: traceID
+            )
+        case "start":
+            guard let recordingID = requireArg("--recording-id", in: args),
+                  let outputDir = requireArg("--output-dir", in: args),
+                  let mode = requireArg("--mode", in: args) else {
+                JSONEmitter.shared.emitAndExit(["type": "error", "message": "Missing required start arguments"], exitCode: 2)
+            }
+            let visualWindowID = requireArg("--visual-window-id", in: args).flatMap { Int($0) }
+            let visualFPS = requireArg("--visual-fps", in: args).flatMap { Double($0) } ?? 0.5
+            runStart(
+                recordingID: recordingID, outputDir: outputDir, mode: mode,
+                visualWindowID: visualWindowID, visualFPS: visualFPS
+            )
+        default:
+            JSONEmitter.shared.emitAndExit(["type": "error", "message": "Unknown command: \(command)"], exitCode: 1)
+        }
     }
-    runScreenshotWorker(recordingID: recordingID)
-case "screenshot":
-    guard let displayID = requireArg("--display-id", in: args).flatMap({ Int($0) }),
-          let recordingReadyUptime = requireArg("--recording-ready-uptime", in: args).flatMap({ Double($0) }),
-          let originalFile = requireArg("--original-file", in: args),
-          let thumbnailFile = requireArg("--thumbnail-file", in: args) else {
-        JSONEmitter.shared.emitAndExit([
-            "type": "error",
-            "reason": "invalid_screenshot_arguments",
-            "message": "Missing required screenshot arguments"
-        ], exitCode: 2)
-    }
-    let traceID = requireArg("--trace-id", in: args) ?? UUID().uuidString
-    runScreenshot(
-        displayID: displayID,
-        recordingReadyUptime: recordingReadyUptime,
-        originalFile: originalFile,
-        thumbnailFile: thumbnailFile,
-        traceID: traceID
-    )
-case "start":
-    guard let recordingID = requireArg("--recording-id", in: args),
-          let outputDir = requireArg("--output-dir", in: args),
-          let mode = requireArg("--mode", in: args) else {
-        JSONEmitter.shared.emitAndExit(["type": "error", "message": "Missing required start arguments"], exitCode: 2)
-    }
-    let visualWindowID = requireArg("--visual-window-id", in: args).flatMap { Int($0) }
-    let visualFPS = requireArg("--visual-fps", in: args).flatMap { Double($0) } ?? 0.5
-    runStart(
-        recordingID: recordingID, outputDir: outputDir, mode: mode,
-        visualWindowID: visualWindowID, visualFPS: visualFPS
-    )
-default:
-    JSONEmitter.shared.emitAndExit(["type": "error", "message": "Unknown command: \(command)"], exitCode: 1)
 }
