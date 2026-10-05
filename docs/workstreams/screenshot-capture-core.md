@@ -165,6 +165,9 @@ Acceptance:
 - screenshot successivo usa B anche quando il caller non passa un display override;
 - invalid/disconnected display viene rifiutato dal backend;
 - compact overlay resta azionabile senza aprire Details;
+- screenshot del display conserva tutte le finestre visibili, inclusa la finestra principale ClosedRoom se presente;
+- viene escluso solo il recording overlay: window ID nativo esplicito come owner primario, titolo esatto `ClosedRoom Recording Overlay` come fallback browser/race-safe;
+- matching fuzzy per process/app/bundle/title `contains("closedroom")` è vietato perché può rimuovere finestre utente intere;
 - nessuna preview live/continuous screen capture viene introdotta.
 
 ## Contratto worker
