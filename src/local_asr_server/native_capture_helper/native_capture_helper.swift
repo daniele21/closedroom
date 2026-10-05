@@ -1190,10 +1190,16 @@ actor ScreenshotWorkerService {
 
     func refreshSources(emitChange: Bool = true) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
-        let excludedApps = content.applications.filter { app in
-            let bundle = app.bundleIdentifier.lowercased()
-            let name = app.applicationName.lowercased()
-            return bundle.contains("closedroom") || name.contains("closedroom")
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let excludedWindows = content.windows.filter { window in
+            let app = window.owningApplication
+            let bundle = (app?.bundleIdentifier ?? "").lowercased()
+            let name = (app?.applicationName ?? "").lowercased()
+            let title = (window.title ?? "").lowercased()
+            return app?.processID == ownPID
+                || bundle.contains("closedroom")
+                || name.contains("closedroom")
+                || title.contains("closedroom")
         }
 
         var nextFilters: [CGDirectDisplayID: SCContentFilter] = [:]
@@ -1201,8 +1207,7 @@ actor ScreenshotWorkerService {
         for display in content.displays {
             let filter = SCContentFilter(
                 display: display,
-                excludingApplications: excludedApps,
-                exceptingWindows: []
+                excludingWindows: excludedWindows
             )
             nextFilters[display.displayID] = filter
             nextDimensions[display.displayID] = (Int(display.width), Int(display.height))
