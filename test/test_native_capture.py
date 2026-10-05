@@ -96,7 +96,8 @@ elif cmd == 'screenshot-worker':
             'thumbnail_width': 640,
             'thumbnail_height': 360,
             'format': 'image/jpeg',
-            'overlay_exclusion': 'closedroom_applications',
+            'overlay_exclusion': 'recording_overlay',
+            'excluded_window_ids': payload.get('excluded_window_ids', []),
             'capture_backend': 'fake',
             'capture_ms': 4,
             'encode_ms': 2,
@@ -180,6 +181,29 @@ else:
         self.assertEqual(captured["thumbnail_bytes"], b"\xff\xd8\xffthumb")
         self.assertEqual(manager.get_session("rec-shot").screenshot_display_id, 7)
         manager.cancel("rec-shot")
+
+
+    def test_screenshot_uses_only_explicit_overlay_window_ids(self) -> None:
+        manager = NativeCaptureManager(
+            helper_path=self.helper,
+            screenshot_exclusion_provider=lambda: [101, 101, -5, 202],
+        )
+        manager.start("rec-overlay-exclusion", self.root, "both")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            session = manager.get_session("rec-overlay-exclusion")
+            if session and session.ready_event:
+                break
+            time.sleep(0.01)
+
+        captured = manager.capture_screenshot(
+            "rec-overlay-exclusion",
+            request_id="request-overlay-exclusion",
+            display_id=7,
+        )
+
+        self.assertEqual(captured["excluded_window_ids"], [101, 202])
+        manager.cancel("rec-overlay-exclusion")
 
 
     def test_explicit_display_selection_becomes_session_owner_for_next_screenshot(self) -> None:
@@ -484,6 +508,22 @@ else:
         self.assertEqual(recovered["worker_restart_count"], 1)
         self.assertIsNone(session.process.poll())
         manager.cancel("rec-recovery")
+
+    def test_native_helper_excludes_only_exact_recording_overlay(self) -> None:
+        helper_source = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "local_asr_server"
+            / "native_capture_helper"
+            / "native_capture_helper.swift"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('screenshotOverlayWindowTitle = "ClosedRoom Recording Overlay"', helper_source)
+        self.assertIn("explicitWindowIDs.contains(window.windowID)", helper_source)
+        self.assertNotIn('title.contains("closedroom")', helper_source)
+        self.assertNotIn('bundle.contains("closedroom")', helper_source)
+        self.assertNotIn('name.contains("closedroom")', helper_source)
+
 
     def test_native_helper_contains_persistent_screenshot_worker_contract(self) -> None:
         helper_source = (
