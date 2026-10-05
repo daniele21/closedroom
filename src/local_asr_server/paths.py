@@ -11,6 +11,7 @@ created on demand only where explicitly noted.
 
 from __future__ import annotations
 
+import os
 import sys
 import shutil
 from pathlib import Path
@@ -160,7 +161,10 @@ def get_static_dir() -> Path:
     """Return the directory that serves the web UI static files."""
     if is_bundled():
         return get_bundle_dir() / "static"
-    # Dev mode: static/ lives alongside this module inside the package
+    dev_static_dir = os.environ.get("CLOSEDROOM_DEV_STATIC_DIR")
+    if dev_static_dir:
+        return Path(dev_static_dir).expanduser().resolve()
+    # Direct create_app() callers and tests keep the committed static fallback.
     return Path(__file__).parent / "static"
 
 
