@@ -11,9 +11,7 @@ from local_asr_server.app_services import get_services
 from local_asr_server.services.transcription_service import TranscriptionService
 from local_asr_server.transcriber import (
     _clean_nan_values,
-    generate_cache_key,
     get_cached_result,
-    hash_audio_file,
     save_cached_result,
 )
 from local_asr_server.transcription_diarization import DIARIZATION_PROVIDER_DISABLED
@@ -51,8 +49,8 @@ class SingleFileTranscriptionUseCase:
         self.transcription = transcription
 
     def cache_key(self, audio_path: Path, request: SingleFileTranscriptionRequest) -> str:
-        asr_cache_key = generate_cache_key(
-            audio_hash=hash_audio_file(audio_path),
+        asr_cache_key = self.transcription.cache_key(
+            audio_path,
             model=request.model,
             language=request.language,
             task=request.task,
@@ -63,8 +61,7 @@ class SingleFileTranscriptionUseCase:
             vad_guided=request.vad_guided,
             vad_post_filter=request.vad_post_filter,
             asr_provider=request.asr_provider,
-            backend=self.transcription.backend(request.asr_provider, request.model),
-            provider_options=request.public_provider_options,
+            provider_options=request.provider_options,
         )
         if request.diarization_provider == DIARIZATION_PROVIDER_DISABLED:
             return asr_cache_key
