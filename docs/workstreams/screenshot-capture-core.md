@@ -127,14 +127,16 @@ Ancora aperto:
 
 Validazione capture-core aggiornata 2026-10-05:
 
-- exact `dev` head validato: `11ffb8343a475333a9fd3cdf8216e305c06eebfa`;
+- ultimo exact-head REAL_ENVIRONMENT PASS precedente: `11ffb8343a475333a9fd3cdf8216e305c06eebfa`;
 - comando eseguito sul target Mac: `python3 scripts/validate_capture_core.py --real --enforce-slo`;
-- deterministic capture-core suite: PASS;
-- REAL_ENVIRONMENT persistent-worker benchmark: PASS;
-- enforced benchmark SLO: PASS, quindi 20 screenshot richiesti completati, singolo worker PID mantenuto e p95 entro il limite configurato dal runner;
+- deterministic capture-core suite: PASS su quell'head;
+- REAL_ENVIRONMENT persistent-worker benchmark: PASS su quell'head;
+- enforced benchmark SLO: PASS su quell'head, quindi 20 screenshot richiesti completati, singolo worker PID mantenuto e p95 entro il limite configurato dal runner;
 - nessuna GitHub Action usata come sostituto dell'evidenza locale.
 
-Questa evidenza chiude SC-1, SC-2, SC-4 e SC-6. SC-7 resta parziale: il benchmark reale prova il worker ScreenCaptureKit e la latenza sul target Mac, ma non copre ancora l'intera matrice prevista (recording `both` contemporaneo con continuità audio misurata, alternanza multi-display, fullscreen/Spaces, TCC deny/grant/relaunch e recovery reale dopo fault). Non inferire release readiness complessiva dal solo PASS capture-core.
+Il 2026-10-05 il native capture lifecycle è stato modificato dopo quell'evidenza per rimuovere il bootstrap concorrente del ScreenshotWorker dal critical path di recording startup e per impedire warm-up screenshot prima dell'evento audio `ready`. L'evidenza precedente resta utile come baseline del worker screenshot ma è STALE per l'exact HEAD corrente. La suite capture-core + REAL_ENVIRONMENT deve essere rieseguita sul nuovo head prima di una nuova readiness claim.
+
+SC-7 resta inoltre parziale: il benchmark reale prova il worker ScreenCaptureKit e la latenza sul target Mac, ma non copre ancora l'intera matrice prevista (recording `both` contemporaneo con continuità audio misurata, alternanza multi-display, fullscreen/Spaces, TCC deny/grant/relaunch e recovery reale dopo fault). Non inferire release readiness complessiva dal solo PASS capture-core.
 
 ## Contratto worker
 
