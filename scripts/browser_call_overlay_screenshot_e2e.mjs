@@ -313,6 +313,16 @@ async function waitText(browser, needles, timeoutMs = 8000, record = false) {
   }
   throw new Error('timed out waiting for ' + needles.join(' | ') + '; text=' + last.slice(0, 1200));
 }
+async function waitSelector(browser, selector, timeoutMs = 8000, record = false) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await browser.execute(`return Boolean(document.querySelector(${JSON.stringify(selector)}));`);
+    if (found) return;
+    if (record) await frame(browser);
+    await sleep(150);
+  }
+  throw new Error('timed out waiting for selector ' + selector);
+}
 async function waitHash(browser, expected, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -427,7 +437,7 @@ try {
 
   await browser.clickCss('#meeting-tab-transcript');
   await waitText(browser, ['Alex reviews the launch roadmap and validation plan.'], 5000, true);
-  await waitText(browser, ['Screenshot 1 · 00:12.00'], 5000);
+  await waitSelector(browser, 'button[data-screenshot-id="shot-001"]', 5000, true);
   const anchored = await browser.execute(`
     const marker = document.querySelector('button[data-screenshot-id="shot-001"]');
     if (!marker) return false;
