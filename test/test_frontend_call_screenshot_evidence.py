@@ -109,8 +109,12 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
             "06-transcript-marker-in-turn",
             "07-screenshot-to-audio",
             "call-overlay-screenshot-evidence",
+            'data-display-selector="true"',
+            'data-display-picker="true"',
+            'data-screenshot-action="true"',
         ):
             self.assertIn(evidence, self.e2e)
+        self.assertNotIn("querySelector('[data-testid=\"recording-overlay\"] select')", self.e2e)
 
     def test_failed_api_response_body_is_consumed_once(self) -> None:
         self.assertIn("const bodyText = await response.text();", self.client)
