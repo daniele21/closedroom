@@ -53,6 +53,14 @@ export default function RecordingOverlayPage() {
     });
   }, [logOverlay]);
 
+  useEffect(() => {
+    const previousTitle = document.title;
+    document.title = 'ClosedRoom Recording Overlay';
+    return () => {
+      document.title = previousTitle;
+    };
+  }, []);
+
   // Dynamic body class for transparency
   useEffect(() => {
     document.documentElement.classList.add('overlay-active');
