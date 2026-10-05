@@ -9,6 +9,7 @@ loop managed by the status-bar menu app.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -414,6 +415,33 @@ class ClosedRoomWindowManager:
             new_frame = ((frame.origin.x, new_y), (width, height))
             self.overlay_window.setFrame_display_animate_(new_frame, True, True)
             logger.info("Resized overlay window to %dx%d", width, height)
+
+    def screenshot_exclusion_window_ids(self) -> list[int]:
+        """Return only the visible recording overlay window IDs for screen capture exclusion.
+
+        The main ClosedRoom window is intentionally not excluded. AppKit state is
+        read on the main thread because the FastAPI server calls this provider from
+        its own worker thread.
+        """
+        window_ids: list[int] = []
+
+        def _read() -> None:
+            overlay = self.overlay_window
+            if overlay is None or not overlay.isVisible():
+                return
+            try:
+                window_id = int(overlay.windowNumber())
+            except Exception:
+                logger.exception("Unable to resolve overlay window number for screenshot exclusion")
+                return
+            if window_id > 0:
+                window_ids.append(window_id)
+
+        if threading.current_thread() is threading.main_thread():
+            _read()
+        else:
+            run_on_main_thread(_read, wait=True)
+        return window_ids
 
     def _create_overlay_window(self) -> None:
         """Initialize the floating NSPanel for recording status monitoring."""
