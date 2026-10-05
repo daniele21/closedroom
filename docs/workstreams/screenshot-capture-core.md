@@ -91,20 +91,20 @@ Questi sono target da validare, non risultati già provati:
 | ID | Outcome | Owner | Dipende da | State |
 | --- | --- | --- | --- | --- |
 | SC-0 | baseline metriche e trace current path | native manager/helper | — | DONE |
-| SC-1 | protocollo JSONL + ScreenshotWorker persistente | helper + manager | — | IMPLEMENTED_PENDING_VALIDATION |
-| SC-2 | DisplayRegistry cached senza ScreenCaptureKit hot-path | helper + manager + API | SC-1 | IMPLEMENTED_PENDING_VALIDATION |
-| SC-3 | timeout locale, health, restart e backend fallback | worker | SC-1 | PARTIAL_PENDING_VALIDATION |
-| SC-4 | staging/atomic commit RecordingStore senza read/write duplicato | RecordingStore + API | SC-1 | IMPLEMENTED_PENDING_VALIDATION |
-| SC-5 | overlay state/feedback rapido e no refresh display ridondanti | frontend | SC-2 | PARTIAL_PENDING_VALIDATION |
-| SC-6 | capture-core deterministic suite + benchmark harness | tests/scripts | SC-1..5 | IMPLEMENTED_PENDING_EXECUTION |
-| SC-7 | target-Mac burst/perf/TCC/audio-continuity evidence | real environment | SC-1..6 | PLANNED |
+| SC-1 | protocollo JSONL + ScreenshotWorker persistente | helper + manager | — | DONE |
+| SC-2 | DisplayRegistry cached senza ScreenCaptureKit hot-path | helper + manager + API | SC-1 | DONE |
+| SC-3 | timeout locale, health, restart e backend fallback | worker | SC-1 | PARTIAL_REAL_ENV_PENDING |
+| SC-4 | staging/atomic commit RecordingStore senza read/write duplicato | RecordingStore + API | SC-1 | DONE |
+| SC-5 | overlay state/feedback rapido e no refresh display ridondanti | frontend | SC-2 | PARTIAL_UX_FOLLOWUP |
+| SC-6 | capture-core deterministic suite + benchmark harness | tests/scripts | SC-1..5 | DONE |
+| SC-7 | target-Mac burst/perf/TCC/audio-continuity evidence | real environment | SC-1..6 | PARTIAL_REAL_ENV_PASS |
 | SC-8 | rimozione runtime path one-shot subprocess legacy | manager/helper | SC-7 | PLANNED |
 
 SC-1, SC-2 e SC-6 sono intenzionalmente sviluppabili in parallelo dopo il contratto sopra.
 
 ## Stato implementazione 2026-10-05
 
-Prima ondata implementata sul branch `work/screenshot-capture-core`, senza integrazione su `dev`.
+Prima ondata implementata e integrata su `dev`.
 
 Implementato:
 - worker screenshot persistente separato dal recording worker, con JSONL stdin/stdout;
@@ -125,7 +125,16 @@ Ancora aperto:
 - SC-7: TCC, ScreenCaptureKit reale, 20-shot burst, p50/p95, multi-display e continuità audio richiedono target Mac;
 - SC-8: il comando standalone one-shot resta presente come diagnostica/legacy finché il nuovo path non è validato.
 
-Validazione: non ancora dichiarata. In questo ambiente il repository non è disponibile come checkout locale e l'accesso Git via DNS non è disponibile; per indicazione del maintainer non si usano GitHub Actions come sostituto. I gate deterministici, frontend typecheck/lint, compilazione Swift e packaged-app restano quindi PENDING finché non possono essere eseguiti localmente sull'exact head. Nessun PASS viene inferito dalla sola review del sorgente.
+Validazione capture-core aggiornata 2026-10-05:
+
+- exact `dev` head validato: `11ffb8343a475333a9fd3cdf8216e305c06eebfa`;
+- comando eseguito sul target Mac: `python3 scripts/validate_capture_core.py --real --enforce-slo`;
+- deterministic capture-core suite: PASS;
+- REAL_ENVIRONMENT persistent-worker benchmark: PASS;
+- enforced benchmark SLO: PASS, quindi 20 screenshot richiesti completati, singolo worker PID mantenuto e p95 entro il limite configurato dal runner;
+- nessuna GitHub Action usata come sostituto dell'evidenza locale.
+
+Questa evidenza chiude SC-1, SC-2, SC-4 e SC-6. SC-7 resta parziale: il benchmark reale prova il worker ScreenCaptureKit e la latenza sul target Mac, ma non copre ancora l'intera matrice prevista (recording `both` contemporaneo con continuità audio misurata, alternanza multi-display, fullscreen/Spaces, TCC deny/grant/relaunch e recovery reale dopo fault). Non inferire release readiness complessiva dal solo PASS capture-core.
 
 ## Contratto worker
 
