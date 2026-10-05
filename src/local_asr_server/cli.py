@@ -73,6 +73,12 @@ def _ensure_dev_frontend_bundle() -> bool:
     if static_ready and current == fingerprint:
         return False
 
+    if not (frontend_dir / "node_modules").is_dir():
+        raise RuntimeError(
+            "Frontend dependencies are missing. Run: "
+            "cd frontend && corepack pnpm install --frozen-lockfile"
+        )
+
     pnpm = shutil.which("pnpm")
     corepack = shutil.which("corepack")
     if pnpm:
