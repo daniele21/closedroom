@@ -115,7 +115,9 @@ elif cmd == 'screenshot':
 elif cmd == 'start':
     signal.signal(signal.SIGTERM, stopped_and_exit)
     signal.signal(signal.SIGINT, stopped_and_exit)
-    print(json.dumps({'type': 'ready', 'recording_ready_uptime': 10.0}), flush=True)
+    recording_id = arg('--recording-id')
+    if recording_id != 'rec-never-ready':
+        print(json.dumps({'type': 'ready', 'recording_ready_uptime': 10.0}), flush=True)
     while True:
         time.sleep(1)
 else:
@@ -323,6 +325,30 @@ else:
             "command_failed",
         ):
             self.assertIn(f'"{stage}"', helper_source)
+
+    def test_recording_ready_timeout_emits_error_and_stops_hung_helper(self) -> None:
+        manager = NativeCaptureManager(
+            helper_path=self.helper,
+            ready_timeout_seconds=0.15,
+        )
+        manager.start("rec-never-ready", self.root, "both")
+
+        deadline = time.monotonic() + 2.0
+        events = []
+        while time.monotonic() < deadline:
+            events.extend(manager.drain_events("rec-never-ready"))
+            if any(event.get("reason") == "capture_ready_timeout" for event in events):
+                break
+            time.sleep(0.01)
+
+        session = manager.get_session("rec-never-ready")
+        self.assertTrue(any(event.get("reason") == "capture_ready_timeout" for event in events))
+        self.assertTrue(session.stopped)
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and session.process.poll() is None:
+            time.sleep(0.01)
+        self.assertIsNotNone(session.process.poll())
+        self.assertIsNone(session.screenshot_worker_process)
 
     def test_recording_start_does_not_boot_screenshot_worker_before_ready(self) -> None:
         manager = NativeCaptureManager(helper_path=self.helper)
