@@ -284,6 +284,19 @@ class RecordingApiTests(unittest.TestCase):
         self.assertNotIn("routing", legacy_after_v1.json())
         self.assertEqual(versioned_after_v1.status_code, 404)
 
+    def test_source_server_marks_browser_overlay_fallback_as_expected(self) -> None:
+        self.assertFalse(hasattr(self.app.state, "window_manager"))
+
+        response = self.client.post(
+            "/v1/system/window/overlay",
+            json={"show": True},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["success"])
+        self.assertEqual(response.json()["fallback"], "browser")
+        self.assertTrue(response.json()["fallback_expected"])
+
     def test_ensure_capture_permissions_endpoint_delegates_to_manager(self) -> None:
         class FakeCaptureManager:
             def ensure_permissions(self, mode: str) -> dict:
