@@ -262,6 +262,8 @@ class NativeCaptureManager:
         request_id: str,
         display_id: int | None = None,
         admission_held: bool = False,
+        original_path: Path | None = None,
+        thumbnail_path: Path | None = None,
     ) -> dict[str, Any]:
         request_id = request_id.strip()
         if not request_id or len(request_id) > 128:
@@ -274,6 +276,8 @@ class NativeCaptureManager:
                 recording_id,
                 request_id=request_id,
                 display_id=display_id,
+                original_path=original_path,
+                thumbnail_path=thumbnail_path,
             )
         finally:
             if not admission_held:
@@ -285,6 +289,8 @@ class NativeCaptureManager:
         *,
         request_id: str,
         display_id: int | None,
+        original_path: Path | None,
+        thumbnail_path: Path | None,
     ) -> dict[str, Any]:
         with self._lock:
             session = self._sessions.get(recording_id)
@@ -323,12 +329,20 @@ class NativeCaptureManager:
             if session.stopped or not session.accept_screenshots:
                 raise RuntimeError("Screenshot capture is closing")
             session.screenshot_display_id = selected
-            temp_dir = session.output_dir / ".screenshot-capture-temp"
-            temp_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            owns_output_paths = original_path is None and thumbnail_path is None
+            if (original_path is None) != (thumbnail_path is None):
+                raise ValueError("original_path and thumbnail_path must be provided together")
+            temp_dir: Path | None = None
             token = uuid.uuid4().hex
             trace_id = f"shot-{token[:12]}"
-            original_path = temp_dir / f"{token}.jpg"
-            thumbnail_path = temp_dir / f"{token}-thumb.jpg"
+            if owns_output_paths:
+                temp_dir = session.output_dir / ".screenshot-capture-temp"
+                temp_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+                original_path = temp_dir / f"{token}.jpg"
+                thumbnail_path = temp_dir / f"{token}-thumb.jpg"
+            else:
+                original_path = Path(original_path)
+                thumbnail_path = Path(thumbnail_path)
             waiter: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
             with session.screenshot_worker_lock:
                 session.screenshot_pending[request_id] = waiter
@@ -393,7 +407,7 @@ class NativeCaptureManager:
                     event.get("encode_ms"),
                     event.get("write_ms"),
                 )
-                return {
+                result = {
                     **event,
                     "request_id": request_id,
                     "recording_id": recording_id,
@@ -405,18 +419,24 @@ class NativeCaptureManager:
                     "roundtrip_ms": roundtrip_ms,
                     "worker_pid": worker_pid,
                     "worker_restart_count": restart_count,
-                    "original_bytes": original_path.read_bytes(),
-                    "thumbnail_bytes": thumbnail_path.read_bytes(),
+                    "original_path": str(original_path),
+                    "thumbnail_path": str(thumbnail_path),
                 }
+                if owns_output_paths:
+                    result["original_bytes"] = original_path.read_bytes()
+                    result["thumbnail_bytes"] = thumbnail_path.read_bytes()
+                return result
             finally:
                 with session.screenshot_worker_lock:
                     session.screenshot_pending.pop(request_id, None)
-                original_path.unlink(missing_ok=True)
-                thumbnail_path.unlink(missing_ok=True)
-                try:
-                    temp_dir.rmdir()
-                except OSError:
-                    pass
+                if owns_output_paths:
+                    original_path.unlink(missing_ok=True)
+                    thumbnail_path.unlink(missing_ok=True)
+                    if temp_dir is not None:
+                        try:
+                            temp_dir.rmdir()
+                        except OSError:
+                            pass
 
     def _ensure_screenshot_worker(self, session: CaptureSession) -> None:
         with session.screenshot_worker_lock:
