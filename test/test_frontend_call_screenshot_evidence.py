@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "frontend" / "src" / "pages" / "RecordingOverlayPage.tsx"
+OVERLAY_DISPLAY_HOOK = ROOT / "frontend" / "src" / "hooks" / "useOverlayDisplaySelection.ts"
 RECORDER = ROOT / "frontend" / "src" / "hooks" / "useRecorder.ts"
 MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
 TRANSCRIPT = ROOT / "frontend" / "src" / "components" / "transcription" / "TranscriptTextView.tsx"
@@ -19,6 +20,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.overlay = OVERLAY.read_text(encoding="utf-8")
+        cls.overlay_display_hook = OVERLAY_DISPLAY_HOOK.read_text(encoding="utf-8")
         cls.recorder = RECORDER.read_text(encoding="utf-8")
         cls.meeting = MEETING.read_text(encoding="utf-8")
         cls.transcript = TRANSCRIPT.read_text(encoding="utf-8")
@@ -29,7 +31,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
 
     def test_overlay_uses_persisted_screenshot_api_and_truthful_stop_completion(self) -> None:
         self.assertIn("ApiClient.captureScreenshot(", self.overlay)
-        self.assertIn("ApiClient.captureDisplays()", self.overlay)
+        self.assertIn("ApiClient.captureDisplays()", self.overlay_display_hook)
         self.assertIn("ApiClient.stopRecordingControl(recordingId)", self.overlay)
         self.assertIn("ApiClient.openMeetingWindow(recordingId)", self.overlay)
         self.assertIn("data.type === 'ack' && data.action === 'stop'", self.overlay)
@@ -47,18 +49,21 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
     def test_browser_overlay_uses_control_center_dimensions_and_local_resize(self) -> None:
         self.assertIn("const width = 420;", self.recorder)
         self.assertIn("const height = 170;", self.recorder)
-        self.assertIn("window.resizeTo(width, height + 52)", self.overlay)
-        self.assertIn("resizeOverlayForState(isExpanded, true)", self.overlay)
+        self.assertIn("window.resizeTo(width, height + 52)", self.overlay_display_hook)
+        self.assertIn("await openDisplayPicker()", self.overlay)
 
     def test_browser_overlay_has_exact_capture_exclusion_title(self) -> None:
         self.assertIn("document.title = 'ClosedRoom Recording Overlay'", self.overlay)
         self.assertNotIn("document.title.includes('ClosedRoom')", self.overlay)
 
     def test_overlay_display_selection_has_backend_owner_and_modern_control_center(self) -> None:
-        self.assertIn("ApiClient.selectScreenshotDisplay(recordingId, displayId)", self.overlay)
+        self.assertIn("ApiClient.selectScreenshotDisplay(recordingId, displayId)", self.overlay_display_hook)
         self.assertIn("/screenshot-display", self.client)
-        self.assertIn("pendingDisplayIdRef.current", self.overlay)
-        self.assertIn("pendingSelection === null || backendDisplayId === pendingSelection", self.overlay)
+        self.assertIn("pendingDisplayIdRef.current", self.overlay_display_hook)
+        self.assertIn(
+            "pendingSelection === null || backendDisplayId === pendingSelection",
+            self.overlay_display_hook,
+        )
         self.assertIn('data-overlay-control-center="true"', self.overlay)
         self.assertIn('data-display-selector="true"', self.overlay)
         self.assertIn('data-display-picker="true"', self.overlay)
