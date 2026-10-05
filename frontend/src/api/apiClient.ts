@@ -371,6 +371,7 @@ export interface CaptureDisplay {
   title: string;
   width: number;
   height: number;
+  is_main?: boolean;
 }
 
 export interface RecordingScreenshot {
