@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,7 +51,7 @@ class SingleFileTranscriptionUseCase:
         self.transcription = transcription
 
     def cache_key(self, audio_path: Path, request: SingleFileTranscriptionRequest) -> str:
-        return generate_cache_key(
+        asr_cache_key = generate_cache_key(
             audio_hash=hash_audio_file(audio_path),
             model=request.model,
             language=request.language,
@@ -63,10 +65,24 @@ class SingleFileTranscriptionUseCase:
             asr_provider=request.asr_provider,
             backend=self.transcription.backend(request.asr_provider, request.model),
             provider_options=request.public_provider_options,
-            diarization_provider=request.diarization_provider,
-            diarization_region=request.diarization_region,
-            diarization_model=request.diarization_model,
         )
+        if request.diarization_provider == DIARIZATION_PROVIDER_DISABLED:
+            return asr_cache_key
+
+        diarization_identity = {
+            "version": "single-file-diarization-v1",
+            "asr_cache_key": asr_cache_key,
+            "provider": request.diarization_provider,
+            "region": request.diarization_region or "",
+            "model": request.diarization_model or "",
+        }
+        return hashlib.sha256(
+            json.dumps(
+                diarization_identity,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
 
     def run(
         self,
