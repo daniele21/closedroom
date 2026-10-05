@@ -182,6 +182,36 @@ else:
         manager.cancel("rec-shot")
 
 
+    def test_explicit_display_selection_becomes_session_owner_for_next_screenshot(self) -> None:
+        manager = NativeCaptureManager(helper_path=self.helper)
+        manager.start("rec-display-owner", self.root, "both")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            session = manager.get_session("rec-display-owner")
+            if session and session.ready_event:
+                break
+            time.sleep(0.01)
+
+        manager.displays()
+        selected = manager.set_screenshot_display("rec-display-owner", 7)
+        session = manager.get_session("rec-display-owner")
+
+        self.assertEqual(selected["display_id"], 7)
+        self.assertEqual(session.screenshot_display_id, 7)
+
+        captured = manager.capture_screenshot(
+            "rec-display-owner",
+            request_id="request-selected-display",
+            display_id=None,
+        )
+        self.assertEqual(captured["display_id"], 7)
+
+        with self.assertRaisesRegex(RuntimeError, "selected_display_unavailable"):
+            manager.set_screenshot_display("rec-display-owner", 999)
+
+        manager.cancel("rec-display-owner")
+
+
     def test_stop_waits_until_admitted_screenshot_persistence_finishes(self) -> None:
         manager = NativeCaptureManager(helper_path=self.helper)
         manager.start("rec-drain", self.root, "both")
