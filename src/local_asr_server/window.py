@@ -9,7 +9,6 @@ loop managed by the status-bar menu app.
 from __future__ import annotations
 
 import logging
-import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -111,6 +110,8 @@ class ClosedRoomWindowManager:
         self.webview: Optional[objc.objc_object] = None
         self.overlay_window: Optional[NSPanel] = None
         self.overlay_webview: Optional[objc.objc_object] = None
+        self._overlay_capture_window_id: int | None = None
+        self._overlay_visible = False
         self._delegate: Optional[ClosedRoomWindowDelegate] = None
         self._observer: Optional[ClosedRoomActivationObserver] = None
         self._key_event_monitor: Optional[objc.objc_object] = None
@@ -382,6 +383,7 @@ class ClosedRoomWindowManager:
 
         if self.overlay_window:
             self.overlay_window.makeKeyAndOrderFront_(None)
+            self._overlay_visible = True
             self.evaluate_overlay_js("window.dispatchEvent(new CustomEvent('overlay-shown'));")
             logger.info("Showing overlay window.")
 
@@ -390,6 +392,7 @@ class ClosedRoomWindowManager:
         if self.overlay_window:
             self._save_overlay_position()
             self.overlay_window.orderOut_(None)
+            self._overlay_visible = False
             logger.info("Hiding overlay window.")
 
     def _save_overlay_position(self) -> None:
@@ -417,31 +420,14 @@ class ClosedRoomWindowManager:
             logger.info("Resized overlay window to %dx%d", width, height)
 
     def screenshot_exclusion_window_ids(self) -> list[int]:
-        """Return only the visible recording overlay window IDs for screen capture exclusion.
+        """Return only the visible recording overlay window ID for capture exclusion.
 
-        The main ClosedRoom window is intentionally not excluded. AppKit state is
-        read on the main thread because the FastAPI server calls this provider from
-        its own worker thread.
+        The ID is captured when the NSPanel is created on the Cocoa main thread,
+        so screenshot dispatch does not synchronously hop to the main thread.
         """
-        window_ids: list[int] = []
-
-        def _read() -> None:
-            overlay = self.overlay_window
-            if overlay is None or not overlay.isVisible():
-                return
-            try:
-                window_id = int(overlay.windowNumber())
-            except Exception:
-                logger.exception("Unable to resolve overlay window number for screenshot exclusion")
-                return
-            if window_id > 0:
-                window_ids.append(window_id)
-
-        if threading.current_thread() is threading.main_thread():
-            _read()
-        else:
-            run_on_main_thread(_read, wait=True)
-        return window_ids
+        if not self._overlay_visible or self._overlay_capture_window_id is None:
+            return []
+        return [self._overlay_capture_window_id]
 
     def _create_overlay_window(self) -> None:
         """Initialize the floating NSPanel for recording status monitoring."""
@@ -487,6 +473,7 @@ class ClosedRoomWindowManager:
             rect, style_mask, NSBackingStoreBuffered, False
         )
         self.overlay_window.setTitle_("ClosedRoom Recording Overlay")
+        self._overlay_capture_window_id = int(self.overlay_window.windowNumber())
         
         # Configure floating panel behavior
         self.overlay_window.setLevel_(NSFloatingWindowLevel)
@@ -571,6 +558,8 @@ class ClosedRoomWindowManager:
             self._save_overlay_position()
             self.overlay_window.close()
             self.overlay_window = None
+            self._overlay_capture_window_id = None
+            self._overlay_visible = False
         self._delegate = None
         self.webview = None
         self.overlay_webview = None
