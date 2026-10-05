@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import CoreGraphics
 import CoreImage
@@ -1020,7 +1021,13 @@ func runScreenshot(
         ], exitCode: 3)
     }
 
-    Task {
+    // SCScreenshotManager is WindowServer-backed. A standalone CLI must
+    // initialize AppKit before requesting a frame or the capture callback can
+    // remain pending indefinitely even though shareable-content discovery works.
+    let app = NSApplication.shared
+    app.setActivationPolicy(.prohibited)
+
+    Task { @MainActor in
         do {
             let result = try await captureDisplayScreenshot(
                 displayID: CGDirectDisplayID(displayID),
@@ -1037,7 +1044,7 @@ func runScreenshot(
             ], exitCode: 4)
         }
     }
-    RunLoop.main.run()
+    dispatchMain()
 }
 
 final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
