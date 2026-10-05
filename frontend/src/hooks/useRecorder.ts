@@ -23,8 +23,8 @@ const CAPTURE_RESERVATION_POLL_MS = 200;
 const CAPTURE_RESERVATION_STORAGE_KEY = 'closedroom-capture-reservation-id';
 
 export const openBrowserPopup = () => {
-  const width = 295;
-  const height = 135;
+  const width = 420;
+  const height = 170;
   const left = window.screen.width - width - 40;
   const top = 80;
   
