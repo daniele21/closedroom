@@ -44,6 +44,12 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("setFallbackNotice(null)", self.recorder)
         self.assertIn("openBrowserPopup()", self.recorder)
 
+    def test_browser_overlay_uses_control_center_dimensions_and_local_resize(self) -> None:
+        self.assertIn("const width = 420;", self.recorder)
+        self.assertIn("const height = 170;", self.recorder)
+        self.assertIn("window.resizeTo(width, height + 52)", self.overlay)
+        self.assertIn("resizeOverlayForState(isExpanded, true)", self.overlay)
+
     def test_overlay_display_selection_has_backend_owner_and_modern_control_center(self) -> None:
         self.assertIn("ApiClient.selectScreenshotDisplay(recordingId, displayId)", self.overlay)
         self.assertIn("/screenshot-display", self.client)
