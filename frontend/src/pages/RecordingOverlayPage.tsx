@@ -89,12 +89,6 @@ export default function RecordingOverlayPage() {
     return `${Math.round(bytes / 1024)} KB`;
   };
 
-  const getPercentage = (dbVal: number) => {
-    const minDb = -48;
-    const maxDb = 0;
-    return Math.min(100, Math.max(0, ((dbVal - minDb) / (maxDb - minDb)) * 100));
-  };
-
   const formatDb = (db: number) => {
     return db <= -47.5 ? '-∞ dB' : `${db.toFixed(1)} dB`;
   };
@@ -525,6 +519,72 @@ export default function RecordingOverlayPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
+  const resizeOverlayForState = useCallback(async (
+    expanded: boolean,
+    displayPickerOpen: boolean,
+  ) => {
+    const width = 420;
+    const height = displayPickerOpen ? 300 : expanded ? 238 : 118;
+    try {
+      await ApiClient.resizeOverlay(width, height);
+    } catch (err) {
+      console.warn('Resize overlay window failed:', err);
+    }
+  }, []);
+
+  const handleSelectDisplay = async (displayId: number) => {
+    if (!recordingId || captureBackend !== 'native') return;
+
+    const previousDisplayId = selectedDisplayIdRef.current;
+    pendingDisplayIdRef.current = displayId;
+    setPendingDisplayId(displayId);
+    selectedDisplayIdRef.current = displayId;
+    setSelectedDisplayId(displayId);
+    setIsSelectingDisplay(true);
+    setErrorMsg(null);
+
+    try {
+      const result = await ApiClient.selectScreenshotDisplay(recordingId, displayId);
+      selectedDisplayIdRef.current = result.display_id;
+      setSelectedDisplayId(result.display_id);
+      pendingDisplayIdRef.current = null;
+      setPendingDisplayId(null);
+      try {
+        localStorage.setItem('asr-overlay-preferred-display-id', String(result.display_id));
+      } catch {}
+      logOverlay('info', 'Screenshot display changed', {
+        recordingId,
+        displayId: result.display_id,
+      });
+      setIsDisplayPickerOpen(false);
+      await resizeOverlayForState(isExpanded, false);
+    } catch (err: any) {
+      pendingDisplayIdRef.current = null;
+      setPendingDisplayId(null);
+      selectedDisplayIdRef.current = previousDisplayId;
+      setSelectedDisplayId(previousDisplayId);
+      const message = String(err?.message || t('recording.screenshotDisplayUnavailable'));
+      setErrorMsg(message);
+      logOverlay('error', 'Screenshot display change failed', {
+        recordingId,
+        requestedDisplayId: displayId,
+        error: message,
+      });
+    } finally {
+      setIsSelectingDisplay(false);
+    }
+  };
+
+  const toggleDisplayPicker = async () => {
+    if (!isRecording || captureBackend !== 'native') return;
+    if (displays.length === 0) {
+      await loadDisplays();
+    }
+    const next = !isDisplayPickerOpen;
+    setIsDisplayPickerOpen(next);
+    await resizeOverlayForState(isExpanded, next);
+  };
+
   const handleCloseOverlay = async () => {
     if (window.name === 'ClosedRoomOverlay') {
       window.close();
@@ -536,282 +596,350 @@ export default function RecordingOverlayPage() {
   const toggleExpand = async () => {
     const nextState = !isExpanded;
     setIsExpanded(nextState);
-    const targetW = nextState ? 320 : 300;
-    const targetH = nextState ? 300 : 150;
-    
-    // Call Native Resize API
-    try {
-      await ApiClient.resizeOverlay(targetW, targetH);
-    } catch (err) {
-      console.warn('Resize overlay window failed:', err);
-    }
+    setIsDisplayPickerOpen(false);
+    await resizeOverlayForState(nextState, false);
   };
 
-  // Convert dB levels to percentages
-  const micVal = parseFloat(signalLevelMic.replace(' dB', ''));
-  const sysVal = parseFloat(signalLevelSystem.replace(' dB', ''));
-  const micPercentage = getPercentage(isNaN(micVal) ? -120 : micVal);
-  const systemPercentage = getPercentage(isNaN(sysVal) ? -120 : sysVal);
+  useEffect(() => {
+    void resizeOverlayForState(false, false);
+  }, [resizeOverlayForState]);
 
-  // Device health status check
+  useEffect(() => {
+    if (!isDisplayPickerOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (displayPickerRef.current && !displayPickerRef.current.contains(target)) {
+        setIsDisplayPickerOpen(false);
+        void resizeOverlayForState(isExpanded, false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [isDisplayPickerOpen, isExpanded, resizeOverlayForState]);
+
   const getDeviceHealth = (dbStr: string) => {
     const val = parseFloat(dbStr.replace(' dB', ''));
-    if (isNaN(val) || val <= -100) return { label: t('recording.healthAbsent') || 'Assente/Muto', color: 'text-red-400 font-semibold' };
-    if (val <= -45) return { label: t('recording.healthSilent') || 'Silente', color: 'text-yellow-400 font-semibold' };
-    return { label: t('recording.healthActive') || 'Attivo', color: 'text-green-400 font-semibold' };
+    if (isNaN(val) || val <= -100) {
+      return {
+        label: t('recording.healthAbsent') || 'Unavailable',
+        dot: 'bg-red-400',
+        text: 'text-red-200',
+      };
+    }
+    if (val <= -45) {
+      return {
+        label: t('recording.healthSilent') || 'Quiet',
+        dot: 'bg-amber-400',
+        text: 'text-amber-200',
+      };
+    }
+    return {
+      label: t('recording.healthActive') || 'Active',
+      dot: 'bg-emerald-400',
+      text: 'text-emerald-200',
+    };
   };
+
+  const displayName = (display: CaptureDisplay, index: number) => {
+    const title = String(display.title || '').trim();
+    const looksGeneric = /^(screen|display)\s+\d+$/i.test(title);
+    if (title && !looksGeneric) return title;
+    if (display.is_main) return 'Main display';
+    const externalIndex = displays
+      .slice(0, index + 1)
+      .filter((item) => !item.is_main).length;
+    return display.is_main ? 'Main display' : `External display ${Math.max(1, externalIndex)}`;
+  };
+
+  const selectedDisplayIndex = displays.findIndex(
+    (display) => display.display_id === selectedDisplayId,
+  );
+  const selectedDisplay = selectedDisplayIndex >= 0 ? displays[selectedDisplayIndex] : null;
+  const selectedDisplayName = selectedDisplay
+    ? displayName(selectedDisplay, selectedDisplayIndex)
+    : (displays.length > 0 ? 'Choose screen' : 'Screen unavailable');
 
   const micHealth = getDeviceHealth(signalLevelMic);
   const systemHealth = getDeviceHealth(signalLevelSystem);
 
   return (
-    <div className="overlay-shell p-3 select-none flex flex-col justify-between" data-testid="recording-overlay">
-      {/* Top Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
+    <div
+      className="overlay-shell relative flex select-none flex-col p-2.5"
+      data-testid="recording-overlay"
+      data-overlay-control-center="true"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <span
-            className={`w-2.5 h-2.5 rounded-full ${
+            className={`h-2.5 w-2.5 shrink-0 rounded-full ${
               isStopping
-                ? 'bg-yellow-500 animate-ping'
+                ? 'bg-amber-400 animate-pulse'
                 : isRecording
-                ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse'
-                : 'bg-gray-500'
+                ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.72)]'
+                : 'bg-white/30'
             }`}
-          ></span>
-          <span className="text-[10px] uppercase font-bold tracking-wider text-white/60">
-            ClosedRoom
+            aria-hidden="true"
+          />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/60">
+            {isStopping ? 'Finalizing' : isRecording ? 'REC' : 'Ready'}
           </span>
+          {isExpanded && (
+            <span className="max-w-[150px] truncate text-[10px] text-white/55" title={title}>
+              {title || t('recording.noActiveRecording')}
+            </span>
+          )}
         </div>
-        
-        {/* Monospace Timer */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-mono font-bold bg-white/5 px-2 py-0.5 rounded border border-white/10 text-white/90">
+
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-md border border-white/10 bg-white/[0.06] px-2 py-0.5 font-mono text-[12px] font-semibold tabular-nums text-white/90">
             {timer}
           </span>
-          {/* Toggle Expand/Collapse */}
           <button
+            type="button"
             onClick={toggleExpand}
-            className="text-[10px] text-white/60 hover:text-white transition-colors cursor-pointer w-5 h-5 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded"
-            title={isExpanded ? 'Riduci' : 'Dettagli'}
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-white/45 transition hover:border-white/10 hover:bg-white/[0.07] hover:text-white"
+            title={isExpanded ? 'Hide details' : 'Details'}
+            aria-label={isExpanded ? 'Hide details' : 'Show details'}
+            aria-expanded={isExpanded}
           >
-            {isExpanded ? '▲' : '▼'}
+            {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            type="button"
+            onClick={handleCloseOverlay}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-white/35 transition hover:bg-white/[0.07] hover:text-white"
+            title="Hide overlay"
+            aria-label="Hide overlay"
+          >
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
-        
-        {/* Close Button */}
-        <button
-          onClick={handleCloseOverlay}
-          className="text-white/40 hover:text-white transition-colors cursor-pointer w-5 h-5 flex items-center justify-center text-[10px] font-bold bg-white/5 hover:bg-white/10 rounded-full"
-          title="Nascondi"
-        >
-          ✕
-        </button>
       </div>
 
-      {/* Main content viewport */}
-      <div className="flex-1 flex flex-col justify-center my-1.5 overflow-hidden">
-        {isExpanded ? (
-          // Expanded view
-          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[10px] text-white/70 animate-fadeIn">
-            <div className="col-span-2 font-medium truncate text-white border-b border-white/5 pb-1 mb-1">
-              🎙️ {title || t('recording.noActiveRecording') || 'Nessuna registrazione attiva'}
-            </div>
-            <div className="col-span-2 flex items-center gap-2">
-              <span className="opacity-50 shrink-0">{t('recording.screenshotMonitor')}:</span>
-              {captureBackend === 'native' && displays.length > 0 ? (
-                <select
-                  value={selectedDisplayId ?? ''}
-                  onChange={(event) => {
-                    const id = event.target.value ? Number(event.target.value) : null;
-                    setSelectedDisplayId(id);
-                    if (id !== null) {
-                      try { localStorage.setItem('asr-overlay-preferred-display-id', String(id)); } catch {}
-                    }
-                  }}
-                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-1.5 py-1 text-[10px] text-white"
-                  aria-label={t('recording.screenshotMonitor')}
-                >
-                  {(selectedDisplayId === null || displays.length > 1) && (
-                    <option value="">{t('recording.screenshotChooseMonitor')}</option>
-                  )}
-                  {displays.map((display) => (
-                    <option key={display.display_id} value={display.display_id}>
-                      {display.title}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="truncate text-white/80">
-                  {captureBackend === 'native' ? t('recording.screenshotNoMonitor') : t('recording.screenshotNativeOnly')}
-                </span>
-              )}
-            </div>
-            <div>
-              <span className="opacity-50">{t('recording.screenshotCount')}:</span>{' '}
-              <span className="font-semibold text-white/90">{screenshotCount}</span>
-            </div>
-            <div>
-              <span className="opacity-50">{t('recording.screenshotLast')}:</span>{' '}
-              <span className="font-semibold text-white/90">
-                {lastScreenshotAt === null ? '—' : `${Math.floor(lastScreenshotAt / 60)}:${String(Math.floor(lastScreenshotAt % 60)).padStart(2, '0')}`}
-              </span>
-            </div>
-            {visualCaptureLabel && (
-              <div
-                className="col-span-2 flex items-center gap-1.5 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-2 py-1 text-cyan-100"
-                title={visualCaptureLabel}
-              >
-                <span aria-hidden="true">◉</span>
-                <span className="shrink-0 font-semibold">{t('recording.visualCaptureActive')}:</span>
-                <span className="truncate">{visualCaptureLabel}</span>
-              </div>
-            )}
-            <div>
-              <span className="opacity-50">Backend:</span> <span className="font-semibold text-white/90 capitalize">{captureBackend}</span>
-            </div>
-            <div>
-              <span className="opacity-50">Files:</span> <span className="font-semibold text-white/90">{formatBytes(bytesWritten)}</span>
-            </div>
-            <div>
-              <span className="opacity-50">Mic:</span> <span className={micHealth.color}>{micHealth.label}</span>
-            </div>
-            <div>
-              <span className="opacity-50">System:</span> <span className={systemHealth.color}>{systemHealth.label}</span>
-            </div>
-            {warnings.length > 0 && (
-              <div className="col-span-2 text-yellow-400 truncate text-[9px] mt-0.5">
-                ⚠️ {warnings[warnings.length - 1]}
-              </div>
-            )}
-            {errorMsg && (
-              <div className="col-span-2 text-red-400 text-[9px] mt-0.5 leading-snug">
-                {errorMsg}
-              </div>
-            )}
-          </div>
-        ) : (
-          // Compact view
-          <div className="flex min-w-0 flex-col gap-1 text-[11px] font-medium text-white/80">
-            <div className="flex min-w-0 items-center justify-between">
-              <span className="truncate pr-2">
-                {isStopping
-                  ? t('recording.finalizing') || 'Terminazione...'
-                  : isRecording
-                  ? `${t('recording.statusRecording').replace('...', '')}: ${title || t('recording.noActiveRecording')}`
-                  : t('recording.statusReady') || 'In attesa...'}
-              </span>
-            </div>
-            {errorMsg && (
-              <div
-                className="flex items-center justify-between gap-1 rounded bg-red-950/80 border border-red-500/40 px-1.5 py-0.5 text-[9px] text-red-200"
-                title={errorMsg}
-              >
-                <span className="truncate">⚠️ {errorMsg}</span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setErrorMsg(null);
-                  }}
-                  className="text-red-400 hover:text-white shrink-0 px-1 font-bold"
-                  aria-label="Chiudi errore"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-            {visualCaptureLabel && (
-              <div
-                className="flex min-w-0 items-center gap-1 rounded border border-cyan-300/20 bg-cyan-300/10 px-1.5 py-0.5 text-[9px] text-cyan-100"
-                title={visualCaptureLabel}
-              >
-                <span className="shrink-0" aria-hidden="true">◉</span>
-                <span className="shrink-0 font-semibold">{t('recording.visualCaptureActive')}:</span>
-                <span className="truncate">{visualCaptureLabel}</span>
-              </div>
-            )}
+      {(errorMsg || warnings.length > 0) && (
+        <div
+          className={`mt-1.5 flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[9px] ${
+            errorMsg
+              ? 'border-red-400/25 bg-red-400/10 text-red-100'
+              : 'border-amber-300/20 bg-amber-300/10 text-amber-100'
+          }`}
+        >
+          <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">
+            {errorMsg || warnings[warnings.length - 1]}
+          </span>
+          {errorMsg && (
+            <button
+              type="button"
+              onClick={() => setErrorMsg(null)}
+              className="shrink-0 text-white/45 hover:text-white"
+              aria-label="Dismiss error"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="mt-2 flex items-center gap-1.5">
+        {captureMode !== 'pc_only' && (
+          <div
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.05] px-2"
+            title={`Microphone · ${micHealth.label} · ${displaySignalLevel(signalLevelMic)}`}
+          >
+            <Mic className="h-3.5 w-3.5 text-white/70" aria-hidden="true" />
+            <span className={`h-1.5 w-1.5 rounded-full ${micHealth.dot}`} aria-hidden="true" />
           </div>
         )}
-      </div>
 
-      {/* Bottom Bar: dB Signal Level + Screenshot + Stop */}
-      <div className="flex items-center gap-2">
-        {/* dB Signal Level Visualizer */}
-        <div className="flex-1 flex flex-col gap-1.5">
-          {/* Mic level */}
-          {captureMode !== 'pc_only' && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[8px] opacity-70" title="Microfono">🎙️</span>
-              <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5 relative">
-                <div
-                  className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-75 rounded-full"
-                  style={{ width: `${micPercentage}%` }}
-                ></div>
-              </div>
-              <span className="text-[8px] font-mono font-bold text-white/60 min-w-[64px] text-right">{displaySignalLevel(signalLevelMic)}</span>
-            </div>
-          )}
+        {captureMode !== 'mic_only' && (
+          <div
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.05] px-2"
+            title={`Computer audio · ${systemHealth.label} · ${displaySignalLevel(signalLevelSystem)}`}
+          >
+            <Volume2 className="h-3.5 w-3.5 text-white/70" aria-hidden="true" />
+            <span className={`h-1.5 w-1.5 rounded-full ${systemHealth.dot}`} aria-hidden="true" />
+          </div>
+        )}
 
-          {/* System level */}
-          {captureMode !== 'mic_only' && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[8px] opacity-70" title="Audio di Sistema">🖥️</span>
-              <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5 relative">
-                <div
-                  className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-75 rounded-full"
-                  style={{ width: `${systemPercentage}%` }}
-                ></div>
+        <div ref={displayPickerRef} className="relative min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => void toggleDisplayPicker()}
+            disabled={!isRecording || captureBackend !== 'native'}
+            className={`flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 text-left transition ${
+              isDisplayPickerOpen
+                ? 'border-cyan-300/35 bg-cyan-300/10 text-white'
+                : 'border-white/10 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]'
+            } disabled:cursor-not-allowed disabled:opacity-35`}
+            aria-expanded={isDisplayPickerOpen}
+            aria-haspopup="listbox"
+            data-display-selector="true"
+            title="Screen used for the next screenshot"
+          >
+            <Monitor className="h-3.5 w-3.5 shrink-0 text-cyan-200/85" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate text-[10px] font-medium">
+              {selectedDisplayName}
+            </span>
+            {isSelectingDisplay ? (
+              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-white/50" aria-hidden="true" />
+            ) : (
+              <ChevronDown className={`h-3 w-3 shrink-0 text-white/35 transition-transform ${isDisplayPickerOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+            )}
+          </button>
+
+          {isDisplayPickerOpen && (
+            <div
+              className="absolute left-0 top-11 z-50 w-[268px] overflow-hidden rounded-xl border border-white/12 bg-[#111827]/98 p-1.5 shadow-2xl backdrop-blur-xl"
+              role="listbox"
+              aria-label="Screen for screenshots"
+              data-display-picker="true"
+            >
+              <div className="px-2 pb-1.5 pt-1">
+                <div className="text-[10px] font-semibold text-white/85">Screenshot screen</div>
+                <div className="mt-0.5 text-[9px] leading-snug text-white/40">
+                  The next screenshots use this display until you change it.
+                </div>
               </div>
-              <span className="text-[8px] font-mono font-bold text-white/60 min-w-[64px] text-right">{displaySignalLevel(signalLevelSystem)}</span>
+              <div className="space-y-1">
+                {displays.map((display, index) => {
+                  const selected = display.display_id === selectedDisplayId;
+                  const pending = display.display_id === pendingDisplayId;
+                  return (
+                    <button
+                      key={display.display_id}
+                      type="button"
+                      onClick={() => void handleSelectDisplay(display.display_id)}
+                      disabled={isSelectingDisplay && !pending}
+                      className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition ${
+                        selected
+                          ? 'bg-cyan-300/10 text-white'
+                          : 'text-white/75 hover:bg-white/[0.06] hover:text-white'
+                      } disabled:opacity-40`}
+                      role="option"
+                      aria-selected={selected}
+                    >
+                      <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${
+                        selected ? 'border-cyan-300/30 bg-cyan-300/10' : 'border-white/10 bg-white/[0.04]'
+                      }`}>
+                        <Monitor className="h-3.5 w-3.5" aria-hidden="true" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate text-[10px] font-medium">
+                            {displayName(display, index)}
+                          </span>
+                          {display.is_main && (
+                            <span className="rounded bg-white/[0.07] px-1 py-0.5 text-[7px] font-semibold uppercase tracking-wide text-white/45">
+                              Main
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 text-[8px] text-white/35">
+                          {display.width} × {display.height}
+                        </div>
+                      </div>
+                      {pending ? (
+                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-cyan-200" aria-hidden="true" />
+                      ) : selected ? (
+                        <Check className="h-3.5 w-3.5 shrink-0 text-cyan-200" aria-hidden="true" />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
 
         <button
+          type="button"
           onClick={handleCaptureScreenshot}
-          disabled={
-            isStopping
-            || isCapturingScreenshot
-          }
-          className={`h-9 min-w-9 rounded-lg border px-2 text-[10px] font-semibold transition ${
-            !isRecording || captureBackend !== 'native'
-              ? 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10'
-              : 'border-white/10 bg-white/10 text-white/90 hover:bg-white/15 active:scale-95'
-          } disabled:cursor-not-allowed disabled:opacity-40`}
-          title={
-            !isRecording
-              ? 'Nessuna registrazione in corso. Clicca per info.'
-              : captureBackend !== 'native'
-              ? t('recording.screenshotNativeOnly')
-              : selectedDisplayId === null && displays.length > 1
-              ? t('recording.screenshotChooseMonitorError')
-              : t('recording.screenshotShortcut')
-          }
+          disabled={isStopping || isCapturingScreenshot || !isRecording || captureBackend !== 'native' || selectedDisplayId === null}
+          className={`flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[10px] font-semibold transition active:scale-[0.97] ${
+            screenshotFeedback === 'saved'
+              ? 'border-emerald-300/30 bg-emerald-300/12 text-emerald-100'
+              : 'border-white/10 bg-white/[0.08] text-white/90 hover:bg-white/[0.12]'
+          } disabled:cursor-not-allowed disabled:opacity-35`}
+          title={selectedDisplayId === null ? 'Choose a screen first' : t('recording.screenshotShortcut')}
           aria-label={t('recording.screenshotAction')}
+          data-screenshot-action="true"
         >
-          {isCapturingScreenshot ? '…' : `▣ ${screenshotCount}`}
+          {isCapturingScreenshot ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : screenshotFeedback === 'saved' ? (
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Camera className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          <span>{screenshotFeedback === 'saved' ? 'Saved' : screenshotCount}</span>
         </button>
 
-        {/* Circular Stop Button */}
         <button
+          type="button"
           onClick={handleStop}
           disabled={isStopping || !isRecording}
-          className={`w-9 h-9 rounded-full transition-all flex items-center justify-center shadow-lg cursor-pointer ${
-            isStopping 
-              ? 'bg-yellow-600 cursor-not-allowed opacity-60' 
-              : !isRecording 
-              ? 'bg-gray-700 cursor-not-allowed opacity-40' 
-              : 'bg-red-500 hover:bg-red-600 active:scale-90 hover:shadow-red-500/20'
-          }`}
-          title="Ferma Registrazione"
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition active:scale-90 ${
+            isStopping
+              ? 'bg-amber-500/70 text-white'
+              : !isRecording
+              ? 'bg-white/10 text-white/30'
+              : 'bg-red-500 text-white shadow-[0_0_18px_rgba(239,68,68,0.18)] hover:bg-red-400'
+          } disabled:cursor-not-allowed`}
+          title="Stop recording"
+          aria-label="Stop recording"
         >
           {isStopping ? (
-            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
           ) : (
-            <div className="w-3 h-3 bg-white rounded-sm"></div>
+            <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
           )}
         </button>
       </div>
+
+      {isExpanded && (
+        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-white/[0.07] bg-black/15 px-2.5 py-2 text-[9px] text-white/45">
+          <div className="col-span-2 min-w-0">
+            <div className="text-[8px] uppercase tracking-[0.14em] text-white/30">Meeting</div>
+            <div className="mt-0.5 truncate text-[10px] font-medium text-white/80">
+              {title || t('recording.noActiveRecording')}
+            </div>
+          </div>
+          {captureMode !== 'pc_only' && (
+            <div>
+              <span>Mic </span>
+              <span className={micHealth.text}>{micHealth.label}</span>
+              <span className="ml-1 font-mono text-white/30">{displaySignalLevel(signalLevelMic)}</span>
+            </div>
+          )}
+          {captureMode !== 'mic_only' && (
+            <div>
+              <span>Computer </span>
+              <span className={systemHealth.text}>{systemHealth.label}</span>
+              <span className="ml-1 font-mono text-white/30">{displaySignalLevel(signalLevelSystem)}</span>
+            </div>
+          )}
+          <div>
+            Screenshots <span className="font-semibold text-white/75">{screenshotCount}</span>
+          </div>
+          <div>
+            Last <span className="font-mono text-white/65">
+              {lastScreenshotAt === null
+                ? '—'
+                : `${Math.floor(lastScreenshotAt / 60)}:${String(Math.floor(lastScreenshotAt % 60)).padStart(2, '0')}`}
+            </span>
+          </div>
+          <div className="col-span-2 flex items-center justify-between border-t border-white/[0.06] pt-1.5 text-[8px]">
+            <span>⌘⇧9 · Screenshot</span>
+            <span>{captureBackend} · {formatBytes(bytesWritten)}</span>
+          </div>
+          {visualCaptureLabel && (
+            <div className="col-span-2 truncate rounded bg-cyan-300/8 px-2 py-1 text-cyan-100/75" title={visualCaptureLabel}>
+              Visual capture: {visualCaptureLabel}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
