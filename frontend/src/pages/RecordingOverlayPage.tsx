@@ -56,6 +56,11 @@ export default function RecordingOverlayPage() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const timerIntervalRef = useRef<any>(null);
   const startedAtRef = useRef<number | null>(null);
+  const selectedDisplayIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    selectedDisplayIdRef.current = selectedDisplayId;
+  }, [selectedDisplayId]);
 
   // Formatter helpers
   const formatBytes = (bytes: number) => {
@@ -100,7 +105,7 @@ export default function RecordingOverlayPage() {
 
       const preferred = preferredDisplayId !== undefined
         ? preferredDisplayId
-        : (selectedDisplayId ?? (storedId && available.some(d => d.display_id === storedId) ? storedId : null));
+        : (selectedDisplayIdRef.current ?? (storedId && available.some(d => d.display_id === storedId) ? storedId : null));
 
       if (preferred && available.some((display) => display.display_id === preferred)) {
         setSelectedDisplayId(preferred);
@@ -114,7 +119,7 @@ export default function RecordingOverlayPage() {
       setDisplays([]);
       setSelectedDisplayId(null);
     }
-  }, [selectedDisplayId]);
+  }, []);
 
   const connectSSE = useCallback((recId: string) => {
     if (eventSourceRef.current) {
@@ -698,58 +703,3 @@ export default function RecordingOverlayPage() {
                 <div
                   className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-75 rounded-full"
                   style={{ width: `${systemPercentage}%` }}
-                ></div>
-              </div>
-              <span className="text-[8px] font-mono font-bold text-white/60 min-w-[64px] text-right">{displaySignalLevel(signalLevelSystem)}</span>
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={handleCaptureScreenshot}
-          disabled={
-            isStopping
-            || isCapturingScreenshot
-          }
-          className={`h-9 min-w-9 rounded-lg border px-2 text-[10px] font-semibold transition ${
-            !isRecording || captureBackend !== 'native'
-              ? 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10'
-              : 'border-white/10 bg-white/10 text-white/90 hover:bg-white/15 active:scale-95'
-          } disabled:cursor-not-allowed disabled:opacity-40`}
-          title={
-            !isRecording
-              ? 'Nessuna registrazione in corso. Clicca per info.'
-              : captureBackend !== 'native'
-              ? t('recording.screenshotNativeOnly')
-              : selectedDisplayId === null && displays.length > 1
-              ? t('recording.screenshotChooseMonitorError')
-              : t('recording.screenshotShortcut')
-          }
-          aria-label={t('recording.screenshotAction')}
-        >
-          {isCapturingScreenshot ? '…' : `▣ ${screenshotCount}`}
-        </button>
-
-        {/* Circular Stop Button */}
-        <button
-          onClick={handleStop}
-          disabled={isStopping || !isRecording}
-          className={`w-9 h-9 rounded-full transition-all flex items-center justify-center shadow-lg cursor-pointer ${
-            isStopping 
-              ? 'bg-yellow-600 cursor-not-allowed opacity-60' 
-              : !isRecording 
-              ? 'bg-gray-700 cursor-not-allowed opacity-40' 
-              : 'bg-red-500 hover:bg-red-600 active:scale-90 hover:shadow-red-500/20'
-          }`}
-          title="Ferma Registrazione"
-        >
-          {isStopping ? (
-            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-          ) : (
-            <div className="w-3 h-3 bg-white rounded-sm"></div>
-          )}
-        </button>
-      </div>
-    </div>
-  );
-}
