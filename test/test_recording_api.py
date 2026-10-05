@@ -108,8 +108,14 @@ class RecordingApiTests(unittest.TestCase):
                 request_id: str,
                 display_id: int | None = None,
                 admission_held: bool = False,
+                original_path: Path | None = None,
+                thumbnail_path: Path | None = None,
             ):
                 self.assert_admission = admission_held
+                assert original_path is not None
+                assert thumbnail_path is not None
+                original_path.write_bytes(b"\xff\xd8\xfforiginal")
+                thumbnail_path.write_bytes(b"\xff\xd8\xffthumb")
                 return {
                     "request_id": request_id,
                     "recording_id": recording_id,
@@ -125,8 +131,6 @@ class RecordingApiTests(unittest.TestCase):
                     "thumbnail_height": 360,
                     "format": "image/jpeg",
                     "overlay_exclusion": "closedroom_windows",
-                    "original_bytes": b"\xff\xd8\xfforiginal",
-                    "thumbnail_bytes": b"\xff\xd8\xffthumb",
                 }
 
         self.app.state.capture_manager = FakeCaptureManager()
@@ -175,6 +179,8 @@ class RecordingApiTests(unittest.TestCase):
                 request_id: str,
                 display_id: int | None = None,
                 admission_held: bool = False,
+                original_path: Path | None = None,
+                thumbnail_path: Path | None = None,
             ):
                 raise RuntimeError("screen_capture_permission_required")
 
