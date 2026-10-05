@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,78 @@ from local_asr_server.runtime.models import (
 DEFAULT_SERVER_PORT = DEFAULT_API_PORT
 DEV_SERVER_PORT = DEFAULT_DEV_RELOAD_PORT
 
+
+def _frontend_source_fingerprint(frontend_dir: Path) -> str:
+    """Hash frontend sources/config that determine the static bundle."""
+    digest = hashlib.sha256()
+    roots = [frontend_dir / "src", frontend_dir / "public"]
+    files: list[Path] = []
+    for root in roots:
+        if root.exists():
+            files.extend(path for path in root.rglob("*") if path.is_file())
+    for name in (
+        "index.html",
+        "package.json",
+        "pnpm-lock.yaml",
+        "tsconfig.json",
+        "tsconfig.node.json",
+        "vite.config.ts",
+        ".eslintrc.cjs",
+    ):
+        path = frontend_dir / name
+        if path.is_file():
+            files.append(path)
+
+    for path in sorted(set(files), key=lambda item: item.relative_to(frontend_dir).as_posix()):
+        relative = path.relative_to(frontend_dir).as_posix().encode("utf-8")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _ensure_dev_frontend_bundle() -> bool:
+    """Build source-mode web UI when frontend inputs changed."""
+    from local_asr_server.paths import is_bundled
+
+    if is_bundled():
+        return False
+
+    root = Path(__file__).resolve().parents[2]
+    frontend_dir = root / "frontend"
+    static_dir = root / "src" / "local_asr_server" / "static"
+    if not frontend_dir.is_dir():
+        return False
+
+    fingerprint = _frontend_source_fingerprint(frontend_dir)
+    cache_dir = root / ".cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    marker = cache_dir / "frontend-build.sha256"
+    current = marker.read_text(encoding="utf-8").strip() if marker.is_file() else ""
+    static_ready = (static_dir / "index.html").is_file()
+    if static_ready and current == fingerprint:
+        return False
+
+    pnpm = shutil.which("pnpm")
+    corepack = shutil.which("corepack")
+    if pnpm:
+        command = [pnpm, "build"]
+    elif corepack:
+        command = [corepack, "pnpm", "build"]
+    else:
+        raise RuntimeError(
+            "Frontend sources changed but pnpm/corepack is unavailable. "
+            "Install Node/Corepack or build the frontend before starting ClosedRoom."
+        )
+
+    print("Frontend sources changed; rebuilding ClosedRoom web UI...")
+    subprocess.run(command, cwd=frontend_dir, check=True)
+    if not (static_dir / "index.html").is_file():
+        raise RuntimeError("Frontend build completed without producing static/index.html")
+    marker.write_text(fingerprint + "\n", encoding="utf-8")
+    print("ClosedRoom web UI bundle is up to date.")
+    return True
 
 def _default_model() -> str:
     local_model_path = Path(
@@ -244,6 +317,7 @@ def main() -> None:
         _setup_audio()
         return
     if args.command == "app":
+        _ensure_dev_frontend_bundle()
         from local_asr_server.menubar import main as menubar_main
         menubar_main()
         return
@@ -257,6 +331,8 @@ def main() -> None:
     if args.command != "serve":
         parser.print_help()
         return
+
+    _ensure_dev_frontend_bundle()
 
     from local_asr_server.server import create_app
     from local_asr_server.runtime.port_manager import (
