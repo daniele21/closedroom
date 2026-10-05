@@ -21,7 +21,8 @@ class RecorderLifecycleContractTests(unittest.TestCase):
         self.assertIn("recorderLifecycleFlags", self.state)
 
     def test_hook_derives_mutually_exclusive_public_flags_from_lifecycle(self) -> None:
-        self.assertIn("useReducer(recorderLifecycleReducer", self.hook)
+        self.assertIn("const [recorderLifecycle, dispatchLifecycle] = useReducer(", self.hook)
+        self.assertIn("recorderLifecycleReducer,", self.hook)
         self.assertIn("recorderLifecycleFlags(recorderLifecycle)", self.hook)
         self.assertNotIn("const [isRecording, setIsRecording] = useState", self.hook)
         self.assertNotIn("const [isPreparingRecording, setIsPreparingRecording] = useState", self.hook)
