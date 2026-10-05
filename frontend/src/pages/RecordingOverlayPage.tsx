@@ -492,14 +492,14 @@ export default function RecordingOverlayPage() {
       logOverlay('error', 'Screenshot capture failed with error', { error: message });
       if (message.includes('selected_display_unavailable')) {
         setErrorMsg(t('recording.screenshotDisplayUnavailable'));
-        await loadDisplays(null, false);
-        setIsExpanded(true);
-        void ApiClient.resizeOverlay(320, 300);
+        await loadDisplays(undefined, false);
+        setIsDisplayPickerOpen(true);
+        void ApiClient.resizeOverlay(420, 300);
       } else if (message.includes('display_selection_required')) {
         setErrorMsg(t('recording.screenshotChooseMonitorError'));
-        await loadDisplays(null, false);
-        setIsExpanded(true);
-        void ApiClient.resizeOverlay(320, 300);
+        await loadDisplays(undefined, false);
+        setIsDisplayPickerOpen(true);
+        void ApiClient.resizeOverlay(420, 300);
       } else {
         setErrorMsg(message);
       }
