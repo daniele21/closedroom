@@ -79,10 +79,16 @@ def main() -> int:
             return status
 
     frontend_dir = Path("frontend")
+    frontend_env = {
+        **env,
+        "CLOSEDROOM_FRONTEND_OUT_DIR": str(
+            (Path(".cache") / "validation-frontend-static").resolve()
+        ),
+    }
     for frontend_command in (("lint",), ("build",)):
         status = run(
             pnpm_command(*frontend_command),
-            env=env,
+            env=frontend_env,
             cwd=frontend_dir,
         )
         if status != 0:
