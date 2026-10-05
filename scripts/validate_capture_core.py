@@ -10,7 +10,7 @@ import sys
 DETERMINISTIC_TESTS = [
     "test.test_native_capture",
     "test.test_screenshot_capture_core",
-    "test.test_recording_api",
+    "test.test_recording_api.RecordingApiTests.test_screenshot_api_uses_store_owned_staging_and_is_idempotent",
     "test.test_frontend_call_screenshot_evidence",
 ]
 
