@@ -95,7 +95,7 @@ Questi sono target da validare, non risultati già provati:
 | SC-2 | DisplayRegistry cached senza ScreenCaptureKit hot-path | helper + manager + API | SC-1 | DONE |
 | SC-3 | timeout locale, health, restart e backend fallback | worker | SC-1 | PARTIAL_REAL_ENV_PENDING |
 | SC-4 | staging/atomic commit RecordingStore senza read/write duplicato | RecordingStore + API | SC-1 | DONE |
-| SC-5 | overlay state/feedback rapido e no refresh display ridondanti | frontend | SC-2 | PARTIAL_UX_FOLLOWUP |
+| SC-5 | overlay control center, display ownership e feedback rapido | frontend + capture manager | SC-2 | IMPLEMENTED_PENDING_VALIDATION |
 | SC-6 | capture-core deterministic suite + benchmark harness | tests/scripts | SC-1..5 | DONE |
 | SC-7 | target-Mac burst/perf/TCC/audio-continuity evidence | real environment | SC-1..6 | PARTIAL_REAL_ENV_PASS |
 | SC-8 | rimozione runtime path one-shot subprocess legacy | manager/helper | SC-7 | PLANNED |
@@ -121,7 +121,7 @@ Implementato:
 
 Ancora aperto:
 - SC-3: il restart su timeout è implementato; fallback automatico a backend alternativo non è ancora introdotto e va deciso dai benchmark reali;
-- SC-5: il churn callback è ridotto, ma lo stato UX esplicito worker warming/ready resta da rifinire dopo evidenza reale sulla warm-up latency;
+- SC-5: redesign implementato sul branch `work/overlay-control-center`; resta da validare su Mac exact-head prima dell'integrazione su `dev`;
 - SC-7: TCC, ScreenCaptureKit reale, 20-shot burst, p50/p95, multi-display e continuità audio richiedono target Mac;
 - SC-8: il comando standalone one-shot resta presente come diagnostica/legacy finché il nuovo path non è validato.
 
@@ -137,6 +137,28 @@ Validazione capture-core aggiornata 2026-10-05:
 Il 2026-10-05 il native capture lifecycle è stato modificato dopo quell'evidenza per rimuovere il bootstrap concorrente del ScreenshotWorker dal critical path di recording startup e per impedire warm-up screenshot prima dell'evento audio `ready`. L'evidenza precedente resta utile come baseline del worker screenshot ma è STALE per l'exact HEAD corrente. La suite capture-core + REAL_ENVIRONMENT deve essere rieseguita sul nuovo head prima di una nuova readiness claim.
 
 SC-7 resta inoltre parziale: il benchmark reale prova il worker ScreenCaptureKit e la latenza sul target Mac, ma non copre ancora l'intera matrice prevista (recording `both` contemporaneo con continuità audio misurata, alternanza multi-display, fullscreen/Spaces, TCC deny/grant/relaunch e recovery reale dopo fault). Non inferire release readiness complessiva dal solo PASS capture-core.
+
+## Overlay control center follow-up 2026-10-05
+
+Il redesign dell'overlay separa controlli meeting da diagnostica tecnica.
+
+Invarianti introdotte:
+- la `CaptureSession` è l'owner canonico del display selezionato per il prossimo screenshot;
+- il frontend cambia display tramite `PUT /v1/recordings/{recording_id}/screenshot-display`;
+- il cambio è optimistic ma un valore SSE precedente non può fare rollback mentre la selezione è in-flight;
+- la preferenza in `localStorage` vale solo come default locale per sessioni future, non come stato canonico della sessione attiva;
+- il compact overlay mostra solo recording/timer, health mic/system, display target, screenshot e stop;
+- monitor selection è sempre accessibile tramite picker dedicato; nessun `<select>` browser legacy;
+- diagnostica come backend, bytes e raw dB resta solo nella vista espansa;
+- screenshot success produce feedback breve `Saved`;
+- display disconnected apre il picker e richiede una nuova scelta esplicita, senza silent switch.
+
+Acceptance:
+- selezione Display A -> Display B resta B dopo heartbeat SSE;
+- screenshot successivo usa B anche quando il caller non passa un display override;
+- invalid/disconnected display viene rifiutato dal backend;
+- compact overlay resta azionabile senza aprire Details;
+- nessuna preview live/continuous screen capture viene introdotta.
 
 ## Contratto worker
 
