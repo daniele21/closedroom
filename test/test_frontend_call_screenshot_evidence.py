@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "frontend" / "src" / "pages" / "RecordingOverlayPage.tsx"
+RECORDER = ROOT / "frontend" / "src" / "hooks" / "useRecorder.ts"
 MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
 TRANSCRIPT = ROOT / "frontend" / "src" / "components" / "transcription" / "TranscriptTextView.tsx"
 NOTES = ROOT / "frontend" / "src" / "components" / "meeting" / "StructuredNotesEditor.tsx"
@@ -18,6 +19,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.overlay = OVERLAY.read_text(encoding="utf-8")
+        cls.recorder = RECORDER.read_text(encoding="utf-8")
         cls.meeting = MEETING.read_text(encoding="utf-8")
         cls.transcript = TRANSCRIPT.read_text(encoding="utf-8")
         cls.notes = NOTES.read_text(encoding="utf-8")
@@ -36,6 +38,11 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("window.location.hash = `#meeting/${recordingId}`", self.overlay)
         self.assertIn("screenshot_count?: number", self.client)
         self.assertIn("/screenshots", self.client)
+
+    def test_source_mode_uses_browser_overlay_without_false_warning(self) -> None:
+        self.assertIn("res?.fallback_expected", self.recorder)
+        self.assertIn("setFallbackNotice(null)", self.recorder)
+        self.assertIn("openBrowserPopup()", self.recorder)
 
     def test_overlay_display_selection_has_backend_owner_and_modern_control_center(self) -> None:
         self.assertIn("ApiClient.selectScreenshotDisplay(recordingId, displayId)", self.overlay)
