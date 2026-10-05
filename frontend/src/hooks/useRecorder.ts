@@ -624,11 +624,16 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
               postNativeStatus();
               broadcastIntervalRef.current = setInterval(postNativeStatus, OVERLAY_STATUS_INTERVAL_MS);
 
-              // Request showing the native overlay panel
+              // Native panel exists only in app mode. In source/server mode the
+              // backend explicitly marks the browser popup as the expected surface.
               ApiClient.toggleOverlay(true).then((res) => {
                 if (!res || !res.success) {
-                  setFallbackNotice(t('recording.overlayFallbackNotice'));
-                  showToast(t('recording.overlayFallbackNotice'), 'warning');
+                  if (!res?.fallback_expected) {
+                    setFallbackNotice(t('recording.overlayFallbackNotice'));
+                    showToast(t('recording.overlayFallbackNotice'), 'warning');
+                  } else {
+                    setFallbackNotice(null);
+                  }
                   openBrowserPopup();
                 }
               }).catch(() => {
@@ -960,11 +965,15 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       postBrowserStatus();
       broadcastIntervalRef.current = setInterval(postBrowserStatus, OVERLAY_STATUS_INTERVAL_MS);
 
-      // Request showing the native overlay panel, fallback to browser window.open if unavailable
+      // In source/server mode the browser popup is the expected overlay surface.
       ApiClient.toggleOverlay(true).then((res) => {
         if (!res || !res.success) {
-          setFallbackNotice(t('recording.overlayFallbackNotice'));
-          showToast(t('recording.overlayFallbackNotice'), 'warning');
+          if (!res?.fallback_expected) {
+            setFallbackNotice(t('recording.overlayFallbackNotice'));
+            showToast(t('recording.overlayFallbackNotice'), 'warning');
+          } else {
+            setFallbackNotice(null);
+          }
           openBrowserPopup();
         }
       }).catch(() => {
