@@ -282,7 +282,7 @@ async def transcribe_upload(
 
     suffix = Path(file.filename or "audio").suffix or ".audio"
     try:
-        with tempfile_NamedTemporaryFile_patch(suffix=suffix) as tmp_path:
+        with tempfile_NamedTemporaryFile_patch(suffix=suffix, cleanup=not is_streaming) as tmp_path:
             audio_path = Path(tmp_path)
             audio_path.write_bytes(await file.read())
             logger.info(
@@ -304,13 +304,16 @@ async def transcribe_upload(
                 )
 
                 async def cached_event_generator():
-                    yield json.dumps({
-                        "type": "progress",
-                        "step": "loading_model",
-                        "message": "Caricamento risultato della trascrizione da cache locale...",
-                    }) + "\n"
-                    await asyncio.sleep(0.5)
-                    yield json.dumps({"type": "completed", "data": cached_res}) + "\n"
+                    try:
+                        yield json.dumps({
+                            "type": "progress",
+                            "step": "loading_model",
+                            "message": "Caricamento risultato della trascrizione da cache locale...",
+                        }) + "\n"
+                        await asyncio.sleep(0.5)
+                        yield json.dumps({"type": "completed", "data": cached_res}) + "\n"
+                    finally:
+                        audio_path.unlink(missing_ok=True)
 
                 return StreamingResponse(
                     cached_event_generator(),
@@ -339,6 +342,8 @@ async def transcribe_upload(
                             yield json.dumps({"type": "completed", "data": payload}) + "\n"
                         except Exception as exc:
                             yield json.dumps({"type": "error", "error": str(exc)}) + "\n"
+                        finally:
+                            audio_path.unlink(missing_ok=True)
 
                     return StreamingResponse(
                         cloud_event_generator(),
@@ -346,37 +351,40 @@ async def transcribe_upload(
                     )
 
                 async def event_generator_wrapper():
-                    async for event in transcribe_stream_generator(
-                        audio_path=tmp_path,
-                        model=target_model,
-                        language=language,
-                        task=task,
-                        word_timestamps=word_timestamps,
-                        initial_prompt=initial_prompt,
-                        temperature=temperature,
-                        condition_on_previous_text=condition_on_previous_text,
-                        cache_key=cache_key,
-                        audio_filename=file.filename,
-                        recording_id=recording_id,
-                        transcription_store=get_services(request.app).transcriptions,
-                        started_at=started_at,
-                        vad_guided=vad_guided,
-                        vad_post_filter=vad_post_filter,
-                        asr_provider=provider,
-                        backend=_effective_backend(provider, target_model),
-                        provider_options=public_options,
-                        payload_postprocessor=(
-                            lambda source_path, payload: _apply_initial_diarization(
-                                request.app,
-                                source_path,
-                                payload,
-                                provider=selected_diarization_provider,
-                                speechmatics_region=speechmatics_region,
-                                speechmatics_model=speechmatics_model,
-                            )
-                        ) if selected_diarization_provider != DIARIZATION_PROVIDER_DISABLED else None,
-                    ):
-                        yield event
+                    try:
+                        async for event in transcribe_stream_generator(
+                            audio_path=tmp_path,
+                            model=target_model,
+                            language=language,
+                            task=task,
+                            word_timestamps=word_timestamps,
+                            initial_prompt=initial_prompt,
+                            temperature=temperature,
+                            condition_on_previous_text=condition_on_previous_text,
+                            cache_key=cache_key,
+                            audio_filename=file.filename,
+                            recording_id=recording_id,
+                            transcription_store=get_services(request.app).transcriptions,
+                            started_at=started_at,
+                            vad_guided=vad_guided,
+                            vad_post_filter=vad_post_filter,
+                            asr_provider=provider,
+                            backend=_effective_backend(provider, target_model),
+                            provider_options=public_options,
+                            payload_postprocessor=(
+                                lambda source_path, payload: _apply_initial_diarization(
+                                    request.app,
+                                    source_path,
+                                    payload,
+                                    provider=selected_diarization_provider,
+                                    speechmatics_region=speechmatics_region,
+                                    speechmatics_model=speechmatics_model,
+                                )
+                            ) if selected_diarization_provider != DIARIZATION_PROVIDER_DISABLED else None,
+                        ):
+                            yield event
+                    finally:
+                        audio_path.unlink(missing_ok=True)
 
                 return StreamingResponse(
                     event_generator_wrapper(),
@@ -398,6 +406,8 @@ async def transcribe_upload(
                 return JSONResponse(payload)
             return JSONResponse({"text": payload["text"]})
     except Exception as exc:
+        if is_streaming and "tmp_path" in locals():
+            Path(tmp_path).unlink(missing_ok=True)
         logger.error(
             "[/v1/audio/transcriptions] Request failed: %s",
             exc,
@@ -733,15 +743,16 @@ import tempfile
 import contextlib
 
 @contextlib.contextmanager
-def tempfile_NamedTemporaryFile_patch(suffix=""):
-    """Helper to handle temporary file path lifecycle cleanly."""
+def tempfile_NamedTemporaryFile_patch(suffix="", *, cleanup: bool = True):
+    """Own a temporary path, optionally transferring cleanup to a stream."""
     fd, path = tempfile.mkstemp(suffix=suffix)
     os.close(fd)
     try:
         yield path
     finally:
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except OSError:
-            pass
+        if cleanup:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
