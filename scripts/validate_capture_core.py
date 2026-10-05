@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 DETERMINISTIC_TEST_PATTERNS = [
+    "test_cli.py",
     "test_native_capture.py",
     "test_screenshot_capture_core.py",
     "test_recording_api.py",
