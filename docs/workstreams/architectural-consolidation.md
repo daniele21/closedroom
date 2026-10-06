@@ -115,9 +115,9 @@ Acceptance:
 - no TCC/signing identity change.
 
 ### AC-6 — Local AI runtime port
-Status: READY
+Status: WAVE_2_CANDIDATE
 
-Start after AC-3/AC-4 establish stable application boundaries.
+Wave 2 candidate: application analysis and visual workflows depend on `LocalAIRuntimePort`; concrete `local_llm_server` client/vision imports are isolated in `LocalLLMServerAdapter`. `RuntimeServiceManager` remains the lifecycle/readiness owner and no remote fallback is introduced.
 
 Observable outcome: ClosedRoom application code depends on a small Local AI runtime port; the current `local-llm-server`/Korgis-compatible implementation sits behind the adapter.
 
@@ -127,11 +127,9 @@ Acceptance:
 - no cloud fallback is introduced.
 
 ### AC-7 — Follow-up hardening
-Status: READY
+Status: PARTIAL_WAVE_2_CANDIDATE
 
-After the structural lanes converge:
-- remove global `ModelRuntimeLeaseManager` service injection;
-- replace the `AppServices(... analysis_jobs=None ...)` construction cycle;
+Wave 2 candidate removes the process-global `ModelRuntimeLeaseManager` injection in favor of one app-owned phase coordinator and removes the `AppServices(... analysis_jobs=None ...)` construction cycle through explicit analysis dependencies. Remaining hardening stays split into independent follow-up lanes:
 - introduce versioned SQLite migration ownership;
 - move cloud credentials toward macOS Keychain;
 - introduce typed settings;
@@ -163,6 +161,7 @@ Source identity at creation:
 - base branch: `dev`
 - original base HEAD: `ae3775a0510b51c45b31373bcba344aa1d1ee7e1`
 - workstream bootstrap merged to `dev`: `90d06cb1e17c7f33db4db462e722d8bf411de354`
+- Wave 1 merged to `dev`: `6dc0ee1986d14169ea997ea1b6714b5d94555a9c` via PR #81
 
 Wave 1 integration:
 - integration PR: #81 (`work/architectural-consolidation-wave1` -> `dev`);
@@ -179,12 +178,19 @@ Failure resolution during convergence:
 - single-file transcription cache identity was fixed so diarization configuration participates without duplicating ASR cache policy;
 - the Saved Meeting journey was corrected to model the screenshot accessory endpoint and scope recovery clicks to the diagnostic/visual status being tested, instead of relying on the first generic Retry button.
 
-Remaining structural work:
+Wave 2 candidate:
+- base: `dev` at `6dc0ee1986d14169ea997ea1b6714b5d94555a9c`;
+- isolated lane PRs #82 (service graph), #83 (app-owned model phases), and #84 (Local AI client port) passed Repository health and Remote preflight on their lane heads;
+- the combined integration branch is `work/architectural-consolidation-wave2`;
+- the combined server composition preserves both a complete `AppServices` graph and injection of `runtime_services.model_phases` into local ASR/diarization;
+- direct consumer review updated `test_shared_analysis_pipeline` to the narrowed `AnalysisJobManager` dependency contract before integration validation.
+
+Remaining structural work after Wave 2:
 - AC-2: decompose `RecordingOverlayPage` and continue reducing page-level orchestration;
 - AC-3: converge path/recording transcription adapters on the application boundary;
 - AC-4: continue RecordingStore visual/artifact decomposition;
 - AC-5: continue native audio/display/permission/run-lifecycle separation;
-- AC-6 and AC-7 remain queued after Wave 1 integration.
+- AC-7: versioned DB migrations, Keychain-backed cloud credentials, typed settings, generated frontend API contracts, generated-source cleanup, and naming cleanup remain separate follow-up lanes.
 
 Next action:
-- merge PR #81 after the documentation-only exact-head check/reuse succeeds, close the superseded isolated Wave 1 lane PRs, then start Wave 2 as small independent lanes rather than one hardening bundle.
+- validate the combined Wave 2 candidate at exact-head/base under the repository-selected INTEGRATION profile; merge only after required source/package gates pass, then close #82–#84 as superseded.
