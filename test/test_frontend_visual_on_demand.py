@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
+MEETING_ACCESSORIES = ROOT / "frontend" / "src" / "hooks" / "useMeetingAccessories.ts"
 CLIENT = ROOT / "frontend" / "src" / "api" / "visualJobs.ts"
 NEW_MEETING = ROOT / "frontend" / "src" / "pages" / "NewRecordingPage.tsx"
 
@@ -13,11 +14,13 @@ NEW_MEETING = ROOT / "frontend" / "src" / "pages" / "NewRecordingPage.tsx"
 class FrontendVisualOnDemandContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.meeting = MEETING.read_text(encoding="utf-8")
+        self.meeting_accessories = MEETING_ACCESSORIES.read_text(encoding="utf-8")
         self.client = CLIENT.read_text(encoding="utf-8")
         self.new_meeting = NEW_MEETING.read_text(encoding="utf-8")
 
     def test_meeting_only_offers_analysis_when_screen_context_was_captured(self) -> None:
-        self.assertIn("ApiClient.recordingVisualFrames(recordingId)", self.meeting)
+        self.assertIn("useMeetingAccessories", self.meeting)
+        self.assertIn("ApiClient.recordingVisualFrames(recordingId)", self.meeting_accessories)
         self.assertIn("const visualEvidenceCount = visualFrameCount + availableScreenshotCount", self.meeting)
         self.assertIn("visualData?.source_validity?.status === 'stale'", self.meeting)
         self.assertIn("visualResultAvailable && !visualSourcesStale", self.meeting)

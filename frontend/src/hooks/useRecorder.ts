@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useReducer } from 'react';
 import { ApiClient, Recording } from '../api/apiClient';
 import {
   createCaptureReservation,
@@ -12,6 +12,11 @@ import { useToast } from '../context/ToastContext';
 import { useAudioDevices, AudioDevice, AudioRouteStatus } from './useAudioDevices';
 import { drawAudioMeterOnCanvas } from '../utils/audioVisualizer';
 import { BrowserUploadBacklog } from '../utils/browserUploadBacklog';
+import {
+  INITIAL_RECORDER_LIFECYCLE,
+  recorderLifecycleFlags,
+  recorderLifecycleReducer,
+} from './recorderLifecycle';
 
 export type { AudioDevice, AudioRouteStatus };
 
@@ -40,9 +45,11 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const { t } = useTranslation();
   const { showToast } = useToast();
 
-  const [isRecording, setIsRecording] = useState(false);
-  const [isPreparingRecording, setIsPreparingRecording] = useState(false);
-  const [isWaitingForAi, setIsWaitingForAi] = useState(false);
+  const [recorderLifecycle, dispatchLifecycle] = useReducer(
+    recorderLifecycleReducer,
+    INITIAL_RECORDER_LIFECYCLE,
+  );
+  const { isRecording, isPreparingRecording, isWaitingForAi } = recorderLifecycleFlags(recorderLifecycle);
   const [timer, setTimer] = useState('00:00');
   const [signalLevel, setSignalLevel] = useState('-∞ dB');
   const [signalLevelMic, setSignalLevelMic] = useState('-∞ dB');
@@ -283,6 +290,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       && (mediaRecorders.length === 0 || mediaRecorders.every((recorder) => recorder.state === 'inactive'))
     ) return;
 
+    dispatchLifecycle({ type: 'stop_requested' });
     setStatusText(t('recording.finalizing'));
     setStatusState('working');
 
@@ -371,7 +379,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
           setStatusState('success');
           setProgressText(t('recording.audioCompleteSaved'));
         }
-        setIsRecording(false);
+        dispatchLifecycle({ type: 'reset' });
         await releaseCaptureLease().catch(() => {});
         if (onSaved) onSaved(recording);
       }
@@ -467,8 +475,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const cancelPendingStart = useCallback(async () => {
     if (!isPreparingRecording || captureLeaseCommittedRef.current) return;
     cancelStartRequestedRef.current = true;
-    setIsWaitingForAi(false);
-    setIsPreparingRecording(false);
+    dispatchLifecycle({ type: 'reset' });
     setIsVerifying(false);
     await releaseCaptureLease().catch(() => {});
     setStatusText(t('recording.statusReady'));
@@ -493,8 +500,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     startInFlightRef.current = true;
     cancelStartRequestedRef.current = false;
     captureLeaseCommittedRef.current = false;
-    setIsPreparingRecording(true);
-    setIsWaitingForAi(false);
+    dispatchLifecycle({ type: 'prepare' });
     setIsVerifying(true);
     setPermissionsErrorDetails(null);
     setFallbackNotice(null);
@@ -518,7 +524,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       localStorage.setItem(CAPTURE_RESERVATION_STORAGE_KEY, initialReservation.reservation_id);
       let reservation = initialReservation;
       if (reservation.status === 'waiting') {
-        setIsWaitingForAi(true);
+        dispatchLifecycle({ type: 'wait_for_ai' });
       }
       while (reservation.status === 'waiting') {
         await new Promise((resolve) => setTimeout(resolve, CAPTURE_RESERVATION_POLL_MS));
@@ -529,7 +535,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         }
         reservation = await getCaptureReservation(reservation.reservation_id);
       }
-      setIsWaitingForAi(false);
+      dispatchLifecycle({ type: 'resume_preparation' });
       if (cancelled()) {
         await releaseCaptureLease().catch(() => {});
         startInFlightRef.current = false;
@@ -642,9 +648,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                 openBrowserPopup();
               });
 
-              setIsPreparingRecording(false);
               setIsVerifying(false);
-              setIsRecording(true);
+              dispatchLifecycle({ type: 'recording_started' });
               setStatusState('recording');
               setStatusText(t('recording.statusRecording'));
               setProgressText(t('recording.progressSaving') || 'Salvataggio in corso...');
@@ -667,11 +672,9 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
               localStorage.removeItem('asr-active-recording-id');
               sessionIdRef.current = null;
               captureLeaseCommittedRef.current = false;
-              setIsPreparingRecording(false);
-              setIsWaitingForAi(false);
               setIsVerifying(false);
               setStatusState('error');
-              setIsRecording(false);
+              dispatchLifecycle({ type: 'reset' });
               void releaseCaptureLease().catch(() => {});
 
               if (data.reason === 'permissions_missing') {
@@ -723,9 +726,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
             localStorage.removeItem('asr-active-recording-id');
             sessionIdRef.current = null;
             captureLeaseCommittedRef.current = false;
-            setIsPreparingRecording(false);
-            setIsWaitingForAi(false);
             setIsVerifying(false);
+            dispatchLifecycle({ type: 'reset' });
             setStatusState('error');
             setStatusText(t('recording.startFailed'));
             showToast(t('recording.startFailed'), 'error');
@@ -982,10 +984,8 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         openBrowserPopup();
       });
 
-      setIsPreparingRecording(false);
-      setIsWaitingForAi(false);
       setIsVerifying(false);
-      setIsRecording(true);
+      dispatchLifecycle({ type: 'recording_started' });
       setStatusText(t('recording.statusRecording'));
       setStatusState('recording');
       setProgressText(t('recording.progressSaving'));
@@ -993,8 +993,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
 
     } catch (error: any) {
       startInFlightRef.current = false;
-      setIsPreparingRecording(false);
-      setIsWaitingForAi(false);
+      dispatchLifecycle({ type: 'reset' });
       setIsVerifying(false);
       if (!captureLeaseCommittedRef.current) {
         await releaseCaptureLease().catch(() => {});

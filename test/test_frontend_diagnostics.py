@@ -31,8 +31,10 @@ class FrontendDiagnosticContractTests(unittest.TestCase):
 
     def test_meeting_drawer_consumes_diagnostic_endpoint_and_renders_failures(self) -> None:
         page = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
+        accessories = (ROOT / "frontend/src/hooks/useMeetingAccessories.ts").read_text(encoding="utf-8")
         client = (ROOT / "frontend/src/api/apiClient.ts").read_text(encoding="utf-8")
-        self.assertIn("ApiClient.getMeetingDiagnostics(recordingId)", page)
+        self.assertIn("useMeetingAccessories", page)
+        self.assertIn("ApiClient.getMeetingDiagnostics(recordingId)", accessories)
         self.assertIn("completed_with_warnings", page)
         self.assertIn("item.requested_backend", page)
         self.assertIn("item.actual_backend", page)

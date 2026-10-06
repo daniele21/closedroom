@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "frontend" / "src" / "pages" / "RecordingOverlayPage.tsx"
 RECORDER = ROOT / "frontend" / "src" / "hooks" / "useRecorder.ts"
 MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
+MEETING_ACCESSORIES = ROOT / "frontend" / "src" / "hooks" / "useMeetingAccessories.ts"
 TRANSCRIPT = ROOT / "frontend" / "src" / "components" / "transcription" / "TranscriptTextView.tsx"
 NOTES = ROOT / "frontend" / "src" / "components" / "meeting" / "StructuredNotesEditor.tsx"
 CLIENT = ROOT / "frontend" / "src" / "api" / "apiClient.ts"
@@ -21,6 +22,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         cls.overlay = OVERLAY.read_text(encoding="utf-8")
         cls.recorder = RECORDER.read_text(encoding="utf-8")
         cls.meeting = MEETING.read_text(encoding="utf-8")
+        cls.meeting_accessories = MEETING_ACCESSORIES.read_text(encoding="utf-8")
         cls.transcript = TRANSCRIPT.read_text(encoding="utf-8")
         cls.notes = NOTES.read_text(encoding="utf-8")
         cls.client = CLIENT.read_text(encoding="utf-8")
@@ -76,7 +78,9 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertNotIn("seg.id =", self.transcript)
 
     def test_meeting_and_structured_notes_share_the_same_screenshot_assets(self) -> None:
-        self.assertIn("ApiClient.recordingScreenshots(recordingId)", self.meeting)
+        self.assertIn("useMeetingAccessories", self.meeting)
+        self.assertIn("ApiClient.recordingScreenshots(recordingId)", self.meeting_accessories)
+        self.assertIn("screenshots,", self.meeting)
         self.assertGreaterEqual(self.meeting.count("screenshots={screenshots}"), 2)
         self.assertIn("onOpenScreenshot={setSelectedScreenshot}", self.meeting)
         self.assertIn("ref.source_type === 'screenshot'", self.notes)
@@ -105,8 +109,12 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
             "06-transcript-marker-in-turn",
             "07-screenshot-to-audio",
             "call-overlay-screenshot-evidence",
+            'data-display-selector="true"',
+            'data-display-picker="true"',
+            'data-screenshot-action="true"',
         ):
             self.assertIn(evidence, self.e2e)
+        self.assertNotIn("querySelector('[data-testid=\"recording-overlay\"] select')", self.e2e)
 
     def test_failed_api_response_body_is_consumed_once(self) -> None:
         self.assertIn("const bodyText = await response.text();", self.client)

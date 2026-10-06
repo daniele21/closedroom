@@ -11,6 +11,15 @@ logger = logging.getLogger("uvicorn.error")
 
 _MODULE_DIR = Path(__file__).parent
 _SWIFT_SOURCE = _MODULE_DIR / "native_capture_helper.swift"
+
+
+def _swift_sources() -> tuple[Path, ...]:
+    """Return every Swift compilation unit with the main source first."""
+    sources = sorted(_MODULE_DIR.glob("*.swift"), key=lambda path: path.name)
+    if _SWIFT_SOURCE not in sources:
+        return tuple(sources)
+    return (_SWIFT_SOURCE, *(path for path in sources if path != _SWIFT_SOURCE))
+
 _PROJECT_ROOT = _MODULE_DIR.parents[2]
 _CACHE_DIR = _PROJECT_ROOT / ".cache" / "native-capture-helper"
 _BINARY_PATH = _CACHE_DIR / "native-capture-helper"
@@ -18,7 +27,13 @@ _HASH_PATH = _CACHE_DIR / "source.sha256"
 
 
 def _swift_source_hash() -> str:
-    return hashlib.sha256(_SWIFT_SOURCE.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    for source in _swift_sources():
+        digest.update(source.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(source.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _is_binary_up_to_date() -> bool:
@@ -50,7 +65,7 @@ def compile_helper(force: bool = False) -> str:
         "-O",
         "-o",
         str(_BINARY_PATH),
-        str(_SWIFT_SOURCE),
+        *(str(source) for source in _swift_sources()),
         "-framework",
         "Foundation",
         "-framework",

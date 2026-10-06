@@ -16,12 +16,13 @@ const evidenceRoot = path.resolve(
     || path.join(root, 'dist/evidence/browser-call-screenshot'),
 );
 const sourceRevision = process.env.E2E_SOURCE_REVISION || 'unknown';
-const counts = { active: 0, displays: 0, screenshots_get: 0, screenshots_post: 0, stop: 0, open_meeting: 0, meeting: 0, visual_frames: 0 };
+const counts = { active: 0, displays: 0, display_select: 0, screenshots_get: 0, screenshots_post: 0, stop: 0, open_meeting: 0, meeting: 0, visual_frames: 0 };
 const checkpoints = [];
 const sseClients = new Set();
 let frameIndex = 0;
 let active = true;
 let screenshot = null;
+let selectedDisplayId = null;
 
 const recording = {
   id: MEETING_ID,
@@ -149,7 +150,7 @@ function overlayPayload() {
     active: true, recording_id: MEETING_ID, title: recording.title,
     capture_backend: 'native', capture_mode: 'both', started_at: '2026-10-01T18:00:00Z',
     bytes_written: 4096, mic_db: -20, system_db: -18, warnings: [],
-    screenshot_count: screenshot ? 1 : 0, screenshot_display_id: screenshot ? 7 : null,
+    screenshot_count: screenshot ? 1 : 0, screenshot_display_id: selectedDisplayId,
   } : { active: false };
 }
 function sendOverlay(res) { res.write('data: ' + JSON.stringify(overlayPayload()) + '\n\n'); }
@@ -172,6 +173,19 @@ function fixtureServer(port) {
         { display_id: 7, source_id: -7, title: 'Synthetic Display 1', width: 1440, height: 900 },
         { display_id: 8, source_id: -8, title: 'Synthetic Display 2', width: 1920, height: 1080 },
       ] });
+    }
+    if (pathname === '/v1/recordings/' + MEETING_ID + '/screenshot-display' && req.method === 'PUT') {
+      counts.display_select += 1;
+      const parsed = JSON.parse(await requestBody(req) || '{}');
+      const displays = [
+        { display_id: 7, source_id: -7, title: 'Synthetic Display 1', width: 1440, height: 900 },
+        { display_id: 8, source_id: -8, title: 'Synthetic Display 2', width: 1920, height: 1080 },
+      ];
+      const display = displays.find((item) => item.display_id === Number(parsed.display_id));
+      if (!display) return json(res, 409, { detail: 'selected_display_unavailable' });
+      selectedDisplayId = display.display_id;
+      for (const client of sseClients) sendOverlay(client);
+      return json(res, 200, { recording_id: MEETING_ID, display_id: display.display_id, display });
     }
     if (pathname === '/v1/recordings/' + MEETING_ID + '/overlay/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-store', connection: 'keep-alive' });
@@ -299,6 +313,16 @@ async function waitText(browser, needles, timeoutMs = 8000, record = false) {
   }
   throw new Error('timed out waiting for ' + needles.join(' | ') + '; text=' + last.slice(0, 1200));
 }
+async function waitSelector(browser, selector, timeoutMs = 8000, record = false) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await browser.execute(`return Boolean(document.querySelector(${JSON.stringify(selector)}));`);
+    if (found) return;
+    if (record) await frame(browser);
+    await sleep(150);
+  }
+  throw new Error('timed out waiting for selector ' + selector);
+}
 async function waitHash(browser, expected, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -349,7 +373,7 @@ try {
   browser = new Browser(driverPort);
   await browser.start();
   await browser.navigate('http://127.0.0.1:' + vitePort + '/#overlay');
-  await waitText(browser, ['Screenshot evidence review'], 30000, true);
+  await waitText(browser, ['Synthetic Display 1'], 30000, true);
   await checkpoint(browser, '01-overlay-recording');
 
   const expanded = await browser.execute(`
@@ -357,25 +381,39 @@ try {
     if (!button) return false; button.click(); return true;
   `);
   if (!expanded) throw new Error('overlay details control not found');
-  await waitText(browser, ['Synthetic Display 1'], 5000, true);
+  await waitText(browser, ['Screenshot evidence review'], 5000, true);
+
+  const pickerOpened = await browser.execute(`
+    const button = document.querySelector('button[data-display-selector="true"]');
+    if (!button || button.disabled) return false; button.click(); return true;
+  `);
+  if (!pickerOpened) throw new Error('display picker control unavailable');
+  await waitText(browser, ['Screenshot screen'], 3000, true);
+
   const selected = await browser.execute(`
-    const select = document.querySelector('[data-testid="recording-overlay"] select');
-    if (!select) return false; select.value = '7'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === '7';
+    const picker = document.querySelector('[data-display-picker="true"]');
+    if (!picker) return false;
+    const option = Array.from(picker.querySelectorAll('[role="option"]'))
+      .find((node) => (node.innerText || '').includes('Synthetic Display 1'));
+    if (!option || option.disabled) return false; option.click(); return true;
   `);
   if (!selected) throw new Error('display selection failed');
+  const selectionDeadline = Date.now() + 3000;
+  while (counts.display_select < 1 && Date.now() < selectionDeadline) await sleep(50);
+  if (counts.display_select !== 1) throw new Error('unexpected display selection count: ' + counts.display_select);
+  await waitText(browser, ['Synthetic Display 1'], 3000, true);
   await checkpoint(browser, '02-display-selected');
 
   const clickedShot = await browser.execute(`
-    const labels = ['Cattura screenshot', 'Capture screenshot'];
-    const button = Array.from(document.querySelectorAll('button')).find((node) => labels.includes(node.getAttribute('aria-label')));
+    const button = document.querySelector('button[data-screenshot-action="true"]');
     if (!button || button.disabled) return false; button.click(); return true;
   `);
   if (!clickedShot) throw new Error('screenshot button unavailable');
-  await waitText(browser, ['Screenshot: 1', 'Screenshots: 1'], 8000, true);
+  await waitText(browser, ['Saved', 'Screenshots 1'], 8000, true);
   if (counts.screenshots_post !== 1) throw new Error('unexpected screenshot POST count: ' + counts.screenshots_post);
   await checkpoint(browser, '03-screenshot-persisted');
 
-  await browser.clickCss('button[title="Ferma Registrazione"]');
+  await browser.clickCss('button[aria-label="Stop recording"]');
   await waitHash(browser, '#meeting/' + MEETING_ID, 10000);
   await waitText(browser, ['Screenshot evidence review'], 30000, true);
   if (counts.stop !== 1 || counts.open_meeting !== 1) throw new Error('stop/open counts unexpected: ' + JSON.stringify(counts));
@@ -399,7 +437,7 @@ try {
 
   await browser.clickCss('#meeting-tab-transcript');
   await waitText(browser, ['Alex reviews the launch roadmap and validation plan.'], 5000, true);
-  await waitText(browser, ['Screenshot 1 · 00:12.00'], 5000);
+  await waitSelector(browser, 'button[data-screenshot-id="shot-001"]', 5000, true);
   const anchored = await browser.execute(`
     const marker = document.querySelector('button[data-screenshot-id="shot-001"]');
     if (!marker) return false;
