@@ -24,11 +24,12 @@ BUNDLE_RUNTIME_IMPORTS = (
     "local_llm_server.cli",
     "mlx_vlm.server",
     "mlx_vlm.models.qwen3_vl",
+    "mlx_whisper.transcribe",
 )
 
 
 def _run_bundle_runtime_smoke() -> None:
-    """Exercise the packaged image-only AI surface without starting model inference."""
+    """Exercise packaged ASR/VLM surfaces without starting model inference."""
     imported: list[str] = []
     for module_name in BUNDLE_RUNTIME_IMPORTS:
         importlib.import_module(module_name)
@@ -60,7 +61,7 @@ def _run_bundle_runtime_smoke() -> None:
         for module_name in excluded_modules
     }
     if any(module_presence.values()):
-        raise RuntimeError(f"Excluded generic VLM dependencies still packaged: {module_presence}")
+        raise RuntimeError(f"Excluded non-runtime dependencies still packaged: {module_presence}")
 
     print(json.dumps({
         "ok": True,
