@@ -534,17 +534,27 @@ export default function RecordingOverlayPage() {
     setErrorMsg(null);
     try {
       await ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId);
-      const remaining = await ApiClient.recordingScreenshots(recordingId);
-      setScreenshotCount(remaining.total || 0);
-      const latest = remaining.items?.[remaining.items.length - 1];
-      setLastScreenshotAt(typeof latest?.timestamp === 'number' ? latest.timestamp : null);
       setLastSavedScreenshotId(null);
       setScreenshotFeedback('idle');
+      setScreenshotCount((current) => Math.max(0, current - 1));
+      setLastScreenshotAt(null);
       if (screenshotFeedbackTimerRef.current) {
         window.clearTimeout(screenshotFeedbackTimerRef.current);
         screenshotFeedbackTimerRef.current = null;
       }
       logOverlay('info', 'Last screenshot removed with undo', { recordingId });
+
+      try {
+        const remaining = await ApiClient.recordingScreenshots(recordingId);
+        setScreenshotCount(remaining.total || 0);
+        const latest = remaining.items?.[remaining.items.length - 1];
+        setLastScreenshotAt(typeof latest?.timestamp === 'number' ? latest.timestamp : null);
+      } catch (refreshErr: any) {
+        logOverlay('warn', 'Screenshot undo committed but list refresh failed', {
+          recordingId,
+          error: String(refreshErr?.message || refreshErr),
+        });
+      }
     } catch (err: any) {
       const message = String(err?.message || (t('recording.screenshotFailed') || 'Unable to remove screenshot.'));
       setErrorMsg(message);
