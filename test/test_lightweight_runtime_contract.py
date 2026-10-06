@@ -52,7 +52,8 @@ class LightweightRuntimeContractTests(unittest.TestCase):
         menubar = (ROOT / "src" / "local_asr_server" / "menubar.py").read_text(encoding="utf-8")
 
         self.assertIn("def _needs_mlx_preload", hook)
-        self.assertIn('args[0] == "transcribe"', hook)
+        self.assertIn('"transcribe"', hook)
+        self.assertIn('"bundle-runtime-smoke"', hook)
         self.assertIn('"local_asr_server.runtime.local_llm_entrypoint"', hook)
         self.assertIn("_needs_mlx_preload(sys.argv)", hook)
         self.assertNotIn('ctypes.CDLL(str(_libmlx_path))', menubar)
