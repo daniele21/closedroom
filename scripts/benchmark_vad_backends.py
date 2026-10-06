@@ -26,6 +26,7 @@ from local_asr_server.audio_intelligence.vad_benchmark import (
     build_benchmark_report,
     build_case_report,
     discover_finalized_recording_tracks,
+    reference_segment_windows,
 )
 from local_asr_server.settings import load_settings
 
@@ -141,6 +142,7 @@ def main() -> int:
             rms_runs=rms_runs,
             silero_windows=representative_silero,
             rms_windows=representative_rms,
+            reference_windows=reference_segment_windows(path),
         ))
 
     report = build_benchmark_report(cases)

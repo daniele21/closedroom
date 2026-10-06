@@ -34,6 +34,65 @@ def interval_duration(windows: list[dict[str, float]]) -> float:
     return sum(end - start for start, end in _intervals(windows))
 
 
+def timeline_recall(
+    reference: list[dict[str, float]],
+    candidate: list[dict[str, float]],
+) -> float | None:
+    reference_intervals = _intervals(reference)
+    candidate_intervals = _intervals(candidate)
+    reference_duration = sum(end - start for start, end in reference_intervals)
+    if reference_duration <= 0:
+        return None
+    intersection = 0.0
+    candidate_index = 0
+    for reference_start, reference_end in reference_intervals:
+        while (
+            candidate_index < len(candidate_intervals)
+            and candidate_intervals[candidate_index][1] <= reference_start
+        ):
+            candidate_index += 1
+        check_index = candidate_index
+        while check_index < len(candidate_intervals):
+            candidate_start, candidate_end = candidate_intervals[check_index]
+            if candidate_start >= reference_end:
+                break
+            intersection += max(
+                0.0,
+                min(reference_end, candidate_end) - max(reference_start, candidate_start),
+            )
+            if candidate_end >= reference_end:
+                break
+            check_index += 1
+    return min(1.0, intersection / reference_duration)
+
+
+def reference_segment_windows(audio_path: Path) -> list[dict[str, float]]:
+    """Load only timing/track metadata from an existing local transcript for quality proxying."""
+    transcript_path = audio_path.parent / "transcript.json"
+    if not transcript_path.is_file():
+        return []
+    try:
+        payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    track_id = "mixed" if audio_path.stem == "recording" else audio_path.stem
+    windows: list[dict[str, float]] = []
+    for segment in payload.get("segments") or []:
+        segment_track = str(segment.get("track_id") or "")
+        if segment_track and segment_track != track_id:
+            continue
+        if not segment_track and track_id != "mixed":
+            continue
+        try:
+            start = float(segment.get("start") or 0.0)
+            end = float(segment.get("end") or start)
+        except (TypeError, ValueError):
+            continue
+        if end > start:
+            windows.append({"start": start, "end": end})
+    return windows
+
+
 def timeline_jaccard(
     left: list[dict[str, float]],
     right: list[dict[str, float]],
@@ -90,10 +149,14 @@ def build_case_report(
     rms_runs: list[dict[str, Any]],
     silero_windows: list[dict[str, float]],
     rms_windows: list[dict[str, float]],
+    reference_windows: list[dict[str, float]] | None = None,
 ) -> dict[str, Any]:
     silero = summarize_backend_runs(silero_runs, duration_seconds=duration_seconds)
     rms = summarize_backend_runs(rms_runs, duration_seconds=duration_seconds)
     jaccard = timeline_jaccard(silero_windows, rms_windows)
+    reference_windows = reference_windows or []
+    silero_reference_recall = timeline_recall(reference_windows, silero_windows)
+    rms_reference_recall = timeline_recall(reference_windows, rms_windows)
     silero_wall = float(silero["median_wall_seconds"])
     rms_wall = float(rms["median_wall_seconds"])
     return {
@@ -109,6 +172,18 @@ def build_case_report(
             "speech_ratio_delta_rms_minus_silero": (
                 round(float(rms["median_speech_ratio"]) - float(silero["median_speech_ratio"]), 4)
                 if rms["median_speech_ratio"] is not None and silero["median_speech_ratio"] is not None
+                else None
+            ),
+            "reference_segment_seconds": round(interval_duration(reference_windows), 3),
+            "silero_reference_speech_recall": (
+                round(silero_reference_recall, 4) if silero_reference_recall is not None else None
+            ),
+            "rms_reference_speech_recall": (
+                round(rms_reference_recall, 4) if rms_reference_recall is not None else None
+            ),
+            "reference_recall_delta_rms_minus_silero": (
+                round(rms_reference_recall - silero_reference_recall, 4)
+                if rms_reference_recall is not None and silero_reference_recall is not None
                 else None
             ),
         },
@@ -128,6 +203,11 @@ def build_benchmark_report(cases: list[dict[str, Any]]) -> dict[str, Any]:
         for case in cases
         if case.get("comparison", {}).get("rms_to_silero_wall_ratio") is not None
     ]
+    reference_recalls = [
+        float(case["comparison"]["rms_reference_speech_recall"])
+        for case in cases
+        if case.get("comparison", {}).get("rms_reference_speech_recall") is not None
+    ]
     return {
         "schema_version": VAD_BACKEND_BENCHMARK_SCHEMA_VERSION,
         "benchmark": "silero_vad_vs_energy_rms",
@@ -140,6 +220,9 @@ def build_benchmark_report(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "summary": {
             "median_timeline_jaccard": round(median(jaccards), 4) if jaccards else None,
             "median_rms_to_silero_wall_ratio": round(median(ratios), 4) if ratios else None,
+            "median_rms_reference_speech_recall": (
+                round(median(reference_recalls), 4) if reference_recalls else None
+            ),
         },
         "cases": cases,
         "decision_policy": {
