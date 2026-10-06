@@ -260,7 +260,10 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const visualEvidenceCount = visualFrameCount + availableScreenshotCount;
   const { data: visualData, loading: visualLoading, error: visualError } = useVisualIntelligence(
     demoMode ? null : recordingId,
-    Boolean(visualResultAvailable && (activeTab === 'analysis' || savedScreenshotCount > 0)),
+    Boolean(
+      (visualResultAvailable && activeTab === 'analysis')
+      || (visualResultAvailable && Boolean(selectedScreenshot)),
+    ),
   );
   const selectedKeyMomentVisual = selectedScreenshot
     ? keyMomentVisualContext(selectedScreenshot, visualData)
