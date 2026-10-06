@@ -194,8 +194,10 @@ class StructuredNotesTests(unittest.TestCase):
         chunks, refs = build_source_chunks(transcription)
 
         self.assertTrue(any("[Vshot-1" in chunk for chunk in chunks))
+        self.assertTrue(any("user_marked=true" in chunk for chunk in chunks))
         self.assertEqual(refs["V:shot-1"]["source_type"], "screenshot")
         self.assertTrue(refs["V:shot-1"]["machine_interpreted"])
+        self.assertTrue(refs["V:shot-1"]["user_marked"])
 
         result = normalize_structured_notes(
             {

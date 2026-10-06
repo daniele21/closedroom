@@ -68,6 +68,10 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertNotIn("<select", self.overlay)
         self.assertIn("display.width} × {display.height", self.overlay)
         self.assertIn("screenshotFeedback === 'saved'", self.overlay)
+        self.assertIn("ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId)", self.overlay)
+        self.assertIn("if (isUndoingScreenshot)", self.overlay)
+        self.assertIn("isCapturingScreenshot || isUndoingScreenshot", self.overlay)
+        self.assertIn('data-screenshot-undo="true"', self.overlay)
 
     def test_transcript_keeps_asr_segments_immutable_and_anchors_screenshot_by_time(self) -> None:
         self.assertIn("segment.start <= shot.timestamp && shot.timestamp <= segment.end", self.transcript)
@@ -88,11 +92,15 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
 
     def test_meeting_surfaces_saved_screenshots_as_progressive_gallery(self) -> None:
         self.assertIn('data-meeting-screenshot-gallery="true"', self.meeting)
+        self.assertIn('data-key-moments="true"', self.meeting)
+        self.assertIn("keyMomentContext(", self.meeting)
         self.assertIn("screenshots.slice(0, 6)", self.meeting)
         self.assertIn("setShowAllScreenshots((value) => !value)", self.meeting)
         self.assertIn("src={shot.thumbnail_url}", self.meeting)
         self.assertIn("onClick={() => setSelectedScreenshot(shot)}", self.meeting)
         self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.meeting)
+        self.assertIn("data-key-moment-id={shot.screenshot_id}", self.meeting)
+        self.assertIn("data-key-moment-context=\"true\"", self.meeting)
         self.assertIn("src={selectedScreenshot.original_url}", self.meeting)
         self.assertIn("handleTimestampClick(selectedScreenshot.timestamp)", self.meeting)
 
@@ -112,6 +120,8 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
             'data-display-selector="true"',
             'data-display-picker="true"',
             'data-screenshot-action="true"',
+            'data-screenshot-undo="true"',
+            'data-key-moment-id="shot-001"',
         ):
             self.assertIn(evidence, self.e2e)
         self.assertNotIn("querySelector('[data-testid=\"recording-overlay\"] select')", self.e2e)

@@ -40,6 +40,8 @@ export default function RecordingOverlayPage() {
   const [pendingDisplayId, setPendingDisplayId] = useState<number | null>(null);
   const [isSelectingDisplay, setIsSelectingDisplay] = useState(false);
   const [screenshotFeedback, setScreenshotFeedback] = useState<'idle' | 'saved'>('idle');
+  const [lastSavedScreenshotId, setLastSavedScreenshotId] = useState<string | null>(null);
+  const [isUndoingScreenshot, setIsUndoingScreenshot] = useState(false);
 
   const logOverlay = useCallback((level: 'info' | 'warn' | 'error', message: string, data?: any) => {
     console[level === 'warn' ? 'warn' : level === 'error' ? 'error' : 'log'](`[Overlay] ${message}`, data || '');
@@ -164,6 +166,7 @@ export default function RecordingOverlayPage() {
           setRecordingId(null);
           setScreenshotCount(0);
           setLastScreenshotAt(null);
+          setLastSavedScreenshotId(null);
           if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
           setTimer('00:00');
           sse.close();
@@ -267,6 +270,7 @@ export default function RecordingOverlayPage() {
         setRecordingId(null);
         setScreenshotCount(0);
         setLastScreenshotAt(null);
+        setLastSavedScreenshotId(null);
         setTimer('00:00');
         if (eventSourceRef.current) {
           eventSourceRef.current.close();
@@ -308,6 +312,7 @@ export default function RecordingOverlayPage() {
               if (prevId !== data.recordingId) {
                 setScreenshotCount(0);
                 setLastScreenshotAt(null);
+                setLastSavedScreenshotId(null);
                 setErrorMsg(null);
                 connectSSE(data.recordingId);
                 if (data.captureBackend === 'native') {
@@ -433,6 +438,10 @@ export default function RecordingOverlayPage() {
       logOverlay('warn', 'Screenshot ignored: capture already in flight');
       return;
     }
+    if (isUndoingScreenshot) {
+      logOverlay('warn', 'Screenshot ignored: undo already in flight');
+      return;
+    }
     if (!isRecording) {
       const msg = 'Nessuna registrazione attiva. Avvia prima una registrazione per scattare screenshot.';
       setErrorMsg(msg);
@@ -485,10 +494,12 @@ export default function RecordingOverlayPage() {
         setSelectedDisplayId(saved.display_id);
       }
       setScreenshotFeedback('saved');
+      setLastSavedScreenshotId(saved.screenshot_id);
       if (screenshotFeedbackTimerRef.current) window.clearTimeout(screenshotFeedbackTimerRef.current);
       screenshotFeedbackTimerRef.current = window.setTimeout(() => {
         setScreenshotFeedback('idle');
-      }, 1200);
+        setLastSavedScreenshotId(null);
+      }, 4500);
       logOverlay('info', 'Screenshot captured and stored successfully', {
         screenshot_id: saved.screenshot_id,
         sequence: saved.sequence,
@@ -513,6 +524,42 @@ export default function RecordingOverlayPage() {
       }
     } finally {
       setIsCapturingScreenshot(false);
+    }
+  };
+
+  const handleUndoScreenshot = async () => {
+    if (!recordingId || !lastSavedScreenshotId || isUndoingScreenshot || isStopping) return;
+    setIsUndoingScreenshot(true);
+    setErrorMsg(null);
+    try {
+      await ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId);
+      setLastSavedScreenshotId(null);
+      setScreenshotFeedback('idle');
+      setScreenshotCount((current) => Math.max(0, current - 1));
+      setLastScreenshotAt(null);
+      if (screenshotFeedbackTimerRef.current) {
+        window.clearTimeout(screenshotFeedbackTimerRef.current);
+        screenshotFeedbackTimerRef.current = null;
+      }
+      logOverlay('info', 'Last screenshot removed with undo', { recordingId });
+
+      try {
+        const remaining = await ApiClient.recordingScreenshots(recordingId);
+        setScreenshotCount(remaining.total || 0);
+        const latest = remaining.items?.[remaining.items.length - 1];
+        setLastScreenshotAt(typeof latest?.timestamp === 'number' ? latest.timestamp : null);
+      } catch (refreshErr: any) {
+        logOverlay('warn', 'Screenshot undo committed but list refresh failed', {
+          recordingId,
+          error: String(refreshErr?.message || refreshErr),
+        });
+      }
+    } catch (err: any) {
+      const message = String(err?.message || (t('recording.screenshotFailed') || 'Unable to remove screenshot.'));
+      setErrorMsg(message);
+      logOverlay('error', 'Screenshot undo failed', { recordingId, error: message });
+    } finally {
+      setIsUndoingScreenshot(false);
     }
   };
 
@@ -864,28 +911,48 @@ export default function RecordingOverlayPage() {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={handleCaptureScreenshot}
-          disabled={isStopping || isCapturingScreenshot || !isRecording || captureBackend !== 'native' || selectedDisplayId === null}
-          className={`flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[10px] font-semibold transition active:scale-[0.97] ${
-            screenshotFeedback === 'saved'
-              ? 'border-emerald-300/30 bg-emerald-300/12 text-emerald-100'
-              : 'border-white/10 bg-white/[0.08] text-white/90 hover:bg-white/[0.12]'
-          } disabled:cursor-not-allowed disabled:opacity-35`}
-          title={selectedDisplayId === null ? 'Choose a screen first' : t('recording.screenshotShortcut')}
-          aria-label={t('recording.screenshotAction')}
-          data-screenshot-action="true"
-        >
-          {isCapturingScreenshot ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-          ) : screenshotFeedback === 'saved' ? (
-            <Check className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : (
-            <Camera className="h-3.5 w-3.5" aria-hidden="true" />
+        <div className={`flex h-9 shrink-0 overflow-hidden rounded-lg border ${
+          screenshotFeedback === 'saved'
+            ? 'border-emerald-300/30 bg-emerald-300/12'
+            : 'border-white/10 bg-white/[0.08]'
+        }`}>
+          <button
+            type="button"
+            onClick={handleCaptureScreenshot}
+            disabled={isStopping || isCapturingScreenshot || isUndoingScreenshot || !isRecording || captureBackend !== 'native' || selectedDisplayId === null}
+            className={`flex h-full items-center gap-1.5 px-2.5 text-[10px] font-semibold transition active:scale-[0.97] ${
+              screenshotFeedback === 'saved'
+                ? 'text-emerald-100'
+                : 'text-white/90 hover:bg-white/[0.05]'
+            } disabled:cursor-not-allowed disabled:opacity-35`}
+            title={selectedDisplayId === null ? 'Choose a screen first' : t('recording.screenshotShortcut')}
+            aria-label={t('recording.screenshotAction')}
+            data-screenshot-action="true"
+          >
+            {isCapturingScreenshot ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : screenshotFeedback === 'saved' ? (
+              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Camera className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            <span>{screenshotFeedback === 'saved' ? 'Saved' : screenshotCount}</span>
+          </button>
+
+          {lastSavedScreenshotId && (
+            <button
+              type="button"
+              onClick={() => void handleUndoScreenshot()}
+              disabled={isUndoingScreenshot || isStopping}
+              className="flex h-full items-center border-l border-emerald-200/20 px-2 text-[9px] font-semibold text-emerald-100/75 transition hover:bg-emerald-200/10 hover:text-emerald-50 disabled:cursor-not-allowed disabled:opacity-35"
+              aria-label="Undo last screenshot"
+              title="Undo last screenshot"
+              data-screenshot-undo="true"
+            >
+              {isUndoingScreenshot ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
+            </button>
           )}
-          <span>{screenshotFeedback === 'saved' ? 'Saved' : screenshotCount}</span>
-        </button>
+        </div>
 
         <button
           type="button"

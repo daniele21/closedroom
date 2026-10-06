@@ -1,6 +1,7 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ArrowLeft,
+  Bookmark,
   ChevronDown,
   CheckCircle2,
   Clock3,
@@ -16,7 +17,7 @@ import {
   Users,
   XCircle,
 } from 'lucide-react';
-import { ApiClient, AnalysisRun, Meeting, RecordingScreenshot } from '../api/apiClient';
+import { ApiClient, AnalysisRun, Meeting, RecordingScreenshot, TranscriptionSegment } from '../api/apiClient';
 import { createVisualIntelligenceJob, cancelVisualIntelligenceJob } from '../api/visualJobs';
 import { prepareMeetingNotes, cancelMeetingPreparation } from '../api/meetingPreparation';
 import { ANALYSIS_TYPE_LABELS, ANALYSIS_TYPE_ORDER } from '../api/config';
@@ -77,6 +78,64 @@ function screenshotTimestampLabel(seconds: number): string {
   const minutes = Math.floor(safe / 60);
   const remaining = Math.floor(safe % 60);
   return `${minutes}:${String(remaining).padStart(2, '0')}`;
+}
+
+interface KeyMomentContext {
+  excerpt: string;
+  speakers: string[];
+  start: number | null;
+  end: number | null;
+}
+
+function keyMomentContext(
+  shot: RecordingScreenshot,
+  segments: TranscriptionSegment[] | undefined,
+): KeyMomentContext {
+  const available = (segments || []).filter((segment) => String(segment.text || '').trim());
+  if (!available.length) return { excerpt: '', speakers: [], start: null, end: null };
+
+  const windowStart = Math.max(0, shot.timestamp - 30);
+  const windowEnd = shot.timestamp + 45;
+  let nearby = available.filter((segment) => segment.end >= windowStart && segment.start <= windowEnd);
+
+  if (!nearby.length) {
+    const nearest = [...available]
+      .sort((a, b) => {
+        const distanceA = Math.min(Math.abs(a.start - shot.timestamp), Math.abs(a.end - shot.timestamp));
+        const distanceB = Math.min(Math.abs(b.start - shot.timestamp), Math.abs(b.end - shot.timestamp));
+        return distanceA - distanceB;
+      })[0];
+    const nearestDistance = nearest
+      ? Math.min(Math.abs(nearest.start - shot.timestamp), Math.abs(nearest.end - shot.timestamp))
+      : Number.POSITIVE_INFINITY;
+    nearby = nearest && nearestDistance <= 90 ? [nearest] : [];
+  }
+
+  const selected = nearby
+    .sort((a, b) => {
+      const centerA = (a.start + a.end) / 2;
+      const centerB = (b.start + b.end) / 2;
+      return Math.abs(centerA - shot.timestamp) - Math.abs(centerB - shot.timestamp);
+    })
+    .slice(0, 4)
+    .sort((a, b) => a.start - b.start);
+  const excerpt = selected
+    .map((segment) => String(segment.text || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 320);
+  const speakers = Array.from(new Set(
+    selected
+      .map((segment) => String(segment.speaker_name || segment.speaker_label || '').trim())
+      .filter(Boolean),
+  )).slice(0, 3);
+
+  return {
+    excerpt,
+    speakers,
+    start: selected.length ? Math.min(...selected.map((segment) => segment.start)) : null,
+    end: selected.length ? Math.max(...selected.map((segment) => segment.end)) : null,
+  };
 }
 
 function preparationProgressLabel(step: string, lang: string): string {
@@ -145,6 +204,18 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const availableScreenshotCount = screenshots.filter((item) => item.available).length;
   const visibleScreenshots = showAllScreenshots ? screenshots : screenshots.slice(0, 6);
   const hiddenScreenshotCount = Math.max(0, savedScreenshotCount - visibleScreenshots.length);
+  const keyMomentContexts = useMemo(
+    () => new Map(
+      screenshots.map((shot) => [
+        shot.screenshot_id,
+        keyMomentContext(shot, meeting?.transcription?.segments),
+      ]),
+    ),
+    [screenshots, meeting?.transcription?.segments],
+  );
+  const selectedKeyMomentContext = selectedScreenshot
+    ? keyMomentContexts.get(selectedScreenshot.screenshot_id)
+    : null;
   const visualEvidenceCount = visualFrameCount + availableScreenshotCount;
   const { data: visualData, loading: visualLoading, error: visualError } = useVisualIntelligence(
     demoMode ? null : recordingId, visualResultAvailable && activeTab === 'analysis',
@@ -748,23 +819,24 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         {!demoMode && screenshotsState === 'ready' && savedScreenshotCount > 0 && (
           <section
             data-meeting-screenshot-gallery="true"
+            data-key-moments="true"
             className="rounded-xl border border-border-subtle bg-bg-elevated p-4"
             aria-labelledby="meeting-screenshots-title"
           >
             <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-2.5">
-                <Images className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                <Bookmark className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 id="meeting-screenshots-title" className="text-xs font-semibold text-text-primary">
-                      {lang === 'it' ? 'Screenshot del meeting' : 'Meeting screenshots'}
+                      {lang === 'it' ? 'Momenti chiave' : 'Key moments'}
                     </h3>
                     <Badge variant="idle">{savedScreenshotCount}</Badge>
                   </div>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
+                  <p className="mt-0.5 max-w-2xl text-[11px] leading-relaxed text-text-muted">
                     {lang === 'it'
-                      ? 'Catture manuali salvate durante la registrazione. Aprine una per ingrandirla o andare al punto esatto dell’audio.'
-                      : 'Manual captures saved during recording. Open one to enlarge it or jump to the exact point in the audio.'}
+                      ? 'Momenti che hai segnato durante il meeting. ClosedRoom li collega al transcript e all’audio senza registrare lo schermo in continuo.'
+                      : 'Moments you marked during the meeting. ClosedRoom connects them to the transcript and audio without continuous screen recording.'}
                   </p>
                 </div>
               </div>
@@ -787,51 +859,76 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
-              {visibleScreenshots.map((shot) => (
-                <button
-                  key={shot.screenshot_id}
-                  type="button"
-                  onClick={() => setSelectedScreenshot(shot)}
-                  className="group relative overflow-hidden rounded-lg border border-border-subtle bg-bg-surface text-left transition hover:border-border-focus hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                  aria-label={
-                    lang === 'it'
-                      ? `Apri screenshot a ${screenshotTimestampLabel(shot.timestamp)}`
-                      : `Open screenshot at ${screenshotTimestampLabel(shot.timestamp)}`
-                  }
-                  title={shot.display_title || undefined}
-                >
-                  <div className="aspect-video overflow-hidden bg-bg-surface">
-                    {shot.available && shot.thumbnail_available ? (
-                      <img
-                        src={shot.thumbnail_url}
-                        alt=""
-                        loading="lazy"
-                        className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-text-muted">
-                        {lang === 'it' ? 'Immagine non disponibile' : 'Image unavailable'}
+            <div className="flex flex-col gap-2.5">
+              {visibleScreenshots.map((shot) => {
+                const context = keyMomentContexts.get(shot.screenshot_id);
+                return (
+                  <button
+                    key={shot.screenshot_id}
+                    type="button"
+                    onClick={() => setSelectedScreenshot(shot)}
+                    className="group grid min-h-[124px] w-full max-w-3xl grid-cols-[128px_minmax(0,1fr)] overflow-hidden rounded-xl border border-border-subtle bg-bg-surface text-left transition hover:border-border-focus hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:grid-cols-[190px_minmax(0,1fr)]"
+                    aria-label={
+                      lang === 'it'
+                        ? `Apri momento chiave a ${screenshotTimestampLabel(shot.timestamp)}`
+                        : `Open key moment at ${screenshotTimestampLabel(shot.timestamp)}`
+                    }
+                    title={shot.display_title || undefined}
+                    data-key-moment-id={shot.screenshot_id}
+                  >
+                    <div className="flex h-full min-h-[124px] items-center justify-center overflow-hidden bg-black/5 p-1.5">
+                      {shot.available && shot.thumbnail_available ? (
+                        <img
+                          src={shot.thumbnail_url}
+                          alt=""
+                          loading="lazy"
+                          className="max-h-[120px] w-full object-contain transition-transform duration-200 group-hover:scale-[1.01]"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-text-muted">
+                          {lang === 'it' ? 'Immagine non disponibile' : 'Image unavailable'}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex min-w-0 flex-col justify-between gap-2 p-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-[11px] font-semibold tabular-nums text-text-primary">
+                            {screenshotTimestampLabel(shot.timestamp)}
+                          </span>
+                          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[9px] font-semibold text-accent">
+                            {lang === 'it' ? 'Segnato da te' : 'Marked by you'}
+                          </span>
+                        </div>
+                        <p className="mt-2 max-h-14 overflow-hidden text-xs leading-relaxed text-text-secondary">
+                          {context?.excerpt || (
+                            lang === 'it'
+                              ? 'Nessun parlato vicino a questo momento. L’immagine e il riferimento temporale restano disponibili.'
+                              : 'No nearby speech for this moment. The image and timestamp remain available.'
+                          )}
+                        </p>
                       </div>
-                    )}
-                  </div>
-                  <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-2.5 pb-2 pt-5 text-white">
-                    <span className="font-mono text-[11px] font-semibold tabular-nums">
-                      {screenshotTimestampLabel(shot.timestamp)}
-                    </span>
-                    <span className="truncate text-[9px] text-white/75">
-                      {shot.sequence + 1}
-                    </span>
-                  </div>
-                </button>
-              ))}
+                      <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] text-text-muted">
+                        <span className="truncate">
+                          {context?.speakers?.length
+                            ? context.speakers.join(' · ')
+                            : (shot.display_title || (lang === 'it' ? 'Contesto visuale' : 'Visual context'))}
+                        </span>
+                        <span className="shrink-0 font-medium text-accent">
+                          {lang === 'it' ? 'Apri momento' : 'Open moment'}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
             {!showAllScreenshots && hiddenScreenshotCount > 0 && (
               <p className="mt-2.5 text-right text-[10px] text-text-muted">
                 {lang === 'it'
-                  ? `+${hiddenScreenshotCount} screenshot non mostrati`
-                  : `+${hiddenScreenshotCount} more screenshot${hiddenScreenshotCount === 1 ? '' : 's'}`}
+                  ? `+${hiddenScreenshotCount} momenti non mostrati`
+                  : `+${hiddenScreenshotCount} more moment${hiddenScreenshotCount === 1 ? '' : 's'}`}
               </p>
             )}
           </section>
@@ -1480,9 +1577,12 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
             <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-text-primary">
-                  Screenshot · {Math.floor(selectedScreenshot.timestamp / 60)}:{String(Math.floor(selectedScreenshot.timestamp % 60)).padStart(2, '0')}
+                  {lang === 'it' ? 'Momento chiave' : 'Key moment'} · {Math.floor(selectedScreenshot.timestamp / 60)}:{String(Math.floor(selectedScreenshot.timestamp % 60)).padStart(2, '0')}
                 </p>
-                <p className="truncate text-xs text-text-muted">{selectedScreenshot.display_title || (lang === 'it' ? 'Schermo acquisito' : 'Captured display')}</p>
+                <p className="truncate text-xs text-text-muted">
+                  {lang === 'it' ? 'Segnato da te durante il meeting' : 'Marked by you during the meeting'}
+                  {selectedScreenshot.display_title ? ` · ${selectedScreenshot.display_title}` : ''}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <Button
@@ -1503,6 +1603,26 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
               </div>
             </div>
             <div className="min-h-0 overflow-auto bg-black/5 p-3">
+              {selectedKeyMomentContext?.excerpt && (
+                <div
+                  className="mb-3 rounded-xl border border-border-subtle bg-bg-surface px-4 py-3"
+                  data-key-moment-context="true"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                      {lang === 'it' ? 'Cosa si stava dicendo' : 'What was being said'}
+                    </p>
+                    {selectedKeyMomentContext.speakers.length > 0 && (
+                      <span className="text-[10px] text-text-muted">
+                        {selectedKeyMomentContext.speakers.join(' · ')}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-sm leading-relaxed text-text-secondary">
+                    {selectedKeyMomentContext.excerpt}
+                  </p>
+                </div>
+              )}
               {selectedScreenshot.available ? (
                 <img
                   src={selectedScreenshot.original_url}

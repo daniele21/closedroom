@@ -148,8 +148,8 @@
     "surface_hierarchy": {
       "today": "understand what happened, what needs attention and what to open or do next",
       "new_meeting": "optionally add meeting context, see readiness and start recording; if managed AI is already active, show truthful cancellable preparation rather than pretending recording has started",
-      "record": "understand capture status, take deliberate manual screenshots of a selected display when useful, and safely Stop; screenshot feedback is secondary to audio health and never implies persistence before backend confirmation",
-      "meeting": "use the saved meeting as the canonical workspace with one primary Prepare notes action and secondary Transcript only recovery/power action",
+      "record": "understand capture status, deliberately mark visual key moments with a screenshot of the selected display, briefly undo the latest saved screenshot when needed, and safely Stop; screenshot feedback is secondary to audio health and never implies persistence before backend confirmation",
+      "meeting": "use the saved meeting as the canonical workspace, review deliberately marked key moments with nearby transcript and audio context, and keep one primary Prepare notes action plus the secondary Transcript only recovery/power action",
       "prepare_notes": "coordinate transcript then notes as one recoverable user task, expose the transcript as soon as it is ready, and preserve completed work across cancel, failure, reconnect and explicit resume",
       "notes_review": "open ready notes first while keeping transcript, speakers and advanced tools directly reachable"
     }
@@ -254,7 +254,7 @@
     },
     {
       "id": "call-overlay-screenshot-evidence",
-      "name": "During an active native meeting, deliberately capture a selected display, save it before success is shown, Stop into the saved Meeting, review the image at its recording timestamp and distinguish visual evidence from spoken evidence in notes",
+      "name": "During an active native meeting, deliberately mark a visual key moment from a selected display, save it before success is shown, optionally undo the latest capture, Stop into the saved Meeting, review that moment with nearby transcript and audio context, and distinguish visual evidence from spoken evidence in notes",
       "e2e": "required"
     },
     {
