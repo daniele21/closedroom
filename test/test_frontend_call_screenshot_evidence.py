@@ -94,7 +94,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn('data-meeting-screenshot-gallery="true"', self.meeting)
         self.assertIn('data-key-moments="true"', self.meeting)
         self.assertIn("keyMomentContext(", self.meeting)
-        self.assertIn("screenshots.slice(0, 6)", self.meeting)
+        self.assertIn("collapsedKeyMoments.slice(0, 6)", self.meeting)
         self.assertIn("setShowAllScreenshots((value) => !value)", self.meeting)
         self.assertIn("src={shot.thumbnail_url}", self.meeting)
         self.assertIn("onClick={() => setSelectedScreenshot(shot)}", self.meeting)
