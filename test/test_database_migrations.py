@@ -89,6 +89,21 @@ class DatabaseMigrationTests(unittest.TestCase):
                 count = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
             self.assertEqual(count, 2)
 
+    def test_applied_version_name_cannot_be_rewritten(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        apply_migrations(
+            conn,
+            component="catalog",
+            migrations=(Migration(1, "original", lambda _conn: None),),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "migration history mismatch"):
+            apply_migrations(
+                conn,
+                component="catalog",
+                migrations=(Migration(1, "renamed", lambda _conn: None),),
+            )
+
     def test_duplicate_component_versions_fail_before_mutating_schema(self) -> None:
         conn = sqlite3.connect(":memory:")
         calls: list[str] = []
