@@ -3,12 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from fastapi import HTTPException
 
-from local_asr_server.app_services import AppServices
 from local_asr_server.llm import DEFAULT_GEMINI_MODEL, LLMService
 from local_asr_server.env import get_env_var
 from local_asr_server.runtime.llm_sidecar import LocalLLMSidecarError
@@ -16,6 +16,12 @@ from local_asr_server.runtime.models import ANALYSIS_QUALITY_DEFAULTS, resolve_l
 from local_asr_server.schemas import ANALYSIS_SETTING_OVERRIDE_FIELDS, AnalysisRequest
 from local_asr_server.recordings import RecordingError
 from local_asr_server.settings import load_settings
+if TYPE_CHECKING:
+    from local_asr_server.catalog import CatalogStore
+    from local_asr_server.recordings import RecordingStore
+    from local_asr_server.runtime.service_manager import RuntimeServiceManager
+    from local_asr_server.transcriptions import TranscriptionStore
+
 from local_asr_server.structured_notes import (
     StructuredNotesError,
     StructuredNotesInputTooLarge,
@@ -30,10 +36,25 @@ STRUCTURED_ANALYSIS_CACHE_VERSION = "analysis-structured-v3"
 MAX_STRUCTURED_VISUAL_SOURCES = 12
 
 
+class AnalysisServiceDependencies(Protocol):
+    runtime: "RuntimeServiceManager"
+    catalog: "CatalogStore"
+    recordings: "RecordingStore"
+    transcriptions: "TranscriptionStore"
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisServiceContext:
+    runtime: "RuntimeServiceManager"
+    catalog: "CatalogStore"
+    recordings: "RecordingStore"
+    transcriptions: "TranscriptionStore"
+
+
 class AnalysisService:
     """Application service that owns analysis workflow decisions."""
 
-    def __init__(self, services: AppServices) -> None:
+    def __init__(self, services: AnalysisServiceDependencies) -> None:
         self.services = services
 
     def analyze(self, body: AnalysisRequest) -> dict[str, Any]:
