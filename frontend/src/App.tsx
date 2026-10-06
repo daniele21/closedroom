@@ -1,4 +1,4 @@
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
 import {
   BarChart3,
   ChevronDown,
@@ -18,13 +18,6 @@ import { ApiClient } from './api/apiClient';
 import { HEALTH_CHECK_INTERVAL_MS } from './api/config';
 import DashboardPage from './pages/DashboardPage';
 import NewRecordingPage from './pages/NewRecordingPage';
-import RecordingPage from './pages/RecordingPage';
-import TranscriptionPage from './pages/TranscriptionPage';
-import ProjectsPage from './pages/ProjectsPage';
-import AnalysisPage from './pages/AnalysisPage';
-import SettingsPage from './pages/SettingsPage';
-import RecordingOverlayPage from './pages/RecordingOverlayPage';
-import MeetingDetailPage from './pages/MeetingDetailPage';
 import { Badge } from './components/ui/Badge';
 import { Button } from './components/ui/Button';
 import { DemoBanner } from './components/ui/DemoBanner';
@@ -32,6 +25,14 @@ import { TourOverlay } from './features/tour/TourOverlay';
 import { TourRecordingMock } from './features/tour/TourRecordingMock';
 import { TOUR_STEPS, TourStepId, tourStepIndex } from './features/tour/tourSteps';
 import './workspace.css';
+
+const RecordingPage = lazy(() => import('./pages/RecordingPage'));
+const TranscriptionPage = lazy(() => import('./pages/TranscriptionPage'));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
+const AnalysisPage = lazy(() => import('./pages/AnalysisPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const RecordingOverlayPage = lazy(() => import('./pages/RecordingOverlayPage'));
+const MeetingDetailPage = lazy(() => import('./pages/MeetingDetailPage'));
 
 function MainApp() {
   const { t, lang, setLang } = useTranslation();
@@ -181,9 +182,19 @@ function MainApp() {
       }
     };
 
+    const refreshWhenVisible = () => {
+      if (!document.hidden) void checkHealth();
+    };
+
     void checkHealth();
     const interval = setInterval(checkHealth, HEALTH_CHECK_INTERVAL_MS);
-    return () => clearInterval(interval);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
   }, [isDemoActive]);
 
   useEffect(() => {
@@ -268,7 +279,13 @@ function MainApp() {
     }
   };
 
-  if (activePage === 'overlay') return <RecordingOverlayPage />;
+  if (activePage === 'overlay') {
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-text-muted" role="status">{t('common.loading')}</div>}>
+        <RecordingOverlayPage />
+      </Suspense>
+    );
+  }
 
   const todayActive = activePage === 'home' || activePage === 'meeting';
   const navItems = [
@@ -461,7 +478,9 @@ function MainApp() {
           )}
 
           <main className="workspace-content" data-workspace-page={activePage}>
-            {renderPage()}
+            <Suspense fallback={<div className="p-6 text-sm text-text-muted" role="status">{t('common.loading')}</div>}>
+              {renderPage()}
+            </Suspense>
           </main>
 
           <footer className="workspace-footer select-none">

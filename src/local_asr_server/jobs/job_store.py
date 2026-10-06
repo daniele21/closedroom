@@ -347,6 +347,21 @@ class JobStore:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return self._row_to_job(row) if row else None
 
+    def has_active_job(self, *, job_type: str | None = None) -> bool:
+        """Check active work without materializing recent job payloads/results."""
+        placeholders = ", ".join("?" for _ in ACTIVE_JOB_STATUSES)
+        clauses = [f"status IN ({placeholders})"]
+        params: list[Any] = [*ACTIVE_JOB_STATUSES]
+        if job_type is not None:
+            clauses.append("type = ?")
+            params.append(job_type)
+        with self.connection() as conn:
+            row = conn.execute(
+                f"SELECT 1 FROM jobs WHERE {' AND '.join(clauses)} LIMIT 1",
+                params,
+            ).fetchone()
+        return row is not None
+
     def find_latest(
         self,
         *,

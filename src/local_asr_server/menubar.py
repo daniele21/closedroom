@@ -45,34 +45,8 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     _existing_path = os.environ.get("PATH", "")
     os.environ["PATH"] = f"{_meipass}:{_existing_path}"
 
-    # 3. MLX metallib fix — MLX resolves mlx.metallib relative to the loaded
-    #    .so via dladdr/NSBundle.  In a PyInstaller bundle this path resolution
-    #    can fail because the bundle layout differs from a normal wheel install.
-    #    We pre-load libmlx.dylib from the known location so that dladdr returns
-    #    the correct path and MLX can find mlx.metallib alongside it.
-    _mlx_lib_dir = _meipass / "mlx" / "lib"
-    if _mlx_lib_dir.exists():
-        # Prepend to DYLD_LIBRARY_PATH so the dynamic linker finds libmlx.dylib
-        # and libjaccl.dylib from our bundled copies before any system path.
-        _existing_dyld = os.environ.get("DYLD_LIBRARY_PATH", "")
-        _new_dyld = str(_mlx_lib_dir)
-        if _existing_dyld:
-            _new_dyld = f"{_new_dyld}:{_existing_dyld}"
-        os.environ["DYLD_LIBRARY_PATH"] = _new_dyld
-
-        # Pre-load libmlx so that subsequent dladdr calls return paths inside
-        # _meipass/mlx/lib/, which lets MLX calculate the metallib path correctly.
-        import ctypes
-        _libmlx_path = _mlx_lib_dir / "libmlx.dylib"
-        if _libmlx_path.exists():
-            try:
-                ctypes.CDLL(str(_libmlx_path))
-            except OSError as _e:
-                # Non-fatal: log and continue; MLX will try its own resolution.
-                import logging as _logging
-                _logging.getLogger(__name__).warning(
-                    "Could not pre-load libmlx.dylib from %s: %s", _libmlx_path, _e
-                )
+    # MLX is intentionally not preloaded in the menu/API process. Frozen AI
+    # workers preload their own MLX runtime through build_assets/hooks/pyi_rth_mlx.py.
 
 from local_asr_server.window import ClosedRoomWindowManager
 from local_asr_server.app_identity import get_app_identity
@@ -306,10 +280,6 @@ class ClosedRoomApp(rumps.App):
         # Delay the window show slightly to run after Cocoa event loop is active
         self._show_timer = rumps.Timer(self._initial_show, 0.1)
         self._show_timer.start()
-
-        # Periodic status refresh (every 5 s)
-        self._status_timer = rumps.Timer(self._refresh_status, 5)
-        self._status_timer.start()
 
         # Start global shortcuts listener
         self._start_shortcuts_listener()

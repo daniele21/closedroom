@@ -308,6 +308,9 @@ PyInstaller usa `menubar.py` come entry point. `build.sh`:
 6. firma helper e bundle;
 7. produce `.app` e, salvo `--no-dmg`, il DMG versionato.
 
+Il runtime hook PyInstaller limita il preload MLX ai subprocess ASR/LLM/VLM;
+menu/API restano cold finché non serve inferenza.
+
 I path runtime passano sempre da `paths.py`, che distingue sorgenti locali da
 risorse in `sys._MEIPASS` e bundle `Contents`.
 
@@ -699,10 +702,10 @@ residency riapre la finestra. `managed_llm_idle_shutdown_seconds=0` consente
 reclamation immediata. Endpoint external/disabled non vengono mai fermati o
 mutati da questa policy.
 
-Nel bundle, l'eseguibile principale gestisce anche i dispatch interni
-`-m local_llm_server` e `-m mlx_vlm.server`, evitando di riaprire la shell UI nei
-processi sidecar. La build macOS usa Python 3.10 e fissa `mlx 0.31.2`: `mlx 0.32.0`
-ha mostrato una regressione di ownership degli stream GPU nel worker PyInstaller.
+Nel bundle, i dispatch `transcribe` e `-m` dei runtime locali riusano l'eseguibile
+senza aprire la shell UI; solo questi worker applicano il preload MLX. La build
+macOS usa Python 3.10 e fissa `mlx 0.31.2` per la regressione GPU verificata in
+`mlx 0.32.0`.
 
 ## 16. Persistenza dettagliata
 
@@ -782,9 +785,8 @@ lavoro visuale del meter. I testi vivono in `i18n/locales/it.ts` e `en.ts`.
 
 ### Distribuzione
 
-Vite scrive la build in `src/local_asr_server/static/`; FastAPI la serve sia in
-sviluppo sia nel bundle. Gli asset hashed sono generati e non vanno modificati a
-mano. `static_vanilla_backup/` è una copia legacy, non la superficie runtime.
+Vite scrive in `src/local_asr_server/static/`; gli asset hashed sono generati.
+La UI usa font di sistema/locali e non mantiene copie statiche legacy.
 
 ## 19. Error handling e recovery
 

@@ -113,6 +113,23 @@ class JobStoreTests(unittest.TestCase):
             recording_jobs = store.list_jobs(scope_type="recording", scope_id="rec-1")
             self.assertEqual({job["id"] for job in recording_jobs}, {"job-1", "job-2"})
 
+    def test_has_active_job_avoids_materializing_job_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "closedroom.db")
+            store.create(job_id="job-1", job_type="transcription")
+            store.create(job_id="job-2", job_type="analysis")
+
+            self.assertTrue(store.has_active_job())
+            self.assertTrue(store.has_active_job(job_type="transcription"))
+            self.assertTrue(store.has_active_job(job_type="analysis"))
+
+            store.update("job-1", status="completed", result={"large": "payload"})
+            self.assertFalse(store.has_active_job(job_type="transcription"))
+            self.assertTrue(store.has_active_job(job_type="analysis"))
+
+            store.update("job-2", status="failed", error="boom")
+            self.assertFalse(store.has_active_job())
+
     def test_missing_job_events_return_none(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "closedroom.db")
