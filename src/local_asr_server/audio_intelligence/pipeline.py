@@ -6,7 +6,6 @@ from typing import Any
 
 from local_asr_server.audio_intelligence.audio_io import (
     canonical_wav_info,
-    energy_windows_from_samples,
     iter_energy_windows,
     iter_normalized_audio_chunks,
     load_audio_samples,

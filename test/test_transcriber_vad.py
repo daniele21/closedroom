@@ -53,6 +53,13 @@ class VadGuidedTranscriptionTests(unittest.TestCase):
             source = Path(temp) / "meeting.wav"
             _write_tone_wav(source)
             kwargs = {**self._kwargs(), "audio_path": str(source)}
+            observed: dict[str, float] = {}
+
+            def fake_transcribe(**call_kwargs):
+                with wave.open(call_kwargs["audio_path"], "rb") as wav:
+                    observed["duration"] = wav.getnframes() / wav.getframerate()
+                return {"text": "ciao", "segments": [{"id": 0, "start": 0.0, "end": 0.5, "text": "ciao"}]}
+
             with patch(
                 "local_asr_server.audio_intelligence.vad.detect_speech_windows_vad_chunks",
                 return_value=[{"start": 0.5, "end": 1.0}],
@@ -61,15 +68,16 @@ class VadGuidedTranscriptionTests(unittest.TestCase):
                 side_effect=AssertionError("canonical path must not materialize the full track"),
             ), patch(
                 "local_asr_server.transcriber._transcribe",
-                return_value={"text": "ciao", "segments": [{"id": 0, "start": 0.0, "end": 0.5, "text": "ciao"}]},
+                side_effect=fake_transcribe,
             ) as transcribe:
                 result = _transcribe_vad_guided(**kwargs)
 
         detect_chunks.assert_called_once()
         transcribe.assert_called_once()
         self.assertEqual(result["text"], "ciao")
+        self.assertAlmostEqual(observed["duration"], 1.5, places=3)
         self.assertAlmostEqual(result["segments"][0]["start"], 0.0, places=3)
-        self.assertAlmostEqual(result["segments"][0]["end"], 1.5, places=3)
+        self.assertAlmostEqual(result["segments"][0]["end"], 0.5, places=3)
 
     @patch("local_asr_server.transcriber._transcribe")
     @patch("local_asr_server.audio_intelligence.vad.detect_speech_windows_vad", return_value=[])
