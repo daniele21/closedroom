@@ -789,7 +789,8 @@ Vite scrive in `src/local_asr_server/static/`; gli asset hashed sono generati.
 La UI usa font di sistema/locali. I loghi runtime sono PNG canonici, senza copie
 legacy o PNG embedded in SVG. PyInstaller include l'intero grafo dinamico di
 `local_llm_server`, ma per `mlx_vlm` esplicita solo server e Qwen3-VL; gli
-import statici transitivi restano risolti dall'analisi PyInstaller.
+import statici transitivi restano risolti dall'analisi PyInstaller. Video e
+training/eval generici (`cv2`/datasets stack) sono esclusi dal bundle.
 
 ## 19. Error handling e recovery
 
