@@ -16,7 +16,7 @@ const evidenceRoot = path.resolve(
     || path.join(root, 'dist/evidence/browser-call-screenshot'),
 );
 const sourceRevision = process.env.E2E_SOURCE_REVISION || 'unknown';
-const counts = { active: 0, displays: 0, display_select: 0, screenshots_get: 0, screenshots_post: 0, stop: 0, open_meeting: 0, meeting: 0, visual_frames: 0 };
+const counts = { active: 0, displays: 0, display_select: 0, screenshots_get: 0, screenshots_post: 0, stop: 0, open_meeting: 0, meeting: 0, visual_frames: 0, visual_intelligence: 0, analysis_jobs: 0, analysis_runs: 0 };
 const checkpoints = [];
 const sseClients = new Set();
 let frameIndex = 0;
@@ -92,7 +92,7 @@ function meetingFixture() {
       language: 'en', audio_filename: 'synthetic.wav', recording_id: MEETING_ID,
       text: 'Alex reviews the launch roadmap and validation plan.',
       segments: [{ id: 10, start: 4, end: 24, text: 'Alex reviews the launch roadmap and validation plan.', speaker_label: 'SPEAKER_00' }],
-      stats: { outcome_status: 'completed' },
+      stats: { outcome_status: 'completed', visual_intelligence: { version: 2, status: 'completed' } },
     },
     analysis_runs: [run], latest_analysis: { meeting_brief: run }, jobs: [], status: 'ready',
     project_name: 'Browser E2E', created_at: recording.created_at, updated_at: recording.stopped_at,
@@ -226,6 +226,105 @@ function fixtureServer(port) {
     if (pathname === '/v1/recordings/' + MEETING_ID + '/visual-frames') {
       counts.visual_frames += 1;
       return json(res, 200, { items: [], total: 0 });
+    }
+    if (pathname === '/v2/recordings/' + MEETING_ID + '/visual-intelligence') {
+      counts.visual_intelligence += 1;
+      return json(res, 200, {
+        schema_version: 2,
+        summary: { version: 2, status: 'completed', generation_id: 'synthetic-visual' },
+        document: {
+          schema_version: 2,
+          generation_id: 'synthetic-visual',
+          observations: [{
+            schema_version: 2,
+            observation_id: 'visual-shot-001-shared_content',
+            sequence: 1000000000,
+            timestamp: 12,
+            task: 'shared_content',
+            trigger: 'structural_change',
+            independent_inference: true,
+            model: 'synthetic-vlm',
+            prompt_version: 1,
+            confidence: 0.91,
+            status: 'valid',
+            content_type: 'slide',
+            title: 'Launch roadmap',
+            visible_text: ['Launch in October'],
+            key_information: ['Milestone: October'],
+            content_state: 'stable',
+            source: {
+              kind: 'manual_screenshot',
+              evidence_id: SCREENSHOT_ID,
+              capture_kind: 'manual',
+              screenshot_id: SCREENSHOT_ID,
+              sha256: 'synthetic-sha',
+              display_id: 7,
+              display_title: 'Synthetic Display 1',
+            },
+          }],
+          speaker_intervals: [],
+          meeting_state_events: [],
+          share_sessions: [],
+          unassigned_share_keyframes: [],
+          semantic_links: [],
+          routing_summary: {},
+          manual_screenshot_sources: [{
+            screenshot_id: SCREENSHOT_ID, timestamp: 12, sha256: 'synthetic-sha',
+            display_id: 7, status: 'processed',
+          }],
+          model: 'synthetic-vlm',
+          prompt_version: 1,
+        },
+        source_validity: {
+          status: 'current',
+          manual_screenshot_count: 1,
+          missing_screenshot_ids: [],
+          unavailable_screenshot_ids: [],
+          changed_screenshot_ids: [],
+        },
+      });
+    }
+    if (pathname === '/v1/analysis-jobs' && req.method === 'POST') {
+      counts.analysis_jobs += 1;
+      const parsed = JSON.parse(await requestBody(req) || '{}');
+      const valid = parsed.recording_id === MEETING_ID
+        && parsed.llm_provider === 'nemotron_local'
+        && Array.isArray(parsed.source_ids)
+        && parsed.source_ids.includes('screenshot:' + SCREENSHOT_ID)
+        && String(parsed.text || '').includes('[VISUAL INFERENCE')
+        && String(parsed.text || '').includes('[NEARBY SPOKEN TRANSCRIPT]')
+        && String(parsed.prompt || '').includes('CLOSEDROOM_KEY_MOMENT_QA_V1');
+      if (!valid) return json(res, 422, { detail: 'invalid key moment ask payload' });
+      return json(res, 202, {
+        job_id: 'key-moment-ask-job',
+        analysis_run_id: 'key-moment-ask-run',
+        status: 'queued',
+      });
+    }
+    if (pathname === '/v1/analysis-runs/key-moment-ask-run') {
+      counts.analysis_runs += 1;
+      return json(res, 200, {
+        id: 'key-moment-ask-run',
+        job_id: 'key-moment-ask-job',
+        scope_type: 'recording',
+        scope_id: MEETING_ID,
+        recording_id: MEETING_ID,
+        analysis_type: 'custom_question',
+        template_id: 'custom_question',
+        provider: 'nemotron_local',
+        reasoning: 'auto',
+        show_thinking: false,
+        json_mode: false,
+        llm_options: {},
+        prompt_version: 'CLOSEDROOM_KEY_MOMENT_QA_V1',
+        input_hash: 'synthetic-key-moment',
+        status: 'completed',
+        result: { markdown: 'The visual shows an October launch milestone while Alex discusses the launch roadmap and validation plan.' },
+        result_markdown: 'The visual shows an October launch milestone while Alex discusses the launch roadmap and validation plan.',
+        source_ids: ['screenshot:' + SCREENSHOT_ID],
+        created_at: 1790877680,
+        completed_at: 1790877681,
+      });
     }
     if (pathname === '/v1/recordings/' + MEETING_ID + '/audio') {
       const body = Buffer.alloc(44);
@@ -462,6 +561,35 @@ try {
   `);
   if (!seekClicked) throw new Error('screenshot-to-audio action missing');
   await checkpoint(browser, '07-screenshot-to-audio');
+
+  await waitSelector(browser, '[data-key-moment-ask="true"] input', 5000, true);
+  const questionSet = await browser.execute(`
+    const input = document.querySelector('[data-key-moment-ask="true"] input');
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    if (!setter) return false;
+    setter.call(input, 'What does this moment tell us about the launch?');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  if (!questionSet) throw new Error('key moment question input unavailable');
+  const askClicked = await browser.execute(`
+    const root = document.querySelector('[data-key-moment-ask="true"]');
+    const button = Array.from(root?.querySelectorAll('button') || []).find((node) => {
+      const text = (node.innerText || '').trim();
+      return text === 'Ask' || text === 'Chiedi';
+    });
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  `);
+  if (!askClicked) throw new Error('key moment ask action unavailable');
+  await waitText(browser, ['The visual shows an October launch milestone while Alex discusses the launch roadmap and validation plan.'], 8000, true);
+  await waitSelector(browser, '[data-key-moment-answer="true"]', 3000, true);
+  if (counts.analysis_jobs !== 1 || counts.analysis_runs < 1) {
+    throw new Error('key moment ask requests unexpected: ' + JSON.stringify(counts));
+  }
+  await checkpoint(browser, '08-key-moment-ask-local');
   video = await renderVideo();
 } catch (caught) {
   error = (caught?.name || 'Error') + ': ' + (caught?.message || caught);
