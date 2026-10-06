@@ -183,7 +183,7 @@ class AudioIntelligenceTests(unittest.TestCase):
             path = Path(temp) / "mic.wav"
             write_tone_wav(path, tone_ranges=[(0.1, 0.8)])
             with patch(
-                "local_asr_server.audio_intelligence.vad.detect_speech_windows_vad",
+                "local_asr_server.audio_intelligence.vad.detect_speech_windows_vad_chunks",
                 side_effect=RuntimeError("vad exploded"),
             ):
                 result = build_audio_intelligence(
