@@ -73,7 +73,7 @@ const diagnosticsFixture = {
   }],
 };
 
-const counts = { session: 0, health: 0, meeting: 0, diagnostics: 0, visual_frames: 0 };
+const counts = { session: 0, health: 0, meeting: 0, diagnostics: 0, visual_frames: 0, screenshots: 0 };
 const checkpoints = [];
 let frameIndex = 0;
 
@@ -162,6 +162,10 @@ function fixtureServer(port) {
         return json(res, 503, { detail: 'synthetic diagnostics outage' });
       }
       return json(res, 200, diagnosticsFixture);
+    }
+    if (pathname === `/v1/recordings/${MEETING_ID}/screenshots`) {
+      counts.screenshots += 1;
+      return json(res, 200, { items: [], total: 0 });
     }
     if (pathname === `/v1/recordings/${MEETING_ID}/visual-frames`) {
       counts.visual_frames += 1;
@@ -282,6 +286,30 @@ class Browser {
       return true;
     `);
     if (clicked !== true) throw new Error(`button not found: ${labels.join(', ')}`);
+  }
+
+  async clickStatusButton(statusLabels, buttonLabels) {
+    const clicked = await this.execute(`
+      const statusLabels = ${JSON.stringify(statusLabels)};
+      const buttonLabels = ${JSON.stringify(buttonLabels)};
+      const status = Array.from(document.querySelectorAll('[role="status"]')).find((candidate) => {
+        const text = (candidate.innerText || candidate.textContent || '').trim();
+        return statusLabels.some((label) => text.includes(label));
+      });
+      if (!status) return false;
+      const button = Array.from(status.querySelectorAll('button')).find((candidate) => {
+        const text = (candidate.innerText || candidate.textContent || '').trim();
+        return buttonLabels.some((label) => text === label || text.includes(label));
+      });
+      if (!button) return false;
+      button.click();
+      return true;
+    `);
+    if (clicked !== true) {
+      throw new Error(
+        `button not found in status ${statusLabels.join(' | ')}: ${buttonLabels.join(', ')}`,
+      );
+    }
   }
 
   async screenshot(destination) {
@@ -417,7 +445,10 @@ try {
   await waitText(browser, ['Quarterly launch review'], 30000, true);
   await waitText(browser, ['Decision: ship the release after validation.']);
   if (counts.diagnostics !== 0 || counts.visual_frames !== 0) {
-    throw new Error(`normal open fetched accessories: ${JSON.stringify(counts)}`);
+    throw new Error(`normal open fetched disclosure-driven accessories: ${JSON.stringify(counts)}`);
+  }
+  if (counts.screenshots < 1) {
+    throw new Error(`progressive screenshot loading did not start: ${JSON.stringify(counts)}`);
   }
   await checkpoint(browser, '01-ready-core-only');
 
@@ -438,7 +469,10 @@ try {
   );
   await waitText(browser, ['Quarterly launch review']);
   await checkpoint(browser, '03-diagnostics-error-core-preserved');
-  await browser.clickButton(['Retry', 'Riprova']);
+  await browser.clickStatusButton(
+    ['Detailed diagnostics unavailable', 'Diagnostica dettagliata non disponibile'],
+    ['Retry', 'Riprova'],
+  );
   await waitCount('diagnostics', 2);
   await waitAbsent(
     browser,
@@ -457,7 +491,10 @@ try {
   );
   await waitText(browser, ['Quarterly launch review']);
   await checkpoint(browser, '05-visual-error-core-preserved');
-  await browser.clickButton(['Retry', 'Riprova']);
+  await browser.clickStatusButton(
+    ['Screen context unavailable', 'Contesto schermo non disponibile'],
+    ['Retry', 'Riprova'],
+  );
   await waitCount('visual_frames', 2);
   await waitText(
     browser,
