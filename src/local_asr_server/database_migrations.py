@@ -63,15 +63,21 @@ def apply_migrations(
         """
     )
     applied = {
-        int(row[0])
+        int(row[0]): str(row[1])
         for row in conn.execute(
-            "SELECT version FROM schema_migrations WHERE component = ?",
+            "SELECT version, name FROM schema_migrations WHERE component = ?",
             (normalized_component,),
         ).fetchall()
     }
     applied_count = 0
     for migration in ordered:
         if migration.version in applied:
+            if applied[migration.version] != migration.name:
+                raise RuntimeError(
+                    "migration history mismatch for "
+                    f"{normalized_component} v{migration.version}: "
+                    f"{applied[migration.version]!r} != {migration.name!r}"
+                )
             continue
         migration.apply(conn)
         conn.execute(
