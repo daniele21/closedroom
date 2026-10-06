@@ -194,6 +194,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
   const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
+  const [keyMomentVisualRequested, setKeyMomentVisualRequested] = useState(false);
   const [showAllScreenshots, setShowAllScreenshots] = useState(false);
   const [momentQuestion, setMomentQuestion] = useState('');
   const [momentAskRunId, setMomentAskRunId] = useState<string | null>(null);
@@ -233,6 +234,11 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const loadQueuedRef = useRef(false);
   const userSelectedTabRef = useRef(false);
 
+  const openKeyMoment = (shot: RecordingScreenshot) => {
+    setKeyMomentVisualRequested(true);
+    setSelectedScreenshot(shot);
+  };
+
   const handleTimestampClick = (time: number) => {
     setShowAudioPlayer(true);
     setTimeout(() => {
@@ -262,7 +268,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     demoMode ? null : recordingId,
     Boolean(
       (visualResultAvailable && activeTab === 'analysis')
-      || (visualResultAvailable && Boolean(selectedScreenshot)),
+      || (visualResultAvailable && keyMomentVisualRequested),
     ),
   );
   const selectedKeyMomentVisual = selectedScreenshot
@@ -314,6 +320,10 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const selectedScreenshotGroup = selectedScreenshot
     ? groupByScreenshotId.get(selectedScreenshot.screenshot_id) || null
     : null;
+
+  useEffect(() => {
+    setKeyMomentVisualRequested(false);
+  }, [recordingId]);
 
   useEffect(() => {
     setMomentQuestion('');
@@ -1061,7 +1071,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                   <button
                     key={group?.group_id || shot.screenshot_id}
                     type="button"
-                    onClick={() => setSelectedScreenshot(shot)}
+                    onClick={() => openKeyMoment(shot)}
                     className="group grid min-h-[124px] w-full max-w-3xl grid-cols-[128px_minmax(0,1fr)] overflow-hidden rounded-xl border border-border-subtle bg-bg-surface text-left transition hover:border-border-focus hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:grid-cols-[190px_minmax(0,1fr)]"
                     aria-label={
                       lang === 'it'
@@ -1862,7 +1872,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                         <button
                           key={screenshotId}
                           type="button"
-                          onClick={() => setSelectedScreenshot(groupedShot)}
+                          onClick={() => openKeyMoment(groupedShot)}
                           className={cn(
                             'relative h-14 w-24 shrink-0 overflow-hidden rounded-lg border bg-bg-elevated transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus',
                             selected ? 'border-accent ring-1 ring-accent/30' : 'border-border-subtle hover:border-border-focus',
@@ -1919,6 +1929,12 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                         {lang === 'it' ? 'Caricamento contesto visuale…' : 'Loading visual context…'}
                       </div>
+                    ) : visualError ? (
+                      <p className="mt-2 text-[11px] text-danger" role="alert">
+                        {lang === 'it'
+                          ? 'Contesto visuale non disponibile. Riprova dall’analisi del meeting.'
+                          : 'Visual context is unavailable. Retry from meeting analysis.'}
+                      </p>
                     ) : visualSourcesStale ? (
                       <p className="mt-2 text-[11px] text-warning">
                         {lang === 'it'
