@@ -786,7 +786,10 @@ lavoro visuale del meter. I testi vivono in `i18n/locales/it.ts` e `en.ts`.
 ### Distribuzione
 
 Vite scrive in `src/local_asr_server/static/`; gli asset hashed sono generati.
-La UI usa font di sistema/locali e non mantiene copie statiche legacy.
+La UI usa font di sistema/locali. I loghi runtime sono PNG canonici, senza copie
+legacy o PNG embedded in SVG. PyInstaller include l'intero grafo dinamico di
+`local_llm_server`, ma per `mlx_vlm` esplicita solo server e Qwen3-VL; gli
+import statici transitivi restano risolti dall'analisi PyInstaller.
 
 ## 19. Error handling e recovery
 
