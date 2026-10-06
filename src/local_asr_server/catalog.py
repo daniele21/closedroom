@@ -8,7 +8,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from local_asr_server.database_migrations import Migration, apply_migrations, ensure_column
+from local_asr_server.database_migrations import (
+    Migration,
+    apply_migrations,
+    ensure_column,
+)
 from local_asr_server.paths import get_app_support_dir
 from local_asr_server.settings import load_settings
 
@@ -38,6 +42,7 @@ def _nullable_int_bool(value: Any) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
 
 def _migrate_catalog_legacy_columns(conn: sqlite3.Connection) -> None:
     for table, column, definition in (
@@ -74,7 +79,11 @@ def _migrate_catalog_legacy_columns(conn: sqlite3.Connection) -> None:
 
 
 CATALOG_MIGRATIONS = (
-    Migration(1, "legacy-capture-transcription-analysis-columns", _migrate_catalog_legacy_columns),
+    Migration(
+        1,
+        "legacy-capture-transcription-analysis-columns",
+        _migrate_catalog_legacy_columns,
+    ),
 )
 
 
