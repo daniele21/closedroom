@@ -1,14 +1,48 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from local_asr_server.runtime.models import DEFAULT_LOCAL_LLM_URL
 from local_asr_server.runtime.service_manager import RuntimeServiceManager
+from local_asr_server.asr_provider import ASRRequest, LocalMlxASRProvider
+from local_asr_server.speaker_diarization import LocalSpeakerDiarizationService
 from local_asr_server.runtime.models import resolve_local_llm_model_path
 
 
 class RuntimeServiceManagerTests(unittest.TestCase):
+    def test_model_phase_leases_are_isolated_per_runtime_manager(self) -> None:
+        first = RuntimeServiceManager(llm_sidecar=Mock())
+        second = RuntimeServiceManager(llm_sidecar=Mock())
+
+        self.assertIsNot(first.model_phases, second.model_phases)
+        first.model_phases.acquire_lease("llm")
+        self.assertEqual(first.model_phases.active_lease, "llm")
+        self.assertIsNone(second.model_phases.active_lease)
+
+    def test_local_model_consumers_use_injected_phase_owner(self) -> None:
+        phases = Mock()
+        runner = Mock()
+        runner.transcribe.return_value = {"text": "ok"}
+        asr = LocalMlxASRProvider(runner, model_phases=phases)
+
+        result = asr.transcribe(ASRRequest(audio_path="/tmp/test.wav", model="test-model"))
+
+        self.assertEqual(result["text"], "ok")
+        phases.acquire_lease.assert_called_once_with("asr")
+        phases.release_lease.assert_called_once_with("asr")
+
+        phases.reset_mock()
+        diarization = LocalSpeakerDiarizationService(
+            runner=lambda _inputs: {"engine": "fake", "tracks": {}},
+            model_phases=phases,
+        )
+        diarization.diarize_paths({"system": Path("/tmp/test.wav")})
+
+        phases.acquire_lease.assert_called_once_with("diarization")
+        phases.release_lease.assert_called_once_with("diarization")
+
     def test_model_specific_path_precedes_legacy_global_path(self) -> None:
         settings = {
             "local_llm_model": "selected",

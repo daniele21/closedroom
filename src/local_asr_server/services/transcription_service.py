@@ -26,6 +26,7 @@ from local_asr_server.audio_intelligence import build_audio_intelligence
 from local_asr_server.recordings import RecordingStore
 from local_asr_server.routers.helpers import _merge_track_transcriptions
 from local_asr_server.runtime.asr_worker import ASRWorkerRunner, InProcessASRWorkerRunner, ASRProcessRunner
+from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
 from local_asr_server.schemas import TranscribeRecordingRequest
 from local_asr_server.settings import load_settings
 from local_asr_server.speechmatics_asr import SpeechmaticsBatchASRProvider
@@ -67,10 +68,16 @@ RECORDING_PIPELINE_SETTING_KEYS = (
 class TranscriptionService:
     """Application service boundary for transcription workflows."""
 
-    def __init__(self, runner: ASRWorkerRunner | None = None) -> None:
+    def __init__(
+        self,
+        runner: ASRWorkerRunner | None = None,
+        *,
+        model_phases: ModelRuntimeLeaseManager | None = None,
+    ) -> None:
         self.runner = runner or ASRProcessRunner()
+        self.model_phases = model_phases or ModelRuntimeLeaseManager()
         self.visual = PostMeetingVisualService()
-        self.diarization = LocalSpeakerDiarizationService()
+        self.diarization = LocalSpeakerDiarizationService(model_phases=self.model_phases)
 
     def transcribe_file(self, **kwargs: Any) -> dict[str, Any]:
         provider_name = normalize_asr_provider(kwargs.pop("asr_provider", ASR_PROVIDER_LOCAL))
@@ -94,7 +101,7 @@ class TranscriptionService:
         )
         if provider_name == ASR_PROVIDER_SPEECHMATICS:
             return SpeechmaticsBatchASRProvider().transcribe(request)
-        return LocalMlxASRProvider(self.runner).transcribe(request)
+        return LocalMlxASRProvider(self.runner, model_phases=self.model_phases).transcribe(request)
 
     def transcribe_cached(
         self,

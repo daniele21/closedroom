@@ -10,6 +10,7 @@ from local_asr_server.runtime.models import (
     resolve_local_llm_model_path,
 )
 from local_asr_server.runtime.llm_sidecar import LocalLLMSidecar
+from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
 from local_asr_server.settings import load_settings
 
 
@@ -54,6 +55,7 @@ class RuntimeServiceManager:
         if managed_llm_idle_shutdown_seconds < 0:
             raise ValueError("managed_llm_idle_shutdown_seconds must be non-negative")
         self.llm_sidecar = llm_sidecar or LocalLLMSidecar()
+        self.model_phases = ModelRuntimeLeaseManager(self)
         self._managed_llm_idle_shutdown_seconds = managed_llm_idle_shutdown_seconds
         self._idle_shutdown_lock = Lock()
         self._idle_shutdown_timer: Timer | None = None
@@ -189,9 +191,8 @@ class RuntimeServiceManager:
         self, *, capability: str = "text", reasoning: str | None = None,
         overrides: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
         lease_type = "vision" if capability == "image" else "llm"
-        ModelRuntimeLeaseManager.acquire_lease(lease_type)
+        self.model_phases.acquire_lease(lease_type)
         llm = self._llm_settings(overrides)
         mode = llm["mode"]
         if mode == "disabled":
@@ -229,11 +230,9 @@ class RuntimeServiceManager:
         mutated. External endpoints remain entirely caller-owned. A managed
         sidecar that is left cold is stopped after a bounded idle window.
         """
-        from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
-
         settings = self._llm_settings(overrides)
-        ModelRuntimeLeaseManager.release_lease("vision")
-        ModelRuntimeLeaseManager.release_lease("llm")
+        self.model_phases.release_lease("vision")
+        self.model_phases.release_lease("llm")
         if settings["mode"] != "auto":
             return {"released": False, "reason": "not_managed"}
         return self._release_managed_llm_residency()

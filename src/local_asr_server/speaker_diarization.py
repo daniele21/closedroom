@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from local_asr_server.settings import load_settings
 from local_asr_server.paths import get_models_dir
+from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
 from local_asr_server.speaker_diarization_helper.compile import get_helper_binary
 from local_asr_server.diagnostics import diagnostic
 
@@ -46,8 +47,14 @@ def assigned_clusters(segments: list[dict[str, Any]]) -> list[str]:
 class LocalSpeakerDiarizationService:
     """Add local FluidAudio speaker clusters to ASR segments post-meeting."""
 
-    def __init__(self, runner: Callable[[dict[str, Path]], dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        runner: Callable[[dict[str, Path]], dict[str, Any]] | None = None,
+        *,
+        model_phases: ModelRuntimeLeaseManager | None = None,
+    ) -> None:
         self._runner = runner or self._run_helper
+        self.model_phases = model_phases or ModelRuntimeLeaseManager()
 
     def process(
         self,
@@ -138,13 +145,11 @@ class LocalSpeakerDiarizationService:
 
     def diarize_paths(self, inputs: dict[str, Path]) -> dict[str, Any]:
         """Run FluidAudio for explicit audio paths without requiring persistence."""
-        from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
-
-        ModelRuntimeLeaseManager.acquire_lease("diarization")
+        self.model_phases.acquire_lease("diarization")
         try:
             return self._runner(inputs)
         finally:
-            ModelRuntimeLeaseManager.release_lease("diarization")
+            self.model_phases.release_lease("diarization")
 
     @staticmethod
     def assign_segments(

@@ -14,6 +14,7 @@ from local_asr_server.asr_provider import (
 )
 from local_asr_server.diagnostics import attach_diagnostics, diagnostic
 from local_asr_server.settings import load_settings
+from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
 from local_asr_server.speaker_diarization import (
     DIARIZATION_ENGINE,
     LocalSpeakerDiarizationService,
@@ -37,8 +38,11 @@ class TranscriptionDiarizationService:
         *,
         local_service: LocalSpeakerDiarizationService | None = None,
         speechmatics_provider: Any | None = None,
+        model_phases: ModelRuntimeLeaseManager | None = None,
     ) -> None:
-        self.local = local_service or LocalSpeakerDiarizationService()
+        self.local = local_service or LocalSpeakerDiarizationService(
+            model_phases=model_phases,
+        )
         self.speechmatics = speechmatics_provider or SpeechmaticsBatchASRProvider()
 
     def process_audio_payload(

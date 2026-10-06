@@ -6,6 +6,7 @@ from typing import Any, Callable, Final, Protocol
 
 from local_asr_server.asr_models import get_asr_backend
 from local_asr_server.env import get_env_var
+from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
 
 
 ASR_PROVIDER_LOCAL: Final = "local"
@@ -54,12 +55,17 @@ class ASRProvider(Protocol):
 
 
 class LocalMlxASRProvider:
-    def __init__(self, runner: Any) -> None:
+    def __init__(
+        self,
+        runner: Any,
+        *,
+        model_phases: ModelRuntimeLeaseManager | None = None,
+    ) -> None:
         self.runner = runner
+        self.model_phases = model_phases or ModelRuntimeLeaseManager()
 
     def transcribe(self, request: ASRRequest) -> dict[str, Any]:
-        from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
-        ModelRuntimeLeaseManager.acquire_lease("asr")
+        self.model_phases.acquire_lease("asr")
         try:
             result = self.runner.transcribe(
                 audio_path=str(request.audio_path),
@@ -88,7 +94,7 @@ class LocalMlxASRProvider:
             payload["metadata"] = metadata
             return payload
         finally:
-            ModelRuntimeLeaseManager.release_lease("asr")
+            self.model_phases.release_lease("asr")
 
 
 def normalize_asr_provider(provider: str | None) -> str:

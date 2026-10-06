@@ -50,6 +50,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
+- [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
 
 PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
 
