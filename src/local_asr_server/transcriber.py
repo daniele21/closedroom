@@ -18,6 +18,7 @@ import logging
 import asyncio
 import threading
 import contextlib
+import tempfile
 from pathlib import Path
 from typing import Optional, Any, Callable, Dict, Generator
 
@@ -38,6 +39,7 @@ from local_asr_server.asr_provider import (
 logger = logging.getLogger("uvicorn.error")
 CACHE_DIR = get_cache_dir()
 TRANSCRIPTION_CACHE_VERSION = "asr-v2"
+TRANSCRIPTION_CACHE_MAX_BYTES = 512 * 1024 * 1024
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_COMPRESSION_RATIO_THRESHOLD = 2.2
 DEFAULT_LOGPROB_THRESHOLD = -0.7
@@ -212,29 +214,123 @@ def hash_audio_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _is_transcription_cache_file(path: Path) -> bool:
+    stem = path.stem.lower()
+    return (
+        path.suffix == ".json"
+        and len(stem) == 64
+        and all(character in "0123456789abcdef" for character in stem)
+    )
+
+
+def prune_transcription_cache(
+    *,
+    max_bytes: int | None = None,
+    protected_cache_key: str | None = None,
+) -> dict[str, int]:
+    """Bound only ephemeral SHA-keyed ASR JSON cache files using LRU mtime."""
+    if max_bytes is None:
+        max_bytes = TRANSCRIPTION_CACHE_MAX_BYTES
+    max_bytes = max(0, int(max_bytes))
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    protected = CACHE_DIR / f"{protected_cache_key}.json" if protected_cache_key else None
+    entries: list[tuple[Path, int, int]] = []
+    for path in CACHE_DIR.glob("*.json"):
+        if not _is_transcription_cache_file(path):
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        entries.append((path, stat.st_size, stat.st_mtime_ns))
+
+    total_bytes = sum(size for _, size, _ in entries)
+    removed_files = 0
+    removed_bytes = 0
+
+    if protected is not None and protected.exists():
+        try:
+            protected_size = protected.stat().st_size
+        except OSError:
+            protected_size = 0
+        if protected_size > max_bytes:
+            try:
+                protected.unlink()
+                total_bytes -= protected_size
+                removed_files += 1
+                removed_bytes += protected_size
+            except OSError:
+                pass
+            protected = None
+
+    for path, size, _mtime_ns in sorted(entries, key=lambda item: item[2]):
+        if total_bytes <= max_bytes:
+            break
+        if protected is not None and path == protected:
+            continue
+        if not path.exists():
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        total_bytes -= size
+        removed_files += 1
+        removed_bytes += size
+
+    return {
+        "remaining_bytes": max(0, total_bytes),
+        "removed_bytes": removed_bytes,
+        "removed_files": removed_files,
+    }
+
+
 def get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
-    """Retrieve and clean cached transcription result from local disk, if present."""
+    """Retrieve an ASR cache hit and promote it in the bounded LRU."""
     cache_file = CACHE_DIR / f"{cache_key}.json"
     if cache_file.exists():
         try:
             with open(cache_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return _clean_nan_values(data)
+            try:
+                os.utime(cache_file, None)
+            except OSError:
+                pass
+            return _clean_nan_values(data)
         except Exception as e:
             logger.warning(f"Failed to read cache file {cache_file}: {e}")
     return None
 
 
 def save_cached_result(cache_key: str, data: Dict[str, Any]) -> None:
-    """Save the transcription result to local disk cache folder."""
+    """Atomically save one ASR result, then bound only the ephemeral cache."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+    temp_path: Path | None = None
     try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = CACHE_DIR / f"{cache_key}.json"
         cleaned_data = _clean_nan_values(data)
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(cleaned_data, f, ensure_ascii=False, indent=2)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=CACHE_DIR,
+            prefix=f".{cache_key}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temp_path = Path(stream.name)
+            json.dump(cleaned_data, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, cache_file)
+        temp_path = None
+        prune_transcription_cache(protected_cache_key=cache_key)
         logger.info(f"Saved transcription to cache: {cache_file}")
     except Exception as e:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         logger.warning(f"Failed to write cache file {cache_file}: {e}")
 
 

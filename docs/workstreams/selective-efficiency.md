@@ -24,8 +24,8 @@ Make further ClosedRoom efficiency changes only when measured evidence shows a w
 | SE-1 | Reuse persisted finalized-track SHA-256 for repeated ASR cache lookup | DONE |
 | SE-2 | Privacy-safe Silero-vs-RMS timing/agreement benchmark | DONE |
 | SE-3 | Representative target-Mac VAD quality run and ONNX keep/remove decision | BLOCKED |
-| SE-4 | Remove generic video/training VLM dependencies from the packaged image-only path | ACTIVE |
-| SE-5 | Add explicit ephemeral cache budget only if storage evidence shows unbounded growth | READY |
+| SE-4 | Remove generic video/training VLM dependencies from the packaged image-only path | DONE |
+| SE-5 | Bound SHA-keyed ephemeral ASR JSON cache with LRU retention | ACTIVE |
 
 ## Acceptance
 
@@ -37,8 +37,11 @@ SE-3: do not remove ONNX Runtime until representative meetings show acceptable s
 
 SE-4: ClosedRoom passes static screenshots/JPEGs to Qwen3-VL and does not expose video, training or evaluation. The frozen app must complete its image-message smoke with `cv2`, `datasets`, `pyarrow`, `pandas` and `multiprocess` absent.
 
+SE-5: prune only SHA-keyed ASR JSON cache files after writes, promote cache hits by mtime and never touch models, recordings, transcripts or unrelated cache files. Default budget: 512 MiB.
+
 ## Validation
 
 SE-1 touches RecordingStore and transcription cache identity: STRONG.
 SE-2 is deterministic tooling/tests. Representative benchmark execution is REAL_ENVIRONMENT evidence, not a hosted-CI substitute for production meeting quality.
 SE-4 changes the PyInstaller dependency boundary and therefore requires FULL packaged-app validation.
+SE-5 is a contained ephemeral-cache policy and requires SCOPED validation unless adjacent shared contracts change.
