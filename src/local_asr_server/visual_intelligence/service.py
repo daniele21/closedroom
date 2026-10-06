@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
+from local_asr_server.runtime.local_ai import LocalAIRuntimePort, LocalLLMServerAdapter
 from local_asr_server.settings import (
     DEFAULT_VISUAL_FRAME_SIMILARITY_THRESHOLD,
     load_settings,
@@ -105,8 +106,14 @@ def calculate_dhash(image_path: Path) -> int:
 
 
 class PostMeetingVisualService:
-    def __init__(self, client_factory: Callable[..., Any] | None = None) -> None:
+    def __init__(
+        self,
+        client_factory: Callable[..., Any] | None = None,
+        *,
+        local_ai: LocalAIRuntimePort | None = None,
+    ) -> None:
         self._client_factory = client_factory
+        self._local_ai = local_ai or LocalLLMServerAdapter()
 
     def process(
         self,
@@ -1193,13 +1200,10 @@ class PostMeetingVisualService:
     def _client(self, base_url: str, model: str) -> Any:
         if self._client_factory:
             return self._client_factory(base_url=base_url, model=model)
-        from local_llm_server.client import LocalLLMClient
-        return LocalLLMClient(base_url=base_url, model=model)
+        return self._local_ai.create_client(base_url=base_url, model=model)
 
-    @staticmethod
-    def _image_message(path: Path) -> list[dict[str, Any]]:
-        from local_llm_server.vision import prepare_image_message
-        return prepare_image_message(path, VISUAL_PROMPT)
+    def _image_message(self, path: Path) -> list[dict[str, Any]]:
+        return self._local_ai.prepare_image_message(path, VISUAL_PROMPT)
 
     @staticmethod
     def _parse(raw: str) -> dict[str, Any]:
