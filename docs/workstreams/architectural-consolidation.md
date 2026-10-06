@@ -115,9 +115,9 @@ Acceptance:
 - no TCC/signing identity change.
 
 ### AC-6 — Local AI runtime port
-Status: WAVE_2_CANDIDATE
+Status: WAVE_2_INTEGRATED
 
-Wave 2 candidate: application analysis and visual workflows depend on `LocalAIRuntimePort`; concrete `local_llm_server` client/vision imports are isolated in `LocalLLMServerAdapter`. `RuntimeServiceManager` remains the lifecycle/readiness owner and no remote fallback is introduced.
+Wave 2 integrated through PR #85: application analysis and visual workflows depend on `LocalAIRuntimePort`; concrete `local_llm_server` client/vision imports are isolated in `LocalLLMServerAdapter`. `RuntimeServiceManager` remains the lifecycle/readiness owner and no remote fallback is introduced.
 
 Observable outcome: ClosedRoom application code depends on a small Local AI runtime port; the current `local-llm-server`/Korgis-compatible implementation sits behind the adapter.
 
@@ -127,10 +127,9 @@ Acceptance:
 - no cloud fallback is introduced.
 
 ### AC-7 — Follow-up hardening
-Status: PARTIAL_WAVE_2_CANDIDATE
+Status: ACTIVE
 
-Wave 2 candidate removes the process-global `ModelRuntimeLeaseManager` injection in favor of one app-owned phase coordinator and removes the `AppServices(... analysis_jobs=None ...)` construction cycle through explicit analysis dependencies. Remaining hardening stays split into independent follow-up lanes:
-- introduce versioned SQLite migration ownership;
+Wave 2 integrated through PR #85 removes the process-global `ModelRuntimeLeaseManager` injection in favor of one app-owned phase coordinator and removes the `AppServices(... analysis_jobs=None ...)` construction cycle through explicit analysis dependencies. The current independent hardening lane introduces versioned SQLite migration ownership; remaining items stay separate:
 - move cloud credentials toward macOS Keychain;
 - introduce typed settings;
 - generate frontend API contracts from FastAPI OpenAPI;
@@ -178,13 +177,19 @@ Failure resolution during convergence:
 - single-file transcription cache identity was fixed so diarization configuration participates without duplicating ASR cache policy;
 - the Saved Meeting journey was corrected to model the screenshot accessory endpoint and scope recovery clicks to the diagnostic/visual status being tested, instead of relying on the first generic Retry button.
 
-Wave 2 candidate:
-- base: `dev` at `6dc0ee1986d14169ea997ea1b6714b5d94555a9c`;
-- isolated lane PRs #82 (service graph), #83 (app-owned model phases), and #84 (Local AI client port) passed Repository health and Remote preflight on their lane heads;
-- the combined integration branch is `work/architectural-consolidation-wave2`;
-- the combined server composition preserves both a complete `AppServices` graph and injection of `runtime_services.model_phases` into local ASR/diarization;
-- direct consumer review updated `test_shared_analysis_pipeline` to the narrowed `AnalysisJobManager` dependency contract before integration validation.
+Wave 2 integration:
+- integration PR: #85 (`work/architectural-consolidation-wave2` -> `dev`);
+- validated exact head: `b8ad4837e9b01ed3290e90c05607dbad60eeece3`;
+- merged `dev` commit: `6352c7ca0a236175da7a56b1502dbde3c0b5a64d`;
+- Repository health, Source tests / INTEGRATION / STRONG, Saved Meeting FULL_MEDIA, packaged-app lifecycle, repository validation, and reusable evidence: PASS;
+- isolated lane PRs #82–#84 were closed without separate merge after #85 landed;
+- `HeavyWorkloadArbiter`, local-first boundaries, runtime lifecycle ownership, persistence ownership and native protocols remain unchanged.
 
+Current AC-7 migration lane:
+- branch: `work/arch-db-migrations` from `dev` at `6352c7ca0a236175da7a56b1502dbde3c0b5a64d`;
+- one shared `schema_migrations` ledger is namespaced by component so `CatalogStore` and `JobStore` can evolve the same SQLite database without competing global schema versions;
+- existing latest-schema bootstrap remains for fresh databases; legacy additive upgrades are versioned, idempotent and history-checked;
+- PR/remote validation is intentionally deferred until the lane is complete to minimize GitHub Actions usage.
 Remaining structural work after Wave 2:
 - AC-2: decompose `RecordingOverlayPage` and continue reducing page-level orchestration;
 - AC-3: converge path/recording transcription adapters on the application boundary;
@@ -193,4 +198,4 @@ Remaining structural work after Wave 2:
 - AC-7: versioned DB migrations, Keychain-backed cloud credentials, typed settings, generated frontend API contracts, generated-source cleanup, and naming cleanup remain separate follow-up lanes.
 
 Next action:
-- validate the combined Wave 2 candidate at exact-head/base under the repository-selected INTEGRATION profile; merge only after required source/package gates pass, then close #82–#84 as superseded.
+- finish focused migration ownership tests and static review on `work/arch-db-migrations`, then open one PR and run the single repository-selected remote gate for that completed lane.
