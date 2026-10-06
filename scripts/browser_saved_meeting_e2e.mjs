@@ -447,9 +447,7 @@ try {
   if (counts.diagnostics !== 0 || counts.visual_frames !== 0) {
     throw new Error(`normal open fetched disclosure-driven accessories: ${JSON.stringify(counts)}`);
   }
-  if (counts.screenshots < 1) {
-    throw new Error(`progressive screenshot loading did not start: ${JSON.stringify(counts)}`);
-  }
+  await waitCount('screenshots', 1);
   await checkpoint(browser, '01-ready-core-only');
 
   await browser.clickButton(['Details', 'Dettagli']);
