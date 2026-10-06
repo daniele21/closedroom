@@ -52,10 +52,20 @@ export interface VisualShareSession {
   keyframes: VisualShareKeyframe[];
 }
 
+export interface VisualManualScreenshotGroup {
+  group_id: string;
+  screenshot_ids: string[];
+  representative_screenshot_id: string;
+  start: number;
+  end: number;
+  display_id?: number | null;
+}
+
 export interface VisualIntelligenceDocumentV2 {
   schema_version: 2;
   generation_id?: string;
   observations: Array<Record<string, unknown>>;
+  manual_screenshot_groups?: VisualManualScreenshotGroup[];
   speaker_intervals: Array<Record<string, unknown>>;
   meeting_state_events: VisualMeetingStateEvent[];
   share_sessions: VisualShareSession[];
