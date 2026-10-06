@@ -31,6 +31,10 @@ export default defineConfig({
         target: `http://127.0.0.1:${process.env.BACKEND_PORT || '1237'}`,
         changeOrigin: true,
       },
+      '/v2': {
+        target: `http://127.0.0.1:${process.env.BACKEND_PORT || '1237'}`,
+        changeOrigin: true,
+      },
       '/health': {
         target: `http://127.0.0.1:${process.env.BACKEND_PORT || '1237'}`,
         changeOrigin: true,
