@@ -5,11 +5,14 @@ import logging
 import threading
 import time
 import uuid
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from fastapi import HTTPException
 
-from local_asr_server.app_services import AppServices
+if TYPE_CHECKING:
+    from local_asr_server.catalog import CatalogStore
+    from local_asr_server.transcriptions import TranscriptionStore
+
 from local_asr_server.analysis_templates import (
     DEFAULT_ANALYSIS_TYPE,
     DEFAULT_PIPELINE_ID,
@@ -45,12 +48,16 @@ class AnalysisJobManager:
 
     def __init__(
         self,
-        services: AppServices,
+        analysis: AnalysisService,
         store: JobStore,
         *,
+        catalog: "CatalogStore",
+        transcriptions: "TranscriptionStore",
         arbiter: HeavyWorkloadArbiter | None = None,
     ) -> None:
-        self._services = services
+        self._analysis = analysis
+        self._catalog = catalog
+        self._transcriptions = transcriptions
         self._store = store
         self._arbiter = arbiter
 
@@ -84,7 +91,7 @@ class AnalysisJobManager:
                 "input_hash": input_hash,
             },
         )
-        self._services.catalog.create_analysis_run(
+        self._catalog.create_analysis_run(
             {
                 "id": run_id,
                 "job_id": job_id,
@@ -233,12 +240,12 @@ class AnalysisJobManager:
                 self._mark_cancelled(job_id, run_id)
                 return
             self._store.update(job_id, status="running", current_step="analysis", progress=10)
-            self._services.catalog.update_analysis_run(run_id, status="running")
-            result = AnalysisService(self._services).analyze(body)
+            self._catalog.update_analysis_run(run_id, status="running")
+            result = self._analysis.analyze(body)
             if self._store.get(job_id) and self._store.get(job_id).get("cancel_requested"):
                 self._mark_cancelled(job_id, run_id)
                 return
-            self._services.catalog.update_analysis_run(
+            self._catalog.update_analysis_run(
                 run_id,
                 status="completed",
                 result=result,
@@ -297,7 +304,7 @@ class AnalysisJobManager:
         current = self._store.get(job_id)
         if current and current["status"] in TERMINAL_JOB_STATUSES:
             return
-        self._services.catalog.update_analysis_run(
+        self._catalog.update_analysis_run(
             run_id,
             status="cancelled",
             completed_at=time.time(),
@@ -309,7 +316,7 @@ class AnalysisJobManager:
         if current and current["status"] in TERMINAL_JOB_STATUSES:
             return
         error = error[:2000]
-        self._services.catalog.update_analysis_run(
+        self._catalog.update_analysis_run(
             run_id,
             status="failed",
             error=error,
@@ -358,7 +365,7 @@ class AnalysisJobManager:
         if body.transcription_id or not body.recording_id:
             return body
         try:
-            transcription = self._services.transcriptions.find_for_recording(body.recording_id)
+            transcription = self._transcriptions.find_for_recording(body.recording_id)
         except Exception:
             transcription = None
         if not transcription:
@@ -368,7 +375,7 @@ class AnalysisJobManager:
     def _input_hash(self, body: AnalysisRequest, payload: dict[str, Any]) -> str:
         if body.transcription_id:
             try:
-                text = self._services.transcriptions.get(body.transcription_id).get("text", "")
+                text = self._transcriptions.get(body.transcription_id).get("text", "")
             except Exception:
                 text = body.transcription_id
         elif body.text:
