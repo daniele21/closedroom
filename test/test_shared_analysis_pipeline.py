@@ -156,8 +156,16 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def _analysis_manager(self) -> AnalysisJobManager:
+        return AnalysisJobManager(
+            AnalysisService(self.services),
+            self.store,
+            catalog=self.catalog,
+            transcriptions=self.transcriptions,
+        )
+
     def test_default_pipeline_uses_one_shared_v2_job(self) -> None:
-        manager = AnalysisJobManager(self.services, self.store)
+        manager = self._analysis_manager()
         body = AnalysisPipelineRequest(text="Representative meeting", pipeline_id="meeting_default")
 
         with patch("local_asr_server.analysis_jobs.load_settings", return_value=self.settings), patch.object(
@@ -172,7 +180,7 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
         self.assertEqual(run["analysis_type"], "meeting_brief")
 
     def test_explicit_analysis_types_keep_legacy_multi_job_path(self) -> None:
-        manager = AnalysisJobManager(self.services, self.store)
+        manager = self._analysis_manager()
         body = AnalysisPipelineRequest(
             text="Representative meeting",
             pipeline_id="meeting_default",
@@ -192,7 +200,7 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
         self.assertEqual(template_ids, {"action_items", "decisions"})
 
     def test_pipeline_identity_versions_shared_default_but_not_public_template_list(self) -> None:
-        manager = AnalysisJobManager(self.services, self.store)
+        manager = self._analysis_manager()
         with patch("local_asr_server.analysis_jobs.load_settings", return_value=self.settings):
             identity = manager.pipeline_identity(AnalysisPipelineRequest(text="x", pipeline_id="meeting_default"))
 
