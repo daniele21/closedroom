@@ -17,10 +17,13 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - GRP-3 stages immutable production artifacts with exact version/source/distribution checks, unchanged DMG bytes, canonical names, checksums, notes and inventory.
 - GRP-4 defines manual draft-only publication from a tagged commit in `main` history using a trusted same-SHA production workflow artifact. It never builds or publishes a final release.
 - GRP-5 automation targets the `production-release` environment, keeps Developer ID/notary authority ephemeral, delegates to the canonical production builder, validates Apple evidence and uploads only the trusted same-SHA artifact consumed by GRP-4. Real success still requires the GitHub environment/authority to be configured externally.
+- Architectural consolidation Wave 1 merged through PR #81 (`6dc0ee1986d14169ea997ea1b6714b5d94555a9c`), establishing explicit recorder lifecycle state, saved-meeting accessory ownership, a single-file transcription application boundary, screenshot artifact delegation, and multi-unit native Swift compilation without changing local-first/runtime protocol boundaries.
 
 ## Current integration state
 
 `HeavyWorkloadArbiter` is the sole heavy-work owner. Capture waits for a safe managed-work boundary, queues bounded work during recording and releases it afterward; `ResourcePolicy` is the fail-safe. `RecordingStore` owns persistence and external runtimes remain caller-owned.
+
+Architectural consolidation Wave 2 is an integration candidate: local AI application workflows are isolated from the concrete `local_llm_server` client behind a port, model-phase coordination is app-owned rather than process-global, and the analysis service graph is constructed without placeholder dependencies. These are internal boundary changes only; `RuntimeServiceManager` still owns managed local-AI lifecycle/readiness and no implicit cloud fallback is introduced.
 
 The frontend reserves before capture, shows cancellable preparation and starts the timer only with real capture. `App.tsx` + `workspace.css` own the adaptive shell.
 
@@ -50,6 +53,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
+- [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 service-graph, app-owned model-phase and Local AI client-port consolidation is under integration validation.
 
 PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
 
