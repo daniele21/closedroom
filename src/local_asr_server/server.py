@@ -90,9 +90,9 @@ def create_app(
     app.state.default_model = default_model
     capture_manager = NativeCaptureManager()
     runtime_services = RuntimeServiceManager()
-    from local_asr_server.runtime.leases import ModelRuntimeLeaseManager
-    ModelRuntimeLeaseManager.set_service_manager(runtime_services)
-    transcription_service = TranscriptionService()
+    transcription_service = TranscriptionService(
+        model_phases=runtime_services.model_phases,
+    )
     app.state.auth_enabled = _env_bool("LOCAL_ASR_REQUIRE_AUTH", True) if enable_auth is None else enable_auth
     app.state.api_token = os.environ.get("LOCAL_ASR_API_TOKEN") or secrets.token_urlsafe(32)
     
@@ -177,7 +177,9 @@ def create_app(
         catalog=catalog_store,
         jobs=job_store,
         transcription_jobs=transcription_jobs,
-        diarization=TranscriptionDiarizationService(),
+        diarization=TranscriptionDiarizationService(
+            model_phases=runtime_services.model_phases,
+        ),
         analysis_jobs=cast(AnalysisJobManager, None),
         recordings=recording_store,
         transcriptions=transcription_store,
