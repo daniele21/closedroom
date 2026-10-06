@@ -34,11 +34,7 @@ router = APIRouter()
 @router.get("/health")
 def health(request: Request) -> dict:
     active_recording = get_services(request.app).recordings.active_recording()
-    active_jobs = get_services(request.app).jobs.list_jobs(limit=100)
-    transcribing = any(
-        job["type"] == "transcription" and job["status"] not in {"completed", "failed", "cancelled", "interrupted"}
-        for job in active_jobs
-    )
+    transcribing = get_services(request.app).jobs.has_active_job(job_type="transcription")
     status_str = "recording" if active_recording else ("transcribing" if transcribing else "idle")
     return {
         "ok": True,

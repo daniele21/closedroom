@@ -10,10 +10,13 @@ ROOT = Path(__file__).parents[1]
 class LightweightRuntimeContractTests(unittest.TestCase):
     def test_frontend_does_not_fetch_remote_fonts(self) -> None:
         html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+        built_html = (ROOT / "src" / "local_asr_server" / "static" / "index.html").read_text(encoding="utf-8")
         css = (ROOT / "frontend" / "src" / "index.css").read_text(encoding="utf-8")
 
         self.assertNotIn("fonts.googleapis.com", html)
         self.assertNotIn("fonts.gstatic.com", html)
+        self.assertNotIn("fonts.googleapis.com", built_html)
+        self.assertNotIn("fonts.gstatic.com", built_html)
         self.assertNotIn("Outfit", css)
         self.assertNotIn("JetBrains Mono", css)
         self.assertIn("-apple-system", css)
