@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { ApiClient, AnalysisRun, Meeting, RecordingScreenshot, TranscriptionSegment } from '../api/apiClient';
 import { createVisualIntelligenceJob, cancelVisualIntelligenceJob } from '../api/visualJobs';
+import { VisualManualScreenshotGroup } from '../api/visualIntelligence';
 import { prepareMeetingNotes, cancelMeetingPreparation } from '../api/meetingPreparation';
 import { ANALYSIS_TYPE_LABELS, ANALYSIS_TYPE_ORDER } from '../api/config';
 import { Badge } from '../components/ui/Badge';
@@ -202,8 +203,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const visualResultAvailable = meeting?.transcription?.stats?.visual_intelligence?.version === 2;
   const savedScreenshotCount = screenshots.length;
   const availableScreenshotCount = screenshots.filter((item) => item.available).length;
-  const visibleScreenshots = showAllScreenshots ? screenshots : screenshots.slice(0, 6);
-  const hiddenScreenshotCount = Math.max(0, savedScreenshotCount - visibleScreenshots.length);
   const keyMomentContexts = useMemo(
     () => new Map(
       screenshots.map((shot) => [
@@ -218,10 +217,55 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     : null;
   const visualEvidenceCount = visualFrameCount + availableScreenshotCount;
   const { data: visualData, loading: visualLoading, error: visualError } = useVisualIntelligence(
-    demoMode ? null : recordingId, visualResultAvailable && activeTab === 'analysis',
+    demoMode ? null : recordingId,
+    Boolean(visualResultAvailable && (activeTab === 'analysis' || savedScreenshotCount > 1)),
   );
   const visualSourcesStale = visualData?.source_validity?.status === 'stale';
   const visualEnabled = visualResultAvailable && !visualSourcesStale;
+  const screenshotGroups = useMemo(
+    () => visualSourcesStale ? [] : (visualData?.document.manual_screenshot_groups || []),
+    [visualData?.document.manual_screenshot_groups, visualSourcesStale],
+  );
+  const screenshotById = useMemo(
+    () => new Map(screenshots.map((shot) => [shot.screenshot_id, shot])),
+    [screenshots],
+  );
+  const groupByScreenshotId = useMemo(() => {
+    const groups = new Map<string, VisualManualScreenshotGroup>();
+    screenshotGroups.forEach((group) => {
+      group.screenshot_ids.forEach((id) => groups.set(id, group));
+    });
+    return groups;
+  }, [screenshotGroups]);
+  const collapsedKeyMoments = useMemo(() => {
+    const groupedMembers = new Set(screenshotGroups.flatMap((group) => group.screenshot_ids));
+    const items: Array<{ shot: RecordingScreenshot; group: VisualManualScreenshotGroup | null; sortTime: number }> = [];
+
+    screenshotGroups.forEach((group) => {
+      const representative = screenshotById.get(group.representative_screenshot_id);
+      if (representative) {
+        items.push({ shot: representative, group, sortTime: group.start });
+      }
+    });
+    screenshots.forEach((shot) => {
+      if (!groupedMembers.has(shot.screenshot_id)) {
+        items.push({ shot, group: null, sortTime: shot.timestamp });
+      }
+    });
+    return items.sort((left, right) => left.sortTime - right.sortTime || left.shot.sequence - right.shot.sequence);
+  }, [screenshotById, screenshotGroups, screenshots]);
+  const visibleKeyMoments = showAllScreenshots
+    ? screenshots.map((shot) => ({ shot, group: null as VisualManualScreenshotGroup | null, sortTime: shot.timestamp }))
+    : collapsedKeyMoments.slice(0, 6);
+  const visibleOriginalCount = visibleKeyMoments.reduce(
+    (count, item) => count + (item.group?.screenshot_ids.length || 1),
+    0,
+  );
+  const hiddenScreenshotCount = Math.max(0, savedScreenshotCount - visibleOriginalCount);
+  const canExpandScreenshots = savedScreenshotCount > visibleOriginalCount || screenshotGroups.length > 0;
+  const selectedScreenshotGroup = selectedScreenshot
+    ? groupByScreenshotId.get(selectedScreenshot.screenshot_id) || null
+    : null;
 
   const load = () => {
     if (!recordingId) return Promise.resolve();
@@ -840,7 +884,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                   </p>
                 </div>
               </div>
-              {savedScreenshotCount > 6 && (
+              {canExpandScreenshots && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -849,8 +893,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                   className="shrink-0"
                 >
                   {showAllScreenshots
-                    ? (lang === 'it' ? 'Mostra meno' : 'Show less')
-                    : (lang === 'it' ? `Mostra tutti (${savedScreenshotCount})` : `Show all (${savedScreenshotCount})`)}
+                    ? (lang === 'it' ? 'Raggruppa simili' : 'Group similar')
+                    : (lang === 'it' ? `Mostra tutti gli scatti (${savedScreenshotCount})` : `Show all captures (${savedScreenshotCount})`)}
                   <ChevronDown
                     className={cn('h-3.5 w-3.5 transition-transform', showAllScreenshots && 'rotate-180')}
                     aria-hidden="true"
@@ -860,11 +904,11 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
             </div>
 
             <div className="flex flex-col gap-2.5">
-              {visibleScreenshots.map((shot) => {
+              {visibleKeyMoments.map(({ shot, group }) => {
                 const context = keyMomentContexts.get(shot.screenshot_id);
                 return (
                   <button
-                    key={shot.screenshot_id}
+                    key={group?.group_id || shot.screenshot_id}
                     type="button"
                     onClick={() => setSelectedScreenshot(shot)}
                     className="group grid min-h-[124px] w-full max-w-3xl grid-cols-[128px_minmax(0,1fr)] overflow-hidden rounded-xl border border-border-subtle bg-bg-surface text-left transition hover:border-border-focus hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:grid-cols-[190px_minmax(0,1fr)]"
@@ -875,6 +919,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     }
                     title={shot.display_title || undefined}
                     data-key-moment-id={shot.screenshot_id}
+                    data-key-moment-group={group?.group_id || undefined}
                   >
                     <div className="flex h-full min-h-[124px] items-center justify-center overflow-hidden bg-black/5 p-1.5">
                       {shot.available && shot.thumbnail_available ? (
@@ -894,11 +939,20 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-mono text-[11px] font-semibold tabular-nums text-text-primary">
-                            {screenshotTimestampLabel(shot.timestamp)}
+                            {group
+                              ? `${screenshotTimestampLabel(group.start)}–${screenshotTimestampLabel(group.end)}`
+                              : screenshotTimestampLabel(shot.timestamp)}
                           </span>
                           <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[9px] font-semibold text-accent">
                             {lang === 'it' ? 'Segnato da te' : 'Marked by you'}
                           </span>
+                          {group && (
+                            <span className="rounded-full border border-border-subtle px-2 py-0.5 text-[9px] font-semibold text-text-muted">
+                              {lang === 'it'
+                                ? `${group.screenshot_ids.length} scatti simili`
+                                : `${group.screenshot_ids.length} similar captures`}
+                            </span>
+                          )}
                         </div>
                         <p className="mt-2 max-h-14 overflow-hidden text-xs leading-relaxed text-text-secondary">
                           {context?.excerpt || (
@@ -927,8 +981,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
             {!showAllScreenshots && hiddenScreenshotCount > 0 && (
               <p className="mt-2.5 text-right text-[10px] text-text-muted">
                 {lang === 'it'
-                  ? `+${hiddenScreenshotCount} momenti non mostrati`
-                  : `+${hiddenScreenshotCount} more moment${hiddenScreenshotCount === 1 ? '' : 's'}`}
+                  ? `+${hiddenScreenshotCount} scatti raccolti negli stack`
+                  : `+${hiddenScreenshotCount} captures grouped into stacks`}
               </p>
             )}
           </section>
@@ -1621,6 +1675,54 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                   <p className="mt-1.5 text-sm leading-relaxed text-text-secondary">
                     {selectedKeyMomentContext.excerpt}
                   </p>
+                </div>
+              )}
+              {selectedScreenshotGroup && selectedScreenshotGroup.screenshot_ids.length > 1 && (
+                <div
+                  className="mb-3 rounded-xl border border-border-subtle bg-bg-surface px-4 py-3"
+                  data-key-moment-group-strip="true"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                      {lang === 'it'
+                        ? `${selectedScreenshotGroup.screenshot_ids.length} scatti dello stesso momento`
+                        : `${selectedScreenshotGroup.screenshot_ids.length} captures of the same moment`}
+                    </p>
+                    <span className="font-mono text-[9px] text-text-muted">
+                      {screenshotTimestampLabel(selectedScreenshotGroup.start)}–{screenshotTimestampLabel(selectedScreenshotGroup.end)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                    {selectedScreenshotGroup.screenshot_ids.map((screenshotId) => {
+                      const groupedShot = screenshotById.get(screenshotId);
+                      if (!groupedShot) return null;
+                      const selected = groupedShot.screenshot_id === selectedScreenshot.screenshot_id;
+                      return (
+                        <button
+                          key={screenshotId}
+                          type="button"
+                          onClick={() => setSelectedScreenshot(groupedShot)}
+                          className={cn(
+                            'relative h-14 w-24 shrink-0 overflow-hidden rounded-lg border bg-bg-elevated transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus',
+                            selected ? 'border-accent ring-1 ring-accent/30' : 'border-border-subtle hover:border-border-focus',
+                          )}
+                          aria-label={
+                            lang === 'it'
+                              ? `Apri scatto a ${screenshotTimestampLabel(groupedShot.timestamp)}`
+                              : `Open capture at ${screenshotTimestampLabel(groupedShot.timestamp)}`
+                          }
+                        >
+                          {groupedShot.thumbnail_available ? (
+                            <img src={groupedShot.thumbnail_url} alt="" className="h-full w-full object-contain" />
+                          ) : (
+                            <span className="flex h-full items-center justify-center text-[9px] text-text-muted">
+                              {screenshotTimestampLabel(groupedShot.timestamp)}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
               {selectedScreenshot.available ? (
