@@ -83,7 +83,11 @@ def energy_windows_from_samples(
         chunk = values[start_index : start_index + frames_per_window]
         if chunk.size == 0:
             continue
-        rms = float(np.sqrt(np.mean(np.square(chunk))))
+        # Canonical ClosedRoom WAV is PCM16. load_audio_samples normalizes by
+        # 32768 while the historical file-window path normalized by 32767;
+        # preserve that established RMS scale on the reuse fast path.
+        pcm16_scaled = chunk * (32768.0 / 32767.0)
+        rms = min(1.0, float(np.sqrt(np.mean(np.square(pcm16_scaled)))))
         windows.append(
             EnergyWindow(
                 start=start_index / sample_rate,
