@@ -25,7 +25,7 @@ Make further ClosedRoom efficiency changes only when measured evidence shows a w
 | SE-2 | Privacy-safe Silero-vs-RMS timing/agreement benchmark | ACTIVE |
 | SE-3 | Representative target-Mac VAD quality run and ONNX keep/remove decision | BLOCKED |
 | SE-4 | Audit large VLM transitive packages against the real ClosedRoom visual path | READY |
-| SE-5 | Add explicit ephemeral cache budget only if storage evidence shows unbounded growth | READY |
+| SE-5 | Bound SHA-keyed ephemeral ASR JSON cache with LRU retention | ACTIVE |
 
 ## Acceptance
 
@@ -35,7 +35,10 @@ SE-2: one command accepts local audio paths and emits only aggregate duration/by
 
 SE-3: do not remove ONNX Runtime until representative meetings show acceptable speech-boundary quality, not just synthetic agreement. Bundle-size benefit is material (~17 MB arm64 wheel before transitive effects) but quality dominates.
 
+SE-5: prune only SHA-keyed ASR JSON cache files after writes, promote cache hits by mtime and never touch models, recordings, transcripts or unrelated cache files. Default budget: 512 MiB.
+
 ## Validation
 
 SE-1 touches RecordingStore and transcription cache identity: STRONG.
 SE-2 is deterministic tooling/tests. Representative benchmark execution is REAL_ENVIRONMENT evidence, not a hosted-CI substitute for production meeting quality.
+SE-5 is a contained ephemeral-cache policy and requires SCOPED validation unless adjacent shared contracts change.
