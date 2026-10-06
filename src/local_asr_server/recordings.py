@@ -22,24 +22,6 @@ from local_asr_server.recording_screenshot_artifacts import (
     SCREENSHOT_MANIFEST_VERSION,
     ScreenshotArtifactStore,
 )
-logger = logging.getLogger("uvicorn.error")
-
-
-_INTERNAL_TRACK_FIELDS = {
-    "extension",
-    "_content_sha256",
-    "_content_sha256_size",
-    "_content_sha256_mtime_ns",
-}
-
-
-def _sha256_path(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
 from local_asr_server.visual_intelligence.contracts import (
     MAX_VISUAL_FRAME_BYTES,
     VISUAL_DOCUMENT_FILE,
@@ -50,6 +32,25 @@ from local_asr_server.visual_intelligence.contracts import (
     VISUAL_ROUTING_FILE,
     VISUAL_SUMMARY_FILE,
 )
+
+
+logger = logging.getLogger("uvicorn.error")
+
+_INTERNAL_TRACK_FIELDS = {
+    "extension",
+    "_content_sha256",
+    "_content_sha256_size",
+    "_content_sha256_mtime_ns",
+    "_content_sha256_inode",
+}
+
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 VALID_STATUSES = {
@@ -1420,13 +1421,18 @@ class RecordingStore:
                 cached
                 and int(track.get("_content_sha256_size") or -1) == before.st_size
                 and int(track.get("_content_sha256_mtime_ns") or -1) == before.st_mtime_ns
+                and int(track.get("_content_sha256_inode") or -1) == before.st_ino
             ):
                 return cached
 
         # Do not keep the recording lock while scanning a potentially multi-hour file.
         digest = _sha256_path(audio_path)
         after = audio_path.stat()
-        if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+        if (after.st_size, after.st_mtime_ns, after.st_ino) != (
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ino,
+        ):
             raise RecordingConflict(f"Track {track_id} changed while computing its content hash")
 
         with self._lock_for(recording_id):
@@ -1435,11 +1441,16 @@ class RecordingStore:
             track = self._track_for(metadata, track_id)
             current_path = self._track_audio_path(session_dir, track)
             current = current_path.stat()
-            if (current.st_size, current.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            if (current.st_size, current.st_mtime_ns, current.st_ino) != (
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ino,
+            ):
                 raise RecordingConflict(f"Track {track_id} changed before its content hash could be persisted")
             track["_content_sha256"] = digest
             track["_content_sha256_size"] = current.st_size
             track["_content_sha256_mtime_ns"] = current.st_mtime_ns
+            track["_content_sha256_inode"] = current.st_ino
             self._write_metadata(session_dir, metadata)
             self._upsert_catalog(metadata)
         return digest
