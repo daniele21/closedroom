@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from local_asr_server.recordings import RecordingConflict, RecordingNotFound, RecordingStore
 
@@ -58,6 +60,37 @@ class RecordingStoreTests(unittest.TestCase):
         self.assertEqual(finalized["status"], "recorded")
         self.assertFalse(should_start)
         self.assertEqual(self.store.audio_path(recording["id"]).read_bytes(), b"firstsecond")
+
+    def test_finalized_track_hash_is_persisted_and_reused(self) -> None:
+        recording = self.create_recording()
+        self.store.append_chunk(recording["id"], 0, b"first")
+        self.store.append_chunk(recording["id"], 1, b"second")
+        self.store.finalize(recording["id"])
+
+        expected = hashlib.sha256(b"firstsecond").hexdigest()
+        first = self.store.track_content_sha256(recording["id"], "mixed")
+        with patch(
+            "local_asr_server.recordings._sha256_path",
+            side_effect=AssertionError("persisted track hash should avoid rescanning audio"),
+        ):
+            second = self.store.track_content_sha256(recording["id"], "mixed")
+
+        self.assertEqual(first, expected)
+        self.assertEqual(second, expected)
+        public_track = self.store.get(recording["id"], include_result=False)["audio_tracks"][0]
+        self.assertNotIn("_content_sha256", public_track)
+
+    def test_persisted_track_hash_invalidates_if_audio_changes(self) -> None:
+        recording = self.create_recording()
+        self.store.append_chunk(recording["id"], 0, b"audio")
+        self.store.finalize(recording["id"])
+        first = self.store.track_content_sha256(recording["id"], "mixed")
+
+        self.store.audio_path(recording["id"]).write_bytes(b"changed-audio")
+        second = self.store.track_content_sha256(recording["id"], "mixed")
+
+        self.assertNotEqual(first, second)
+        self.assertEqual(second, hashlib.sha256(b"changed-audio").hexdigest())
 
     def test_rejects_out_of_order_and_post_stop_chunks(self) -> None:
         recording = self.create_recording()

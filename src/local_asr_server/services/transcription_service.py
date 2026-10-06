@@ -108,10 +108,11 @@ class TranscriptionService:
         audio_path: Path,
         *,
         engine: Callable[..., dict[str, Any]] | None = None,
+        audio_hash: str | None = None,
         **options: Any,
     ) -> dict[str, Any]:
         """Reuse one deterministic engine cache for every transcription entrypoint."""
-        cache_key = self.cache_key(audio_path, **options)
+        cache_key = self.cache_key(audio_path, audio_hash=audio_hash, **options)
         cached = get_cached_result(cache_key)
         if cached is not None:
             logger.info("[ASR Cache] Hit for %s", audio_path.name)
@@ -121,7 +122,7 @@ class TranscriptionService:
         return result
 
     @staticmethod
-    def cache_key(audio_path: Path, **options: Any) -> str:
+    def cache_key(audio_path: Path, *, audio_hash: str | None = None, **options: Any) -> str:
         provider = normalize_asr_provider(options.get("asr_provider"))
         provider_options = public_provider_options(provider, options.get("provider_options"))
         cache_options = {
@@ -143,7 +144,7 @@ class TranscriptionService:
             backend=asr_backend_for(provider, options.get("model") or ""),
             provider_options=provider_options,
         )
-        return generate_cache_key(audio_hash=hash_audio_file(audio_path), **cache_options)
+        return generate_cache_key(audio_hash=audio_hash or hash_audio_file(audio_path), **cache_options)
 
     @staticmethod
     def resolve_asr(
@@ -331,6 +332,7 @@ class TranscriptionService:
                 result = self.transcribe_cached(
                     audio_path,
                     engine=engine,
+                    audio_hash=store.track_content_sha256(recording_id, str(track["id"])),
                     model=target_model,
                     language=body.language,
                     task=body.task,
