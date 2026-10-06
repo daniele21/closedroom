@@ -40,6 +40,8 @@ export default function RecordingOverlayPage() {
   const [pendingDisplayId, setPendingDisplayId] = useState<number | null>(null);
   const [isSelectingDisplay, setIsSelectingDisplay] = useState(false);
   const [screenshotFeedback, setScreenshotFeedback] = useState<'idle' | 'saved'>('idle');
+  const [lastSavedScreenshotId, setLastSavedScreenshotId] = useState<string | null>(null);
+  const [isUndoingScreenshot, setIsUndoingScreenshot] = useState(false);
 
   const logOverlay = useCallback((level: 'info' | 'warn' | 'error', message: string, data?: any) => {
     console[level === 'warn' ? 'warn' : level === 'error' ? 'error' : 'log'](`[Overlay] ${message}`, data || '');
@@ -164,6 +166,8 @@ export default function RecordingOverlayPage() {
           setRecordingId(null);
           setScreenshotCount(0);
           setLastScreenshotAt(null);
+          setLastSavedScreenshotId(null);
+          setLastSavedScreenshotId(null);
           if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
           setTimer('00:00');
           sse.close();
@@ -267,6 +271,7 @@ export default function RecordingOverlayPage() {
         setRecordingId(null);
         setScreenshotCount(0);
         setLastScreenshotAt(null);
+        setLastSavedScreenshotId(null);
         setTimer('00:00');
         if (eventSourceRef.current) {
           eventSourceRef.current.close();
@@ -308,6 +313,7 @@ export default function RecordingOverlayPage() {
               if (prevId !== data.recordingId) {
                 setScreenshotCount(0);
                 setLastScreenshotAt(null);
+                setLastSavedScreenshotId(null);
                 setErrorMsg(null);
                 connectSSE(data.recordingId);
                 if (data.captureBackend === 'native') {
@@ -485,10 +491,12 @@ export default function RecordingOverlayPage() {
         setSelectedDisplayId(saved.display_id);
       }
       setScreenshotFeedback('saved');
+      setLastSavedScreenshotId(saved.screenshot_id);
       if (screenshotFeedbackTimerRef.current) window.clearTimeout(screenshotFeedbackTimerRef.current);
       screenshotFeedbackTimerRef.current = window.setTimeout(() => {
         setScreenshotFeedback('idle');
-      }, 1200);
+        setLastSavedScreenshotId(null);
+      }, 4500);
       logOverlay('info', 'Screenshot captured and stored successfully', {
         screenshot_id: saved.screenshot_id,
         sequence: saved.sequence,
@@ -513,6 +521,32 @@ export default function RecordingOverlayPage() {
       }
     } finally {
       setIsCapturingScreenshot(false);
+    }
+  };
+
+  const handleUndoScreenshot = async () => {
+    if (!recordingId || !lastSavedScreenshotId || isUndoingScreenshot || isStopping) return;
+    setIsUndoingScreenshot(true);
+    setErrorMsg(null);
+    try {
+      await ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId);
+      const remaining = await ApiClient.recordingScreenshots(recordingId);
+      setScreenshotCount(remaining.total || 0);
+      const latest = remaining.items?.[remaining.items.length - 1];
+      setLastScreenshotAt(typeof latest?.timestamp === 'number' ? latest.timestamp : null);
+      setLastSavedScreenshotId(null);
+      setScreenshotFeedback('idle');
+      if (screenshotFeedbackTimerRef.current) {
+        window.clearTimeout(screenshotFeedbackTimerRef.current);
+        screenshotFeedbackTimerRef.current = null;
+      }
+      logOverlay('info', 'Last screenshot removed with undo', { recordingId });
+    } catch (err: any) {
+      const message = String(err?.message || (t('recording.screenshotFailed') || 'Unable to remove screenshot.'));
+      setErrorMsg(message);
+      logOverlay('error', 'Screenshot undo failed', { recordingId, error: message });
+    } finally {
+      setIsUndoingScreenshot(false);
     }
   };
 
@@ -886,6 +920,20 @@ export default function RecordingOverlayPage() {
           )}
           <span>{screenshotFeedback === 'saved' ? 'Saved' : screenshotCount}</span>
         </button>
+
+        {lastSavedScreenshotId && (
+          <button
+            type="button"
+            onClick={() => void handleUndoScreenshot()}
+            disabled={isUndoingScreenshot || isStopping}
+            className="flex h-9 shrink-0 items-center rounded-lg border border-white/10 bg-white/[0.04] px-2 text-[9px] font-semibold text-white/65 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+            aria-label={t('common.undo') || 'Undo last screenshot'}
+            title={t('common.undo') || 'Undo'}
+            data-screenshot-undo="true"
+          >
+            {isUndoingScreenshot ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
+          </button>
+        )}
 
         <button
           type="button"
