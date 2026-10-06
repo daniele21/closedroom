@@ -179,7 +179,11 @@ class AnalysisService:
     ) -> dict[str, Any]:
         text_to_analyze = ""
         transcription: dict[str, Any] | None = None
-        if body.transcription_id:
+        if body.text and body.source_ids:
+            # Explicit source-scoped text is already the bounded evidence chosen
+            # by the caller. recording_id remains provenance/scope metadata only.
+            text_to_analyze = body.text
+        elif body.transcription_id:
             try:
                 transcription = self.services.transcriptions.get(body.transcription_id)
                 text_to_analyze = transcription.get("text", "")
