@@ -570,16 +570,34 @@ try {
   await waitText(browser, ['Screenshot evidence review'], 30000, true);
   if (counts.stop !== 1 || counts.open_meeting !== 1) throw new Error('stop/open counts unexpected: ' + JSON.stringify(counts));
   await waitSelector(browser, '[data-key-moments="true"]', 10000, true);
-  await waitSelector(browser, '[data-key-moment-id="shot-001"]', 5000, true);
   await waitText(browser, ['Alex reviews the launch roadmap and validation plan.'], 5000, true);
   await waitText(browser, ['The roadmap image shows the launch milestone.'], 10000, true);
   await waitText(browser, ['Screenshot · 00:12'], 10000);
   await checkpoint(browser, '04-meeting-notes-cited');
 
-  // Visual enrichment is disclosure-driven: opening a Key Moment loads the
-  // persisted local visual document instead of slowing the initial meeting open.
-  await browser.clickCss('[data-key-moment-id="shot-001"]');
+  // Visual enrichment is disclosure-driven. The saved Meeting may already open
+  // on Analysis when notes exist, which is itself a valid disclosure; otherwise
+  // opening the first Key Moment requests the persisted local visual document.
+  const enrichmentDeadline = Date.now() + 8000;
+  let enrichmentEntry = null;
+  while (Date.now() < enrichmentDeadline) {
+    enrichmentEntry = await browser.execute(`
+      if (document.querySelector('[data-key-moment-group="manual-screenshot-group-01"]')) return 'group';
+      if (document.querySelector('[data-key-moment-id="shot-001"]')) return 'shot';
+      return null;
+    `);
+    if (enrichmentEntry) break;
+    await frame(browser);
+    await sleep(150);
+  }
+  if (!enrichmentEntry) throw new Error('key moment enrichment entry unavailable');
+  if (enrichmentEntry === 'group') {
+    await browser.clickCss('[data-key-moment-group="manual-screenshot-group-01"]');
+  } else {
+    await browser.clickCss('[data-key-moment-id="shot-001"]');
+  }
   await waitSelector(browser, '[data-key-moment-group-strip="true"]', 8000, true);
+  if (counts.visual_intelligence < 1) throw new Error('visual intelligence disclosure did not reach v2 backend');
   await checkpoint(browser, '04a-key-moment-progressive-enrichment');
   const closeEnrichedModal = await browser.execute(`
     const labels = ['Chiudi screenshot', 'Close screenshot'];
