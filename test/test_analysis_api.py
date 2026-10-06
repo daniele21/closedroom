@@ -56,6 +56,30 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertIn("key_points", data)
         self.assertIn("action_items", data)
 
+
+    @patch("local_asr_server.services.analysis_service.LLMService.get_provider")
+    def test_source_scoped_recording_analysis_uses_explicit_bounded_text(self, mock_provider_factory) -> None:
+        provider = MagicMock()
+        provider.analyze.return_value = {"markdown": "bounded answer"}
+        mock_provider_factory.return_value = provider
+
+        response = self.client.post(
+            "/v1/analysis",
+            json={
+                "recording_id": "recording-key-moment",
+                "text": "[VISUAL INFERENCE] roadmap\n[SPOKEN] ship after validation",
+                "source_ids": ["screenshot:shot-1"],
+                "prompt": "Answer only from the supplied key moment evidence.",
+                "llm_provider": "mock",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        provider.analyze.assert_called_once()
+        analyzed_text = provider.analyze.call_args.args[0]
+        self.assertIn("[VISUAL INFERENCE] roadmap", analyzed_text)
+        self.assertIn("[SPOKEN] ship after validation", analyzed_text)
+
     @patch("local_asr_server.services.settings_service.load_settings")
     def test_settings_does_not_return_gemini_secret(self, mock_load) -> None:
         mock_load.return_value = {
