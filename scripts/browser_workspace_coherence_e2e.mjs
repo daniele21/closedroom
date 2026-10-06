@@ -314,6 +314,13 @@ try {
     10000,
     true,
   );
+  await waitUntil(
+    browser,
+    'Meeting content ready',
+    "return Boolean(document.querySelector('#meeting-tab-transcript') && document.querySelector('#meeting-tab-analysis'));",
+    10000,
+    true,
+  );
   observations.meeting = await browser.execute(`
     return {
       page: document.querySelector('.workspace-content')?.getAttribute('data-workspace-page'),
