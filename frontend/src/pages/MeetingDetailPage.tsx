@@ -1331,7 +1331,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                       onTimestampClick={handleTimestampClick}
                       currentTime={currentTime}
                       screenshots={screenshots}
-                      onOpenScreenshot={setSelectedScreenshot}
+                      onOpenScreenshot={openKeyMoment}
                     />
                   </div>
                 ) : meeting.transcription?.text ? (
@@ -1468,7 +1468,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                         onSeek={handleTimestampClick}
                         onChanged={async () => { await load(); }}
                         screenshots={screenshots}
-                        onOpenScreenshot={setSelectedScreenshot}
+                        onOpenScreenshot={openKeyMoment}
                         readOnly={demoMode}
                       />
                     ) : (
