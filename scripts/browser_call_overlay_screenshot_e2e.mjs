@@ -410,6 +410,7 @@ try {
   `);
   if (!clickedShot) throw new Error('screenshot button unavailable');
   await waitText(browser, ['Saved', 'Screenshots 1'], 8000, true);
+  await waitSelector(browser, 'button[data-screenshot-undo="true"]', 3000, true);
   if (counts.screenshots_post !== 1) throw new Error('unexpected screenshot POST count: ' + counts.screenshots_post);
   await checkpoint(browser, '03-screenshot-persisted');
 
@@ -417,6 +418,9 @@ try {
   await waitHash(browser, '#meeting/' + MEETING_ID, 10000);
   await waitText(browser, ['Screenshot evidence review'], 30000, true);
   if (counts.stop !== 1 || counts.open_meeting !== 1) throw new Error('stop/open counts unexpected: ' + JSON.stringify(counts));
+  await waitText(browser, ['Key moments'], 10000, true);
+  await waitSelector(browser, '[data-key-moment-id="shot-001"]', 5000, true);
+  await waitText(browser, ['Alex reviews the launch roadmap and validation plan.'], 5000, true);
   await waitText(browser, ['The roadmap image shows the launch milestone.'], 10000, true);
   await waitText(browser, ['Screenshot · 00:12'], 10000);
   await checkpoint(browser, '04-meeting-notes-cited');
