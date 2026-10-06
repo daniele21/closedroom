@@ -5,7 +5,6 @@ import hmac
 import secrets
 import tempfile
 from pathlib import Path
-from typing import cast
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +24,7 @@ from local_asr_server.paths import get_static_dir
 from local_asr_server.runtime.resource_policy import ResourcePolicy, recording_has_active_capture
 from local_asr_server.runtime.service_manager import RuntimeServiceManager
 from local_asr_server.runtime.workload_arbiter import HeavyWorkloadArbiter
+from local_asr_server.services.analysis_service import AnalysisService, AnalysisServiceContext
 from local_asr_server.services.transcription_service import TranscriptionService
 from local_asr_server.transcriber import transcribe_file_sync
 from local_asr_server.app_logging import configure_application_logging
@@ -170,6 +170,20 @@ def create_app(
     from local_asr_server.transcriptions import TranscriptionStore
     transcription_store = TranscriptionStore(catalog=catalog_store)
     from local_asr_server.transcription_diarization import TranscriptionDiarizationService
+
+    analysis_context = AnalysisServiceContext(
+        runtime=runtime_services,
+        catalog=catalog_store,
+        recordings=recording_store,
+        transcriptions=transcription_store,
+    )
+    analysis_jobs = AnalysisJobManager(
+        AnalysisService(analysis_context),
+        job_store,
+        catalog=catalog_store,
+        transcriptions=transcription_store,
+        arbiter=heavy_workloads,
+    )
     services = AppServices(
         capture=capture_manager,
         runtime=runtime_services,
@@ -178,11 +192,10 @@ def create_app(
         jobs=job_store,
         transcription_jobs=transcription_jobs,
         diarization=TranscriptionDiarizationService(),
-        analysis_jobs=cast(AnalysisJobManager, None),
+        analysis_jobs=analysis_jobs,
         recordings=recording_store,
         transcriptions=transcription_store,
     )
-    services.analysis_jobs = AnalysisJobManager(services, job_store, arbiter=heavy_workloads)
     install_compatibility_aliases(app, services)
 
     # Clean up any orphan aggregate devices from previous runs/crashes
