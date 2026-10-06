@@ -167,7 +167,6 @@ export default function RecordingOverlayPage() {
           setScreenshotCount(0);
           setLastScreenshotAt(null);
           setLastSavedScreenshotId(null);
-          setLastSavedScreenshotId(null);
           if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
           setTimer('00:00');
           sse.close();
