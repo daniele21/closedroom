@@ -101,6 +101,11 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.meeting)
         self.assertIn("data-key-moment-id={shot.screenshot_id}", self.meeting)
         self.assertIn("data-key-moment-context=\"true\"", self.meeting)
+        self.assertIn('data-key-moment-ask="true"', self.meeting)
+        self.assertIn("source_ids: ['screenshot:' + selectedScreenshot.screenshot_id]", self.meeting)
+        self.assertIn("llm_provider: 'nemotron_local'", self.meeting)
+        self.assertIn("CLOSEDROOM_KEY_MOMENT_QA_V1", self.meeting)
+        self.assertIn("data-key-moment-answer=\"true\"", self.meeting)
         self.assertIn("src={selectedScreenshot.original_url}", self.meeting)
         self.assertIn("handleTimestampClick(selectedScreenshot.timestamp)", self.meeting)
 
