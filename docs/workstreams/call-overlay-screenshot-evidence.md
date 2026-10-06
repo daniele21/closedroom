@@ -7,15 +7,19 @@ Created: 2026-10-01
 
 ## Outcome
 
-Durante una registrazione nativa l'utente può salvare intenzionalmente uno screenshot
-dell'intero monitor dal compact overlay. Lo scatto usa il clock della registrazione,
-viene persistito localmente prima del feedback di successo e riappare nel Meeting al
-timestamp corretto. Transcript/audio restano canonici; le note possono citare
-separatamente evidenza parlata e visuale.
+Durante una registrazione nativa l'utente può segnare intenzionalmente un momento
+importante salvando uno screenshot dell'intero monitor dal compact overlay. Lo scatto usa
+il clock della registrazione, viene persistito localmente prima del feedback di successo e
+può essere annullato subito senza interrompere l'audio. Nel Meeting riappare come Key Moment
+al timestamp corretto, con contesto transcript vicino e accesso allo stesso punto dell'audio.
+Transcript/audio restano canonici; le note possono citare separatamente evidenza parlata e
+visuale e usare il gesto manuale solo come segnale di salienza, mai come prova di una decisione.
 
 Decisioni:
 - multi-display: selezione esplicita, mai cambio monitor silenzioso;
 - one-shot manuale, non screen recording continuo;
+- il click screenshot è un marker intenzionale di Key Moment; nessun prompt/caption obbligatorio durante la call;
+- Undo è limitato all'ultimo screenshot appena salvato e riusa delete/manifest owner esistenti;
 - originale + thumbnail + manifest versionato posseduti da RecordingStore;
 - nessun ASR/LLM/VLM durante recording;
 - nessun trasferimento cloud implicito di immagini o descrizioni visuali;
@@ -63,6 +67,11 @@ gli owner esistenti e non introducono queue o lifecycle paralleli.
 - Restart riconcilia manifest/file; delete/discard segue il proprietario RecordingStore.
 - Overlay distingue recording, screenshot saving/failure e stopping; ACK non equivale
   a salvataggio. Click e shortcut invocano lo stesso comando.
+- Dopo il commit persistente l'overlay espone un Undo temporaneo dell'ultimo screenshot;
+  il Meeting presenta gli screenshot come Key Moments e deriva il contesto parlato solo dai
+  segmenti temporali già persistiti, senza analisi live o nuova persistenza parallela.
+- Il marker manuale può aumentare la salienza nella generazione note, ma non trasforma
+  evidenza visual-only in contenuto detto, concordato, deciso o richiesto.
 - Marker Screenshot N · mm:ss è deterministico anche dentro turni lunghi, nei silenzi
   e con paginazione; non divide/rinumera segmenti.
 - Asset mancanti restano riferimenti espliciti; thumbnail lazy e originale apribile.
