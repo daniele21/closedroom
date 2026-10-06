@@ -570,13 +570,27 @@ try {
   await waitText(browser, ['Screenshot evidence review'], 30000, true);
   if (counts.stop !== 1 || counts.open_meeting !== 1) throw new Error('stop/open counts unexpected: ' + JSON.stringify(counts));
   await waitSelector(browser, '[data-key-moments="true"]', 10000, true);
-  await waitSelector(browser, '[data-key-moment-group="manual-screenshot-group-01"]', 8000, true);
-  await waitSelector(browser, '[data-key-moment-id="shot-002"]', 5000, true);
-  await waitText(browser, ['Launch roadmap'], 5000, true);
+  await waitSelector(browser, '[data-key-moment-id="shot-001"]', 5000, true);
   await waitText(browser, ['Alex reviews the launch roadmap and validation plan.'], 5000, true);
   await waitText(browser, ['The roadmap image shows the launch milestone.'], 10000, true);
   await waitText(browser, ['Screenshot · 00:12'], 10000);
   await checkpoint(browser, '04-meeting-notes-cited');
+
+  // Visual enrichment is disclosure-driven: opening a Key Moment loads the
+  // persisted local visual document instead of slowing the initial meeting open.
+  await browser.clickCss('[data-key-moment-id="shot-001"]');
+  await waitSelector(browser, '[data-key-moment-group-strip="true"]', 8000, true);
+  await checkpoint(browser, '04a-key-moment-progressive-enrichment');
+  const closeEnrichedModal = await browser.execute(`
+    const labels = ['Chiudi screenshot', 'Close screenshot'];
+    const button = Array.from(document.querySelectorAll('button')).find((node) => labels.includes(node.getAttribute('aria-label')));
+    if (!button) return false; button.click(); return true;
+  `);
+  if (!closeEnrichedModal) throw new Error('enriched key moment modal close control missing');
+
+  await waitSelector(browser, '[data-key-moment-group="manual-screenshot-group-01"]', 5000, true);
+  await waitSelector(browser, '[data-key-moment-id="shot-002"]', 5000, true);
+  await waitText(browser, ['Launch roadmap'], 5000, true);
   await browser.clickCss('[data-key-moment-group="manual-screenshot-group-01"]');
   await waitSelector(browser, '[data-key-moment-group-strip="true"]', 5000, true);
   await checkpoint(browser, '04b-key-moment-group-stack');
