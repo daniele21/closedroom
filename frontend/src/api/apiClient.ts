@@ -942,7 +942,7 @@ export const ApiClient = {
     })).json();
   },
 
-  async createAnalysisJob(payload: AnalysisSetupPayload & { transcription_id?: string; recording_id?: string; text?: string; audio_task?: string; question?: string; prompt?: string; analysis_type?: string; template_id?: string; pipeline_id?: string; pipeline_run_id?: string }): Promise<AnalysisJobCreated> {
+  async createAnalysisJob(payload: AnalysisSetupPayload & { transcription_id?: string; recording_id?: string; text?: string; audio_task?: string; question?: string; prompt?: string; analysis_type?: string; template_id?: string; pipeline_id?: string; pipeline_run_id?: string; source_ids?: string[] }): Promise<AnalysisJobCreated> {
     return (await request('/v1/analysis-jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
