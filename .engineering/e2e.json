@@ -211,7 +211,7 @@
     },
     {
       "id": "call-overlay-screenshot-evidence",
-      "claim": "During an active call, the overlay exposes explicit display selection and a manual screenshot action; after persisted Stop the saved Meeting exposes the screenshot at its recording timestamp, opens the original, seeks audio from the same point and exposes screenshot-backed note evidence without changing transcript text.",
+      "claim": "During an active call, the overlay exposes explicit display selection and a manual screenshot action that marks a deliberate key moment, confirms persistence before success and briefly allows undo; after persisted Stop the saved Meeting exposes that key moment with nearby transcript context, the original image and audio at the same timestamp, while screenshot-backed note evidence remains distinct from spoken evidence and transcript text stays immutable.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
       "target_environment_refs": [
