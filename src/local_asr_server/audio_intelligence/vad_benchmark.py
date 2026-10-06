@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from statistics import median
 from typing import Any
 
@@ -148,3 +150,50 @@ def build_benchmark_report(cases: list[dict[str, Any]]) -> dict[str, Any]:
             ),
         },
     }
+
+
+_FINALIZED_RECORDING_STATUSES = {"recorded", "completed"}
+
+
+def discover_finalized_recording_tracks(root: Path, *, recording_limit: int) -> list[Path]:
+    """Return audio tracks from the newest finalized recordings without mutating store state."""
+    if recording_limit < 1:
+        raise ValueError("recording_limit must be >= 1")
+    root = root.expanduser().resolve()
+    candidates: list[tuple[str, list[Path]]] = []
+    for metadata_path in root.glob("*/*/metadata.json"):
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if str(metadata.get("status") or "") not in _FINALIZED_RECORDING_STATUSES:
+            continue
+
+        tracks = list(metadata.get("audio_tracks") or [])
+        selected = [
+            track
+            for track in tracks
+            if str(track.get("source") or "") in {"mic", "system"}
+        ]
+        if not selected and tracks:
+            primary = next((track for track in tracks if track.get("primary")), tracks[0])
+            selected = [primary]
+
+        session_dir = metadata_path.parent
+        audio_paths: list[Path] = []
+        for track in selected:
+            track_id = str(track.get("id") or "mixed")
+            extension = str(track.get("extension") or metadata.get("extension") or ".wav")
+            stem = "recording" if track_id == "mixed" else track_id
+            audio_path = session_dir / f"{stem}{extension}"
+            if audio_path.is_file():
+                audio_paths.append(audio_path)
+        if audio_paths:
+            candidates.append((str(metadata.get("created_at") or ""), audio_paths))
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return [
+        path
+        for _created_at, paths in candidates[:recording_limit]
+        for path in paths
+    ]

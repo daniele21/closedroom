@@ -1,16 +1,71 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from local_asr_server.audio_intelligence.vad_benchmark import (
     build_benchmark_report,
     build_case_report,
+    discover_finalized_recording_tracks,
     interval_duration,
     timeline_jaccard,
 )
 
 
 class VadBackendBenchmarkTests(unittest.TestCase):
+    def test_discovers_latest_finalized_tracks_without_store_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            older = root / "2026-01-01" / "older"
+            newer = root / "2026-01-02" / "newer"
+            active = root / "2026-01-03" / "active"
+            for directory in (older, newer, active):
+                directory.mkdir(parents=True)
+
+            (older / "metadata.json").write_text(json.dumps({
+                "status": "completed",
+                "created_at": "2026-01-01T10:00:00+00:00",
+                "audio_tracks": [{
+                    "id": "mixed",
+                    "source": "mixed",
+                    "extension": ".wav",
+                    "primary": True,
+                }],
+            }), encoding="utf-8")
+            (older / "recording.wav").write_bytes(b"old")
+
+            (newer / "metadata.json").write_text(json.dumps({
+                "status": "recorded",
+                "created_at": "2026-01-02T10:00:00+00:00",
+                "audio_tracks": [
+                    {"id": "mic", "source": "mic", "extension": ".wav", "primary": True},
+                    {"id": "system", "source": "system", "extension": ".wav", "primary": False},
+                    {"id": "mixed", "source": "mixed", "extension": ".wav", "primary": False},
+                ],
+            }), encoding="utf-8")
+            (newer / "mic.wav").write_bytes(b"mic")
+            (newer / "system.wav").write_bytes(b"system")
+            (newer / "recording.wav").write_bytes(b"mixed")
+
+            (active / "metadata.json").write_text(json.dumps({
+                "status": "recording",
+                "created_at": "2026-01-03T10:00:00+00:00",
+                "audio_tracks": [{
+                    "id": "mic",
+                    "source": "mic",
+                    "extension": ".wav",
+                    "primary": True,
+                }],
+            }), encoding="utf-8")
+            (active / "mic.wav").write_bytes(b"active")
+
+            paths = discover_finalized_recording_tracks(root, recording_limit=1)
+
+        self.assertEqual([path.name for path in paths], ["mic.wav", "system.wav"])
+        self.assertTrue(all("active" not in str(path) for path in paths))
+
     def test_timeline_jaccard_uses_merged_intervals(self) -> None:
         left = [{"start": 0.0, "end": 2.0}, {"start": 1.5, "end": 3.0}]
         right = [{"start": 1.0, "end": 2.0}]
