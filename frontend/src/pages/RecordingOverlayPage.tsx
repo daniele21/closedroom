@@ -927,8 +927,8 @@ export default function RecordingOverlayPage() {
             onClick={() => void handleUndoScreenshot()}
             disabled={isUndoingScreenshot || isStopping}
             className="flex h-9 shrink-0 items-center rounded-lg border border-white/10 bg-white/[0.04] px-2 text-[9px] font-semibold text-white/65 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-            aria-label={t('common.undo') || 'Undo last screenshot'}
-            title={t('common.undo') || 'Undo'}
+            aria-label="Undo last screenshot"
+            title="Undo last screenshot"
             data-screenshot-undo="true"
           >
             {isUndoingScreenshot ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
