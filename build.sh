@@ -297,29 +297,19 @@ ok "ffmpeg bundled with $DYLIB_COUNT dylibs"
 log "Step 3/5: Generating icon.icns..."
 
 ICNS_PATH="$BUILD_ASSETS/icon.icns"
-SVG_SOURCE="$SCRIPT_DIR/src/local_asr_server/static/logo-dark.svg"
+PNG_SOURCE="$SCRIPT_DIR/frontend/public/logo-dark.png"
 ICONSET_DIR="$BUILD_ASSETS/ClosedRoom.iconset"
 
-if [[ -f "$SVG_SOURCE" ]]; then
+if [[ -f "$PNG_SOURCE" ]]; then
+    rm -rf "$ICONSET_DIR"
     mkdir -p "$ICONSET_DIR"
 
-    # Convert SVG → PNG at various sizes using sips + rsvg-convert (if available) or qlmanage
-    if command -v rsvg-convert >/dev/null 2>&1; then
-        CONVERT_CMD="rsvg-convert"
-    else
-        warn "rsvg-convert not found (install: brew install librsvg). Using qlmanage fallback."
-        CONVERT_CMD="qlmanage"
-    fi
-
+    # The canonical UI logo is already a PNG. Resize it directly with the
+    # macOS-native sips tool instead of carrying an SVG with an embedded PNG.
     declare -a SIZES=(16 32 64 128 256 512 1024)
     for size in "${SIZES[@]}"; do
         out="$ICONSET_DIR/icon_${size}x${size}.png"
-        if [[ "$CONVERT_CMD" == "rsvg-convert" ]]; then
-            rsvg-convert -w "$size" -h "$size" "$SVG_SOURCE" -o "$out" 2>/dev/null || true
-        else
-            # Fallback: use sips on a large PNG placeholder
-            sips -s format png "$SVG_SOURCE" --out "$out" --resampleWidth "$size" 2>/dev/null || true
-        fi
+        sips --resampleWidth "$size" "$PNG_SOURCE" --out "$out" >/dev/null 2>&1 || true
     done
 
     # Create @2x versions
@@ -332,7 +322,6 @@ if [[ -f "$SVG_SOURCE" ]]; then
         fi
     done
 
-    # iconutil requires valid PNGs — if generation failed, create a placeholder
     VALID_PNGS=$(find "$ICONSET_DIR" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')
     if [[ "$VALID_PNGS" -gt 0 ]]; then
         iconutil -c icns "$ICONSET_DIR" -o "$ICNS_PATH" 2>/dev/null && ok "icon.icns generated" || warn "iconutil failed, using no icon"
@@ -341,7 +330,7 @@ if [[ -f "$SVG_SOURCE" ]]; then
     fi
     rm -rf "$ICONSET_DIR"
 else
-    warn "Logo SVG not found at $SVG_SOURCE — building without custom icon"
+    warn "Logo PNG not found at $PNG_SOURCE — building without custom icon"
 fi
 
 # ── Step 4: PyInstaller ───────────────────────────────────────────────────────

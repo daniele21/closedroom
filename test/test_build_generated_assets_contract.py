@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 import unittest
@@ -10,6 +11,10 @@ HELPER_APP = "build_assets/ClosedRoomNativeCapture.app"
 
 
 class GeneratedBuildAssetsContractTests(unittest.TestCase):
+    def test_build_script_remains_executable(self) -> None:
+        mode = (ROOT / "build.sh").stat().st_mode
+        self.assertTrue(mode & os.X_OK, "build.sh must remain executable")
+
     def test_native_helper_app_is_generated_and_ignored(self) -> None:
         tracked = subprocess.run(
             ["git", "ls-files", "--error-unmatch", f"{HELPER_APP}/Contents/Info.plist"],

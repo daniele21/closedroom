@@ -305,8 +305,8 @@ function MainApp() {
           >
             <span className="brand-mark brand-mark-compact" aria-hidden="true">
               <span className="brand-mark-halo" />
-              <img src="/logo-dark.svg" alt="" className="brand-logo brand-logo-dark" />
-              <img src="/logo-light.svg" alt="" className="brand-logo brand-logo-light" />
+              <img src="/logo-dark.png" alt="" className="brand-logo brand-logo-dark" />
+              <img src="/logo-light.png" alt="" className="brand-logo brand-logo-light" />
             </span>
             <span className="workspace-brand-copy">
               <strong>ClosedRoom</strong>

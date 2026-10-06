@@ -24,7 +24,7 @@ def _needs_mlx_preload(argv: list[str]) -> bool:
     args = argv[1:]
     if not args:
         return False
-    if args[0] == "transcribe":
+    if args[0] in {"transcribe", "bundle-runtime-smoke"}:
         return True
     return len(args) >= 2 and args[0] == "-m" and args[1] in _MLX_MODULE_WORKERS
 

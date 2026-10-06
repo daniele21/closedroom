@@ -94,8 +94,9 @@ extra_datas = [
     (str(STATIC_DIR), "static"),
 ]
 
-for runtime_package in ("local_llm_server", "mlx_vlm"):
-    extra_datas.extend(collect_data_files(runtime_package))
+# local-llm-server owns runtime registry/config data. mlx-vlm 0.6.4 package
+# data is documentation-only for ClosedRoom's inference path, so do not copy it.
+extra_datas.extend(collect_data_files("local_llm_server"))
 
 # mlx_whisper ships tokenizer data (json / tiktoken files)
 import mlx_whisper as _mlx_w
@@ -186,8 +187,14 @@ hidden_imports = [
     "local_asr_server.analysis_jobs",
 ]
 
-for runtime_package in ("local_llm_server", "mlx_vlm"):
-    hidden_imports.extend(collect_submodules(runtime_package))
+# local-llm-server selects backends dynamically, so retain its complete module
+# graph. ClosedRoom's mlx-vlm usage is narrower: the bundled dispatcher launches
+# only the server and the product registry exposes Qwen3-VL for visual inference.
+# Static imports from those modules remain discovered by PyInstaller; only the
+# dynamically imported Qwen3-VL model family needs an explicit hidden import.
+hidden_imports.extend(collect_submodules("local_llm_server"))
+hidden_imports.extend(collect_submodules("mlx_vlm.server"))
+hidden_imports.extend(collect_submodules("mlx_vlm.models.qwen3_vl"))
 
 # Speechmatics is imported lazily so local-only startup remains lightweight.
 # Collect it explicitly when building the app bundle.
