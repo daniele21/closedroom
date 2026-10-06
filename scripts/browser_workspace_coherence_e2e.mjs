@@ -309,8 +309,10 @@ try {
   await browser.clickMeetingCardContaining('Product sync');
   await waitUntil(
     browser,
-    'Meeting workspace',
-    "return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'meeting';",
+    'Meeting workspace ready',
+    `return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'meeting'
+      && Boolean(document.querySelector('#meeting-tab-transcript'))
+      && Boolean(document.querySelector('#meeting-tab-analysis'));`,
     10000,
     true,
   );
