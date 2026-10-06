@@ -121,6 +121,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
             "04-meeting-notes-cited",
             "06-transcript-marker-in-turn",
             "07-screenshot-to-audio",
+            "08-key-moment-ask-local",
             "call-overlay-screenshot-evidence",
             'data-display-selector="true"',
             'data-display-picker="true"',
