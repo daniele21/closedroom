@@ -52,8 +52,9 @@ def _run_bundle_runtime_smoke() -> None:
             raise RuntimeError("Packaged image message preparation returned no content")
 
     mel = log_mel_spectrogram(np.zeros(16_000, dtype=np.float32))
-    if tuple(mel.shape)[0] != 80:
-        raise RuntimeError(f"Unexpected packaged MLX Whisper mel shape: {tuple(mel.shape)}")
+    mel_shape = tuple(int(value) for value in mel.shape)
+    if len(mel_shape) != 2 or 80 not in mel_shape or 0 in mel_shape:
+        raise RuntimeError(f"Unexpected packaged MLX Whisper mel shape: {mel_shape}")
 
     excluded_modules = ("cv2", "datasets", "pyarrow", "pandas", "multiprocess", "torch")
     module_presence = {

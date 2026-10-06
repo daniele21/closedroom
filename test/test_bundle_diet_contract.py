@@ -61,6 +61,7 @@ class BundleDietContractTests(unittest.TestCase):
         self.assertIn("load_image", source)
         self.assertIn("excluded_module_presence", source)
         self.assertIn("log_mel_spectrogram", source)
+        self.assertIn("80 not in mel_shape", source)
         self.assertIn('"mlx_whisper_audio_ok": True', source)
         self.assertIn('("cv2", "datasets", "pyarrow", "pandas", "multiprocess", "torch")', source)
 
