@@ -29,7 +29,9 @@ This work is architectural consolidation, not a product redesign. User-visible b
 ## Parallel lanes
 
 ### AC-1 — Recorder state machine
-Status: ACTIVE
+Status: WAVE_1_LANDED
+
+Wave 1 result: the public recorder lifecycle is now derived from one reducer-owned phase model (`idle`, `preparing`, `waiting_for_ai`, `recording`, `stopping`) while preserving the existing hook API and fallback flows.
 
 Observable outcome: recording orchestration uses one explicit typed transition model instead of independent booleans/refs for mutually exclusive lifecycle states.
 
@@ -44,7 +46,9 @@ Acceptance:
 - existing recording UI API remains compatible during the first extraction.
 
 ### AC-2 — Meeting and overlay UI decomposition
-Status: ACTIVE
+Status: PARTIAL
+
+Wave 1 result: saved-meeting accessory ownership (diagnostics, screenshots, visual-frame discovery and retry state) moved from `MeetingDetailPage` into `useMeetingAccessories`. `RecordingOverlayPage` decomposition remains follow-up work and this lane is not complete.
 
 Observable outcome: `MeetingDetailPage` and `RecordingOverlayPage` coordinate feature hooks/components rather than owning accessory fetching, screenshot/display orchestration, and analysis actions directly.
 
@@ -60,7 +64,9 @@ Acceptance:
 - page-level state/effect counts materially decrease.
 
 ### AC-3 — Transcription application boundary
-Status: ACTIVE
+Status: PARTIAL
+
+Wave 1 result: single-file upload transcription now delegates cache -> ASR -> diarization -> persistence to `SingleFileTranscriptionUseCase`, with diarization included in final cache identity while reusing the canonical transcription cache owner. Path/recording adapters still need convergence before this lane is complete.
 
 Observable outcome: upload/path/recording transcription routes adapt HTTP inputs to shared application use cases; provider/cache/diarization/persistence policy no longer lives in a 300-line route handler.
 
@@ -75,7 +81,9 @@ Acceptance:
 - public API responses and cache identities stay compatible.
 
 ### AC-4 — RecordingStore internal decomposition
-Status: ACTIVE
+Status: PARTIAL
+
+Wave 1 result: screenshot artifact topology, manifest interpretation, public projection and artifact deletion moved behind `ScreenshotArtifactStore`; `RecordingStore` remains the canonical aggregate facade. Further visual/persistence decomposition remains follow-up work.
 
 Observable outcome: `RecordingStore` remains the canonical facade but delegates screenshot/visual artifact persistence to cohesive internal collaborators.
 
@@ -90,7 +98,9 @@ Acceptance:
 - `RecordingStore` line/method responsibility decreases without consumer churn.
 
 ### AC-5 — Native capture internal decomposition
-Status: ACTIVE
+Status: PARTIAL
+
+Wave 1 result: the native helper build supports multiple Swift units and shared JSON/diagnostic support moved to `Support.swift` while preserving one executable and the existing Python/JSON protocol. Broader audio/display/permissions lifecycle separation remains follow-up work.
 
 Observable outcome: the native helper remains one executable/protocol but Swift implementation separates audio, displays/screenshots, permissions/diagnostics, and run lifecycle.
 
@@ -151,12 +161,30 @@ No lane may weaken existing tests simply to preserve behavior after extraction.
 
 Source identity at creation:
 - base branch: `dev`
-- base HEAD: `ae3775a0510b51c45b31373bcba344aa1d1ee7e1`
+- original base HEAD: `ae3775a0510b51c45b31373bcba344aa1d1ee7e1`
+- workstream bootstrap merged to `dev`: `90d06cb1e17c7f33db4db462e722d8bf411de354`
 
-Confirmed facts:
-- no open PRs targeting `dev` at workstream start;
-- `RecordingStore`, native capture, transcription router, `MeetingDetailPage`, `RecordingOverlayPage`, and `useRecorder` are current structural hotspots;
-- macro architecture, local-first boundary, HeavyWorkloadArbiter ownership, filesystem/SQLite split, and validation fidelity model are preserved.
+Wave 1 integration:
+- integration PR: #81 (`work/architectural-consolidation-wave1` -> `dev`);
+- executable-tree validation point: `aa8322df5c75d03247eb9f0f92f75aebd070519d`;
+- repository health: PASS;
+- remote preflight: PASS at `INTEGRATION / STRONG`;
+- deterministic frontend checks: PASS;
+- Python unit/integration suite: PASS;
+- Saved Meeting browser FULL_MEDIA journey: PASS;
+- no local-first, persistence-owner, native protocol, or implicit-cloud boundary was intentionally changed.
+
+Failure resolution during convergence:
+- stale source-location contract tests were redirected to the new canonical owners rather than moving logic back into page monoliths;
+- single-file transcription cache identity was fixed so diarization configuration participates without duplicating ASR cache policy;
+- the Saved Meeting journey was corrected to model the screenshot accessory endpoint and scope recovery clicks to the diagnostic/visual status being tested, instead of relying on the first generic Retry button.
+
+Remaining structural work:
+- AC-2: decompose `RecordingOverlayPage` and continue reducing page-level orchestration;
+- AC-3: converge path/recording transcription adapters on the application boundary;
+- AC-4: continue RecordingStore visual/artifact decomposition;
+- AC-5: continue native audio/display/permission/run-lifecycle separation;
+- AC-6 and AC-7 remain queued after Wave 1 integration.
 
 Next action:
-- create lane branches from the same base, implement focused extractions with non-conflicting ownership, validate independently, then converge in the order above.
+- merge PR #81 after the documentation-only exact-head check/reuse succeeds, close the superseded isolated Wave 1 lane PRs, then start Wave 2 as small independent lanes rather than one hardening bundle.
