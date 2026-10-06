@@ -44,7 +44,7 @@ class BundleDietContractTests(unittest.TestCase):
         self.assertIn('collect_submodules("mlx_vlm.server")', spec)
         self.assertIn('collect_submodules("mlx_vlm.models.qwen3_vl")', spec)
         self.assertIn('collect_submodules("local_llm_server")', spec)
-        for excluded in ("cv2", "datasets", "pyarrow", "pandas", "multiprocess"):
+        for excluded in ("cv2", "datasets", "pyarrow", "pandas", "multiprocess", "torch"):
             self.assertIn(f'"{excluded}"', spec)
 
         hook = (ROOT / "build_assets" / "hooks" / "pyi_rth_mlx.py").read_text(encoding="utf-8")
@@ -60,7 +60,9 @@ class BundleDietContractTests(unittest.TestCase):
         self.assertIn("prepare_image_message", source)
         self.assertIn("load_image", source)
         self.assertIn("excluded_module_presence", source)
-        self.assertIn('("cv2", "datasets", "pyarrow", "pandas", "multiprocess")', source)
+        self.assertIn("log_mel_spectrogram", source)
+        self.assertIn('"mlx_whisper_audio_ok": True', source)
+        self.assertIn('("cv2", "datasets", "pyarrow", "pandas", "multiprocess", "torch")', source)
 
 
 if __name__ == "__main__":
