@@ -86,7 +86,9 @@ class DatabaseMigrationTests(unittest.TestCase):
             CatalogStore(db_path)
             JobStore(db_path)
             with sqlite3.connect(db_path) as conn:
-                count = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM schema_migrations"
+                ).fetchone()[0]
             self.assertEqual(count, 2)
 
     def test_applied_version_name_cannot_be_rewritten(self) -> None:
