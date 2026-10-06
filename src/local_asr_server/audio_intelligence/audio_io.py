@@ -129,6 +129,25 @@ def stream_audio_stats(
     }
 
 
+def can_reuse_normalized_samples_for_energy(
+    path: Path,
+    *,
+    target_sr: int = TARGET_SAMPLE_RATE,
+) -> bool:
+    """Return whether normalized samples preserve the canonical WAV energy signal."""
+    if not _looks_like_wave(path):
+        return False
+    try:
+        with wave.open(str(path), "rb") as wav:
+            return (
+                wav.getframerate() == target_sr
+                and wav.getnchannels() == 1
+                and wav.getsampwidth() == 2
+            )
+    except (wave.Error, EOFError, OSError):
+        return False
+
+
 def iter_energy_windows(
     path: Path,
     *,
@@ -258,22 +277,13 @@ def _iter_normalized_sample_chunks(
     target_sr: int,
     chunk_samples: int,
 ) -> Iterator[np.ndarray]:
-    if _looks_like_wave(path):
-        try:
-            with wave.open(str(path), "rb") as wav:
-                if (
-                    wav.getframerate() == target_sr
-                    and wav.getnchannels() == 1
-                    and wav.getsampwidth() == 2
-                ):
-                    while True:
-                        raw = wav.readframes(chunk_samples)
-                        if not raw:
-                            return
-                        yield np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    if can_reuse_normalized_samples_for_energy(path, target_sr=target_sr):
+        with wave.open(str(path), "rb") as wav:
+            while True:
+                raw = wav.readframes(chunk_samples)
+                if not raw:
                     return
-        except (wave.Error, EOFError, OSError):
-            pass
+                yield np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
     ffmpeg = get_ffmpeg_path()
     process = subprocess.Popen(

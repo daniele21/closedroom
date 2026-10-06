@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from local_asr_server.audio_intelligence.audio_io import (
+    can_reuse_normalized_samples_for_energy,
     energy_windows_from_samples,
     iter_energy_windows,
     load_audio_samples,
@@ -56,7 +57,13 @@ def build_audio_intelligence(
                     # Normal path: decode once, then reuse the same normalized
                     # samples for both RMS windows and Silero VAD.
                     samples = load_audio_samples(path)
-                    windows = energy_windows_from_samples(samples)
+                    if can_reuse_normalized_samples_for_energy(path):
+                        windows = energy_windows_from_samples(samples)
+                    else:
+                        # Imported/non-canonical audio keeps the previous energy
+                        # decode semantics; only canonical ClosedRoom WAV tracks
+                        # take the single-decode fast path.
+                        windows = list(iter_energy_windows(path))
                     duration = windows[-1].end if windows else 0.0
                     raw_speech = detect_speech_windows_vad(samples, sr=16000)
                     source = track.get("source") or track.get("id") or "audio"
