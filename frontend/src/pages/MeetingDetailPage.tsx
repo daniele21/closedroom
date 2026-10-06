@@ -859,7 +859,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
               )}
             </div>
 
-            <div className="grid grid-cols-1 gap-2.5 xl:grid-cols-2">
+            <div className="flex flex-col gap-2.5">
               {visibleScreenshots.map((shot) => {
                 const context = keyMomentContexts.get(shot.screenshot_id);
                 return (
@@ -867,7 +867,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     key={shot.screenshot_id}
                     type="button"
                     onClick={() => setSelectedScreenshot(shot)}
-                    className="group grid min-h-[118px] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-border-subtle bg-bg-surface text-left transition hover:border-border-focus hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:grid-cols-[150px_minmax(0,1fr)]"
+                    className="group grid min-h-[124px] w-full max-w-3xl grid-cols-[128px_minmax(0,1fr)] overflow-hidden rounded-xl border border-border-subtle bg-bg-surface text-left transition hover:border-border-focus hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:grid-cols-[190px_minmax(0,1fr)]"
                     aria-label={
                       lang === 'it'
                         ? `Apri momento chiave a ${screenshotTimestampLabel(shot.timestamp)}`
@@ -876,13 +876,13 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     title={shot.display_title || undefined}
                     data-key-moment-id={shot.screenshot_id}
                   >
-                    <div className="h-full min-h-[118px] overflow-hidden bg-bg-elevated">
+                    <div className="flex h-full min-h-[124px] items-center justify-center overflow-hidden bg-black/5 p-1.5">
                       {shot.available && shot.thumbnail_available ? (
                         <img
                           src={shot.thumbnail_url}
                           alt=""
                           loading="lazy"
-                          className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                          className="max-h-[120px] w-full object-contain transition-transform duration-200 group-hover:scale-[1.01]"
                         />
                       ) : (
                         <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-text-muted">
