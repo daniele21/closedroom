@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from local_asr_server.catalog import CatalogStore
-from local_asr_server.database_migrations import Migration, apply_migrations, ensure_column
+from local_asr_server.database_migrations import (
+    Migration,
+    apply_migrations,
+    ensure_column,
+)
 
 
 DEFAULT_JOB_EVENT_CAPACITY = 512
@@ -35,6 +39,7 @@ def _json_load(value: str | None, default: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return default
+
 
 def _migrate_job_legacy_columns(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "jobs", "progress_detail_json", "TEXT")
