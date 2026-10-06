@@ -126,6 +126,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
             "03-screenshot-persisted",
             "03b-second-screenshot-persisted",
             "04-meeting-notes-cited",
+            "04a-key-moment-progressive-enrichment",
             "04b-key-moment-group-stack",
             "06-transcript-marker-in-turn",
             "07-screenshot-to-audio",
