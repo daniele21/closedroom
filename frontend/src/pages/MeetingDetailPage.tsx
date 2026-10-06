@@ -1581,6 +1581,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 </p>
                 <p className="truncate text-xs text-text-muted">
                   {lang === 'it' ? 'Segnato da te durante il meeting' : 'Marked by you during the meeting'}
+                  {selectedScreenshot.display_title ? ` · ${selectedScreenshot.display_title}` : ''}
                 </p>
               </div>
               <div className="flex items-center gap-2">
