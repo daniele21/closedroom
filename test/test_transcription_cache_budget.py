@@ -57,7 +57,7 @@ class TranscriptionCacheBudgetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             old = root / f"{_cache_key('d')}.json"
-            old.write_bytes(b"x" * 990)
+            old.write_bytes(b"x" * 1020)
             os.utime(old, ns=(1_000_000_000, 1_000_000_000))
 
             with (
