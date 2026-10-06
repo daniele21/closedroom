@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from local_asr_server.runtime.models import DEFAULT_LOCAL_LLM_URL
+from local_asr_server.runtime.local_ai import LocalAIRuntimePort, LocalLLMServerAdapter
 from local_asr_server.prompts import load_prompts
 
 logger = logging.getLogger("uvicorn.error")
@@ -212,9 +213,16 @@ class NemotronLocalProvider(BaseLLMProvider):
     Does NOT auto-start the server — the user must run local-llm-server separately.
     """
 
-    def __init__(self, base_url: str = DEFAULT_LOCAL_LLM_URL, model: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str = DEFAULT_LOCAL_LLM_URL,
+        model: str | None = None,
+        *,
+        local_ai: LocalAIRuntimePort | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.local_ai = local_ai or LocalLLMServerAdapter()
 
     def analyze(
         self,
@@ -223,15 +231,10 @@ class NemotronLocalProvider(BaseLLMProvider):
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
     ) -> dict:
-        try:
-            from local_llm_server.client import LocalLLMClient  # lazy import
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "local-llm-server non è installato. "
-                "Installa il wheel local_llm_server dalla directory dist del repository collegato."
-            ) from exc
-
-        client = LocalLLMClient(base_url=self.base_url, model=self.model)
+        client = self.local_ai.create_client(
+            base_url=self.base_url,
+            model=self.model,
+        )
         if not client.is_ready():
             raise RuntimeError(
                 f"Il server LLM locale non è raggiungibile su {self.base_url}. "
@@ -260,21 +263,23 @@ class VoxtralLocalProvider(BaseLLMProvider):
       - analyze_audio(path)   — direct audio analysis (multimodal, requires soundfile+numpy)
     """
 
-    def __init__(self, base_url: str = DEFAULT_LOCAL_LLM_URL, model: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str = DEFAULT_LOCAL_LLM_URL,
+        model: str | None = None,
+        *,
+        local_ai: LocalAIRuntimePort | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.local_ai = local_ai or LocalLLMServerAdapter()
 
     def _get_client(self):
         """Return a ready LocalLLMClient or raise a descriptive error."""
-        try:
-            from local_llm_server.client import LocalLLMClient  # lazy import
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "local-llm-server non è installato. "
-                "Installa il wheel local_llm_server dalla directory dist del repository collegato."
-            ) from exc
-
-        client = LocalLLMClient(base_url=self.base_url, model=self.model)
+        client = self.local_ai.create_client(
+            base_url=self.base_url,
+            model=self.model,
+        )
         if not client.is_ready():
             raise RuntimeError(
                 f"Il server LLM locale non è raggiungibile su {self.base_url}. "
@@ -353,6 +358,7 @@ class LLMService:
         local_llm_url: Optional[str] = None,
         local_llm_model: Optional[str] = None,
         gemini_model: Optional[str] = None,
+        local_ai: LocalAIRuntimePort | None = None,
     ) -> BaseLLMProvider:
         """
         Return an LLM provider instance.
@@ -370,7 +376,15 @@ class LLMService:
         if provider_name == "gemini":
             return GeminiProvider(api_key or "", gemini_model or DEFAULT_GEMINI_MODEL)
         if provider_name == "nemotron_local":
-            return NemotronLocalProvider(base_url=url, model=local_llm_model)
+            return NemotronLocalProvider(
+                base_url=url,
+                model=local_llm_model,
+                local_ai=local_ai,
+            )
         if provider_name == "voxtral_local":
-            return VoxtralLocalProvider(base_url=url, model=local_llm_model)
+            return VoxtralLocalProvider(
+                base_url=url,
+                model=local_llm_model,
+                local_ai=local_ai,
+            )
         return MockProvider()
