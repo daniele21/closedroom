@@ -25,7 +25,8 @@ Make further ClosedRoom efficiency changes only when measured evidence shows a w
 | SE-2 | Privacy-safe Silero-vs-RMS timing/agreement benchmark | DONE |
 | SE-3 | Representative target-Mac VAD quality run and ONNX keep/remove decision | BLOCKED |
 | SE-4 | Remove generic video/training VLM dependencies from the packaged image-only path | DONE |
-| SE-5 | Bound SHA-keyed ephemeral ASR JSON cache with LRU retention | ACTIVE |
+| SE-5 | Bound SHA-keyed ephemeral ASR JSON cache with LRU retention | DONE |
+| SE-6 | Remove PyTorch from packaged MLX inference surface | ACTIVE |
 
 ## Acceptance
 
@@ -39,9 +40,12 @@ SE-4: ClosedRoom passes static screenshots/JPEGs to Qwen3-VL and does not expose
 
 SE-5: prune only SHA-keyed ASR JSON cache files after writes, promote cache hits by mtime and never touch models, recordings, transcripts or unrelated cache files. Default budget: 512 MiB.
 
+SE-6: ClosedRoom and mlx-whisper's MLX inference path do not import PyTorch; the frozen smoke must import `mlx_whisper.transcribe`, execute log-mel preprocessing and the Qwen image path with `torch` absent before this dependency may be excluded from the app.
+
 ## Validation
 
 SE-1 touches RecordingStore and transcription cache identity: STRONG.
 SE-2 is deterministic tooling/tests. Representative benchmark execution is REAL_ENVIRONMENT evidence, not a hosted-CI substitute for production meeting quality.
 SE-4 changes the PyInstaller dependency boundary and therefore requires FULL packaged-app validation.
 SE-5 is a contained ephemeral-cache policy and requires SCOPED validation unless adjacent shared contracts change.
+SE-6 changes the PyInstaller dependency boundary and requires FULL packaged-app validation.

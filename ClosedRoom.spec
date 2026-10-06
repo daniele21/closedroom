@@ -219,6 +219,10 @@ excludes = [
     "pyarrow",
     "pandas",
     "multiprocess",
+
+    # mlx-whisper runtime is MLX-native. PyTorch is a declared dependency for
+    # conversion/compatibility helpers and is not part of ClosedRoom inference.
+    "torch",
 ]
 
 # ── PyInstaller Analysis ───────────────────────────────────────────────────────

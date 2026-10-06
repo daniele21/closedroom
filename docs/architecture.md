@@ -788,6 +788,7 @@ lavoro visuale del meter. I testi vivono in `i18n/locales/it.ts` e `en.ts`.
 Vite scrive gli asset generati in `src/local_asr_server/static/`; UI e loghi
 restano locali. PyInstaller mantiene `local_llm_server` completo, limita
 `mlx_vlm` a server/Qwen3-VL ed esclude video/training (`cv2`/datasets).
+Il runtime MLX Whisper non include PyTorch: conversione/compatibilità restano fuori bundle.
 
 ## 19. Error handling e recovery
 
