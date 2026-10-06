@@ -162,28 +162,10 @@ Source identity at creation:
 - workstream bootstrap merged to `dev`: `90d06cb1e17c7f33db4db462e722d8bf411de354`
 - Wave 1 merged to `dev`: `6dc0ee1986d14169ea997ea1b6714b5d94555a9c` via PR #81
 
-Wave 1 integration:
-- integration PR: #81 (`work/architectural-consolidation-wave1` -> `dev`);
-- executable-tree validation point: `aa8322df5c75d03247eb9f0f92f75aebd070519d`;
-- repository health: PASS;
-- remote preflight: PASS at `INTEGRATION / STRONG`;
-- deterministic frontend checks: PASS;
-- Python unit/integration suite: PASS;
-- Saved Meeting browser FULL_MEDIA journey: PASS;
-- no local-first, persistence-owner, native protocol, or implicit-cloud boundary was intentionally changed.
-
-Failure resolution during convergence:
-- stale source-location contract tests were redirected to the new canonical owners rather than moving logic back into page monoliths;
-- single-file transcription cache identity was fixed so diarization configuration participates without duplicating ASR cache policy;
-- the Saved Meeting journey was corrected to model the screenshot accessory endpoint and scope recovery clicks to the diagnostic/visual status being tested, instead of relying on the first generic Retry button.
-
-Wave 2 integration:
-- integration PR: #85 (`work/architectural-consolidation-wave2` -> `dev`);
-- validated exact head: `b8ad4837e9b01ed3290e90c05607dbad60eeece3`;
-- merged `dev` commit: `6352c7ca0a236175da7a56b1502dbde3c0b5a64d`;
-- Repository health, Source tests / INTEGRATION / STRONG, Saved Meeting FULL_MEDIA, packaged-app lifecycle, repository validation, and reusable evidence: PASS;
-- isolated lane PRs #82–#84 were closed without separate merge after #85 landed;
-- `HeavyWorkloadArbiter`, local-first boundaries, runtime lifecycle ownership, persistence ownership and native protocols remain unchanged.
+Integrated checkpoints:
+- Wave 1: PR #81; executable validation `aa8322df5c75d03247eb9f0f92f75aebd070519d`; merged `dev` commit `6dc0ee1986d14169ea997ea1b6714b5d94555a9c`; INTEGRATION / STRONG + FULL_MEDIA PASS.
+- Wave 2: PR #85; exact head `b8ad4837e9b01ed3290e90c05607dbad60eeece3`; merged `dev` commit `6352c7ca0a236175da7a56b1502dbde3c0b5a64d`; Repository health, INTEGRATION / STRONG, FULL_MEDIA and packaged-app lifecycle PASS.
+- Superseded lane PRs were closed without separate merges. Local-first, workload scheduling, runtime lifecycle, persistence ownership and native protocol invariants remain unchanged.
 
 Current AC-7 migration lane:
 - branch: `work/arch-db-migrations` from `dev` at `6352c7ca0a236175da7a56b1502dbde3c0b5a64d`;
