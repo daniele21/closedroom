@@ -42,7 +42,7 @@ from local_asr_server.transcriber import (
     hash_audio_file,
     save_cached_result,
 )
-from local_asr_server.transcription_quality import audio_stats, is_near_silent_track
+from local_asr_server.transcription_quality import is_near_silent_track
 from local_asr_server.visual_intelligence import PostMeetingVisualService
 from local_asr_server.diagnostics import attach_diagnostics, diagnostic, log_diagnostic
 from local_asr_server.speaker_labels import apply_speaker_labels
@@ -635,9 +635,9 @@ class TranscriptionService:
         track: dict[str, Any],
     ) -> tuple[dict[str, Any] | None, dict[str, float]]:
         try:
-            from local_asr_server.audio_intelligence.audio_io import load_audio_samples
+            from local_asr_server.audio_intelligence.audio_io import stream_audio_stats
 
-            stats = audio_stats(load_audio_samples(audio_path))
+            stats = stream_audio_stats(audio_path)
         except Exception as exc:
             logger.info(
                 "[ASR Quality] Cannot inspect track %s; continuing with ASR: %s",
