@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from local_asr_server.database_migrations import Migration, apply_migrations, ensure_column
 from local_asr_server.paths import get_app_support_dir
 from local_asr_server.settings import load_settings
 
@@ -37,6 +38,44 @@ def _nullable_int_bool(value: Any) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
+def _migrate_catalog_legacy_columns(conn: sqlite3.Connection) -> None:
+    for table, column, definition in (
+        ("recordings", "capture_mode", "TEXT"),
+        ("recordings", "primary_track_id", "TEXT"),
+        ("recordings", "audio_tracks", "TEXT"),
+        ("recordings", "capture_backend", "TEXT"),
+        ("recordings", "capture_status", "TEXT"),
+        ("recordings", "quality_report", "TEXT"),
+        ("recordings", "warnings", "TEXT"),
+        ("recordings", "visual_intelligence", "TEXT"),
+        ("transcriptions", "source_tracks", "TEXT"),
+        ("transcriptions", "asr_provider", "TEXT"),
+        ("transcriptions", "backend", "TEXT"),
+        ("transcriptions", "provider_options", "TEXT"),
+        ("analysis_runs", "analysis_type", "TEXT NOT NULL DEFAULT 'meeting_brief'"),
+        ("analysis_runs", "template_id", "TEXT"),
+        ("analysis_runs", "template_version", "TEXT"),
+        ("analysis_runs", "pipeline_run_id", "TEXT"),
+        ("analysis_runs", "result_markdown", "TEXT"),
+        ("analysis_runs", "source_ids_json", "TEXT"),
+        ("analysis_runs", "period_start", "TEXT"),
+        ("analysis_runs", "period_end", "TEXT"),
+    ):
+        ensure_column(conn, table, column, definition)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_analysis_runs_type "
+        "ON analysis_runs(analysis_type, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_analysis_runs_pipeline "
+        "ON analysis_runs(pipeline_run_id)"
+    )
+
+
+CATALOG_MIGRATIONS = (
+    Migration(1, "legacy-capture-transcription-analysis-columns", _migrate_catalog_legacy_columns),
+)
 
 
 class CatalogStore:
@@ -177,33 +216,11 @@ class CatalogStore:
             CREATE INDEX IF NOT EXISTS idx_analysis_cache_created_at ON analysis_cache(created_at DESC);
             """
         )
-        self._ensure_column(conn, "recordings", "capture_mode", "TEXT")
-        self._ensure_column(conn, "recordings", "primary_track_id", "TEXT")
-        self._ensure_column(conn, "recordings", "audio_tracks", "TEXT")
-        self._ensure_column(conn, "recordings", "capture_backend", "TEXT")
-        self._ensure_column(conn, "recordings", "capture_status", "TEXT")
-        self._ensure_column(conn, "recordings", "quality_report", "TEXT")
-        self._ensure_column(conn, "recordings", "warnings", "TEXT")
-        self._ensure_column(conn, "recordings", "visual_intelligence", "TEXT")
-        self._ensure_column(conn, "transcriptions", "source_tracks", "TEXT")
-        self._ensure_column(conn, "transcriptions", "asr_provider", "TEXT")
-        self._ensure_column(conn, "transcriptions", "backend", "TEXT")
-        self._ensure_column(conn, "transcriptions", "provider_options", "TEXT")
-        self._ensure_column(conn, "analysis_runs", "analysis_type", "TEXT NOT NULL DEFAULT 'meeting_brief'")
-        self._ensure_column(conn, "analysis_runs", "template_id", "TEXT")
-        self._ensure_column(conn, "analysis_runs", "template_version", "TEXT")
-        self._ensure_column(conn, "analysis_runs", "pipeline_run_id", "TEXT")
-        self._ensure_column(conn, "analysis_runs", "result_markdown", "TEXT")
-        self._ensure_column(conn, "analysis_runs", "source_ids_json", "TEXT")
-        self._ensure_column(conn, "analysis_runs", "period_start", "TEXT")
-        self._ensure_column(conn, "analysis_runs", "period_end", "TEXT")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_analysis_runs_type ON analysis_runs(analysis_type, created_at DESC)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_analysis_runs_pipeline ON analysis_runs(pipeline_run_id)")
-
-    def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        if column not in {row["name"] for row in rows}:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        apply_migrations(
+            conn,
+            component="catalog",
+            migrations=CATALOG_MIGRATIONS,
+        )
 
     def upsert_recording(self, metadata: dict[str, Any], audio_file: str | None = None) -> None:
         with self.connection() as conn:
