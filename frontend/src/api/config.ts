@@ -130,6 +130,6 @@ export const ACCEPTED_EXTENSIONS = /\.(mp3|wav|m4a|webm|flac|ogg|aac|oga)$/i;
 export const ACCEPTED_MIME_PREFIX = 'audio/';
 export const MAX_FILE_SIZE_MB = 25;
 export const RECORDING_CHUNK_INTERVAL_MS = 5000;
-export const HEALTH_CHECK_INTERVAL_MS = 15000;
+export const HEALTH_CHECK_INTERVAL_MS = 60000;
 export const TOAST_DURATION_MS = 4000;
 export const NEW_RECORDING_PROJECT_STORAGE_KEY = 'closedroom:new-recording-project';
