@@ -395,8 +395,17 @@ def _transcribe_vad_guided(
     import numpy as np
     import tempfile
     import wave
-    from local_asr_server.audio_intelligence.audio_io import load_audio_samples, iter_energy_windows
-    from local_asr_server.audio_intelligence.vad import detect_speech_windows_vad
+    from local_asr_server.audio_intelligence.audio_io import (
+        canonical_wav_info,
+        iter_energy_windows,
+        iter_normalized_audio_chunks,
+        load_audio_samples,
+        write_canonical_wav_slice,
+    )
+    from local_asr_server.audio_intelligence.vad import (
+        detect_speech_windows_vad,
+        detect_speech_windows_vad_chunks,
+    )
     from local_asr_server.audio_intelligence.features import _speech_threshold, _speech_windows
 
     def full_track_fallback(reason: str, *, vad_windows_count: int | None = None) -> dict:
@@ -426,27 +435,50 @@ def _transcribe_vad_guided(
         )
         return result
 
+    source_path = Path(audio_path)
+    canonical = canonical_wav_info(source_path)
+    samples = None
     logger.info(f"[VAD Guided ASR] Loading audio from: {audio_path}")
-    try:
-        samples = load_audio_samples(Path(audio_path))
-    except Exception as e:
-        logger.warning(f"[VAD Guided ASR] Failed to load samples, falling back to full-track: {e}")
-        return full_track_fallback("audio_load_failed")
-
-    duration = len(samples) / 16000.0
-    logger.info(f"[VAD Guided ASR] Running VAD detection. Duration: {duration:.2f}s")
-    try:
-        raw_windows = detect_speech_windows_vad(samples, sr=16000)
-    except Exception as e:
-        logger.warning(f"[VAD Guided ASR] Silero VAD failed, falling back to RMS energy windows: {e}")
+    if canonical is not None:
+        duration = canonical.duration_seconds
+        logger.info(f"[VAD Guided ASR] Running streaming VAD detection. Duration: {duration:.2f}s")
         try:
-            windows = list(iter_energy_windows(Path(audio_path)))
-            threshold = _speech_threshold(windows)
-            raw_w = _speech_windows(windows, threshold=threshold, channel="audio")
-            raw_windows = [{"start": w["source_start"], "end": w["source_end"]} for w in raw_w]
-        except Exception as e2:
-            logger.warning(f"[VAD Guided ASR] Fallback RMS failed, transcribing full-track: {e2}")
-            return full_track_fallback("vad_and_rms_detection_failed")
+            raw_windows = detect_speech_windows_vad_chunks(
+                iter_normalized_audio_chunks(source_path, chunk_samples=512),
+                total_samples=canonical.sample_count,
+                sr=canonical.sample_rate,
+            )
+        except Exception as e:
+            logger.warning(f"[VAD Guided ASR] Streaming Silero VAD failed, falling back to RMS energy windows: {e}")
+            try:
+                windows = list(iter_energy_windows(source_path))
+                threshold = _speech_threshold(windows)
+                raw_w = _speech_windows(windows, threshold=threshold, channel="audio")
+                raw_windows = [{"start": w["source_start"], "end": w["source_end"]} for w in raw_w]
+            except Exception as e2:
+                logger.warning(f"[VAD Guided ASR] Fallback RMS failed, transcribing full-track: {e2}")
+                return full_track_fallback("vad_and_rms_detection_failed")
+    else:
+        try:
+            samples = load_audio_samples(source_path)
+        except Exception as e:
+            logger.warning(f"[VAD Guided ASR] Failed to load samples, falling back to full-track: {e}")
+            return full_track_fallback("audio_load_failed")
+
+        duration = len(samples) / 16000.0
+        logger.info(f"[VAD Guided ASR] Running VAD detection. Duration: {duration:.2f}s")
+        try:
+            raw_windows = detect_speech_windows_vad(samples, sr=16000)
+        except Exception as e:
+            logger.warning(f"[VAD Guided ASR] Silero VAD failed, falling back to RMS energy windows: {e}")
+            try:
+                windows = list(iter_energy_windows(source_path))
+                threshold = _speech_threshold(windows)
+                raw_w = _speech_windows(windows, threshold=threshold, channel="audio")
+                raw_windows = [{"start": w["source_start"], "end": w["source_end"]} for w in raw_w]
+            except Exception as e2:
+                logger.warning(f"[VAD Guided ASR] Fallback RMS failed, transcribing full-track: {e2}")
+                return full_track_fallback("vad_and_rms_detection_failed")
 
     if not raw_windows:
         logger.warning(
@@ -466,21 +498,29 @@ def _transcribe_vad_guided(
         if end - start < 0.1:
             continue
 
-        start_sample = int(start * 16000)
-        end_sample = int(end * 16000)
-        slice_samples = samples[start_sample:end_sample]
-
-        # Use context manager orNamedTemporaryFile cleanly
+        # Use context manager or NamedTemporaryFile cleanly.
         fd, tmp_path = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
-        
+
         try:
-            int_samples = (slice_samples * 32768.0).clip(-32768, 32767).astype(np.int16)
-            with wave.open(tmp_path, "wb") as wav:
-                wav.setnchannels(1)
-                wav.setsampwidth(2)
-                wav.setframerate(16000)
-                wav.writeframes(int_samples.tobytes())
+            if canonical is not None:
+                write_canonical_wav_slice(
+                    source_path,
+                    Path(tmp_path),
+                    start_seconds=start,
+                    end_seconds=end,
+                )
+            else:
+                assert samples is not None
+                start_sample = int(start * 16000)
+                end_sample = int(end * 16000)
+                slice_samples = samples[start_sample:end_sample]
+                int_samples = (slice_samples * 32768.0).clip(-32768, 32767).astype(np.int16)
+                with wave.open(tmp_path, "wb") as wav:
+                    wav.setnchannels(1)
+                    wav.setsampwidth(2)
+                    wav.setframerate(16000)
+                    wav.writeframes(int_samples.tobytes())
 
             logger.info(f"[VAD Guided ASR] Segment {idx+1}/{len(raw_windows)}: transcribing {start:.2f}s --> {end:.2f}s")
             res = _transcribe(

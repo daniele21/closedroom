@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Any
 
 from local_asr_server.audio_intelligence.audio_io import (
-    can_reuse_normalized_samples_for_energy,
-    energy_windows_from_samples,
+    canonical_wav_info,
     iter_energy_windows,
+    iter_normalized_audio_chunks,
     load_audio_samples,
 )
 from local_asr_server.audio_intelligence.features import (
@@ -38,7 +38,10 @@ def build_audio_intelligence(
     
     use_vad = True
     try:
-        from local_asr_server.audio_intelligence.vad import detect_speech_windows_vad
+        from local_asr_server.audio_intelligence.vad import (
+            detect_speech_windows_vad,
+            detect_speech_windows_vad_chunks,
+        )
     except Exception as e:
         logger.warning(f"Could not load VAD backend, falling back to RMS: {e}")
         use_vad = False
@@ -54,18 +57,24 @@ def build_audio_intelligence(
             track_features = None
             if use_vad:
                 try:
-                    # Normal path: decode once, then reuse the same normalized
-                    # samples for both RMS windows and Silero VAD.
-                    samples = load_audio_samples(path)
-                    if can_reuse_normalized_samples_for_energy(path):
-                        windows = energy_windows_from_samples(samples)
-                    else:
-                        # Imported/non-canonical audio keeps the previous energy
-                        # decode semantics; only canonical ClosedRoom WAV tracks
-                        # take the single-decode fast path.
+                    canonical = canonical_wav_info(path)
+                    if canonical is not None:
+                        # Native ClosedRoom audio stays bounded: RMS windows and
+                        # Silero both stream from disk instead of materializing a
+                        # multi-hour float32 track in the API process.
                         windows = list(iter_energy_windows(path))
+                        raw_speech = detect_speech_windows_vad_chunks(
+                            iter_normalized_audio_chunks(path, chunk_samples=512),
+                            total_samples=canonical.sample_count,
+                            sr=canonical.sample_rate,
+                        )
+                    else:
+                        # Imported audio preserves the previous decode/resample
+                        # path because its energy semantics may differ.
+                        samples = load_audio_samples(path)
+                        windows = list(iter_energy_windows(path))
+                        raw_speech = detect_speech_windows_vad(samples, sr=16000)
                     duration = windows[-1].end if windows else 0.0
-                    raw_speech = detect_speech_windows_vad(samples, sr=16000)
                     source = track.get("source") or track.get("id") or "audio"
                     speech_windows = format_vad_speech_windows(
                         raw_speech, windows, channel=source, duration=duration

@@ -10,7 +10,9 @@ from pathlib import Path
 
 from local_asr_server.audio_intelligence import build_audio_intelligence
 from local_asr_server.audio_intelligence.audio_io import (
+    canonical_wav_info,
     energy_windows_from_samples,
+    iter_normalized_audio_chunks,
     load_audio_samples,
     stream_audio_stats,
 )
@@ -117,18 +119,38 @@ class AudioIntelligenceTests(unittest.TestCase):
         finally:
             self.patcher.start()
 
-    def test_normal_vad_path_reuses_one_decoded_sample_buffer(self) -> None:
+    def test_canonical_vad_path_never_materializes_the_full_track(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "mic.wav"
             write_tone_wav(path, tone_ranges=[(0.1, 0.8)])
             with patch(
-                "local_asr_server.audio_intelligence.pipeline.iter_energy_windows",
-                side_effect=AssertionError("normal VAD path must not decode again"),
+                "local_asr_server.audio_intelligence.pipeline.load_audio_samples",
+                side_effect=AssertionError("canonical VAD path must remain streaming"),
             ):
                 result = build_audio_intelligence(
                     [({"id": "mic", "source": "mic", "label": "Tu"}, path)], []
                 )
         self.assertTrue(result["channels"]["mic"]["available"])
+
+    def test_streaming_vad_matches_in_memory_vad_for_canonical_wav(self) -> None:
+        from local_asr_server.audio_intelligence.vad import (
+            detect_speech_windows_vad,
+            detect_speech_windows_vad_chunks,
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "mic.wav"
+            write_tone_wav(path, tone_ranges=[(0.1, 0.8), (1.2, 1.6)])
+            samples = load_audio_samples(path)
+            info = canonical_wav_info(path)
+            self.assertIsNotNone(info)
+            expected = detect_speech_windows_vad(samples)
+            actual = detect_speech_windows_vad_chunks(
+                iter_normalized_audio_chunks(path, chunk_samples=137),
+                total_samples=info.sample_count,
+                sr=info.sample_rate,
+            )
+        self.assertEqual(actual, expected)
 
     def test_energy_windows_from_samples_match_file_windows(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -161,7 +183,7 @@ class AudioIntelligenceTests(unittest.TestCase):
             path = Path(temp) / "mic.wav"
             write_tone_wav(path, tone_ranges=[(0.1, 0.8)])
             with patch(
-                "local_asr_server.audio_intelligence.vad.detect_speech_windows_vad",
+                "local_asr_server.audio_intelligence.vad.detect_speech_windows_vad_chunks",
                 side_effect=RuntimeError("vad exploded"),
             ):
                 result = build_audio_intelligence(

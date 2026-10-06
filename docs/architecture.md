@@ -472,10 +472,10 @@ VAD e opzioni pubbliche provider. La cache vive in `.cache/` in sviluppo e in
 
 ### Merge multi-traccia
 
-Ogni traccia è trascritta separatamente. I segmenti sono poi normalizzati e
-ordinati temporalmente, conservando source track, label e speaker provider.
-Tracce quasi silenziose vengono rilevate prima dell'ASR e saltate con metadata
-espliciti.
+Ogni traccia è trascritta separatamente; i segmenti restano ordinati con
+source, label e speaker provider. Il precheck salta le tracce quasi silenziose.
+Sui WAV PCM16 mono 16 kHz, precheck e VAD lavorano a chunk e l'ASR riceve solo
+le finestre vocali copiate dal file.
 
 ### TranscriptionStore
 
