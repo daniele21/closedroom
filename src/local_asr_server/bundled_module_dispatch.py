@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import runpy
 import sys
+import tempfile
+from pathlib import Path
 from collections.abc import Sequence
 
 
@@ -25,12 +28,40 @@ BUNDLE_RUNTIME_IMPORTS = (
 
 
 def _run_bundle_runtime_smoke() -> None:
-    """Import the packaged dynamic AI surfaces without starting model inference."""
+    """Exercise the packaged image-only AI surface without starting model inference."""
     imported: list[str] = []
     for module_name in BUNDLE_RUNTIME_IMPORTS:
         importlib.import_module(module_name)
         imported.append(module_name)
-    print(json.dumps({"ok": True, "imports": imported}, sort_keys=True))
+
+    from PIL import Image
+    from local_llm_server.vision import prepare_image_message
+    from mlx_vlm.utils import load_image
+
+    with tempfile.TemporaryDirectory(prefix="closedroom-runtime-smoke-") as tmp:
+        image_path = Path(tmp) / "frame.png"
+        Image.new("RGB", (8, 8), (16, 32, 48)).save(image_path, format="PNG")
+        loaded = load_image(image_path)
+        if loaded.size != (8, 8):
+            raise RuntimeError(f"Unexpected packaged image size: {loaded.size}")
+        message = prepare_image_message(image_path, "Describe only visible content.")
+        if not message:
+            raise RuntimeError("Packaged image message preparation returned no content")
+
+    excluded_modules = ("cv2", "datasets", "pyarrow", "pandas", "multiprocess")
+    module_presence = {
+        module_name: importlib.util.find_spec(module_name) is not None
+        for module_name in excluded_modules
+    }
+    if any(module_presence.values()):
+        raise RuntimeError(f"Excluded generic VLM dependencies still packaged: {module_presence}")
+
+    print(json.dumps({
+        "ok": True,
+        "imports": imported,
+        "image_path_ok": True,
+        "excluded_module_presence": module_presence,
+    }, sort_keys=True))
 
 
 def dispatch_bundled_module(argv: Sequence[str] | None = None) -> bool:

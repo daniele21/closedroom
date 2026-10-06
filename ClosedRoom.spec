@@ -210,6 +210,15 @@ excludes = [
     "jupyter",
     "notebook",
     "matplotlib",
+
+    # ClosedRoom visual intelligence is image-only. mlx-vlm's generic package
+    # also supports video/training/evaluation, but those surfaces are outside
+    # the product contract and pull large transitive dependencies into the app.
+    "cv2",
+    "datasets",
+    "pyarrow",
+    "pandas",
+    "multiprocess",
 ]
 
 # ── PyInstaller Analysis ───────────────────────────────────────────────────────

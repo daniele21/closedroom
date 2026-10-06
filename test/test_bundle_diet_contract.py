@@ -44,12 +44,23 @@ class BundleDietContractTests(unittest.TestCase):
         self.assertIn('collect_submodules("mlx_vlm.server")', spec)
         self.assertIn('collect_submodules("mlx_vlm.models.qwen3_vl")', spec)
         self.assertIn('collect_submodules("local_llm_server")', spec)
+        for excluded in ("cv2", "datasets", "pyarrow", "pandas", "multiprocess"):
+            self.assertIn(f'"{excluded}"', spec)
 
         hook = (ROOT / "build_assets" / "hooks" / "pyi_rth_mlx.py").read_text(encoding="utf-8")
         smoke = (ROOT / "scripts" / "smoke_packaged_app.py").read_text(encoding="utf-8")
         self.assertIn('"bundle-runtime-smoke"', hook)
         self.assertIn('"bundle-runtime-smoke"', smoke)
         self.assertIn('"runtime_imports_ok"', smoke)
+
+    def test_frozen_runtime_smoke_exercises_image_only_surface(self) -> None:
+        source = (ROOT / "src" / "local_asr_server" / "bundled_module_dispatch.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("prepare_image_message", source)
+        self.assertIn("load_image", source)
+        self.assertIn("excluded_module_presence", source)
+        self.assertIn('("cv2", "datasets", "pyarrow", "pandas", "multiprocess")', source)
 
 
 if __name__ == "__main__":

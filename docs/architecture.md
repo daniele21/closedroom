@@ -785,11 +785,9 @@ lavoro visuale del meter. I testi vivono in `i18n/locales/it.ts` e `en.ts`.
 
 ### Distribuzione
 
-Vite scrive in `src/local_asr_server/static/`; gli asset hashed sono generati.
-La UI usa font di sistema/locali. I loghi runtime sono PNG canonici, senza copie
-legacy o PNG embedded in SVG. PyInstaller include l'intero grafo dinamico di
-`local_llm_server`, ma per `mlx_vlm` esplicita solo server e Qwen3-VL; gli
-import statici transitivi restano risolti dall'analisi PyInstaller.
+Vite scrive gli asset generati in `src/local_asr_server/static/`; UI e loghi
+restano locali. PyInstaller mantiene `local_llm_server` completo, limita
+`mlx_vlm` a server/Qwen3-VL ed esclude video/training (`cv2`/datasets).
 
 ## 19. Error handling e recovery
 
