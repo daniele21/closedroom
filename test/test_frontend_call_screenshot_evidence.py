@@ -86,7 +86,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("ApiClient.recordingScreenshots(recordingId)", self.meeting_accessories)
         self.assertIn("screenshots,", self.meeting)
         self.assertGreaterEqual(self.meeting.count("screenshots={screenshots}"), 2)
-        self.assertIn("onOpenScreenshot={setSelectedScreenshot}", self.meeting)
+        self.assertIn("onOpenScreenshot={openKeyMoment}", self.meeting)
         self.assertIn("ref.source_type === 'screenshot'", self.notes)
         self.assertIn("onOpenScreenshot(screenshot)", self.notes)
 
@@ -97,7 +97,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("collapsedKeyMoments.slice(0, 6)", self.meeting)
         self.assertIn("setShowAllScreenshots((value) => !value)", self.meeting)
         self.assertIn("src={shot.thumbnail_url}", self.meeting)
-        self.assertIn("onClick={() => setSelectedScreenshot(shot)}", self.meeting)
+        self.assertIn("onClick={() => openKeyMoment(shot)}", self.meeting)
         self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.meeting)
         self.assertIn("data-key-moment-id={shot.screenshot_id}", self.meeting)
         self.assertIn("data-key-moment-context=\"true\"", self.meeting)
