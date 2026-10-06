@@ -18,6 +18,7 @@ import logging
 import asyncio
 import threading
 import contextlib
+import tempfile
 from pathlib import Path
 from typing import Optional, Any, Callable, Dict, Generator
 
@@ -302,16 +303,34 @@ def get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
 
 
 def save_cached_result(cache_key: str, data: Dict[str, Any]) -> None:
-    """Save one ASR result, then bound only the ephemeral transcription cache."""
+    """Atomically save one ASR result, then bound only the ephemeral cache."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+    temp_path: Path | None = None
     try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = CACHE_DIR / f"{cache_key}.json"
         cleaned_data = _clean_nan_values(data)
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(cleaned_data, f, ensure_ascii=False, indent=2)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=CACHE_DIR,
+            prefix=f".{cache_key}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temp_path = Path(stream.name)
+            json.dump(cleaned_data, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, cache_file)
+        temp_path = None
         prune_transcription_cache(protected_cache_key=cache_key)
         logger.info(f"Saved transcription to cache: {cache_file}")
     except Exception as e:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         logger.warning(f"Failed to write cache file {cache_file}: {e}")
 
 
