@@ -3,11 +3,11 @@
   "contract_version": "0.5.0",
   "product_name": "ClosedRoom",
   "assets": {
-    "logo_primary": "frontend/public/logo-light.svg and frontend/public/logo-dark.svg",
-    "logo_compact": "public/logo-light.svg",
+    "logo_primary": "frontend/public/logo-light.png and frontend/public/logo-dark.png",
+    "logo_compact": "frontend/public/logo-light.png",
     "logo_monochrome": "use the canonical SVG logo with semantic foreground treatment; do not create a parallel logo source",
-    "app_icon": "canonical ClosedRoom logo source packaged by the macOS build when an app-icon artifact is generated",
-    "favicon": "frontend/public/logo-light.svg",
+    "app_icon": "frontend/public/logo-dark.png packaged by the macOS build into icon.icns",
+    "favicon": "frontend/public/logo-light.png",
     "brand_lockup_stacked": "design/assets/brand/closedroom-primary-stacked-lockup.png",
     "brand_lockup_horizontal": "design/assets/brand/closedroom-primary-horizontal-lockup.png",
     "brand_illustration_mark": "design/assets/brand/closedroom-microphone-mark.png"
