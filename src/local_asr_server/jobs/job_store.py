@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from local_asr_server.catalog import CatalogStore
+from local_asr_server.database_migrations import Migration, apply_migrations, ensure_column
 
 
 DEFAULT_JOB_EVENT_CAPACITY = 512
@@ -34,6 +35,19 @@ def _json_load(value: str | None, default: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return default
+
+def _migrate_job_legacy_columns(conn: sqlite3.Connection) -> None:
+    ensure_column(conn, "jobs", "progress_detail_json", "TEXT")
+    ensure_column(conn, "jobs", "dedupe_key", "TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_dedupe "
+        "ON jobs(type, scope_type, scope_id, dedupe_key, created_at DESC)"
+    )
+
+
+JOB_MIGRATIONS = (
+    Migration(1, "legacy-progress-detail-and-dedupe", _migrate_job_legacy_columns),
+)
 
 
 class JobStore:
@@ -123,20 +137,11 @@ class JobStore:
             CREATE INDEX IF NOT EXISTS idx_job_links_child ON job_links(child_job_id);
             """
         )
-        self._ensure_column(conn, "jobs", "progress_detail_json", "TEXT")
-        self._ensure_column(conn, "jobs", "dedupe_key", "TEXT")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_dedupe "
-            "ON jobs(type, scope_type, scope_id, dedupe_key, created_at DESC)"
+        apply_migrations(
+            conn,
+            component="jobs",
+            migrations=JOB_MIGRATIONS,
         )
-
-    @staticmethod
-    def _ensure_column(
-        conn: sqlite3.Connection, table: str, column: str, definition: str,
-    ) -> None:
-        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-        if column not in columns:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def create(
         self,
