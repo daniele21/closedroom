@@ -898,42 +898,48 @@ export default function RecordingOverlayPage() {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={handleCaptureScreenshot}
-          disabled={isStopping || isCapturingScreenshot || !isRecording || captureBackend !== 'native' || selectedDisplayId === null}
-          className={`flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[10px] font-semibold transition active:scale-[0.97] ${
-            screenshotFeedback === 'saved'
-              ? 'border-emerald-300/30 bg-emerald-300/12 text-emerald-100'
-              : 'border-white/10 bg-white/[0.08] text-white/90 hover:bg-white/[0.12]'
-          } disabled:cursor-not-allowed disabled:opacity-35`}
-          title={selectedDisplayId === null ? 'Choose a screen first' : t('recording.screenshotShortcut')}
-          aria-label={t('recording.screenshotAction')}
-          data-screenshot-action="true"
-        >
-          {isCapturingScreenshot ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-          ) : screenshotFeedback === 'saved' ? (
-            <Check className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : (
-            <Camera className="h-3.5 w-3.5" aria-hidden="true" />
-          )}
-          <span>{screenshotFeedback === 'saved' ? 'Saved' : screenshotCount}</span>
-        </button>
-
-        {lastSavedScreenshotId && (
+        <div className={`flex h-9 shrink-0 overflow-hidden rounded-lg border ${
+          screenshotFeedback === 'saved'
+            ? 'border-emerald-300/30 bg-emerald-300/12'
+            : 'border-white/10 bg-white/[0.08]'
+        }`}>
           <button
             type="button"
-            onClick={() => void handleUndoScreenshot()}
-            disabled={isUndoingScreenshot || isStopping}
-            className="flex h-9 shrink-0 items-center rounded-lg border border-white/10 bg-white/[0.04] px-2 text-[9px] font-semibold text-white/65 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-            aria-label="Undo last screenshot"
-            title="Undo last screenshot"
-            data-screenshot-undo="true"
+            onClick={handleCaptureScreenshot}
+            disabled={isStopping || isCapturingScreenshot || !isRecording || captureBackend !== 'native' || selectedDisplayId === null}
+            className={`flex h-full items-center gap-1.5 px-2.5 text-[10px] font-semibold transition active:scale-[0.97] ${
+              screenshotFeedback === 'saved'
+                ? 'text-emerald-100'
+                : 'text-white/90 hover:bg-white/[0.05]'
+            } disabled:cursor-not-allowed disabled:opacity-35`}
+            title={selectedDisplayId === null ? 'Choose a screen first' : t('recording.screenshotShortcut')}
+            aria-label={t('recording.screenshotAction')}
+            data-screenshot-action="true"
           >
-            {isUndoingScreenshot ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
+            {isCapturingScreenshot ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : screenshotFeedback === 'saved' ? (
+              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Camera className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            <span>{screenshotFeedback === 'saved' ? 'Saved' : screenshotCount}</span>
           </button>
-        )}
+
+          {lastSavedScreenshotId && (
+            <button
+              type="button"
+              onClick={() => void handleUndoScreenshot()}
+              disabled={isUndoingScreenshot || isStopping}
+              className="flex h-full items-center border-l border-emerald-200/20 px-2 text-[9px] font-semibold text-emerald-100/75 transition hover:bg-emerald-200/10 hover:text-emerald-50 disabled:cursor-not-allowed disabled:opacity-35"
+              aria-label="Undo last screenshot"
+              title="Undo last screenshot"
+              data-screenshot-undo="true"
+            >
+              {isUndoingScreenshot ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
+            </button>
+          )}
+        </div>
 
         <button
           type="button"
