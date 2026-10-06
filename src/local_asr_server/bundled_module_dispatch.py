@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import json
 import runpy
 import sys
 from collections.abc import Sequence
@@ -14,6 +16,21 @@ SUPPORTED_BUNDLED_MODULES = {
 # `serve` is used by packaged-app CI smoke to exercise the real bundled Python
 # runtime and static assets without requiring TCC prompts or interactive UI.
 SUPPORTED_CLI_COMMANDS = {"inspect-meeting", "transcribe", "serve"}
+BUNDLE_RUNTIME_SMOKE_COMMAND = "bundle-runtime-smoke"
+BUNDLE_RUNTIME_IMPORTS = (
+    "local_llm_server.cli",
+    "mlx_vlm.server",
+    "mlx_vlm.models.qwen3_vl",
+)
+
+
+def _run_bundle_runtime_smoke() -> None:
+    """Import the packaged dynamic AI surfaces without starting model inference."""
+    imported: list[str] = []
+    for module_name in BUNDLE_RUNTIME_IMPORTS:
+        importlib.import_module(module_name)
+        imported.append(module_name)
+    print(json.dumps({"ok": True, "imports": imported}, sort_keys=True))
 
 
 def dispatch_bundled_module(argv: Sequence[str] | None = None) -> bool:
@@ -25,6 +42,9 @@ def dispatch_bundled_module(argv: Sequence[str] | None = None) -> bool:
     """
 
     arguments = list(sys.argv if argv is None else argv)
+    if len(arguments) >= 2 and arguments[1] == BUNDLE_RUNTIME_SMOKE_COMMAND:
+        _run_bundle_runtime_smoke()
+        return True
     if len(arguments) >= 2 and arguments[1] in SUPPORTED_CLI_COMMANDS:
         from local_asr_server.cli import main
 

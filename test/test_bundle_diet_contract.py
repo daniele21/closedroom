@@ -45,6 +45,12 @@ class BundleDietContractTests(unittest.TestCase):
         self.assertIn('collect_submodules("mlx_vlm.models.qwen3_vl")', spec)
         self.assertIn('collect_submodules("local_llm_server")', spec)
 
+        hook = (ROOT / "build_assets" / "hooks" / "pyi_rth_mlx.py").read_text(encoding="utf-8")
+        smoke = (ROOT / "scripts" / "smoke_packaged_app.py").read_text(encoding="utf-8")
+        self.assertIn('"bundle-runtime-smoke"', hook)
+        self.assertIn('"bundle-runtime-smoke"', smoke)
+        self.assertIn('"runtime_imports_ok"', smoke)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -178,6 +178,31 @@ def main() -> int:
         env["HOME"] = str(home)
         env["CLOSEDROOM_BUILD_CHANNEL"] = env.get("CLOSEDROOM_BUILD_CHANNEL", "ci-smoke")
 
+        runtime_probe = subprocess.run(
+            [str(executable), "bundle-runtime-smoke"],
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=min(args.timeout, 60.0),
+            check=False,
+        )
+        runtime_probe_payload: dict[str, Any] | None = None
+        runtime_probe_error: str | None = None
+        if runtime_probe.returncode == 0:
+            try:
+                candidates = [line for line in runtime_probe.stdout.splitlines() if line.strip().startswith("{")]
+                runtime_probe_payload = json.loads(candidates[-1]) if candidates else None
+                if not runtime_probe_payload or not runtime_probe_payload.get("ok"):
+                    runtime_probe_error = "runtime import probe returned no valid success payload"
+            except (json.JSONDecodeError, IndexError) as exc:
+                runtime_probe_error = f"runtime import probe JSON invalid: {exc}"
+        else:
+            runtime_probe_error = (
+                f"runtime import probe exited with {runtime_probe.returncode}: "
+                f"{runtime_probe.stderr[-2000:]}"
+            )
+
         with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open("w", encoding="utf-8") as stderr:
             process = subprocess.Popen(
                 [str(executable), "serve", "--host", "127.0.0.1", "--port", str(port)],
@@ -238,6 +263,8 @@ def main() -> int:
         ]
 
         errors: list[str] = []
+        if runtime_probe_error:
+            errors.append(f"packaged runtime import probe failed: {runtime_probe_error}")
         if not ready_ok:
             errors.append("packaged server/static root did not reach readiness")
         if archive_search_error:
@@ -266,6 +293,8 @@ def main() -> int:
             "static_root_loaded": root_loaded,
             "archive_search_fts5_ok": archive_search_payload is not None,
             "archive_search_probe": archive_search_payload,
+            "runtime_imports_ok": runtime_probe_payload is not None and runtime_probe_error is None,
+            "runtime_import_probe": runtime_probe_payload,
             "graceful_sigint": graceful,
             "returncode": process.returncode,
             "port_closed": port_closed,

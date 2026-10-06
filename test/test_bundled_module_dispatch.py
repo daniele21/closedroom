@@ -11,6 +11,13 @@ class BundledModuleDispatchTests(unittest.TestCase):
     def test_ignores_regular_closedroom_arguments(self) -> None:
         self.assertFalse(dispatch_bundled_module(["ClosedRoom", "--other"]))
 
+    def test_dispatches_bundle_runtime_smoke(self) -> None:
+        with patch(
+            "local_asr_server.bundled_module_dispatch._run_bundle_runtime_smoke"
+        ) as smoke:
+            self.assertTrue(dispatch_bundled_module(["ClosedRoom", "bundle-runtime-smoke"]))
+        smoke.assert_called_once_with()
+
     def test_dispatches_local_llm_server_cli(self) -> None:
         with patch("local_llm_server.cli.main") as main, patch.object(sys, "argv", ["ClosedRoom"]):
             self.assertTrue(dispatch_bundled_module(["ClosedRoom", "-m", "local_llm_server", "serve", "--port", "1235"]))
