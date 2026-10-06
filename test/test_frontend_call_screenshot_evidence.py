@@ -124,7 +124,9 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
     def test_full_media_journey_covers_overlay_to_notes_and_audio(self) -> None:
         for evidence in (
             "03-screenshot-persisted",
+            "03b-second-screenshot-persisted",
             "04-meeting-notes-cited",
+            "04b-key-moment-group-stack",
             "06-transcript-marker-in-turn",
             "07-screenshot-to-audio",
             "08-key-moment-ask-local",
@@ -133,7 +135,8 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
             'data-display-picker="true"',
             'data-screenshot-action="true"',
             'data-screenshot-undo="true"',
-            'data-key-moment-id="shot-001"',
+            'data-key-moment-id="shot-002"',
+            'data-key-moment-group="manual-screenshot-group-01"',
         ):
             self.assertIn(evidence, self.e2e)
         self.assertNotIn("querySelector('[data-testid=\"recording-overlay\"] select')", self.e2e)
