@@ -34,9 +34,11 @@ def _run_bundle_runtime_smoke() -> None:
         importlib.import_module(module_name)
         imported.append(module_name)
 
+    import numpy as np
     from PIL import Image
     from local_llm_server.vision import prepare_image_message
     from mlx_vlm.utils import load_image
+    from mlx_whisper.audio import log_mel_spectrogram
 
     with tempfile.TemporaryDirectory(prefix="closedroom-runtime-smoke-") as tmp:
         image_path = Path(tmp) / "frame.png"
@@ -48,7 +50,11 @@ def _run_bundle_runtime_smoke() -> None:
         if not message:
             raise RuntimeError("Packaged image message preparation returned no content")
 
-    excluded_modules = ("cv2", "datasets", "pyarrow", "pandas", "multiprocess")
+    mel = log_mel_spectrogram(np.zeros(16_000, dtype=np.float32))
+    if tuple(mel.shape)[0] != 80:
+        raise RuntimeError(f"Unexpected packaged MLX Whisper mel shape: {tuple(mel.shape)}")
+
+    excluded_modules = ("cv2", "datasets", "pyarrow", "pandas", "multiprocess", "torch")
     module_presence = {
         module_name: importlib.util.find_spec(module_name) is not None
         for module_name in excluded_modules
@@ -60,6 +66,7 @@ def _run_bundle_runtime_smoke() -> None:
         "ok": True,
         "imports": imported,
         "image_path_ok": True,
+        "mlx_whisper_audio_ok": True,
         "excluded_module_presence": module_presence,
     }, sort_keys=True))
 
