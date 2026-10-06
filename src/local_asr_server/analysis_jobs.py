@@ -362,7 +362,10 @@ class AnalysisJobManager:
         )
 
     def _with_recording_transcription(self, body: AnalysisRequest) -> AnalysisRequest:
-        if body.transcription_id or not body.recording_id:
+        # A source-scoped explicit text payload deliberately narrows a recording
+        # analysis (for example, one screenshot key moment). Do not silently
+        # replace that bounded evidence with the recording's full transcript.
+        if body.transcription_id or not body.recording_id or (body.text and body.source_ids):
             return body
         try:
             transcription = self._transcriptions.find_for_recording(body.recording_id)
