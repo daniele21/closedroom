@@ -101,6 +101,13 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.meeting)
         self.assertIn("data-key-moment-id={shot.screenshot_id}", self.meeting)
         self.assertIn("data-key-moment-context=\"true\"", self.meeting)
+        self.assertIn('data-key-moment-ask="true"', self.meeting)
+        self.assertIn("source_ids: ['screenshot:' + selectedScreenshot.screenshot_id]", self.meeting)
+        self.assertIn("llm_provider: 'nemotron_local'", self.meeting)
+        self.assertIn("CLOSEDROOM_KEY_MOMENT_QA_V1", self.meeting)
+        self.assertIn("data-key-moment-answer=\"true\"", self.meeting)
+        self.assertIn("visualContext?.contentType", self.meeting)
+        self.assertIn("visualContext?.title", self.meeting)
         self.assertIn("manual_screenshot_groups", self.meeting)
         self.assertIn("data-key-moment-group={group?.group_id || undefined}", self.meeting)
         self.assertIn("data-key-moment-group-strip=\"true\"", self.meeting)
@@ -120,6 +127,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
             "04-meeting-notes-cited",
             "06-transcript-marker-in-turn",
             "07-screenshot-to-audio",
+            "08-key-moment-ask-local",
             "call-overlay-screenshot-evidence",
             'data-display-selector="true"',
             'data-display-picker="true"',
