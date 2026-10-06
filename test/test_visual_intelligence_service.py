@@ -514,6 +514,37 @@ class VisualIntelligenceTests(unittest.TestCase):
             self.assertEqual(len(store.list_visual_frames(recording["id"])), 3)
 
 
+    def test_manual_screenshot_groups_are_presentation_only_and_time_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            same_a = root / "same-a.jpg"
+            same_b = root / "same-b.jpg"
+            same_late = root / "same-late.jpg"
+            other = root / "other.jpg"
+            same_a.write_bytes(self._jpeg("blue", pattern=True))
+            same_b.write_bytes(self._jpeg("blue", pattern=True))
+            same_late.write_bytes(self._jpeg("blue", pattern=True))
+            other.write_bytes(self._jpeg("red", pattern=False))
+            frames = [
+                {"sequence": 1_000_000_000, "timestamp": 10.0, "path": same_a, "evidence_source": "manual_screenshot", "screenshot_id": "shot-a", "display_id": 7},
+                {"sequence": 1_000_000_001, "timestamp": 25.0, "path": same_b, "evidence_source": "manual_screenshot", "screenshot_id": "shot-b", "display_id": 7},
+                {"sequence": 1_000_000_002, "timestamp": 30.0, "path": other, "evidence_source": "manual_screenshot", "screenshot_id": "shot-c", "display_id": 7},
+                {"sequence": 1_000_000_003, "timestamp": 200.0, "path": same_late, "evidence_source": "manual_screenshot", "screenshot_id": "shot-d", "display_id": 7},
+            ]
+
+            groups = PostMeetingVisualService._manual_screenshot_groups(
+                frames,
+                {},
+                VisualRoutingConfig(mode="v2"),
+            )
+
+            self.assertEqual(len(groups), 1)
+            self.assertEqual(groups[0]["screenshot_ids"], ["shot-a", "shot-b"])
+            self.assertEqual(groups[0]["representative_screenshot_id"], "shot-b")
+            self.assertEqual(groups[0]["start"], 10.0)
+            self.assertEqual(groups[0]["end"], 25.0)
+            self.assertEqual(len(frames), 4)
+
     def test_v2_manual_screenshot_is_processed_with_source_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -587,6 +618,7 @@ class VisualIntelligenceTests(unittest.TestCase):
             inventory = document["manual_screenshot_sources"]
             self.assertEqual(inventory[0]["screenshot_id"], saved["screenshot_id"])
             self.assertEqual(inventory[0]["status"], "processed")
+            self.assertEqual(document["manual_screenshot_groups"], [])
 
     def test_manual_screenshot_reserves_capacity_inside_visual_candidate_budget(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

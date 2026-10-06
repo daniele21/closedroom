@@ -9,6 +9,7 @@ import path from 'node:path';
 const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 const MEETING_ID = 'e2e-call-screenshot';
 const SCREENSHOT_ID = 'shot-001';
+const SECOND_SCREENSHOT_ID = 'shot-002';
 const VIDEO_FPS = 4;
 const root = path.resolve(process.cwd());
 const evidenceRoot = path.resolve(
@@ -16,12 +17,12 @@ const evidenceRoot = path.resolve(
     || path.join(root, 'dist/evidence/browser-call-screenshot'),
 );
 const sourceRevision = process.env.E2E_SOURCE_REVISION || 'unknown';
-const counts = { active: 0, displays: 0, display_select: 0, screenshots_get: 0, screenshots_post: 0, stop: 0, open_meeting: 0, meeting: 0, visual_frames: 0 };
+const counts = { active: 0, displays: 0, display_select: 0, screenshots_get: 0, screenshots_post: 0, stop: 0, open_meeting: 0, meeting: 0, visual_frames: 0, visual_intelligence: 0, analysis_jobs: 0, analysis_runs: 0 };
 const checkpoints = [];
 const sseClients = new Set();
 let frameIndex = 0;
 let active = true;
-let screenshot = null;
+let screenshots = [];
 let selectedDisplayId = null;
 
 const recording = {
@@ -40,15 +41,17 @@ const recording = {
   screenshot_count: 1,
 };
 
-function publicScreenshot() {
+function publicScreenshot(sequence = 0) {
+  const screenshotId = sequence === 0 ? SCREENSHOT_ID : SECOND_SCREENSHOT_ID;
+  const timestamp = sequence === 0 ? 12 : 16;
   return {
-    screenshot_id: SCREENSHOT_ID, recording_id: MEETING_ID, request_id: 'browser-e2e-request',
-    sequence: 0, capture_kind: 'manual', timestamp: 12, captured_wall_time: 1790877612,
+    screenshot_id: screenshotId, recording_id: MEETING_ID, request_id: 'browser-e2e-request-' + sequence,
+    sequence, capture_kind: 'manual', timestamp, captured_wall_time: 1790877612 + sequence * 4,
     display_id: 7, display_title: 'Synthetic Display 1',
     width: 1440, height: 900, thumbnail_width: 640, thumbnail_height: 400,
-    sha256: 'synthetic-sha', available: true, thumbnail_available: true,
-    original_url: '/v1/recordings/' + MEETING_ID + '/screenshots/' + SCREENSHOT_ID + '/original',
-    thumbnail_url: '/v1/recordings/' + MEETING_ID + '/screenshots/' + SCREENSHOT_ID + '/thumbnail',
+    sha256: 'synthetic-sha-' + sequence, available: true, thumbnail_available: true,
+    original_url: '/v1/recordings/' + MEETING_ID + '/screenshots/' + screenshotId + '/original',
+    thumbnail_url: '/v1/recordings/' + MEETING_ID + '/screenshots/' + screenshotId + '/thumbnail',
   };
 }
 
@@ -86,13 +89,13 @@ function meetingFixture() {
   const run = structuredRun();
   return {
     id: MEETING_ID,
-    recording,
+    recording: { ...recording, screenshot_count: screenshots.length },
     transcription: {
       id: 'transcription-shot', timestamp: '2026-10-01T18:00:41Z', model: 'synthetic',
       language: 'en', audio_filename: 'synthetic.wav', recording_id: MEETING_ID,
       text: 'Alex reviews the launch roadmap and validation plan.',
       segments: [{ id: 10, start: 4, end: 24, text: 'Alex reviews the launch roadmap and validation plan.', speaker_label: 'SPEAKER_00' }],
-      stats: { outcome_status: 'completed' },
+      stats: { outcome_status: 'completed', visual_intelligence: { version: 2, status: 'completed' } },
     },
     analysis_runs: [run], latest_analysis: { meeting_brief: run }, jobs: [], status: 'ready',
     project_name: 'Browser E2E', created_at: recording.created_at, updated_at: recording.stopped_at,
@@ -150,7 +153,7 @@ function overlayPayload() {
     active: true, recording_id: MEETING_ID, title: recording.title,
     capture_backend: 'native', capture_mode: 'both', started_at: '2026-10-01T18:00:00Z',
     bytes_written: 4096, mic_db: -20, system_db: -18, warnings: [],
-    screenshot_count: screenshot ? 1 : 0, screenshot_display_id: selectedDisplayId,
+    screenshot_count: screenshots.length, screenshot_display_id: selectedDisplayId,
   } : { active: false };
 }
 function sendOverlay(res) { res.write('data: ' + JSON.stringify(overlayPayload()) + '\n\n'); }
@@ -199,21 +202,22 @@ function fixtureServer(port) {
       counts.screenshots_post += 1;
       const parsed = JSON.parse(await requestBody(req) || '{}');
       if (parsed.display_id !== 7) return json(res, 409, { detail: 'selected_display_unavailable' });
-      screenshot = publicScreenshot();
+      if (screenshots.length >= 2) return json(res, 409, { detail: 'screenshot_limit_for_fixture' });
+      const saved = publicScreenshot(screenshots.length);
+      screenshots = [...screenshots, saved];
       for (const client of sseClients) sendOverlay(client);
-      return json(res, 201, screenshot);
+      return json(res, 201, saved);
     }
     if (pathname === '/v1/recordings/' + MEETING_ID + '/screenshots' && req.method === 'GET') {
       counts.screenshots_get += 1;
-      const items = screenshot ? [screenshot] : [];
-      return json(res, 200, { items, total: items.length });
+      return json(res, 200, { items: screenshots, total: screenshots.length });
     }
     if (pathname === '/v1/recordings/' + MEETING_ID + '/control/stop' && req.method === 'POST') {
       counts.stop += 1;
       active = false;
       for (const client of sseClients) { sendOverlay(client); client.end(); }
       sseClients.clear();
-      return json(res, 202, { recording: { ...recording, screenshot_count: screenshot ? 1 : 0 } });
+      return json(res, 202, { recording: { ...recording, screenshot_count: screenshots.length } });
     }
     if (pathname === '/v1/system/window/main/meeting/' + MEETING_ID && req.method === 'POST') {
       counts.open_meeting += 1;
@@ -227,12 +231,148 @@ function fixtureServer(port) {
       counts.visual_frames += 1;
       return json(res, 200, { items: [], total: 0 });
     }
+    if (pathname === '/v2/recordings/' + MEETING_ID + '/visual-intelligence') {
+      counts.visual_intelligence += 1;
+      return json(res, 200, {
+        schema_version: 2,
+        summary: { version: 2, status: 'completed', generation_id: 'synthetic-visual' },
+        document: {
+          schema_version: 2,
+          generation_id: 'synthetic-visual',
+          observations: [{
+            schema_version: 2,
+            observation_id: 'visual-shot-001-shared_content',
+            sequence: 1000000000,
+            timestamp: 12,
+            task: 'shared_content',
+            trigger: 'structural_change',
+            independent_inference: true,
+            model: 'synthetic-vlm',
+            prompt_version: 1,
+            confidence: 0.91,
+            status: 'valid',
+            content_type: 'slide',
+            title: 'Launch roadmap',
+            visible_text: ['Launch in October'],
+            key_information: ['Milestone: October'],
+            content_state: 'stable',
+            source: {
+              kind: 'manual_screenshot',
+              evidence_id: SCREENSHOT_ID,
+              capture_kind: 'manual',
+              screenshot_id: SCREENSHOT_ID,
+              sha256: 'synthetic-sha-0',
+              display_id: 7,
+              display_title: 'Synthetic Display 1',
+            },
+          }, {
+            schema_version: 2,
+            observation_id: 'visual-shot-002-shared_content',
+            sequence: 1000000001,
+            timestamp: 16,
+            task: 'shared_content',
+            trigger: 'structural_change',
+            independent_inference: true,
+            model: 'synthetic-vlm',
+            prompt_version: 1,
+            confidence: 0.93,
+            status: 'valid',
+            content_type: 'slide',
+            title: 'Launch roadmap',
+            visible_text: ['Launch in October'],
+            key_information: ['Milestone: October', 'Validation before launch'],
+            content_state: 'stable',
+            source: {
+              kind: 'manual_screenshot',
+              evidence_id: SECOND_SCREENSHOT_ID,
+              capture_kind: 'manual',
+              screenshot_id: SECOND_SCREENSHOT_ID,
+              sha256: 'synthetic-sha-1',
+              display_id: 7,
+              display_title: 'Synthetic Display 1',
+            },
+          }],
+          speaker_intervals: [],
+          meeting_state_events: [],
+          share_sessions: [],
+          unassigned_share_keyframes: [],
+          semantic_links: [],
+          routing_summary: {},
+          manual_screenshot_sources: [{
+            screenshot_id: SCREENSHOT_ID, timestamp: 12, sha256: 'synthetic-sha-0',
+            display_id: 7, status: 'processed',
+          }, {
+            screenshot_id: SECOND_SCREENSHOT_ID, timestamp: 16, sha256: 'synthetic-sha-1',
+            display_id: 7, status: 'processed',
+          }],
+          manual_screenshot_groups: [{
+            group_id: 'manual-screenshot-group-01',
+            screenshot_ids: [SCREENSHOT_ID, SECOND_SCREENSHOT_ID],
+            representative_screenshot_id: SECOND_SCREENSHOT_ID,
+            start: 12,
+            end: 16,
+            display_id: 7,
+          }],
+          model: 'synthetic-vlm',
+          prompt_version: 1,
+        },
+        source_validity: {
+          status: 'current',
+          manual_screenshot_count: 2,
+          missing_screenshot_ids: [],
+          unavailable_screenshot_ids: [],
+          changed_screenshot_ids: [],
+        },
+      });
+    }
+    if (pathname === '/v1/analysis-jobs' && req.method === 'POST') {
+      counts.analysis_jobs += 1;
+      const parsed = JSON.parse(await requestBody(req) || '{}');
+      const valid = parsed.recording_id === MEETING_ID
+        && parsed.llm_provider === 'nemotron_local'
+        && Array.isArray(parsed.source_ids)
+        && parsed.source_ids.includes('screenshot:' + SCREENSHOT_ID)
+        && String(parsed.text || '').includes('[VISUAL INFERENCE')
+        && String(parsed.text || '').includes('[NEARBY SPOKEN TRANSCRIPT]')
+        && String(parsed.prompt || '').includes('CLOSEDROOM_KEY_MOMENT_QA_V1');
+      if (!valid) return json(res, 422, { detail: 'invalid key moment ask payload' });
+      return json(res, 202, {
+        job_id: 'key-moment-ask-job',
+        analysis_run_id: 'key-moment-ask-run',
+        status: 'queued',
+      });
+    }
+    if (pathname === '/v1/analysis-runs/key-moment-ask-run') {
+      counts.analysis_runs += 1;
+      return json(res, 200, {
+        id: 'key-moment-ask-run',
+        job_id: 'key-moment-ask-job',
+        scope_type: 'recording',
+        scope_id: MEETING_ID,
+        recording_id: MEETING_ID,
+        analysis_type: 'custom_question',
+        template_id: 'custom_question',
+        provider: 'nemotron_local',
+        reasoning: 'auto',
+        show_thinking: false,
+        json_mode: false,
+        llm_options: {},
+        prompt_version: 'CLOSEDROOM_KEY_MOMENT_QA_V1',
+        input_hash: 'synthetic-key-moment',
+        status: 'completed',
+        result: { markdown: 'The visual shows an October launch milestone while Alex discusses the launch roadmap and validation plan.' },
+        result_markdown: 'The visual shows an October launch milestone while Alex discusses the launch roadmap and validation plan.',
+        source_ids: ['screenshot:' + SCREENSHOT_ID],
+        created_at: 1790877680,
+        completed_at: 1790877681,
+      });
+    }
     if (pathname === '/v1/recordings/' + MEETING_ID + '/audio') {
       const body = Buffer.alloc(44);
       res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': body.length });
       return res.end(body);
     }
-    if (pathname.includes('/screenshots/' + SCREENSHOT_ID + '/')) {
+    if (pathname.includes('/screenshots/' + SCREENSHOT_ID + '/') || pathname.includes('/screenshots/' + SECOND_SCREENSHOT_ID + '/')) {
       const body = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="100%" height="100%" fill="#111827"/><text x="40" y="90" fill="white" font-size="32">Launch roadmap</text><text x="40" y="150" fill="#67e8f9" font-size="24">Synthetic screenshot evidence</text></svg>');
       res.writeHead(200, { 'content-type': 'image/svg+xml', 'content-length': body.length, 'cache-control': 'no-store' });
       return res.end(body);
@@ -414,16 +554,70 @@ try {
   if (counts.screenshots_post !== 1) throw new Error('unexpected screenshot POST count: ' + counts.screenshots_post);
   await checkpoint(browser, '03-screenshot-persisted');
 
+  const clickedSecondShot = await browser.execute(`
+    const button = document.querySelector('button[data-screenshot-action="true"]');
+    if (!button || button.disabled) return false; button.click(); return true;
+  `);
+  if (!clickedSecondShot) throw new Error('second screenshot action unavailable');
+  const secondShotDeadline = Date.now() + 5000;
+  while (counts.screenshots_post < 2 && Date.now() < secondShotDeadline) await sleep(50);
+  if (counts.screenshots_post !== 2) throw new Error('second screenshot was not persisted');
+  await waitText(browser, ['Screenshots 2'], 5000, true);
+  await checkpoint(browser, '03b-second-screenshot-persisted');
+
   await browser.clickCss('button[aria-label="Stop recording"]');
   await waitHash(browser, '#meeting/' + MEETING_ID, 10000);
   await waitText(browser, ['Screenshot evidence review'], 30000, true);
   if (counts.stop !== 1 || counts.open_meeting !== 1) throw new Error('stop/open counts unexpected: ' + JSON.stringify(counts));
   await waitSelector(browser, '[data-key-moments="true"]', 10000, true);
-  await waitSelector(browser, '[data-key-moment-id="shot-001"]', 5000, true);
   await waitText(browser, ['Alex reviews the launch roadmap and validation plan.'], 5000, true);
   await waitText(browser, ['The roadmap image shows the launch milestone.'], 10000, true);
   await waitText(browser, ['Screenshot · 00:12'], 10000);
   await checkpoint(browser, '04-meeting-notes-cited');
+
+  // Visual enrichment is disclosure-driven. The saved Meeting may already open
+  // on Analysis when notes exist, which is itself a valid disclosure; otherwise
+  // opening the first Key Moment requests the persisted local visual document.
+  const enrichmentDeadline = Date.now() + 8000;
+  let enrichmentEntry = null;
+  while (Date.now() < enrichmentDeadline) {
+    enrichmentEntry = await browser.execute(`
+      if (document.querySelector('[data-key-moment-group="manual-screenshot-group-01"]')) return 'group';
+      if (document.querySelector('[data-key-moment-id="shot-001"]')) return 'shot';
+      return null;
+    `);
+    if (enrichmentEntry) break;
+    await frame(browser);
+    await sleep(150);
+  }
+  if (!enrichmentEntry) throw new Error('key moment enrichment entry unavailable');
+  if (enrichmentEntry === 'group') {
+    await browser.clickCss('[data-key-moment-group="manual-screenshot-group-01"]');
+  } else {
+    await browser.clickCss('[data-key-moment-id="shot-001"]');
+  }
+  await waitSelector(browser, '[data-key-moment-group-strip="true"]', 8000, true);
+  if (counts.visual_intelligence < 1) throw new Error('visual intelligence disclosure did not reach v2 backend');
+  await checkpoint(browser, '04a-key-moment-progressive-enrichment');
+  const closeEnrichedModal = await browser.execute(`
+    const labels = ['Chiudi screenshot', 'Close screenshot'];
+    const button = Array.from(document.querySelectorAll('button')).find((node) => labels.includes(node.getAttribute('aria-label')));
+    if (!button) return false; button.click(); return true;
+  `);
+  if (!closeEnrichedModal) throw new Error('enriched key moment modal close control missing');
+
+  await waitSelector(browser, '[data-key-moment-group="manual-screenshot-group-01"]', 5000, true);
+  await waitSelector(browser, '[data-key-moment-id="shot-002"]', 5000, true);
+  await waitText(browser, ['Launch roadmap'], 5000, true);
+  await browser.clickCss('[data-key-moment-group="manual-screenshot-group-01"]');
+  await waitSelector(browser, '[data-key-moment-group-strip="true"]', 5000, true);
+  await checkpoint(browser, '04b-key-moment-group-stack');
+  const closeGroupedModal = await browser.execute(`
+    const labels = ['Chiudi screenshot', 'Close screenshot'];
+    const button = Array.from(document.querySelectorAll('button')).find((node) => labels.includes(node.getAttribute('aria-label')));
+    if (!button) return false; button.click(); return true;
+  `);
+  if (!closeGroupedModal) throw new Error('grouped key moment modal close control missing');
 
   const noteEvidenceClicked = await browser.execute(`
     const button = Array.from(document.querySelectorAll('button')).find((node) => (node.innerText || '').includes('Screenshot · 00:12'));
@@ -462,6 +656,35 @@ try {
   `);
   if (!seekClicked) throw new Error('screenshot-to-audio action missing');
   await checkpoint(browser, '07-screenshot-to-audio');
+
+  await waitSelector(browser, '[data-key-moment-ask="true"] input', 5000, true);
+  const questionSet = await browser.execute(`
+    const input = document.querySelector('[data-key-moment-ask="true"] input');
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    if (!setter) return false;
+    setter.call(input, 'What does this moment tell us about the launch?');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  if (!questionSet) throw new Error('key moment question input unavailable');
+  const askClicked = await browser.execute(`
+    const root = document.querySelector('[data-key-moment-ask="true"]');
+    const button = Array.from(root?.querySelectorAll('button') || []).find((node) => {
+      const text = (node.innerText || '').trim();
+      return text === 'Ask' || text === 'Chiedi';
+    });
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  `);
+  if (!askClicked) throw new Error('key moment ask action unavailable');
+  await waitText(browser, ['The visual shows an October launch milestone while Alex discusses the launch roadmap and validation plan.'], 8000, true);
+  await waitSelector(browser, '[data-key-moment-answer="true"]', 3000, true);
+  if (counts.analysis_jobs !== 1 || counts.analysis_runs < 1) {
+    throw new Error('key moment ask requests unexpected: ' + JSON.stringify(counts));
+  }
+  await checkpoint(browser, '08-key-moment-ask-local');
   video = await renderVideo();
 } catch (caught) {
   error = (caught?.name || 'Error') + ': ' + (caught?.message || caught);

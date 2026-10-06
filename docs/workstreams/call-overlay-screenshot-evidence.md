@@ -20,6 +20,8 @@ Decisioni:
 - one-shot manuale, non screen recording continuo;
 - il click screenshot è un marker intenzionale di Key Moment; nessun prompt/caption obbligatorio durante la call;
 - Undo è limitato all'ultimo screenshot appena salvato e riusa delete/manifest owner esistenti;
+- similarità e grouping avvengono solo post-meeting nel visual-intelligence owner; gli screenshot originali non vengono deduplicati, cancellati o resi non citabili;
+- classificazione visuale e Ask about this moment sono disponibili solo quando esiste visual intelligence locale corrente; l'Ask riusa l'analysis owner con input source-scoped e provider locale, senza introdurre un nuovo motore Q&A;
 - originale + thumbnail + manifest versionato posseduti da RecordingStore;
 - nessun ASR/LLM/VLM durante recording;
 - nessun trasferimento cloud implicito di immagini o descrizioni visuali;
@@ -72,6 +74,8 @@ gli owner esistenti e non introducono queue o lifecycle paralleli.
   segmenti temporali già persistiti, senza analisi live o nuova persistenza parallela.
 - Il marker manuale può aumentare la salienza nella generazione note, ma non trasforma
   evidenza visual-only in contenuto detto, concordato, deciso o richiesto.
+- Screenshot consecutivi sufficientemente simili possono essere proiettati come stack UI; "Mostra tutti" e il modal mantengono accesso a ogni asset originale.
+- Quando disponibile, il documento visuale può arricchire il Key Moment con content type/title. Una domanda contestuale usa solo visual inference già derivata e transcript vicino al timestamp, resta associata a screenshot:<id> e non amplia silenziosamente l'input all'intero meeting.
 - Marker Screenshot N · mm:ss è deterministico anche dentro turni lunghi, nei silenzi
   e con paginazione; non divide/rinumera segmenti.
 - Asset mancanti restano riferimenti espliciti; thumbnail lazy e originale apribile.

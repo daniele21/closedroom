@@ -37,7 +37,7 @@ from local_asr_server.visual_intelligence.inference import (
 from local_asr_server.visual_intelligence.router import TaskAwareFrameRouter
 from local_asr_server.visual_intelligence.processors import LegacyVisualProcessor, TaskAwareVisualProcessor
 from local_asr_server.visual_intelligence.shared_content import should_infer_shared_candidate
-from local_asr_server.visual_intelligence.signatures import FrameSignature, calculate_signature
+from local_asr_server.visual_intelligence.signatures import FrameSignature, calculate_signature, hamming_distance
 from local_asr_server.visual_intelligence.temporal import aggregate_temporal_state
 from local_asr_server.diagnostics import diagnostic
 
@@ -106,6 +106,83 @@ def calculate_dhash(image_path: Path) -> int:
 
 
 class PostMeetingVisualService:
+    MANUAL_SCREENSHOT_GROUP_MAX_GAP_SECONDS = 90.0
+
+    @staticmethod
+    def _manual_screenshot_groups(
+        frames: list[dict[str, Any]],
+        signature_cache: dict[int, FrameSignature],
+        routing_config: VisualRoutingConfig,
+    ) -> list[dict[str, Any]]:
+        """Project consecutive near-duplicate manual screenshots into presentation groups.
+
+        This never removes, skips or rewrites a screenshot. It only produces a
+        deterministic document projection that the UI may collapse.
+        """
+        manual = sorted(
+            (
+                frame for frame in frames
+                if frame.get("evidence_source") == "manual_screenshot"
+                and frame.get("path") is not None
+                and frame.get("screenshot_id")
+            ),
+            key=lambda frame: (
+                float(frame.get("timestamp") or 0.0),
+                int(frame.get("sequence") or 0),
+            ),
+        )
+        if len(manual) < 2:
+            return []
+
+        def signature(frame: dict[str, Any]) -> FrameSignature:
+            sequence = int(frame["sequence"])
+            cached = signature_cache.get(sequence)
+            if cached is None:
+                cached = calculate_signature(Path(frame["path"]))
+                signature_cache[sequence] = cached
+            return cached
+
+        groups: list[list[dict[str, Any]]] = []
+        current = [manual[0]]
+        for frame in manual[1:]:
+            previous = current[-1]
+            gap = float(frame.get("timestamp") or 0.0) - float(previous.get("timestamp") or 0.0)
+            same_display = frame.get("display_id") == previous.get("display_id")
+            similar = False
+            if same_display and 0.0 <= gap <= PostMeetingVisualService.MANUAL_SCREENSHOT_GROUP_MAX_GAP_SECONDS:
+                try:
+                    similar = hamming_distance(
+                        signature(previous).shared_roi_hash,
+                        signature(frame).shared_roi_hash,
+                    ) <= routing_config.shared_roi_dhash_distance
+                except Exception as exc:
+                    logger.warning(
+                        "Unable to compare manual screenshots %s and %s: %s",
+                        previous.get("screenshot_id"),
+                        frame.get("screenshot_id"),
+                        exc,
+                    )
+            if similar:
+                current.append(frame)
+            else:
+                if len(current) > 1:
+                    groups.append(current)
+                current = [frame]
+        if len(current) > 1:
+            groups.append(current)
+
+        return [
+            {
+                "group_id": f"manual-screenshot-group-{index + 1:02d}",
+                "screenshot_ids": [str(item["screenshot_id"]) for item in group],
+                "representative_screenshot_id": str(group[-1]["screenshot_id"]),
+                "start": float(group[0].get("timestamp") or 0.0),
+                "end": float(group[-1].get("timestamp") or 0.0),
+                "display_id": group[0].get("display_id"),
+            }
+            for index, group in enumerate(groups)
+        ]
+
     def __init__(
         self,
         client_factory: Callable[..., Any] | None = None,
@@ -891,11 +968,17 @@ class PostMeetingVisualService:
                 }
                 for frame in unavailable_sources
             ]
+            manual_screenshot_groups = self._manual_screenshot_groups(
+                frames,
+                signature_cache,
+                routing_config,
+            )
             document = {
                 "schema_version": 2,
                 "observations": observations,
                 "candidate_errors": candidate_errors,
                 "manual_screenshot_sources": manual_source_inventory,
+                "manual_screenshot_groups": manual_screenshot_groups,
                 **temporal,
                 "routing_summary": self._compact_routing_summary(routing_summary),
                 "model": model,
