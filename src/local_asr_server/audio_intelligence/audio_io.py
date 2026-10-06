@@ -64,6 +64,71 @@ class EnergyWindow:
     rms: float
 
 
+def energy_windows_from_samples(
+    samples: np.ndarray,
+    *,
+    sample_rate: int = TARGET_SAMPLE_RATE,
+    window_seconds: float = DEFAULT_WINDOW_SECONDS,
+) -> list[EnergyWindow]:
+    """Build RMS windows from an already-decoded mono sample buffer."""
+    values = np.nan_to_num(
+        np.asarray(samples, dtype=np.float32),
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    )
+    frames_per_window = max(1, int(sample_rate * window_seconds))
+    windows: list[EnergyWindow] = []
+    for start_index in range(0, values.size, frames_per_window):
+        chunk = values[start_index : start_index + frames_per_window]
+        if chunk.size == 0:
+            continue
+        rms = float(np.sqrt(np.mean(np.square(chunk))))
+        windows.append(
+            EnergyWindow(
+                start=start_index / sample_rate,
+                end=(start_index + chunk.size) / sample_rate,
+                rms=rms,
+            )
+        )
+    return windows
+
+
+def stream_audio_stats(
+    path: Path,
+    *,
+    target_sr: int = TARGET_SAMPLE_RATE,
+    chunk_samples: int = TARGET_SAMPLE_RATE * 4,
+) -> dict[str, float]:
+    """Inspect a track with bounded memory while preserving normalized stats."""
+    sample_count = 0
+    sum_squares = 0.0
+    peak = 0.0
+    for chunk in _iter_normalized_sample_chunks(
+        path,
+        target_sr=target_sr,
+        chunk_samples=max(1, chunk_samples),
+    ):
+        values = np.nan_to_num(
+            np.asarray(chunk, dtype=np.float32),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        if values.size == 0:
+            continue
+        sample_count += int(values.size)
+        sum_squares += float(np.dot(values, values))
+        peak = max(peak, float(np.max(np.abs(values))))
+    if sample_count == 0:
+        return {"rms": 0.0, "peak": 0.0, "duration_seconds": 0.0}
+    return {
+        "rms": math.sqrt(sum_squares / sample_count),
+        "peak": peak,
+        "duration_seconds": sample_count / target_sr,
+    }
+
+
 def iter_energy_windows(
     path: Path,
     *,
@@ -185,3 +250,71 @@ def _sample_to_int(raw: bytes, sample_width: int) -> int:
     if sample_width == 1:
         return raw[0] - 128
     return int.from_bytes(raw, byteorder="little", signed=True)
+
+
+def _iter_normalized_sample_chunks(
+    path: Path,
+    *,
+    target_sr: int,
+    chunk_samples: int,
+) -> Iterator[np.ndarray]:
+    if _looks_like_wave(path):
+        try:
+            with wave.open(str(path), "rb") as wav:
+                if (
+                    wav.getframerate() == target_sr
+                    and wav.getnchannels() == 1
+                    and wav.getsampwidth() == 2
+                ):
+                    while True:
+                        raw = wav.readframes(chunk_samples)
+                        if not raw:
+                            return
+                        yield np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                    return
+        except (wave.Error, EOFError, OSError):
+            pass
+
+    ffmpeg = get_ffmpeg_path()
+    process = subprocess.Popen(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-ac",
+            "1",
+            "-ar",
+            str(target_sr),
+            "-f",
+            "f32le",
+            "pipe:1",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if process.stdout is None:
+        raise OSError("ffmpeg stdout unavailable")
+    try:
+        bytes_per_chunk = chunk_samples * 4
+        while True:
+            raw = process.stdout.read(bytes_per_chunk)
+            if not raw:
+                break
+            usable = len(raw) - (len(raw) % 4)
+            if usable:
+                yield np.frombuffer(raw[:usable], dtype=np.float32)
+        returncode = process.wait(timeout=5)
+        if returncode != 0:
+            raise OSError(f"ffmpeg failed with exit code {returncode}")
+    finally:
+        try:
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
+            if process.poll() is None:
+                process.wait(timeout=5)
+        except Exception:
+            process.kill()

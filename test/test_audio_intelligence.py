@@ -9,6 +9,11 @@ from unittest.mock import patch
 from pathlib import Path
 
 from local_asr_server.audio_intelligence import build_audio_intelligence
+from local_asr_server.audio_intelligence.audio_io import (
+    energy_windows_from_samples,
+    load_audio_samples,
+    stream_audio_stats,
+)
 from local_asr_server.services.transcription_service import TranscriptionService
 
 
@@ -112,6 +117,45 @@ class AudioIntelligenceTests(unittest.TestCase):
         finally:
             self.patcher.start()
 
+    def test_normal_vad_path_reuses_one_decoded_sample_buffer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "mic.wav"
+            write_tone_wav(path, tone_ranges=[(0.1, 0.8)])
+            with patch(
+                "local_asr_server.audio_intelligence.pipeline.iter_energy_windows",
+                side_effect=AssertionError("normal VAD path must not decode again"),
+            ):
+                result = build_audio_intelligence(
+                    [({"id": "mic", "source": "mic", "label": "Tu"}, path)], []
+                )
+        self.assertTrue(result["channels"]["mic"]["available"])
+
+    def test_energy_windows_from_samples_match_file_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "mic.wav"
+            write_tone_wav(path, tone_ranges=[(0.1, 0.8), (1.2, 1.6)])
+            samples = load_audio_samples(path)
+            memory_windows = energy_windows_from_samples(samples)
+            from local_asr_server.audio_intelligence.audio_io import iter_energy_windows
+            file_windows = list(iter_energy_windows(path))
+        self.assertEqual(len(memory_windows), len(file_windows))
+        for actual, expected in zip(memory_windows, file_windows):
+            self.assertAlmostEqual(actual.start, expected.start, places=6)
+            self.assertAlmostEqual(actual.end, expected.end, places=6)
+            self.assertAlmostEqual(actual.rms, expected.rms, places=5)
+
+    def test_stream_audio_stats_match_materialized_stats(self) -> None:
+        from local_asr_server.transcription_quality import audio_stats
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "mic.wav"
+            write_tone_wav(path, tone_ranges=[(0.1, 0.8), (1.2, 1.6)])
+            streamed = stream_audio_stats(path, chunk_samples=997)
+            materialized = audio_stats(load_audio_samples(path))
+        self.assertAlmostEqual(streamed["duration_seconds"], materialized["duration_seconds"], places=6)
+        self.assertAlmostEqual(streamed["rms"], materialized["rms"], places=5)
+        self.assertAlmostEqual(streamed["peak"], materialized["peak"], places=5)
+
     def test_per_track_vad_fallback_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "mic.wav"
@@ -128,6 +172,18 @@ class AudioIntelligenceTests(unittest.TestCase):
         self.assertEqual(channel["requested_backend"], "silero-vad-v4")
         self.assertEqual(channel["actual_backend"], "energy-rms-v1")
         self.assertIn("vad exploded", channel["fallback_reason"])
+
+    def test_track_inspection_does_not_materialize_full_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "silent.wav"
+            write_tone_wav(path, tone_ranges=[])
+            with patch(
+                "local_asr_server.audio_intelligence.audio_io.load_audio_samples",
+                side_effect=AssertionError("track inspection must stay streaming"),
+            ):
+                result, stats = TranscriptionService._inspect_track(path, {"id": "mic"})
+        self.assertIsNotNone(result)
+        self.assertLessEqual(stats["peak"], 0.003)
 
     def test_near_silent_track_skip_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

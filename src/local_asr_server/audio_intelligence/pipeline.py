@@ -4,7 +4,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from local_asr_server.audio_intelligence.audio_io import iter_energy_windows, load_audio_samples
+from local_asr_server.audio_intelligence.audio_io import (
+    energy_windows_from_samples,
+    iter_energy_windows,
+    load_audio_samples,
+)
 from local_asr_server.audio_intelligence.features import (
     MAX_SERIALIZED_EVENTS,
     build_error_track_features,
@@ -45,14 +49,14 @@ def build_audio_intelligence(
         track_backend = ENERGY_BACKEND if not use_vad else VAD_BACKEND
         track_fallback_reason = fallback_reasons[0] if not use_vad and fallback_reasons else None
         try:
-            windows = list(iter_energy_windows(path))
-            if not windows and path.exists() and path.stat().st_size > 0:
-                raise ValueError("audio_decode_empty")
-            
+            windows = None
             track_features = None
             if use_vad:
                 try:
+                    # Normal path: decode once, then reuse the same normalized
+                    # samples for both RMS windows and Silero VAD.
                     samples = load_audio_samples(path)
+                    windows = energy_windows_from_samples(samples)
                     duration = windows[-1].end if windows else 0.0
                     raw_speech = detect_speech_windows_vad(samples, sr=16000)
                     source = track.get("source") or track.get("id") or "audio"
@@ -68,7 +72,13 @@ def build_audio_intelligence(
                     track_backend = ENERGY_BACKEND
                     track_fallback_reason = f"track_{track_id}_vad_failed: {vad_exc}"
                     fallback_reasons.append(track_fallback_reason)
-            
+
+            if windows is None:
+                # Decode failures and installations without VAD preserve the
+                # existing streaming RMS fallback rather than failing the track.
+                windows = list(iter_energy_windows(path))
+            if not windows and path.exists() and path.stat().st_size > 0:
+                raise ValueError("audio_decode_empty")
             if track_features is None:
                 track_features = build_track_features(track, windows)
                 
