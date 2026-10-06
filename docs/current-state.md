@@ -14,9 +14,8 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - PR #65 made Search release evidence prove accessible open/focus/close rather than synthetic Cmd-K/Escape delivery; shortcuts remain technically tested but are not a stable-source blocker.
 - PRS-18 measured product/runtime release evidence remains active.
 - GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata.
-- GRP-3 stages immutable production artifacts with exact version/source/distribution checks, unchanged DMG bytes, canonical names, checksums, notes and inventory.
-- GRP-4 defines manual draft-only publication from a tagged commit in `main` history using a trusted same-SHA production workflow artifact. It never builds or publishes a final release.
-- GRP-5 automation targets the `production-release` environment, keeps Developer ID/notary authority ephemeral, delegates to the canonical production builder, validates Apple evidence and uploads only the trusted same-SHA artifact consumed by GRP-4. Real success still requires the GitHub environment/authority to be configured externally.
+- GRP-3 stages immutable production artifacts with exact identity and checksums.
+- GRP-4/5 publish draft releases from trusted same-SHA production artifacts; Apple environment/authority remains external and required.
 
 ## Current integration state
 
@@ -51,6 +50,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
+- [`selective-efficiency.md`](workstreams/selective-efficiency.md): persisted audio fingerprint reuse and privacy-safe VAD comparison tooling; ONNX removal remains evidence-gated.
 
 PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
 
