@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import urllib.request
 from pathlib import Path
 from typing import Iterator
@@ -119,46 +120,77 @@ def detect_speech_windows_vad(
     min_silence_duration_ms: int = 700,
     speech_pad_ms: int = 800,
 ) -> list[dict[str, float]]:
-    """
-    Perform stateful Silero VAD over the full numpy array of float32 samples.
-    Returns a list of speech windows: [{"start": float, "end": float}] in seconds.
-    """
-    audio_samples = np.nan_to_num(np.asarray(audio_samples, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    """Perform stateful Silero VAD over an in-memory float32 sample buffer."""
+    audio_samples = np.nan_to_num(
+        np.asarray(audio_samples, dtype=np.float32),
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    )
     peak = float(np.max(np.abs(audio_samples))) if len(audio_samples) else 0.0
     if peak > 2.0:
         audio_samples = audio_samples / 32768.0
     audio_samples = np.clip(audio_samples, -1.0, 1.0)
+    return detect_speech_windows_vad_chunks(
+        (audio_samples[offset : offset + chunk_size] for offset in range(0, len(audio_samples), chunk_size)),
+        total_samples=len(audio_samples),
+        sr=sr,
+        chunk_size=chunk_size,
+        threshold=threshold,
+        neg_threshold=neg_threshold,
+        min_speech_duration_ms=min_speech_duration_ms,
+        min_silence_duration_ms=min_silence_duration_ms,
+        speech_pad_ms=speech_pad_ms,
+    )
+
+
+def detect_speech_windows_vad_chunks(
+    audio_chunks: Iterator[np.ndarray],
+    *,
+    total_samples: int,
+    sr: int = 16000,
+    chunk_size: int = 512,
+    threshold: float = 0.35,
+    neg_threshold: float = 0.20,
+    min_speech_duration_ms: int = 150,
+    min_silence_duration_ms: int = 700,
+    speech_pad_ms: int = 800,
+) -> list[dict[str, float]]:
+    """Run the same Silero state machine over normalized chunks with bounded RAM."""
+    if total_samples < 0:
+        raise ValueError("total_samples must be non-negative")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
     vad = SileroVAD()
     vad.reset_states(sr=sr)
-    total_samples = len(audio_samples)
-    step = chunk_size
-
-    # Convert durations to samples
     min_speech_samples = (min_speech_duration_ms * sr) // 1000
     min_silence_samples = (min_silence_duration_ms * sr) // 1000
-
     speech_pad_samples = (speech_pad_ms * sr) // 1000
-    speech_windows = []
+
+    speech_windows: list[dict[str, float]] = []
+    probabilities: list[float] = []
     is_speaking = False
     speech_start = 0
     temp_end: int | None = None
-    probabilities: list[float] = []
+    pending = np.empty(0, dtype=np.float32)
+    processed = 0
+    sample_count = 0
+    sum_squares = 0.0
+    peak = 0.0
 
-    # Stateful loop
-    for i in range(0, total_samples, step):
-        chunk = audio_samples[i : i + step]
-        # Pad last chunk if it's smaller than chunk_size
-        if len(chunk) < step:
-            chunk = np.pad(chunk, (0, step - len(chunk)))
-
-        prob = vad.process_chunk(chunk, sr=sr)
-
+    def process_model_chunk(chunk: np.ndarray, *, start_sample: int, actual_samples: int) -> None:
+        nonlocal is_speaking, speech_start, temp_end
+        model_chunk = chunk
+        if actual_samples < chunk_size:
+            model_chunk = np.pad(chunk, (0, chunk_size - actual_samples))
+        prob = vad.process_chunk(model_chunk, sr=sr)
         probabilities.append(prob)
-        current_sample = min(i + step, total_samples)
+        current_sample = min(start_sample + chunk_size, total_samples)
 
         if prob >= threshold and not is_speaking:
             is_speaking = True
-            speech_start = max(0, i - speech_pad_samples)
+            speech_start = max(0, start_sample - speech_pad_samples)
             temp_end = None
         elif is_speaking and prob < neg_threshold:
             if temp_end is None:
@@ -166,23 +198,75 @@ def detect_speech_windows_vad(
             if current_sample - temp_end >= min_silence_samples:
                 speech_end = min(total_samples, temp_end + speech_pad_samples)
                 if speech_end - speech_start >= min_speech_samples:
-                    speech_windows.append({"start": round(speech_start / sr, 3), "end": round(speech_end / sr, 3)})
+                    speech_windows.append({
+                        "start": round(speech_start / sr, 3),
+                        "end": round(speech_end / sr, 3),
+                    })
                 is_speaking = False
                 temp_end = None
         elif is_speaking:
             temp_end = None
 
-    # Handle end of audio
+    for source_chunk in audio_chunks:
+        values = np.nan_to_num(
+            np.asarray(source_chunk, dtype=np.float32).reshape(-1),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        if values.size == 0:
+            continue
+        values = np.clip(values, -1.0, 1.0)
+        sample_count += int(values.size)
+        sum_squares += float(np.dot(values, values))
+        peak = max(peak, float(np.max(np.abs(values))))
+        if pending.size:
+            values = np.concatenate((pending, values))
+            pending = np.empty(0, dtype=np.float32)
+
+        offset = 0
+        while offset + chunk_size <= values.size:
+            chunk = values[offset : offset + chunk_size]
+            process_model_chunk(chunk, start_sample=processed, actual_samples=chunk_size)
+            processed += chunk_size
+            offset += chunk_size
+        if offset < values.size:
+            pending = values[offset:].copy()
+
+    if pending.size:
+        actual = int(pending.size)
+        process_model_chunk(pending, start_sample=processed, actual_samples=actual)
+        processed += actual
+
+    if processed != total_samples:
+        raise ValueError(
+            f"VAD stream length mismatch: expected {total_samples} samples, got {processed}"
+        )
+
     if is_speaking:
         duration = total_samples - speech_start
         if duration >= min_speech_samples:
-            speech_windows.append({"start": round(speech_start / sr, 3), "end": round(total_samples / sr, 3)})
+            speech_windows.append({
+                "start": round(speech_start / sr, 3),
+                "end": round(total_samples / sr, 3),
+            })
 
-    # Post-process: merge segments with silence smaller than min_silence_duration_ms
     if probabilities:
         probs = np.asarray(probabilities, dtype=np.float32)
-        rms = float(np.sqrt(np.mean(np.square(audio_samples)))) if len(audio_samples) else 0.0
-        logger.info("[VAD] stats: chunks=%s max_prob=%.4f p99=%.4f p95=%.4f mean=%.4f rms=%.6f peak=%.6f threshold=%s neg_threshold=%s windows=%s", len(probs), float(np.max(probs)), float(np.percentile(probs, 99)), float(np.percentile(probs, 95)), float(np.mean(probs)), rms, peak, threshold, neg_threshold, len(speech_windows))
+        rms = math.sqrt(sum_squares / sample_count) if sample_count else 0.0
+        logger.info(
+            "[VAD] stats: chunks=%s max_prob=%.4f p99=%.4f p95=%.4f mean=%.4f rms=%.6f peak=%.6f threshold=%s neg_threshold=%s windows=%s",
+            len(probs),
+            float(np.max(probs)),
+            float(np.percentile(probs, 99)),
+            float(np.percentile(probs, 95)),
+            float(np.mean(probs)),
+            rms,
+            peak,
+            threshold,
+            neg_threshold,
+            len(speech_windows),
+        )
     return _merge_vad_windows(speech_windows)
 
 

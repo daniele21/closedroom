@@ -64,6 +64,13 @@ class EnergyWindow:
     rms: float
 
 
+@dataclass(frozen=True)
+class CanonicalWavInfo:
+    sample_rate: int
+    sample_count: int
+    duration_seconds: float
+
+
 def energy_windows_from_samples(
     samples: np.ndarray,
     *,
@@ -108,7 +115,7 @@ def stream_audio_stats(
     sample_count = 0
     sum_squares = 0.0
     peak = 0.0
-    for chunk in _iter_normalized_sample_chunks(
+    for chunk in iter_normalized_audio_chunks(
         path,
         target_sr=target_sr,
         chunk_samples=max(1, chunk_samples),
@@ -133,23 +140,39 @@ def stream_audio_stats(
     }
 
 
+def canonical_wav_info(
+    path: Path,
+    *,
+    target_sr: int = TARGET_SAMPLE_RATE,
+) -> CanonicalWavInfo | None:
+    """Describe ClosedRoom's canonical PCM16 mono WAV format, or return None."""
+    if not _looks_like_wave(path):
+        return None
+    try:
+        with wave.open(str(path), "rb") as wav:
+            if (
+                wav.getframerate() != target_sr
+                or wav.getnchannels() != 1
+                or wav.getsampwidth() != 2
+            ):
+                return None
+            sample_count = wav.getnframes()
+            return CanonicalWavInfo(
+                sample_rate=target_sr,
+                sample_count=sample_count,
+                duration_seconds=sample_count / target_sr,
+            )
+    except (wave.Error, EOFError, OSError):
+        return None
+
+
 def can_reuse_normalized_samples_for_energy(
     path: Path,
     *,
     target_sr: int = TARGET_SAMPLE_RATE,
 ) -> bool:
     """Return whether normalized samples preserve the canonical WAV energy signal."""
-    if not _looks_like_wave(path):
-        return False
-    try:
-        with wave.open(str(path), "rb") as wav:
-            return (
-                wav.getframerate() == target_sr
-                and wav.getnchannels() == 1
-                and wav.getsampwidth() == 2
-            )
-    except (wave.Error, EOFError, OSError):
-        return False
+    return canonical_wav_info(path, target_sr=target_sr) is not None
 
 
 def iter_energy_windows(
@@ -275,12 +298,13 @@ def _sample_to_int(raw: bytes, sample_width: int) -> int:
     return int.from_bytes(raw, byteorder="little", signed=True)
 
 
-def _iter_normalized_sample_chunks(
+def iter_normalized_audio_chunks(
     path: Path,
     *,
-    target_sr: int,
-    chunk_samples: int,
+    target_sr: int = TARGET_SAMPLE_RATE,
+    chunk_samples: int = 512,
 ) -> Iterator[np.ndarray]:
+    """Yield normalized mono float32 chunks without materializing the full track."""
     if can_reuse_normalized_samples_for_energy(path, target_sr=target_sr):
         with wave.open(str(path), "rb") as wav:
             while True:
@@ -332,3 +356,27 @@ def _iter_normalized_sample_chunks(
                 process.wait(timeout=5)
         except Exception:
             process.kill()
+
+
+def write_canonical_wav_slice(
+    source: Path,
+    destination: Path,
+    *,
+    start_seconds: float,
+    end_seconds: float,
+    target_sr: int = TARGET_SAMPLE_RATE,
+) -> None:
+    """Copy one interval from canonical ClosedRoom WAV without a full-track decode."""
+    info = canonical_wav_info(source, target_sr=target_sr)
+    if info is None:
+        raise ValueError(f"Not a canonical {target_sr} Hz mono PCM16 WAV: {source}")
+    start_frame = max(0, min(info.sample_count, int(start_seconds * target_sr)))
+    end_frame = max(start_frame, min(info.sample_count, int(end_seconds * target_sr)))
+    with wave.open(str(source), "rb") as src:
+        src.setpos(start_frame)
+        frames = src.readframes(end_frame - start_frame)
+    with wave.open(str(destination), "wb") as dst:
+        dst.setnchannels(1)
+        dst.setsampwidth(2)
+        dst.setframerate(target_sr)
+        dst.writeframes(frames)
