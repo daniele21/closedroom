@@ -439,6 +439,10 @@ export default function RecordingOverlayPage() {
       logOverlay('warn', 'Screenshot ignored: capture already in flight');
       return;
     }
+    if (isUndoingScreenshot) {
+      logOverlay('warn', 'Screenshot ignored: undo already in flight');
+      return;
+    }
     if (!isRecording) {
       const msg = 'Nessuna registrazione attiva. Avvia prima una registrazione per scattare screenshot.';
       setErrorMsg(msg);
@@ -906,7 +910,7 @@ export default function RecordingOverlayPage() {
           <button
             type="button"
             onClick={handleCaptureScreenshot}
-            disabled={isStopping || isCapturingScreenshot || !isRecording || captureBackend !== 'native' || selectedDisplayId === null}
+            disabled={isStopping || isCapturingScreenshot || isUndoingScreenshot || !isRecording || captureBackend !== 'native' || selectedDisplayId === null}
             className={`flex h-full items-center gap-1.5 px-2.5 text-[10px] font-semibold transition active:scale-[0.97] ${
               screenshotFeedback === 'saved'
                 ? 'text-emerald-100'
