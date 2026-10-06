@@ -5,7 +5,7 @@
   "assets": {
     "logo_primary": "frontend/public/logo-light.png and frontend/public/logo-dark.png",
     "logo_compact": "frontend/public/logo-light.png",
-    "logo_monochrome": "use the canonical SVG logo with semantic foreground treatment; do not create a parallel logo source",
+    "logo_monochrome": "use the canonical PNG mark with semantic foreground treatment; do not create a parallel logo source",
     "app_icon": "frontend/public/logo-dark.png packaged by the macOS build into icon.icns",
     "favicon": "frontend/public/logo-light.png",
     "brand_lockup_stacked": "design/assets/brand/closedroom-primary-stacked-lockup.png",
@@ -25,7 +25,7 @@
       "border": "frontend/src/index.css --border-subtle",
       "focus": "frontend/src/index.css --border-focus"
     },
-    "typography": "frontend/src/index.css --font-sans (Outfit/platform sans) and --font-mono (JetBrains Mono/platform mono)",
+    "typography": "frontend/src/index.css --font-sans and --font-mono platform-local stacks",
     "spacing": "Tailwind spacing scale plus existing semantic component spacing in frontend/src; raw one-off spacing should not become a second token system"
   },
   "style": {

@@ -22,6 +22,10 @@ class BundleDietContractTests(unittest.TestCase):
             self.assertFalse((static / obsolete).exists())
         self.assertFalse((ROOT / "public").exists())
 
+        brand = (ROOT / "design" / "brand-kit.json").read_text(encoding="utf-8")
+        self.assertNotIn("canonical SVG", brand)
+        self.assertNotIn("Outfit/platform", brand)
+
     def test_frontend_and_icon_build_use_png_assets(self) -> None:
         app = (ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
         html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
