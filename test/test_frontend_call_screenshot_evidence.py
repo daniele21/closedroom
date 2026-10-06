@@ -101,6 +101,10 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.meeting)
         self.assertIn("data-key-moment-id={shot.screenshot_id}", self.meeting)
         self.assertIn("data-key-moment-context=\"true\"", self.meeting)
+        self.assertIn("manual_screenshot_groups", self.meeting)
+        self.assertIn("data-key-moment-group={group?.group_id || undefined}", self.meeting)
+        self.assertIn("data-key-moment-group-strip=\"true\"", self.meeting)
+        self.assertIn("group.screenshot_ids.length", self.meeting)
         self.assertIn("src={selectedScreenshot.original_url}", self.meeting)
         self.assertIn("handleTimestampClick(selectedScreenshot.timestamp)", self.meeting)
 
