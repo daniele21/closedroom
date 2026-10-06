@@ -308,6 +308,11 @@ PyInstaller usa `menubar.py` come entry point. `build.sh`:
 6. firma helper e bundle;
 7. produce `.app` e, salvo `--no-dmg`, il DMG versionato.
 
+Il processo menu/API resta privo di preload MLX. Il runtime hook PyInstaller
+precarica le librerie MLX solo nei subprocess di inferenza ASR/LLM/VLM, dove
+serve il workaround per la risoluzione del metallib. In questo modo l'apertura
+e l'idle della shell non pagano la residency del runtime GPU prima che serva.
+
 I path runtime passano sempre da `paths.py`, che distingue sorgenti locali da
 risorse in `sys._MEIPASS` e bundle `Contents`.
 
@@ -700,9 +705,11 @@ reclamation immediata. Endpoint external/disabled non vengono mai fermati o
 mutati da questa policy.
 
 Nel bundle, l'eseguibile principale gestisce anche i dispatch interni
-`-m local_llm_server` e `-m mlx_vlm.server`, evitando di riaprire la shell UI nei
-processi sidecar. La build macOS usa Python 3.10 e fissa `mlx 0.31.2`: `mlx 0.32.0`
-ha mostrato una regressione di ownership degli stream GPU nel worker PyInstaller.
+`transcribe`, `-m local_llm_server`, `-m local_asr_server.runtime.local_llm_entrypoint`
+e `-m mlx_vlm.server`, evitando di riaprire la shell UI nei processi worker. Il
+runtime hook MLX riconosce questi ingressi e limita il preload a tali subprocess.
+La build macOS usa Python 3.10 e fissa `mlx 0.31.2`: `mlx 0.32.0` ha mostrato una
+regressione di ownership degli stream GPU nel worker PyInstaller.
 
 ## 16. Persistenza dettagliata
 
@@ -784,7 +791,9 @@ lavoro visuale del meter. I testi vivono in `i18n/locales/it.ts` e `en.ts`.
 
 Vite scrive la build in `src/local_asr_server/static/`; FastAPI la serve sia in
 sviluppo sia nel bundle. Gli asset hashed sono generati e non vanno modificati a
-mano. `static_vanilla_backup/` è una copia legacy, non la superficie runtime.
+mano. La UI usa font di sistema/locali e non richiede font remoti durante il
+caricamento. Le copie statiche legacy non fanno parte della superficie runtime e
+non vengono mantenute nel repository.
 
 ## 19. Error handling e recovery
 
