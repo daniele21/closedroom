@@ -111,7 +111,14 @@ function keyMomentContext(
     nearby = nearest && nearestDistance <= 90 ? [nearest] : [];
   }
 
-  const selected = nearby.slice(0, 4);
+  const selected = nearby
+    .sort((a, b) => {
+      const centerA = (a.start + a.end) / 2;
+      const centerB = (b.start + b.end) / 2;
+      return Math.abs(centerA - shot.timestamp) - Math.abs(centerB - shot.timestamp);
+    })
+    .slice(0, 4)
+    .sort((a, b) => a.start - b.start);
   const excerpt = selected
     .map((segment) => String(segment.text || '').trim())
     .filter(Boolean)
