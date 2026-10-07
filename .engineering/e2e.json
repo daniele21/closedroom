@@ -360,7 +360,7 @@
     },
     {
       "id": "coherent-macos-workspace",
-      "claim": "Today, a saved Meeting, Projects and Settings share one stable application hierarchy across wide, compact and narrow windows: Meeting remains a child of Today, Projects is the second peer destination, New Meeting remains the persistent primary action, utility controls remain secondary, theme continuity survives navigation, the layout does not introduce page-wide horizontal overflow, and Settings exposes the canonical ClosedRoom menu-bar mark with truthful status, recovery guidance and a working local Show again action.",
+      "claim": "Today, a saved Meeting, Projects and Settings share one stable application hierarchy across wide, compact and narrow windows: Meeting remains a child of Today, Projects is the second peer destination, New Meeting remains the persistent primary action, utility controls remain secondary, theme continuity survives navigation, the layout does not introduce page-wide horizontal overflow, and Settings exposes the canonical transparent ClosedRoom menu-bar mark with truthful item-created status, macOS 26 Allow-in-the-Menu-Bar guidance, a working System Settings action and a local Show again action.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
       "target_environment_refs": [
@@ -373,7 +373,7 @@
       "real_environment_confirmation": "required",
       "real_environment_runner": "target-macos-real",
       "residual_gaps": [
-        "headless Chrome proves responsive hierarchy, Settings recovery interaction and local menu-bar repair round-trip semantics but not the packaged WKWebView/Cocoa process boundary or physical NSStatusItem placement",
+        "headless Chrome proves responsive hierarchy, Settings recovery interaction, macOS Menu Bar settings/open action and local repair round-trip semantics but not the packaged WKWebView/Cocoa process boundary or physical NSStatusItem placement",
         "window chrome, keyboard/focus behavior, reduced-motion behavior and VoiceOver quality require target-macos-real release evidence",
         "this journey uses synthetic demo data and does not claim persistence/runtime fidelity"
       ],
