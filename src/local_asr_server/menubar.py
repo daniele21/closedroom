@@ -449,7 +449,7 @@ class ClosedRoomApp(rumps.App):
         self._stop_item.set_callback(self._stop_recording if available and recording else None)
         self._copy_transcript_item.set_callback(self._copy_last_transcription if available else None)
 
-    # ── Server lifecycle    # ── Server lifecycle ───────────────────────────────────────────────────
+    # ── Server lifecycle ───────────────────────────────────────────────────
 
     def _wait_for_server(self) -> None:
         """Wait for local services, then expose user-facing ready state."""
@@ -504,7 +504,7 @@ class ClosedRoomApp(rumps.App):
     def _update_status_item(self, text: str) -> None:
         self._meeting_status_item.title = text
 
-    # ── Drag and drop support    # ── Drag and drop support ──────────────────────────────────────────────
+    # ── Drag and drop support ──────────────────────────────────────────────
 
     def _setup_drag_and_drop(self) -> None:
         """Configure drag and drop support on the status bar button."""
