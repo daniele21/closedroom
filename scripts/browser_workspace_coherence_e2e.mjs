@@ -483,7 +483,7 @@ try {
   await waitUntil(
     browser,
     'menu bar recovery settings',
-    "return Boolean(document.querySelector('[data-settings-menubar="true"]'));",
+    `return Boolean(document.querySelector('[data-settings-menubar="true"]'));`,
     10000,
     true,
   );
