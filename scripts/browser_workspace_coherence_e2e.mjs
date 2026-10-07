@@ -45,6 +45,7 @@ async function startSettingsFixture(port) {
     path.join(root, 'design/assets/brand/closedroom-microphone-mark.png'),
   );
   let refreshCount = 0;
+  let settingsOpenCount = 0;
   const settings = {
     transcriptions_dir: '/tmp/closedroom-transcriptions',
     recordings_dir: '/tmp/closedroom-recordings',
@@ -121,6 +122,13 @@ async function startSettingsFixture(port) {
       refreshCount += 1;
       return sendJson(200, menuBarPayload());
     }
+    if (request.method === 'POST' && pathname === '/v1/system/menubar/open-settings') {
+      settingsOpenCount += 1;
+      return sendJson(200, {
+        opened: true,
+        url: 'x-apple.systempreferences:com.apple.ControlCenter-Settings.extension',
+      });
+    }
     if (request.method === 'GET' && pathname === '/brand/closedroom-microphone-mark.png') {
       response.writeHead(200, {
         'content-type': 'image/png',
@@ -140,6 +148,7 @@ async function startSettingsFixture(port) {
   return {
     close: () => new Promise((resolve) => server.close(resolve)),
     getRefreshCount: () => refreshCount,
+    getSettingsOpenCount: () => settingsOpenCount,
   };
 }
 
@@ -499,8 +508,12 @@ try {
   observations.menuBarSettings = await browser.execute(`
     const card = document.querySelector('[data-settings-menubar="true"]');
     const image = card?.querySelector('img[src="/brand/closedroom-microphone-mark.png"]');
-    const restore = Array.from(card?.querySelectorAll('button') || []).find((button) =>
+    const buttons = Array.from(card?.querySelectorAll('button') || []);
+    const restore = buttons.find((button) =>
       /mostra di nuovo|show again/i.test((button.innerText || button.textContent || '').trim())
+    );
+    const openSettings = buttons.find((button) =>
+      /apri impostazioni barra dei menu|open menu bar settings/i.test((button.innerText || button.textContent || '').trim())
     );
     const help = card?.querySelector('details');
     if (help) help.open = true;
@@ -508,9 +521,11 @@ try {
     return {
       present: Boolean(card),
       imageLoaded: Boolean(image && image.complete && image.naturalWidth > 0),
-      activeStatus: /attiva|active/i.test(card?.innerText || card?.textContent || ''),
+      createdStatus: /item creato|item created/i.test(card?.innerText || card?.textContent || ''),
       restoreEnabled: Boolean(restore && !restore.disabled),
+      openSettingsEnabled: Boolean(openSettings && !openSettings.disabled),
       helpVisible: Boolean(help),
+      hasTahoePermissionGuidance: /consenti nella barra dei menu|allow in the menu bar/i.test(card?.innerText || card?.textContent || ''),
       hasNotchGuidance: /notch/i.test(card?.innerText || card?.textContent || ''),
       hasManagerGuidance: /bartender|hidden bar|ice/i.test(card?.innerText || card?.textContent || ''),
     };
@@ -518,15 +533,38 @@ try {
   if (
     !observations.menuBarSettings.present
     || !observations.menuBarSettings.imageLoaded
-    || !observations.menuBarSettings.activeStatus
+    || !observations.menuBarSettings.createdStatus
     || !observations.menuBarSettings.restoreEnabled
+    || !observations.menuBarSettings.openSettingsEnabled
     || !observations.menuBarSettings.helpVisible
+    || !observations.menuBarSettings.hasTahoePermissionGuidance
     || !observations.menuBarSettings.hasNotchGuidance
     || !observations.menuBarSettings.hasManagerGuidance
   ) {
     throw new Error(`menu bar Settings recovery is incomplete: ${JSON.stringify(observations.menuBarSettings)}`);
   }
   await checkpoint(browser, '05-menubar-settings');
+
+  const settingsOpenBefore = settingsFixture.getSettingsOpenCount();
+  const openSettingsClicked = await browser.execute(`
+    const card = document.querySelector('[data-settings-menubar="true"]');
+    const button = Array.from(card?.querySelectorAll('button') || []).find((candidate) =>
+      /apri impostazioni barra dei menu|open menu bar settings/i.test((candidate.innerText || candidate.textContent || '').trim())
+    );
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  `);
+  if (!openSettingsClicked) throw new Error('Menu Bar settings action is unavailable');
+  const settingsDeadline = Date.now() + 5000;
+  while (settingsFixture.getSettingsOpenCount() <= settingsOpenBefore && Date.now() < settingsDeadline) {
+    await sleep(100);
+  }
+  if (settingsFixture.getSettingsOpenCount() <= settingsOpenBefore) {
+    throw new Error('Menu Bar settings action did not reach the local open-settings endpoint');
+  }
+  observations.menuBarSettings.settingsRoundTrip = true;
+  observations.menuBarSettings.settingsOpenCount = settingsFixture.getSettingsOpenCount();
 
   const refreshCountBefore = settingsFixture.getRefreshCount();
   const restoreClicked = await browser.execute(`
