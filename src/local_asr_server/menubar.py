@@ -520,14 +520,51 @@ class ClosedRoomApp(rumps.App):
     # ── Global keyboard shortcuts ──────────────────────────────────────────
 
     def _start_shortcuts_listener(self) -> None:
-        """Start the global keyboard shortcuts listener using pynput."""
+        """Register core meeting hotkeys natively, then optional legacy shortcuts."""
+        self._native_hotkeys = None
+        try:
+            from local_asr_server.macos_hotkeys import (
+                CarbonHotKeyManager,
+                DEFAULT_MEETING_HOTKEYS,
+                HotKeySpec,
+            )
+
+            toggle_key, toggle_mods, toggle_label = DEFAULT_MEETING_HOTKEYS["toggle_recording"]
+            note_key, note_mods, note_label = DEFAULT_MEETING_HOTKEYS["add_note"]
+            shot_key, shot_mods, shot_label = DEFAULT_MEETING_HOTKEYS["screenshot"]
+            manager = CarbonHotKeyManager([
+                HotKeySpec(1, toggle_key, toggle_mods, toggle_label, self._shortcut_toggle_recording),
+                HotKeySpec(2, note_key, note_mods, note_label, self._shortcut_add_note),
+                HotKeySpec(3, shot_key, shot_mods, shot_label, self._shortcut_take_screenshot),
+            ])
+            failures = manager.start()
+            self._native_hotkeys = manager
+            if failures:
+                unavailable = ", ".join(failures)
+                logger.warning("Some native meeting shortcuts are unavailable: %s", unavailable)
+                rumps.notification(
+                    "ClosedRoom",
+                    "Shortcut non disponibile",
+                    f"{unavailable}. Le azioni restano disponibili dalla menu bar.",
+                )
+        except Exception as exc:
+            logger.warning("Native meeting shortcuts unavailable: %s", exc)
+            rumps.notification(
+                "ClosedRoom",
+                "Shortcut globali non disponibili",
+                "Puoi continuare a usare le azioni dalla menu bar.",
+            )
+
+        # Clipboard transcription/paste are separate power tools. Paste still
+        # synthesizes keyboard input, so only these legacy actions retain the
+        # Accessibility-gated pynput path.
         from local_asr_server.macos_permissions import accessibility_status
 
         permission = accessibility_status()
         if not permission.get("trusted"):
-            logger.warning(
-                "Global shortcuts disabled: macOS Accessibility permission is required "
-                "(System Settings > Privacy & Security > Accessibility)."
+            logger.info(
+                "Legacy clipboard shortcuts disabled because Accessibility permission is not granted; "
+                "core meeting shortcuts use native registration instead."
             )
             return
 
@@ -536,34 +573,40 @@ class ClosedRoomApp(rumps.App):
                 from pynput import keyboard
 
                 shortcuts = {
-                    "<cmd>+<shift>+r": self._shortcut_toggle_recording,
                     "<cmd>+<shift>+t": self._shortcut_transcribe_clipboard,
                     "<cmd>+<shift>+v": self._shortcut_paste_last_transcription,
                 }
 
-                logger.info("Starting global keyboard shortcut listener...")
+                logger.info("Starting Accessibility-gated legacy clipboard shortcuts...")
                 with keyboard.GlobalHotKeys(shortcuts) as listener:
                     listener.join()
             except Exception as exc:
-                logger.error("Global shortcuts listener failed: %s", exc)
+                logger.error("Legacy clipboard shortcut listener failed: %s", exc)
 
-        import threading
         threading.Thread(target=run_listener, daemon=True).start()
 
     def _shortcut_toggle_recording(self) -> None:
-        """Toggle recording via global keyboard shortcut."""
+        """Toggle recording through the canonical recording controller."""
         status = _get_server_status(self.app_port)
         server_status = status.get("status", "idle")
         if server_status == "recording":
             self.window_manager.evaluate_js("RecordingController.stop()")
-            rumps.notification("ClosedRoom", "Registrazione ⏹", "Salvataggio registrazione in corso…")
+            rumps.notification("ClosedRoom", "Registrazione", "Salvataggio del meeting in corso…")
         elif server_status == "idle":
             self.window_manager.evaluate_js("RecordingController.start()")
-            rumps.notification("ClosedRoom", "Registrazione ⏺", "Avvio registrazione…")
+            rumps.notification("ClosedRoom", "Registrazione", "Avvio meeting…")
         else:
-            rumps.notification("ClosedRoom", "Registrazione", "Il server è occupato con una trascrizione.")
+            rumps.notification("ClosedRoom", "Meeting non disponibile", "ClosedRoom sta preparando il meeting.")
 
-    def _shortcut_transcribe_clipboard(self) -> None:
+    def _shortcut_add_note(self) -> None:
+        """Open the same timestamped quick-note flow exposed by the menu bar."""
+        self._add_quick_note(None)
+
+    def _shortcut_take_screenshot(self) -> None:
+        """Use the same selected-display screenshot action as the menu bar."""
+        self._take_screenshot(None)
+
+    def _shortcut_transcribe_clipboard(self) -> None:    def _shortcut_transcribe_clipboard(self) -> None:
         """Transcribe an audio file copied to the clipboard."""
         try:
             from AppKit import NSPasteboard, NSFilenamesPboardType
@@ -790,6 +833,9 @@ class ClosedRoomApp(rumps.App):
     def _quit(self, _) -> None:
         """Gracefully stop the server, close the window, and quit."""
         self._status_timer.stop()
+        native_hotkeys = getattr(self, "_native_hotkeys", None)
+        if native_hotkeys is not None:
+            native_hotkeys.stop()
         self.window_manager.close()
         self._server_thread.stop()
         clear_api_runtime(self.app_port)
