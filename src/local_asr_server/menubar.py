@@ -692,7 +692,7 @@ class ClosedRoomApp(rumps.App):
         """Use the same selected-display screenshot action as the menu bar."""
         self._take_screenshot(None)
 
-    def _shortcut_transcribe_clipboard(self) -> None:    def _shortcut_transcribe_clipboard(self) -> None:
+    def _shortcut_transcribe_clipboard(self) -> None:
         """Transcribe an audio file copied to the clipboard."""
         try:
             from AppKit import NSPasteboard, NSFilenamesPboardType
