@@ -651,7 +651,7 @@ class ClosedRoomApp(rumps.App):
     def _stop_recording(self, _) -> None:
         """Trigger recording stop in WKWebView."""
         if not _check_server_health(self.app_port):
-            self._update_status_item("Server non raggiungibile ⚠️")
+            self._update_status_item("ClosedRoom non disponibile")
             return
         self.window_manager.evaluate_js("RecordingController.stop()")
 
