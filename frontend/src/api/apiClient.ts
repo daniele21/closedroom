@@ -395,6 +395,19 @@ export interface RecordingScreenshot {
   thumbnail_url: string;
 }
 
+export interface RecordingNote {
+  note_id: string;
+  recording_id: string;
+  request_id: string;
+  sequence: number;
+  timestamp: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+  text: string;
+  revision: number;
+  source_kind: 'user_note';
+}
+
 export interface MergedSource {
   id: string;
   audio_filename: string;
@@ -1035,6 +1048,45 @@ export const ApiClient = {
     return (await request(`/v1/recordings/${recordingId}/screenshots`)).json();
   },
 
+  async recordingNotes(recordingId: string): Promise<{ items: RecordingNote[]; total: number }> {
+    return (await request(`/v1/recordings/${recordingId}/notes`)).json();
+  },
+
+  async recordingNoteAnchor(recordingId: string): Promise<{
+    recording_id: string;
+    timestamp: number;
+    clock_source: 'native_recording_uptime' | 'recording_created_at_fallback' | string;
+  }> {
+    return (await request(`/v1/recordings/${recordingId}/notes/anchor`, { method: 'POST' })).json();
+  },
+
+  async createRecordingNote(
+    recordingId: string,
+    payload: { request_id: string; timestamp: number; text: string },
+  ): Promise<RecordingNote> {
+    return (await request(`/v1/recordings/${recordingId}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })).json();
+  },
+
+  async updateRecordingNote(
+    recordingId: string,
+    noteId: string,
+    payload: { text: string; revision: number },
+  ): Promise<RecordingNote> {
+    return (await request(`/v1/recordings/${recordingId}/notes/${noteId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })).json();
+  },
+
+  async deleteRecordingNote(recordingId: string, noteId: string): Promise<void> {
+    await request(`/v1/recordings/${recordingId}/notes/${noteId}`, { method: 'DELETE' });
+  },
+
   async selectScreenshotDisplay(
     recordingId: string,
     displayId: number,
@@ -1093,6 +1145,7 @@ export const ApiClient = {
     system_db?: number;
     warnings?: string[];
     screenshot_count?: number;
+    note_count?: number;
     screenshot_display_id?: number | null;
   }> {
     return (await request('/v1/recordings/active')).json();
