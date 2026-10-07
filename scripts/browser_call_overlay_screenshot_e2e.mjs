@@ -829,7 +829,7 @@ try {
 }
 
 const manifest = {
-  schema_version: 1, journey_id: 'call-overlay-screenshot-and-user-note-evidence',
+  schema_version: 1, journey_id: 'call-overlay-screenshot-evidence',
   execution_environment: 'browser-macos-arm64-ci', fidelity_class: 'simulated_or_emulated',
   source_revision: sourceRevision, result: error ? 'FAIL' : 'PASS', requests: counts,
   checkpoints, video,
