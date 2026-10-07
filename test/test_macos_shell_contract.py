@@ -3,22 +3,41 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
+from local_asr_server.paths import get_brand_asset_path
+
 
 ROOT = Path(__file__).parents[1]
 
 
 class MacOSShellContractTests(unittest.TestCase):
-    def test_menu_bar_uses_native_square_template_icon(self) -> None:
+    def test_menu_bar_uses_canonical_microphone_mark_and_reasserts_visibility(self) -> None:
         source = (ROOT / "src" / "local_asr_server" / "menubar.py").read_text(encoding="utf-8")
+        spec = (ROOT / "ClosedRoom.spec").read_text(encoding="utf-8")
+        brand = (ROOT / "design" / "brand-kit.json").read_text(encoding="utf-8")
 
-        self.assertIn("STATUS_ITEM_STATES", source)
-        self.assertIn("imageWithSystemSymbolName_accessibilityDescription_", source)
+        self.assertIn('MENU_BAR_ICON_ASSET = "closedroom-microphone-mark.png"', source)
+        self.assertIn('MENU_BAR_ICON_SOURCE = "design/assets/brand/closedroom-microphone-mark.png"', source)
+        self.assertIn("get_brand_asset_path(MENU_BAR_ICON_ASSET)", source)
         self.assertIn("image.setTemplate_(True)", source)
         self.assertIn("status_item.setLength_(AppKit.NSSquareStatusItemLength)", source)
+        self.assertIn("status_item.setVisible_(True)", source)
         self.assertIn("button.setImage_(image)", source)
         self.assertIn('button.setTitle_("")', source)
-        self.assertIn('self._set_status_icon("recording")', source)
-        self.assertIn('self._set_status_icon("idle")', source)
+        self.assertNotIn("imageWithSystemSymbolName_accessibilityDescription_", source)
+        self.assertNotIn("self._setup_drag_and_drop()\n", source)
+        self.assertIn("closedroom-microphone-mark.png", spec)
+        self.assertIn('"menu_bar_icon": "design/assets/brand/closedroom-microphone-mark.png"', brand)
+
+    def test_canonical_menu_bar_brand_mark_resolves_in_source_tree(self) -> None:
+        mark = get_brand_asset_path("closedroom-microphone-mark.png")
+
+        self.assertTrue(mark.is_file(), mark)
+        self.assertEqual(
+            mark.resolve(),
+            (ROOT / "design" / "assets" / "brand" / "closedroom-microphone-mark.png").resolve(),
+        )
+        with self.assertRaises(ValueError):
+            get_brand_asset_path("../closedroom-microphone-mark.png")
 
     def test_overlay_drag_is_owned_by_native_view_above_webview(self) -> None:
         source = (ROOT / "src" / "local_asr_server" / "window.py").read_text(encoding="utf-8")
@@ -58,6 +77,7 @@ class MacOSShellContractTests(unittest.TestCase):
         self.assertIn(".brand-logo-fallback", css)
         self.assertIn("probe_image_asset", smoke)
         self.assertIn('"brand_asset_loaded": brand_asset_loaded', smoke)
+        self.assertIn('"menu_bar_brand_asset_loaded": menu_bar_brand_asset_loaded', smoke)
 
 
 if __name__ == "__main__":
