@@ -230,6 +230,7 @@ def main() -> int:
             health: dict[str, Any] = {}
             root_loaded = False
             brand_asset_loaded = False
+            menu_bar_brand_asset_loaded = False
 
             def ready() -> bool:
                 nonlocal health, root_loaded
@@ -253,6 +254,12 @@ def main() -> int:
                     )
                 except Exception:
                     brand_asset_loaded = False
+                try:
+                    menu_bar_brand_asset_loaded = probe_image_asset(
+                        f"http://127.0.0.1:{port}/brand/closedroom-microphone-mark.png"
+                    )
+                except Exception:
+                    menu_bar_brand_asset_loaded = False
                 try:
                     archive_search_payload = probe_archive_search(port)
                 except Exception as exc:
@@ -290,6 +297,8 @@ def main() -> int:
             errors.append("packaged server/static root did not reach readiness")
         if ready_ok and not brand_asset_loaded:
             errors.append("packaged ClosedRoom brand asset is unavailable")
+        if ready_ok and not menu_bar_brand_asset_loaded:
+            errors.append("packaged ClosedRoom menu-bar brand mark is unavailable")
         if archive_search_error:
             errors.append(f"packaged archive search/FTS5 probe failed: {archive_search_error}")
         if process.returncode not in (0, 130):
@@ -315,6 +324,7 @@ def main() -> int:
             "health_ok": bool(health.get("ok")),
             "static_root_loaded": root_loaded,
             "brand_asset_loaded": brand_asset_loaded,
+            "menu_bar_brand_asset_loaded": menu_bar_brand_asset_loaded,
             "archive_search_fts5_ok": archive_search_payload is not None,
             "archive_search_probe": archive_search_payload,
             "runtime_imports_ok": runtime_probe_payload is not None and runtime_probe_error is None,
