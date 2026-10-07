@@ -12,13 +12,14 @@ import {
   ListChecks,
   Loader2,
   MessageCircleQuestion,
+  PencilLine,
   PlayCircle,
   RefreshCw,
   Sparkles,
   Users,
   XCircle,
 } from 'lucide-react';
-import { ApiClient, AnalysisRun, Meeting, RecordingScreenshot, TranscriptionSegment } from '../api/apiClient';
+import { ApiClient, AnalysisRun, Meeting, RecordingNote, RecordingScreenshot, TranscriptionSegment } from '../api/apiClient';
 import { createVisualIntelligenceJob, cancelVisualIntelligenceJob } from '../api/visualJobs';
 import type { VisualIntelligenceResponseV2, VisualManualScreenshotGroup } from '../api/visualIntelligence';
 import { prepareMeetingNotes, cancelMeetingPreparation } from '../api/meetingPreparation';
@@ -224,6 +225,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     screenshots,
     screenshotsState,
     loadScreenshots,
+    notes,
+    notesState,
+    loadNotes,
   } = useMeetingAccessories({ recordingId, demoMode, lang });
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabListRef = useRef<HTMLDivElement | null>(null);
@@ -248,6 +252,21 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
       }
     }, 100);
   };
+  const handleUpdateNote = async (note: RecordingNote, text: string) => {
+    if (!recordingId || demoMode) return;
+    await ApiClient.updateRecordingNote(recordingId, note.note_id, {
+      text,
+      revision: note.revision,
+    });
+    await loadNotes();
+  };
+
+  const handleDeleteNote = async (note: RecordingNote) => {
+    if (!recordingId || demoMode) return;
+    await ApiClient.deleteRecordingNote(recordingId, note.note_id);
+    await loadNotes();
+  };
+
   const visualResultAvailable = meeting?.transcription?.stats?.visual_intelligence?.version === 2;
   const savedScreenshotCount = screenshots.length;
   const availableScreenshotCount = screenshots.filter((item) => item.available).length;
@@ -504,6 +523,11 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     if (!recordingId || demoMode || screenshotsState !== 'idle') return;
     void loadScreenshots();
   }, [recordingId, demoMode, screenshotsState]);
+
+  useEffect(() => {
+    if (!recordingId || demoMode || notesState !== 'idle') return;
+    void loadNotes();
+  }, [recordingId, demoMode, notesState]);
 
   useEffect(() => {
     if (
@@ -984,6 +1008,29 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
         )}
 
+        {!demoMode && notesState === 'error' && (
+          <section className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <PencilLine className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                <div>
+                  <p className="text-xs font-semibold text-text-primary">
+                    {lang === 'it' ? 'Note del meeting non disponibili' : 'Meeting notes unavailable'}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-text-muted">
+                    {lang === 'it'
+                      ? 'La trascrizione resta disponibile; puoi riprovare a caricare le note che hai segnato.'
+                      : 'The transcript is still available; you can retry loading the notes you marked.'}
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={loadNotes}>
+                {lang === 'it' ? 'Riprova' : 'Retry'}
+              </Button>
+            </div>
+          </section>
+        )}
+
         {!demoMode && screenshotsState === 'loading' && (
           <section
             className="rounded-xl border border-border-subtle bg-bg-surface/40 px-4 py-4"
@@ -1332,6 +1379,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                       currentTime={currentTime}
                       screenshots={screenshots}
                       onOpenScreenshot={openKeyMoment}
+                      notes={notes}
+                      onUpdateNote={handleUpdateNote}
+                      onDeleteNote={handleDeleteNote}
                     />
                   </div>
                 ) : meeting.transcription?.text ? (
