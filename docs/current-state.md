@@ -14,6 +14,7 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - PR #65 made Search release evidence prove accessible open/focus/close rather than synthetic Cmd-K/Escape delivery; shortcuts remain technically tested but are not a stable-source blocker.
 - PRS-18 measured product/runtime release evidence remains active.
 - GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata; runtime/install identity stays stable as `ClosedRoom.app` / `ClosedRoom` / `com.closedroom.app`, while DMGs/finalized artifacts carry version + build/source identity.
+- The macOS shell uses a native square SF Symbol status item (with text fallback), while the recording overlay owns movement through an explicit AppKit drag region layered above WKWebView; the workspace brand mark retains its packaged PNG asset with a deterministic in-app fallback.
 - GRP-3 stages immutable production artifacts with exact identity and checksums.
 - GRP-4/5 publish draft releases from trusted same-SHA production artifacts; Apple environment/authority remains external and required.
 
