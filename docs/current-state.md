@@ -51,7 +51,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
 - [`selective-efficiency.md`](workstreams/selective-efficiency.md): persisted audio fingerprint reuse and privacy-safe VAD comparison tooling; ONNX removal remains evidence-gated.
-- [`meeting-moments-notetaker-menubar.md`](workstreams/meeting-moments-notetaker-menubar.md): timestamped user notes, transcript projection and meeting-aware menu/hotkeys are implemented on the work branch; deterministic INTEGRATION preflight is pending and target-Mac menu/focus/hotkey confirmation remains RELEASE evidence.
+- Meeting Moments is integrated through PR #100 (`4e159414`): timestamped user notes, transcript/audio projection, Prepare notes `user_note` provenance, meeting-aware menu bar, Recent meetings and native core meeting hotkeys are now in `dev`. INTEGRATION / STRONG preflight #659 passed on exact head `816da96a`, including frontend checks, the full Python suite, browser FULL_MEDIA and packaged-app smoke. Target-Mac menu/focus/hotkey/TCC confirmation remains RELEASE evidence.
 
 PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
 
