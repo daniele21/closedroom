@@ -46,10 +46,13 @@ class MacOSShellContractTests(unittest.TestCase):
     def test_brand_has_asset_and_render_fallback_contract(self) -> None:
         app = (ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
         css = (ROOT / "frontend" / "src" / "index.css").read_text(encoding="utf-8")
+        server = (ROOT / "src" / "local_asr_server" / "server.py").read_text(encoding="utf-8")
         smoke = (ROOT / "scripts" / "smoke_packaged_app.py").read_text(encoding="utf-8")
 
         self.assertIn('src="/logo-dark.png"', app)
         self.assertIn('src="/logo-light.png"', app)
+        self.assertIn('"\/logo-dark.png"', server)
+        self.assertIn('"\/logo-light.png"', server)
         self.assertIn("onError={() => setBrandLogoFailed(true)}", app)
         self.assertIn('data-brand-logo-fallback="true"', app)
         self.assertIn(".brand-logo-fallback", css)
