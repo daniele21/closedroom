@@ -786,7 +786,7 @@ class ClosedRoomApp(rumps.App):
 
     def _active_recording_payload(self) -> dict:
         try:
-            payload = _request_api_json(self.app_port, "/v1/recordings/active")
+            payload = self._api_json("/v1/recordings/active")
         except Exception as exc:
             logger.warning("Unable to resolve active recording for menu action: %s", exc)
             return {}
