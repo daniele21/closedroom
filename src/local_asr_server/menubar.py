@@ -51,6 +51,7 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
 
 from local_asr_server.window import ClosedRoomWindowManager
 from local_asr_server.app_identity import get_app_identity
+from local_asr_server.paths import get_brand_asset_path
 from local_asr_server.runtime.models import (
     DEFAULT_API_PORT,
     DEFAULT_DEV_RELOAD_PORT,
@@ -76,18 +77,14 @@ except ImportError:
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-# Native menu-bar states. Emoji remain only as a fallback if AppKit cannot
-# resolve an SF Symbol on the running macOS version.
-ICON_IDLE = "🎙️"
-ICON_RECORDING = "🔴"
-ICON_TRANSCRIBING = "⏳"
-ICON_ERROR = "⚠️"
+MENU_BAR_ICON_ASSET = "closedroom-microphone-mark.png"
+MENU_BAR_ICON_SOURCE = "design/assets/brand/closedroom-microphone-mark.png"
 
 STATUS_ITEM_STATES = {
-    "idle": ("waveform", "ClosedRoom — pronto", ICON_IDLE),
-    "recording": ("record.circle", "ClosedRoom — registrazione in corso", ICON_RECORDING),
-    "transcribing": ("hourglass", "ClosedRoom — elaborazione in corso", ICON_TRANSCRIBING),
-    "error": ("exclamationmark.triangle", "ClosedRoom — non disponibile", ICON_ERROR),
+    "idle": "ClosedRoom — pronto",
+    "recording": "ClosedRoom — registrazione in corso",
+    "transcribing": "ClosedRoom — elaborazione in corso",
+    "error": "ClosedRoom — non disponibile",
 }
 
 
@@ -125,6 +122,7 @@ class _ServerThread(threading.Thread):
         )
         self._app = app
         app.state.window_manager = self.app_instance.window_manager
+        app.state.menubar_controller = self.app_instance
         app.state.capture_manager.set_screenshot_exclusion_provider(
             self.app_instance.window_manager.screenshot_exclusion_window_ids
         )
@@ -292,15 +290,22 @@ class ClosedRoomApp(rumps.App):
     """
 
     def __init__(self) -> None:
-        # Let rumps own menu lifecycle, then project state through a native
-        # square SF Symbol so the menu-bar item is stable and compact.
+        # rumps owns the NSStatusItem lifecycle. Use the canonical transparent
+        # ClosedRoom microphone mark directly rather than a synthetic SF Symbol.
+        self._menu_bar_icon_path = get_brand_asset_path(MENU_BAR_ICON_ASSET)
+        self._status_icon_state = "idle"
+        self._status_item_ready = False
+        self._status_item_last_error: str | None = None
+        self._status_item_repair_count = 0
+        icon_path = str(self._menu_bar_icon_path) if self._menu_bar_icon_path.is_file() else None
         super().__init__(
             name="ClosedRoom",
-            title=ICON_IDLE,
+            title=None if icon_path else "CR",
+            icon=icon_path,
+            template=bool(icon_path),
             quit_button=None,  # we provide our own Esci item
         )
-        self._status_icon_state = "idle"
-        self._set_status_icon("idle")
+        self._ensure_status_item_visible()
 
         # Build the menu
         self._build_menu()
@@ -328,40 +333,115 @@ class ClosedRoomApp(rumps.App):
     def _initial_show(self, timer: rumps.Timer) -> None:
         """One-shot timer to show the window once the Cocoa run loop is active."""
         timer.stop()
-        self._setup_drag_and_drop()
-        # Re-apply after the status button is fully attached to the Cocoa run
-        # loop (and after optional drag/drop setup touches its native class).
-        self._set_status_icon(self._status_icon_state)
+        # Do not runtime-subclass NSStatusBarButton here. That old file-drop
+        # hook mutated the same native control that must remain visible.
+        self._ensure_status_item_visible()
         self.window_manager.show()
 
-    def _set_status_icon(self, state: str) -> None:
-        """Render one native template icon in a fixed square status-item slot."""
-        symbol_name, accessibility_label, fallback = STATUS_ITEM_STATES.get(
-            state,
-            STATUS_ITEM_STATES["idle"],
-        )
-        self._status_icon_state = state
+    def _ensure_status_item_visible(self) -> None:
+        """Re-assert the canonical menu-bar item on the Cocoa main thread."""
         try:
             import AppKit
 
             status_item = self._nsapp.nsstatusitem
             button = status_item.button()
-            image = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-                symbol_name,
-                accessibility_label,
-            )
+            if status_item is None or button is None:
+                raise RuntimeError("NSStatusItem is unavailable")
+            if not self._menu_bar_icon_path.is_file():
+                raise FileNotFoundError(f"menu-bar icon missing: {self._menu_bar_icon_path}")
+
+            image = AppKit.NSImage.alloc().initWithContentsOfFile_(str(self._menu_bar_icon_path))
             if image is None:
-                raise RuntimeError(f"SF Symbol unavailable: {symbol_name}")
+                raise RuntimeError(f"unable to load menu-bar icon: {self._menu_bar_icon_path}")
+
+            # The source asset has transparent background. Template rendering is
+            # the macOS-native treatment that keeps it legible in light/dark menu bars.
             image.setTemplate_(True)
-            image.setSize_((17.0, 17.0))
+            image.setSize_((18.0, 18.0))
+            self._status_item_image = image  # retain the NSImage for the item lifetime
+
+            if hasattr(status_item, "setAutosaveName_"):
+                status_item.setAutosaveName_("ClosedRoomMenuBarItem")
+            if hasattr(status_item, "setVisible_"):
+                status_item.setVisible_(True)
             status_item.setLength_(AppKit.NSSquareStatusItemLength)
             button.setImage_(image)
             button.setImagePosition_(AppKit.NSImageOnly)
             button.setTitle_("")
-            button.setToolTip_(accessibility_label)
+            button.setToolTip_(STATUS_ITEM_STATES.get(self._status_icon_state, STATUS_ITEM_STATES["idle"]))
+
+            self._status_item_ready = True
+            self._status_item_last_error = None
         except Exception as exc:
-            logger.warning("Falling back to text menu-bar status icon: %s", exc)
-            self.title = fallback
+            self._status_item_ready = False
+            self._status_item_last_error = str(exc)
+            logger.exception("Failed to render ClosedRoom menu-bar item: %s", exc)
+            try:
+                status_item = self._nsapp.nsstatusitem
+                if hasattr(status_item, "setVisible_"):
+                    status_item.setVisible_(True)
+                status_item.setLength_(34.0)
+                button = status_item.button()
+                button.setImage_(None)
+                button.setTitle_("CR")
+                button.setToolTip_(STATUS_ITEM_STATES.get(self._status_icon_state, "ClosedRoom"))
+            except Exception:
+                logger.exception("Failed to render text fallback for menu-bar item")
+
+    def _set_status_icon(self, state: str) -> None:
+        """Keep the brand mark stable while updating its accessible state label."""
+        self._status_icon_state = state if state in STATUS_ITEM_STATES else "idle"
+        if not self._status_item_ready:
+            self._ensure_status_item_visible()
+            return
+        try:
+            self._nsapp.nsstatusitem.button().setToolTip_(STATUS_ITEM_STATES[self._status_icon_state])
+        except Exception as exc:
+            self._status_item_ready = False
+            self._status_item_last_error = str(exc)
+            self._ensure_status_item_visible()
+
+    def menu_bar_status(self) -> dict:
+        """Return a truthful native-shell snapshot for Settings diagnostics."""
+        from local_asr_server.window import run_on_main_thread
+
+        snapshot: dict = {}
+
+        def capture() -> None:
+            try:
+                status_item = self._nsapp.nsstatusitem
+                button = status_item.button()
+                visible = bool(status_item.isVisible()) if hasattr(status_item, "isVisible") else self._status_item_ready
+                snapshot.update({
+                    "available": True,
+                    "visible": visible,
+                    "icon_loaded": bool(button.image()),
+                    "state": self._status_icon_state,
+                    "icon_asset": MENU_BAR_ICON_SOURCE,
+                    "repair_count": self._status_item_repair_count,
+                    "last_error": self._status_item_last_error,
+                })
+            except Exception as exc:
+                snapshot.update({
+                    "available": False,
+                    "visible": False,
+                    "icon_loaded": False,
+                    "state": self._status_icon_state,
+                    "icon_asset": MENU_BAR_ICON_SOURCE,
+                    "repair_count": self._status_item_repair_count,
+                    "last_error": str(exc),
+                })
+
+        run_on_main_thread(capture, wait=True)
+        return snapshot
+
+    def repair_menu_bar(self) -> dict:
+        """Re-assert visibility and the canonical icon, then report the result."""
+        from local_asr_server.window import run_on_main_thread
+
+        self._status_item_repair_count += 1
+        run_on_main_thread(self._ensure_status_item_visible, wait=True)
+        return self.menu_bar_status()
 
     # ── Menu construction ──────────────────────────────────────────────────
 
