@@ -82,7 +82,8 @@ class MeetingPreparationManager:
             }
             for item in selected_screenshots
         ]
-        user_notes = self.services.recordings.list_notes(recording_id)
+        list_notes = getattr(self.services.recordings, "list_notes", None)
+        user_notes = list_notes(recording_id) if callable(list_notes) else []
         user_note_source_snapshot = [
             {
                 "note_id": item.get("note_id"),
