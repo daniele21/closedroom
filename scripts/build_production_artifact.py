@@ -197,7 +197,8 @@ def main() -> int:
     )
     build_id = re.sub(r"[^A-Za-z0-9._-]+", "-", build_id)
     app_name = os.getenv("CLOSEDROOM_APP_NAME", "ClosedRoom")
-    staging_app = root / "dist" / f"{app_name}.app"
+    app_bundle_name = os.getenv("CLOSEDROOM_APP_BUNDLE_NAME", f"{app_name}.app")
+    staging_app = root / "dist" / app_bundle_name
     staging_dmg = root / "dist" / f"{app_name}-{version}.dmg"
     artifact_dir = (
         root / "dist" / "artifacts" / "macos-arm64-release-package" / build_id
@@ -222,6 +223,9 @@ def main() -> int:
             env["PATH"] = f"{wrapper_dir}:{env.get('PATH', '')}"
             env["CLOSEDROOM_SIGN_IDENTITY"] = identity
             env["CLOSEDROOM_BUILD_CHANNEL"] = "release"
+            env["CLOSEDROOM_APP_NAME"] = app_name
+            env["CLOSEDROOM_APP_BUNDLE_NAME"] = app_bundle_name
+            env["CLOSEDROOM_APP_DISPLAY_NAME"] = app_name
             try:
                 run(
                     ["bash", "build.sh", "--no-dmg", "--clean"],
