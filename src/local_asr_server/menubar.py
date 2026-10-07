@@ -331,6 +331,11 @@ class ClosedRoomApp(rumps.App):
 
         self._meeting_status_item = rumps.MenuItem("Avvio…")
         self._start_item = rumps.MenuItem("＋ Nuovo meeting", callback=self._start_recording)
+        self._recent_item = rumps.MenuItem("Recenti")
+        self._recent_signature: tuple[tuple[str, str], ...] = ()
+        empty_recent = rumps.MenuItem("Nessun meeting recente")
+        empty_recent.set_callback(None)
+        self._recent_item.add(empty_recent)
         self._add_note_item = rumps.MenuItem("✎ Aggiungi nota", callback=self._add_quick_note)
         self._screenshot_item = rumps.MenuItem("▣ Screenshot", callback=self._take_screenshot)
         self._open_controls_item = rumps.MenuItem("Apri controlli registrazione", callback=self._open_recording_controls)
@@ -342,6 +347,7 @@ class ClosedRoomApp(rumps.App):
             self._meeting_status_item,
             rumps.separator,
             self._start_item,
+            self._recent_item,
             self._add_note_item,
             self._screenshot_item,
             self._open_controls_item,
@@ -356,6 +362,43 @@ class ClosedRoomApp(rumps.App):
         ]
 
         self._set_recording_actions(recording=False, available=False)
+
+    def _refresh_recent_meetings(self) -> None:
+        try:
+            payload = _request_api_json(self.app_port, "/v1/recordings?limit=3")
+        except Exception:
+            return
+        items = [
+            item
+            for item in (payload.get("items") or [])
+            if isinstance(item, dict) and item.get("id")
+        ][:3]
+        signature = tuple(
+            (str(item["id"]), str(item.get("title") or "Meeting"))
+            for item in items
+        )
+        if signature == self._recent_signature:
+            return
+
+        self._recent_signature = signature
+        self._recent_item.clear()
+        if not items:
+            empty = rumps.MenuItem("Nessun meeting recente")
+            empty.set_callback(None)
+            self._recent_item.add(empty)
+            return
+
+        for item in items:
+            recording_id = str(item["id"])
+            title = str(item.get("title") or "Meeting").strip() or "Meeting"
+            menu_item = rumps.MenuItem(title[:64])
+
+            def open_recent(_, rid=recording_id):
+                self.window_manager.show()
+                self.window_manager.load_url(f"{self.app_url}/#meeting/{rid}")
+
+            menu_item.set_callback(open_recent)
+            self._recent_item.add(menu_item)
 
     def _set_recording_actions(self, *, recording: bool, available: bool = True) -> None:
         self._start_item.set_callback(self._start_recording if available and not recording else None)
@@ -396,6 +439,8 @@ class ClosedRoomApp(rumps.App):
             return
 
         server_status = status.get("status", "idle")
+        self._refresh_recent_meetings()
+
         if server_status == "recording":
             self.title = ICON_RECORDING
             try:
