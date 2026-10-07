@@ -288,6 +288,9 @@ try {
     const projects = document.querySelector('[data-tour="nav-projects"]');
     const shell = document.querySelector('.workspace-shell');
     const railRect = rail?.getBoundingClientRect();
+    const brandImages = Array.from(document.querySelectorAll('.workspace-brand .brand-logo'));
+    const brandImageLoaded = brandImages.some((image) => image.complete && image.naturalWidth > 0);
+    const brandFallbackVisible = Boolean(document.querySelector('[data-brand-logo-fallback="true"]'));
     return {
       page: document.querySelector('.workspace-content')?.getAttribute('data-workspace-page'),
       homeCurrent: home?.getAttribute('aria-current'),
@@ -296,6 +299,8 @@ try {
       railHeight: railRect?.height || 0,
       shellColumns: shell ? getComputedStyle(shell).gridTemplateColumns : '',
       railPosition: rail ? getComputedStyle(rail).position : '',
+      brandImageLoaded,
+      brandFallbackVisible,
     };
   `);
   if (observations.wideHome.page !== 'home' || observations.wideHome.homeCurrent !== 'page') {
@@ -303,6 +308,9 @@ try {
   }
   if (observations.wideHome.railWidth < 200 || !String(observations.wideHome.shellColumns).includes('236px')) {
     throw new Error(`wide workspace rail is not stable: ${JSON.stringify(observations.wideHome)}`);
+  }
+  if (!observations.wideHome.brandImageLoaded && !observations.wideHome.brandFallbackVisible) {
+    throw new Error(`ClosedRoom brand mark is not visible: ${JSON.stringify(observations.wideHome)}`);
   }
   await checkpoint(browser, '01-wide-today');
 
