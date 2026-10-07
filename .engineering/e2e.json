@@ -89,7 +89,7 @@
       "automation": "automated",
       "platform": "GitHub-hosted macOS arm64 with headless Chrome",
       "command": "node scripts/browser_meeting_ui_e2e.mjs",
-      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for call-overlay screenshot evidence, saved-Meeting, preparation-recovery, verified-note-edit revision, complete archive-search and busy-AI recording-priority journeys, plus a synthetic demo-mode coherent-workspace journey across Today, Meeting and Projects with wide/compact/narrow resize assertions; ChromeDriver interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
+      "artifact_surface": "real React source served by Vite, deterministic loopback API fixtures for timestamped user-note + call-overlay screenshot evidence, saved-Meeting, preparation-recovery, verified-note-edit revision, complete archive-search and busy-AI recording-priority journeys, plus a synthetic demo-mode coherent-workspace journey across Today, Meeting and Projects with wide/compact/narrow resize assertions; ChromeDriver interaction, bounded viewport screenshots and frame-assembled MP4 evidence",
       "target_environment_refs": [
         "closedroom-macos-apple-silicon"
       ],
@@ -228,6 +228,28 @@
         "browser fixtures do not prove real ScreenCaptureKit pixels, TCC permissions, display withdrawal or ClosedRoom overlay exclusion",
         "headless Chrome does not prove packaged WKWebView/global-hotkey behavior while another application has focus",
         "physical audio capture and representative local-VLM/Metal behavior remain target-Mac release evidence"
+      ],
+      "automation_gap_reason": ""
+    },
+    {
+      "id": "meeting-moments-notes",
+      "claim": "During an active recording, a user can open a plain-text quick note, anchor it to the canonical recording time before typing, persist it before success is shown, then review, seek, edit and delete the user-authored marker beside the corresponding transcript context while Prepare notes preserves user-note provenance and never treats the note alone as spoken or agreed evidence.",
+      "ui_surface": true,
+      "minimum_ui_evidence_mode": "full_media",
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "browser-macos-arm64-ci",
+        "source-contract-suite"
+      ],
+      "minimum_automated_fidelity": "simulated_or_emulated",
+      "real_environment_confirmation": "required",
+      "real_environment_runner": "target-macos-real",
+      "residual_gaps": [
+        "browser fixtures do not prove the native recording-ready uptime source against physical capture startup latency",
+        "headless Chrome does not prove the native menu-bar quick-note panel, Carbon global-hotkey registration/collision handling or focus while another application/fullscreen Space owns focus",
+        "packaged WKWebView, TCC-backed capture and physical audio remain target-Mac release evidence"
       ],
       "automation_gap_reason": ""
     },
