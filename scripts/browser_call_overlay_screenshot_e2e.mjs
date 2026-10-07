@@ -578,6 +578,10 @@ try {
   await browser.start();
   await browser.navigate('http://127.0.0.1:' + vitePort + '/#overlay');
   await waitText(browser, ['Synthetic Display 1'], 30000, true);
+  const dragAffordanceVisible = await browser.execute(
+    'return Boolean(document.querySelector(\'[data-overlay-drag-region="true"]\'));',
+  );
+  if (!dragAffordanceVisible) throw new Error('overlay drag affordance is missing');
   await checkpoint(browser, '01-overlay-recording');
 
   const expanded = await browser.execute(`
