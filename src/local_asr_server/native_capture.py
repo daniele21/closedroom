@@ -153,6 +153,22 @@ class NativeCaptureManager:
         with self._lock:
             return self._sessions.get(recording_id)
 
+    def recording_timestamp(self, recording_id: str) -> dict[str, Any]:
+        """Return the current native recording offset from the authoritative ready clock."""
+        with self._lock:
+            session = self._sessions.get(recording_id)
+        if session is None or session.stopped:
+            raise RuntimeError("native_capture_not_active")
+        ready = session.ready_event or {}
+        ready_uptime = ready.get("recording_ready_uptime")
+        if ready_uptime is None:
+            raise RuntimeError("capture_not_ready")
+        return {
+            "recording_id": recording_id,
+            "timestamp": max(0.0, time.monotonic() - float(ready_uptime)),
+            "clock_source": "native_recording_uptime",
+        }
+
     def set_screenshot_exclusion_provider(
         self,
         provider: Callable[[], list[int]] | None,
