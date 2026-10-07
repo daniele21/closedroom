@@ -51,8 +51,8 @@ class MacOSShellContractTests(unittest.TestCase):
 
         self.assertIn('src="/logo-dark.png"', app)
         self.assertIn('src="/logo-light.png"', app)
-        self.assertIn('"\/logo-dark.png"', server)
-        self.assertIn('"\/logo-light.png"', server)
+        self.assertIn('"/logo-dark.png"', server)
+        self.assertIn('"/logo-light.png"', server)
         self.assertIn("onError={() => setBrandLogoFailed(true)}", app)
         self.assertIn('data-brand-logo-fallback="true"', app)
         self.assertIn(".brand-logo-fallback", css)
