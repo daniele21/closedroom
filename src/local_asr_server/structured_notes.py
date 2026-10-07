@@ -431,6 +431,9 @@ def _ref_label(ref: dict[str, Any]) -> str:
     if ref.get("source_type") == "screenshot":
         timestamp = float(ref.get("timestamp") or 0.0)
         return f"Screenshot {int(timestamp // 60):02d}:{int(timestamp % 60):02d}"
+    if ref.get("source_type") == "user_note":
+        timestamp = float(ref.get("timestamp") or 0.0)
+        return f"User note {int(timestamp // 60):02d}:{int(timestamp % 60):02d}"
     start = ref.get("start")
     end = ref.get("end")
     if isinstance(start, (int, float)) and isinstance(end, (int, float)):
@@ -552,7 +555,8 @@ def _aggregate_groups(partials: list[dict[str, Any]], budget: int) -> list[list[
 def _refs_for_chunk(chunk: str, refs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     transcript_ids = set(re.findall(r"\[S([^\s\]]+)", chunk))
     visual_ids = {f"V:{value}" for value in re.findall(r"\[V([^\s\]]+)", chunk)}
-    identifiers = transcript_ids | visual_ids
+    user_note_ids = {f"N:{value}" for value in re.findall(r"\[N([^\s\]]+)", chunk)}
+    identifiers = transcript_ids | visual_ids | user_note_ids
     return {key: value for key, value in refs.items() if key in identifiers}
 
 
@@ -566,6 +570,8 @@ def _source_ref_ids(value: Any) -> set[str]:
                     continue
                 if ref.get("source_type") == "screenshot" and ref.get("screenshot_id"):
                     identifiers.add(f"V:{ref['screenshot_id']}")
+                elif ref.get("source_type") == "user_note" and ref.get("note_id"):
+                    identifiers.add(f"N:{ref['note_id']}")
                 elif ref.get("segment_id") is not None:
                     identifiers.add(str(ref["segment_id"]))
         for child in value.values():
