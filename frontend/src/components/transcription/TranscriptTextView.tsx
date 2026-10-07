@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
-import { RecordingScreenshot, TranscriptionSegment } from '../../api/apiClient';
+import { RecordingNote, RecordingScreenshot, TranscriptionSegment } from '../../api/apiClient';
 import { formatTime } from '../../utils/formatters';
 import { Button } from '../ui/Button';
 import {
   Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  Activity, Timer, Gauge, Users, Image as ImageIcon,
+  Activity, Timer, Gauge, Users, Image as ImageIcon, PencilLine, Save, Trash2, X,
 } from 'lucide-react';
 
 interface TranscriptTextViewProps {
@@ -14,6 +14,9 @@ interface TranscriptTextViewProps {
   currentTime?: number;
   screenshots?: RecordingScreenshot[];
   onOpenScreenshot?: (screenshot: RecordingScreenshot) => void;
+  notes?: RecordingNote[];
+  onUpdateNote?: (note: RecordingNote, text: string) => Promise<void>;
+  onDeleteNote?: (note: RecordingNote) => Promise<void>;
 }
 
 const SEGMENTS_PER_PAGE = 25;
@@ -56,11 +59,18 @@ export default function TranscriptTextView({
   currentTime = 0,
   screenshots = [],
   onOpenScreenshot,
+  notes = [],
+  onUpdateNote,
+  onDeleteNote,
 }: TranscriptTextViewProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [showAudioDetails, setShowAudioDetails] = useState(true);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteBusyId, setNoteBusyId] = useState<string | null>(null);
+  const [noteActionError, setNoteActionError] = useState<string | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(segments.length / SEGMENTS_PER_PAGE));
 
@@ -138,6 +148,30 @@ export default function TranscriptTextView({
     return { anchored, standalone };
   }, [screenshots, segments]);
 
+  const notePlacement = useMemo(() => {
+    const anchored = new Map<number, RecordingNote[]>();
+    const standalone: RecordingNote[] = [];
+    const ordered = [...notes].sort((a, b) => (
+      a.timestamp - b.timestamp || a.sequence - b.sequence || a.note_id.localeCompare(b.note_id)
+    ));
+
+    ordered.forEach((note) => {
+      const candidates = segments
+        .filter((segment) => segment.start <= note.timestamp && note.timestamp <= segment.end)
+        .sort((a, b) => b.start - a.start || a.end - b.end || a.id - b.id);
+      const anchor = candidates[0];
+      if (!anchor) {
+        standalone.push(note);
+        return;
+      }
+      const current = anchored.get(anchor.id) || [];
+      current.push(note);
+      anchored.set(anchor.id, current);
+    });
+
+    return { anchored, standalone };
+  }, [notes, segments]);
+
   const timelineItems = useMemo(() => {
     const pageStartIndex = currentPage * SEGMENTS_PER_PAGE;
     const nextPageStart = segments[pageStartIndex + SEGMENTS_PER_PAGE]?.start;
@@ -154,17 +188,27 @@ export default function TranscriptTextView({
         sequence: shot.sequence,
         screenshot: shot,
       }));
+    const noteItems = notePlacement.standalone
+      .filter((note) => note.timestamp >= lowerBound && note.timestamp < upperBound)
+      .map((note) => ({
+        kind: 'note' as const,
+        timestamp: note.timestamp,
+        sequence: note.sequence,
+        note,
+      }));
     const segmentItems = pageSegments.map((segment) => ({
       kind: 'segment' as const,
       timestamp: segment.start,
       sequence: segment.id,
       segment,
     }));
-    return [...screenshotItems, ...segmentItems].sort((a, b) => (
+    const kindOrder = { note: 0, screenshot: 1, segment: 2 } as const;
+    return [...noteItems, ...screenshotItems, ...segmentItems].sort((a, b) => (
       a.timestamp - b.timestamp
-      || (a.kind === b.kind ? a.sequence - b.sequence : (a.kind === 'screenshot' ? -1 : 1))
+      || kindOrder[a.kind] - kindOrder[b.kind]
+      || a.sequence - b.sequence
     ));
-  }, [currentPage, pageSegments, screenshotPlacement.standalone, segments]);
+  }, [currentPage, notePlacement.standalone, pageSegments, screenshotPlacement.standalone, segments]);
 
   const renderScreenshotMarker = (shot: RecordingScreenshot, compact = false) => (
     <button
@@ -203,6 +247,129 @@ export default function TranscriptTextView({
       )}
     </button>
   );
+
+  const renderNoteMarker = (note: RecordingNote, compact = false) => {
+    const editing = editingNoteId === note.note_id;
+    const busy = noteBusyId === note.note_id;
+
+    return (
+      <div
+        key={`note-${note.note_id}`}
+        className={`rounded-xl border border-amber-500/20 bg-amber-500/5 ${compact ? 'mt-2 px-2.5 py-2' : 'px-3 py-2.5'}`}
+        data-user-note-id={note.note_id}
+        data-user-note-timestamp={note.timestamp}
+      >
+        <div className="flex items-start gap-3">
+          <span className={`flex shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 ${compact ? 'h-7 w-7' : 'h-8 w-8'}`}>
+            <PencilLine className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => onTimestampClick?.(note.timestamp)}
+                className="text-[10px] font-bold uppercase tracking-wider text-amber-700 hover:underline dark:text-amber-300"
+              >
+                Your note · {formatTime(note.timestamp)}
+              </button>
+              {!editing && (onUpdateNote || onDeleteNote) && (
+                <div className="flex items-center gap-1">
+                  {onUpdateNote && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingNoteId(note.note_id);
+                        setNoteDraft(note.text);
+                        setNoteActionError(null);
+                      }}
+                      disabled={busy}
+                      className="rounded p-1 text-text-muted transition hover:bg-bg-hover hover:text-text-primary disabled:opacity-40"
+                      aria-label="Edit note"
+                    >
+                      <PencilLine className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  {onDeleteNote && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!window.confirm('Delete this note?')) return;
+                        setNoteBusyId(note.note_id);
+                        setNoteActionError(null);
+                        try {
+                          await onDeleteNote(note);
+                        } catch (error: any) {
+                          setNoteActionError(String(error?.message || 'Unable to delete note.'));
+                        } finally {
+                          setNoteBusyId(null);
+                        }
+                      }}
+                      disabled={busy}
+                      className="rounded p-1 text-text-muted transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                      aria-label="Delete note"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            {editing ? (
+              <div className="space-y-2">
+                <textarea
+                  value={noteDraft}
+                  maxLength={4000}
+                  rows={Math.max(2, Math.min(5, noteDraft.split('\n').length))}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  className="w-full resize-y rounded-lg border border-border-subtle bg-bg-elevated px-2.5 py-2 text-xs leading-relaxed text-text-primary outline-none focus:border-border-focus"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingNoteId(null);
+                      setNoteDraft('');
+                      setNoteActionError(null);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold text-text-muted hover:bg-bg-hover"
+                  >
+                    <X className="h-3 w-3" /> Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !noteDraft.trim()}
+                    onClick={async () => {
+                      if (!onUpdateNote || !noteDraft.trim()) return;
+                      setNoteBusyId(note.note_id);
+                      setNoteActionError(null);
+                      try {
+                        await onUpdateNote(note, noteDraft.trim());
+                        setEditingNoteId(null);
+                        setNoteDraft('');
+                      } catch (error: any) {
+                        setNoteActionError(String(error?.message || 'Unable to save note.'));
+                      } finally {
+                        setNoteBusyId(null);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md bg-accent px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40"
+                  >
+                    <Save className="h-3 w-3" /> Save
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="whitespace-pre-wrap text-xs leading-relaxed text-text-primary">{note.text}</p>
+            )}
+            {noteActionError && editingNoteId === note.note_id && (
+              <p className="mt-1 text-[10px] text-danger" role="alert">{noteActionError}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   /** Render text with search highlights */
   const renderHighlightedText = (text: string, segmentId: number) => {
@@ -355,6 +522,9 @@ export default function TranscriptTextView({
       {/* Segment cards */}
       <div className="flex flex-col gap-3">
         {timelineItems.map((item) => {
+          if (item.kind === 'note') {
+            return renderNoteMarker(item.note);
+          }
           if (item.kind === 'screenshot') {
             return renderScreenshotMarker(item.screenshot);
           }
@@ -427,6 +597,9 @@ export default function TranscriptTextView({
 
               {(screenshotPlacement.anchored.get(seg.id) || []).map((shot) => (
                 renderScreenshotMarker(shot, true)
+              ))}
+              {(notePlacement.anchored.get(seg.id) || []).map((note) => (
+                renderNoteMarker(note, true)
               ))}
             </div>
           );
