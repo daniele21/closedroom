@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, Clock3, Image as ImageIcon, Pencil, RotateCcw, Save, X } from 'lucide-react';
+import { AlertTriangle, Check, Clock3, Image as ImageIcon, Pencil, RotateCcw, Save, StickyNote, X } from 'lucide-react';
 
 import type { AnalysisRun, RecordingScreenshot } from '../../api/apiClient';
 import {
@@ -99,6 +99,35 @@ function EvidenceRefs({
           );
         }
 
+        if (ref.source_type === 'user_note' || ref.note_id) {
+          const timestamp = typeof ref.timestamp === 'number' ? ref.timestamp : null;
+          const label = `Your note${timestamp !== null ? ` · ${formatTimestamp(timestamp)}` : ''}`;
+          if (timestamp === null) {
+            return (
+              <span
+                key={`${ref.note_id || 'user-note'}-${index}`}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+                title="User-authored meeting note"
+              >
+                <StickyNote className="h-3 w-3" aria-hidden="true" />
+                {label}
+              </span>
+            );
+          }
+          return (
+            <button
+              key={`${ref.note_id || 'user-note'}-${index}`}
+              type="button"
+              onClick={() => onSeek(timestamp)}
+              className="inline-flex items-center gap-1 rounded-md border border-amber-500/20 bg-amber-500/5 px-2 py-1 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/10 dark:text-amber-300"
+              title="Play the moment marked by this user note"
+            >
+              <StickyNote className="h-3 w-3" aria-hidden="true" />
+              {label}
+            </button>
+          );
+        }
+
         const label = typeof ref.start === 'number'
           ? `${formatTimestamp(ref.start)}${ref.speaker ? ` · ${ref.speaker}` : ''}`
           : `S${ref.segment_id ?? '?'}`;
@@ -134,9 +163,11 @@ function EvidenceBasis({ basis, lang }: { basis?: string; lang: string }) {
   if (!basis) return null;
   const label = basis === 'visual'
     ? (lang === 'it' ? 'Evidenza visuale' : 'Visual evidence')
-    : basis === 'mixed'
-      ? (lang === 'it' ? 'Audio + visuale' : 'Audio + visual')
-      : (lang === 'it' ? 'Parlato' : 'Spoken');
+    : basis === 'user_note'
+      ? (lang === 'it' ? 'Nota utente' : 'User note')
+      : basis === 'mixed'
+        ? (lang === 'it' ? 'Fonti miste' : 'Mixed evidence')
+        : (lang === 'it' ? 'Parlato' : 'Spoken');
   return <Badge variant="idle">{label}</Badge>;
 }
 

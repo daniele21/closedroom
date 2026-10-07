@@ -50,6 +50,7 @@
       "project",
       "transcript",
       "notes",
+      "meeting moments",
       "actions",
       "speakers",
       "search"
@@ -83,7 +84,8 @@
       "meeting transcript",
       "summary, decisions and actions",
       "speaker attribution and naming",
-      "meeting search"
+      "meeting search",
+      "timestamped user notes during recording"
     ],
     "contextual": [
       "project organization and filtering"
@@ -132,7 +134,7 @@
     ],
     "desktop_pattern": "one stable left workspace rail",
     "compact_pattern": "the same destinations and action hierarchy reflow into one sticky top toolbar; compact width must not introduce a second navigation model",
-    "rule": "Today, Meeting and Projects share one workspace chrome. Meeting is opened from Today/search/project context but does not become a third peer destination. Advanced transcription, analysis and diagnostics remain contextual or utility routes."
+    "rule": "Today, Meeting and Projects share one workspace chrome. Meeting is opened from Today/search/project context but does not become a third peer destination. During recording, the macOS menu bar is a contextual companion for Add note, Screenshot, recording controls and Stop; it projects canonical state and never becomes a second state owner. Advanced transcription, analysis and diagnostics remain contextual or utility routes."
   },
   "golden_path": {
     "steps": [
@@ -148,8 +150,8 @@
     "surface_hierarchy": {
       "today": "understand what happened, what needs attention and what to open or do next",
       "new_meeting": "optionally add meeting context, see readiness and start recording; if managed AI is already active, show truthful cancellable preparation rather than pretending recording has started",
-      "record": "understand capture status, deliberately mark visual key moments with a screenshot of the selected display, briefly undo the latest saved screenshot when needed, and safely Stop; screenshot feedback is secondary to audio health and never implies persistence before backend confirmation",
-      "meeting": "use the saved meeting as the canonical workspace, review deliberately marked key moments with nearby transcript and audio context, optionally enrich them through local visual analysis with classification, non-destructive similarity stacks and bounded local questions, and keep one primary Prepare notes action plus the secondary Transcript only recovery/power action",
+      "record": "understand capture status, deliberately mark important moments with a quick user note or a screenshot of the selected display, briefly undo the latest persisted marker when needed, and safely Stop; marker feedback is secondary to audio health and never implies persistence before backend confirmation",
+      "meeting": "use the saved meeting as the canonical workspace, review user notes and deliberately marked screenshots at their original transcript/audio timestamps, edit user-authored notes without changing their anchors, optionally enrich screenshots through local visual analysis, and keep one primary Prepare notes action plus the secondary Transcript only recovery/power action",
       "prepare_notes": "coordinate transcript then notes as one recoverable user task, expose the transcript as soon as it is ready, and preserve completed work across cancel, failure, reconnect and explicit resume",
       "notes_review": "open ready notes first while keeping transcript, speakers and advanced tools directly reachable"
     }
@@ -169,7 +171,7 @@
     "recovery_exception": "A technical condition may surface outside diagnostics only when the user must act on it; present the user-facing consequence and recovery action before raw technical detail."
   },
   "resource_experience": {
-    "recording_priority": "While recording is active, ClosedRoom prioritizes audio capture and persistence. Manual screenshot capture is a bounded one-shot local write on the recording path; no ASR, LLM or VLM starts during capture.",
+    "recording_priority": "While recording is active, ClosedRoom prioritizes audio capture and persistence. Quick user-note writes and manual screenshots are bounded local writes on the recording path; no ASR, LLM or VLM starts because a moment is marked.",
     "recording_start_priority": "When Start meeting races with managed heavy work, one capture reservation in the canonical workload owner closes the admission boundary atomically. Already-active managed work reaches its normal safe boundary without force-kill; queued work stays bounded and resumes after Stop. The UI calls the waiting state preparation, never recording, and offers cancellation while it is waiting for the active AI phase.",
     "heavy_work_admission": "One canonical runtime policy and the existing bounded workload owner decide when heavy work may start; meeting preparation and recording admission never own a second heavy-work queue.",
     "model_residency": "Managed AI residency is phase-scoped and reclaimed after work; external runtimes remain caller-owned.",
@@ -186,7 +188,9 @@
     "partial",
     "interrupted",
     "screenshot-saving",
-    "screenshot-failed"
+    "screenshot-failed",
+    "note-saving",
+    "note-failed"
   ],
   "accessibility": {
     "target": "macOS accessibility conventions plus WCAG 2.2 AA semantics for web-rendered content where applicable",
@@ -255,6 +259,11 @@
     {
       "id": "call-overlay-screenshot-evidence",
       "name": "During an active native meeting, deliberately mark visual key moments from a selected display, save them before success is shown, optionally undo the latest capture, Stop into the saved Meeting, review them with nearby transcript and audio context, optionally collapse similar captures and ask a bounded local question after visual analysis, and distinguish visual evidence from spoken evidence throughout",
+      "e2e": "required"
+    },
+    {
+      "id": "meeting-moments-notes",
+      "name": "During an active meeting, capture a plain-text user note at the canonical recording timestamp from the overlay or menu bar, persist before success, optionally undo, then review/edit/delete it beside the corresponding transcript and audio context while preserving user-note provenance in Prepare notes",
       "e2e": "required"
     },
     {

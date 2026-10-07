@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import shutil
 import threading
@@ -78,6 +79,10 @@ TRACK_SOURCES = {
     "mic": "mic",
     "system": "system",
 }
+
+NOTE_MANIFEST_VERSION = 1
+NOTE_MANIFEST_FILE = "notes.json"
+MAX_NOTE_TEXT_CHARS = 4_000
 
 
 class RecordingError(Exception):
@@ -210,6 +215,9 @@ class RecordingStore:
             "screenshot_count": 0,
             "screenshot_manifest_version": SCREENSHOT_MANIFEST_VERSION,
             "screenshot_revision": 0,
+            "note_count": 0,
+            "note_manifest_version": NOTE_MANIFEST_VERSION,
+            "note_revision": 0,
         }
         for track in audio_tracks:
             self._track_part_path(session_dir, track).touch()
@@ -717,6 +725,172 @@ class RecordingStore:
                     key=lambda item: (float(item.get("timestamp") or 0.0), int(item.get("sequence") or 0)),
                 )
             ]
+
+    def _note_manifest_path(self, session_dir: Path) -> Path:
+        return session_dir / NOTE_MANIFEST_FILE
+
+    def _read_note_manifest(self, session_dir: Path, recording_id: str) -> dict[str, Any]:
+        path = self._note_manifest_path(session_dir)
+        if not path.exists():
+            return {
+                "version": NOTE_MANIFEST_VERSION,
+                "recording_id": recording_id,
+                "revision": 0,
+                "items": [],
+            }
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RecordingConflict("Recording note manifest is unreadable") from exc
+        if payload.get("recording_id") not in {None, recording_id}:
+            raise RecordingConflict("Recording note manifest belongs to another recording")
+        items = payload.get("items")
+        if not isinstance(items, list):
+            raise RecordingConflict("Recording note manifest is invalid")
+        return {
+            "version": int(payload.get("version") or NOTE_MANIFEST_VERSION),
+            "recording_id": recording_id,
+            "revision": int(payload.get("revision") or 0),
+            "items": [item for item in items if isinstance(item, dict)],
+        }
+
+    def _commit_note_manifest(
+        self,
+        session_dir: Path,
+        metadata: dict[str, Any],
+        manifest: dict[str, Any],
+    ) -> None:
+        manifest["version"] = NOTE_MANIFEST_VERSION
+        manifest["revision"] = int(manifest.get("revision") or 0) + 1
+        self._write_json_atomic(self._note_manifest_path(session_dir), manifest)
+        metadata["note_count"] = len(manifest["items"])
+        metadata["note_manifest_version"] = NOTE_MANIFEST_VERSION
+        metadata["note_revision"] = int(metadata.get("note_revision") or 0) + 1
+        self._write_metadata(session_dir, metadata)
+        self._upsert_catalog(metadata)
+
+    @staticmethod
+    def _public_note(recording_id: str, item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "note_id": str(item["note_id"]),
+            "recording_id": recording_id,
+            "request_id": str(item.get("request_id") or ""),
+            "sequence": int(item.get("sequence") or 0),
+            "timestamp": float(item.get("timestamp") or 0.0),
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+            "text": str(item.get("text") or ""),
+            "revision": int(item.get("revision") or 1),
+            "source_kind": "user_note",
+        }
+
+    def list_notes(self, recording_id: str) -> list[dict[str, Any]]:
+        with self._lock_for(recording_id):
+            session_dir, _ = self._load(recording_id)
+            manifest = self._read_note_manifest(session_dir, recording_id)
+            ordered = sorted(
+                manifest["items"],
+                key=lambda item: (
+                    float(item.get("timestamp") or 0.0),
+                    int(item.get("sequence") or 0),
+                    str(item.get("note_id") or ""),
+                ),
+            )
+            return [self._public_note(recording_id, item) for item in ordered]
+
+    def create_note(
+        self,
+        recording_id: str,
+        *,
+        request_id: str,
+        timestamp: float,
+        text: str,
+    ) -> dict[str, Any]:
+        request_id = str(request_id or "").strip()
+        if not request_id or len(request_id) > 128:
+            raise RecordingConflict("Invalid note request id")
+        note_text = str(text or "").strip()
+        if not note_text:
+            raise RecordingConflict("Note text cannot be empty")
+        if len(note_text) > MAX_NOTE_TEXT_CHARS:
+            raise RecordingConflict(f"Note text cannot exceed {MAX_NOTE_TEXT_CHARS} characters")
+        timestamp = float(timestamp)
+        if not math.isfinite(timestamp) or timestamp < 0:
+            raise RecordingConflict("Note timestamp must be a finite non-negative number")
+
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            manifest = self._read_note_manifest(session_dir, recording_id)
+            existing = next(
+                (item for item in manifest["items"] if item.get("request_id") == request_id),
+                None,
+            )
+            if existing is not None:
+                return self._public_note(recording_id, existing)
+
+            sequence = max(
+                (int(item.get("sequence") or 0) for item in manifest["items"]),
+                default=-1,
+            ) + 1
+            now = _utc_now()
+            item = {
+                "note_id": str(uuid.uuid4()),
+                "request_id": request_id,
+                "sequence": sequence,
+                "timestamp": timestamp,
+                "created_at": now,
+                "updated_at": now,
+                "text": note_text,
+                "revision": 1,
+            }
+            manifest["items"].append(item)
+            self._commit_note_manifest(session_dir, metadata, manifest)
+            return self._public_note(recording_id, item)
+
+    def update_note(
+        self,
+        recording_id: str,
+        note_id: str,
+        *,
+        text: str,
+        revision: int,
+    ) -> dict[str, Any]:
+        note_text = str(text or "").strip()
+        if not note_text:
+            raise RecordingConflict("Note text cannot be empty")
+        if len(note_text) > MAX_NOTE_TEXT_CHARS:
+            raise RecordingConflict(f"Note text cannot exceed {MAX_NOTE_TEXT_CHARS} characters")
+
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            manifest = self._read_note_manifest(session_dir, recording_id)
+            item = next(
+                (entry for entry in manifest["items"] if entry.get("note_id") == note_id),
+                None,
+            )
+            if item is None:
+                raise RecordingNotFound(note_id)
+            current_revision = int(item.get("revision") or 1)
+            if int(revision) != current_revision:
+                raise RecordingConflict(
+                    f"Note revision conflict: expected {current_revision}, received {revision}"
+                )
+            item["text"] = note_text
+            item["updated_at"] = _utc_now()
+            item["revision"] = current_revision + 1
+            self._commit_note_manifest(session_dir, metadata, manifest)
+            return self._public_note(recording_id, item)
+
+    def delete_note(self, recording_id: str, note_id: str) -> None:
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            manifest = self._read_note_manifest(session_dir, recording_id)
+            if not any(item.get("note_id") == note_id for item in manifest["items"]):
+                raise RecordingNotFound(note_id)
+            manifest["items"] = [
+                item for item in manifest["items"] if item.get("note_id") != note_id
+            ]
+            self._commit_note_manifest(session_dir, metadata, manifest)
 
     def screenshot_asset_path(self, recording_id: str, screenshot_id: str, *, thumbnail: bool = False) -> Path:
         with self._lock_for(recording_id):

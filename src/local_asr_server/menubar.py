@@ -21,6 +21,7 @@ import logging
 import json
 import socket
 import threading
+import uuid
 import webbrowser
 from pathlib import Path
 from typing import Optional
@@ -173,6 +174,35 @@ def _get_server_status(port: int) -> dict:
         return {}
 
 
+def _request_api_json(
+    port: int,
+    path: str,
+    *,
+    method: str = "GET",
+    payload: dict | None = None,
+    timeout: float = 2.0,
+    bearer_token: str | None = None,
+) -> dict:
+    """Call ClosedRoom's authenticated-loopback-equivalent local API from the app shell."""
+    import urllib.request
+    data = None
+    headers = {}
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        f"{_build_app_url(port)}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read()
+        return json.loads(raw) if raw else {}
+
+
 def _is_port_open(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.25)
@@ -293,7 +323,7 @@ class ClosedRoomApp(rumps.App):
     # ── Menu construction ──────────────────────────────────────────────────
 
     def _build_menu(self) -> None:
-        """Construct the drop-down menu items."""
+        """Construct a meeting-aware menu instead of exposing server internals."""
         from local_asr_server.launchd import is_launch_agent_installed
 
         launch_agent_title = (
@@ -302,14 +332,31 @@ class ClosedRoomApp(rumps.App):
             else "Avvia al login"
         )
 
+        self._meeting_status_item = rumps.MenuItem("Avvio…")
+        self._start_item = rumps.MenuItem("＋ Nuovo meeting", callback=self._start_recording)
+        self._recent_item = rumps.MenuItem("Recenti")
+        self._recent_signature: tuple[tuple[str, str], ...] = ()
+        empty_recent = rumps.MenuItem("Nessun meeting recente")
+        empty_recent.set_callback(None)
+        self._recent_item.add(empty_recent)
+        self._add_note_item = rumps.MenuItem("✎ Aggiungi nota", callback=self._add_quick_note)
+        self._screenshot_item = rumps.MenuItem("▣ Screenshot", callback=self._take_screenshot)
+        self._open_controls_item = rumps.MenuItem("Apri controlli registrazione", callback=self._open_recording_controls)
+        self._stop_item = rumps.MenuItem("■ Ferma registrazione", callback=self._stop_recording)
+        self._copy_transcript_item = rumps.MenuItem("Copia ultima trascrizione", callback=self._copy_last_transcription)
+
         self.menu = [
             rumps.MenuItem("Apri ClosedRoom", callback=self._open_window),
+            self._meeting_status_item,
             rumps.separator,
-            rumps.MenuItem("Stato: in avvio…"),
+            self._start_item,
+            self._recent_item,
+            self._add_note_item,
+            self._screenshot_item,
+            self._open_controls_item,
+            self._stop_item,
             rumps.separator,
-            rumps.MenuItem("⏺ Avvia registrazione", callback=self._start_recording),
-            rumps.MenuItem("⏹ Ferma registrazione", callback=self._stop_recording),
-            rumps.MenuItem("📋 Copia ultima trascrizione", callback=self._copy_last_transcription),
+            self._copy_transcript_item,
             rumps.separator,
             rumps.MenuItem("Preferenze…", callback=self._open_preferences),
             rumps.MenuItem(launch_agent_title, callback=_toggle_launch_agent),
@@ -317,17 +364,96 @@ class ClosedRoomApp(rumps.App):
             rumps.MenuItem("Esci", callback=self._quit),
         ]
 
-        # Disable recording controls until server is ready
-        self.menu["⏺ Avvia registrazione"].set_callback(None)
-        self.menu["⏹ Ferma registrazione"].set_callback(None)
-        self.menu["📋 Copia ultima trascrizione"].set_callback(None)
+        self._set_recording_actions(recording=False, available=False)
+
+    def _refresh_api_session(self) -> None:
+        session = _request_api_json(self.app_port, "/v1/session")
+        self._api_bearer_token = session.get("token")
+
+    def _api_json(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        payload: dict | None = None,
+        timeout: float = 2.0,
+    ) -> dict:
+        import urllib.error
+
+        if not hasattr(self, "_api_bearer_token"):
+            self._refresh_api_session()
+        try:
+            return _request_api_json(
+                self.app_port,
+                path,
+                method=method,
+                payload=payload,
+                timeout=timeout,
+                bearer_token=self._api_bearer_token,
+            )
+        except urllib.error.HTTPError as exc:
+            if exc.code != 401:
+                raise
+            self._refresh_api_session()
+            return _request_api_json(
+                self.app_port,
+                path,
+                method=method,
+                payload=payload,
+                timeout=timeout,
+                bearer_token=self._api_bearer_token,
+            )
+
+    def _refresh_recent_meetings(self) -> None:
+        try:
+            payload = self._api_json("/v1/recordings?limit=3")
+        except Exception:
+            return
+        items = [
+            item
+            for item in (payload.get("items") or [])
+            if isinstance(item, dict) and item.get("id")
+        ][:3]
+        signature = tuple(
+            (str(item["id"]), str(item.get("title") or "Meeting"))
+            for item in items
+        )
+        if signature == self._recent_signature:
+            return
+
+        self._recent_signature = signature
+        self._recent_item.clear()
+        if not items:
+            empty = rumps.MenuItem("Nessun meeting recente")
+            empty.set_callback(None)
+            self._recent_item.add(empty)
+            return
+
+        for item in items:
+            recording_id = str(item["id"])
+            title = str(item.get("title") or "Meeting").strip() or "Meeting"
+            menu_item = rumps.MenuItem(title[:64])
+
+            def open_recent(_, rid=recording_id):
+                self.window_manager.show()
+                self.window_manager.load_url(f"{self.app_url}/#meeting/{rid}")
+
+            menu_item.set_callback(open_recent)
+            self._recent_item.add(menu_item)
+
+    def _set_recording_actions(self, *, recording: bool, available: bool = True) -> None:
+        self._start_item.set_callback(self._start_recording if available and not recording else None)
+        self._add_note_item.set_callback(self._add_quick_note if available and recording else None)
+        self._screenshot_item.set_callback(self._take_screenshot if available and recording else None)
+        self._open_controls_item.set_callback(self._open_recording_controls if available and recording else None)
+        self._stop_item.set_callback(self._stop_recording if available and recording else None)
+        self._copy_transcript_item.set_callback(self._copy_last_transcription if available else None)
 
     # ── Server lifecycle ───────────────────────────────────────────────────
 
     def _wait_for_server(self) -> None:
-        """Block until the server reports healthy, then update the UI and load WebView."""
+        """Wait for local services, then expose user-facing ready state."""
         self._server_thread.ready.wait(timeout=60)
-        # Extra wait for uvicorn to bind the port
         import time
         for _ in range(20):
             if _check_server_health(self.app_port):
@@ -337,54 +463,46 @@ class ClosedRoomApp(rumps.App):
         from local_asr_server.window import run_on_main_thread
 
         def update_ui():
-            # Update status item and re-enable recording controls
-            self._update_status_item("Server attivo ✅")
-            self.menu["⏺ Avvia registrazione"].set_callback(self._start_recording)
-            self.menu["⏹ Ferma registrazione"].set_callback(None)
-            self.menu["📋 Copia ultima trascrizione"].set_callback(self._copy_last_transcription)
-
-            # Replace loading screen with the real application URL
+            self._update_status_item("Pronto")
+            self._set_recording_actions(recording=False, available=True)
             self.window_manager.load_url(self.app_url)
 
         run_on_main_thread(update_ui)
 
-
-    # ── Periodic status refresh ────────────────────────────────────────────
-
     @rumps.timer(5)
     def _refresh_status(self, _) -> None:
-        """Update the status menu item and icon every 5 seconds."""
+        """Project canonical recording/job state into the menu bar."""
         status = _get_server_status(self.app_port)
         if not status:
-            self._update_status_item("Server non raggiungibile ⚠️")
             self.title = ICON_ERROR
-            # Disable recording callbacks when server is down
-            self.menu["⏺ Avvia registrazione"].set_callback(None)
-            self.menu["⏹ Ferma registrazione"].set_callback(None)
-            self.menu["📋 Copia ultima trascrizione"].set_callback(None)
+            self._update_status_item("ClosedRoom non disponibile")
+            self._set_recording_actions(recording=False, available=False)
             return
 
         server_status = status.get("status", "idle")
+        self._refresh_recent_meetings()
+
         if server_status == "recording":
             self.title = ICON_RECORDING
-            self._update_status_item("Registrazione in corso… 🔴")
-            self.menu["⏺ Avvia registrazione"].set_callback(None)
-            self.menu["⏹ Ferma registrazione"].set_callback(self._stop_recording)
+            try:
+                active = self._api_json("/v1/recordings/active")
+            except Exception:
+                active = {}
+            title = str(active.get("title") or "Meeting").strip()
+            self._update_status_item(f"● {title}")
+            self._set_recording_actions(recording=True, available=True)
         elif server_status == "transcribing":
             self.title = ICON_TRANSCRIBING
-            self._update_status_item("Trascrizione in corso… ⏳")
-            self.menu["⏺ Avvia registrazione"].set_callback(None)
-            self.menu["⏹ Ferma registrazione"].set_callback(None)
+            self._update_status_item("Preparazione in corso…")
+            self._set_recording_actions(recording=False, available=False)
+            self._copy_transcript_item.set_callback(self._copy_last_transcription)
         else:
             self.title = ICON_IDLE
-            self._update_status_item("Server attivo ✅")
-            self.menu["⏺ Avvia registrazione"].set_callback(self._start_recording)
-            self.menu["⏹ Ferma registrazione"].set_callback(None)
-        
-        self.menu["📋 Copia ultima trascrizione"].set_callback(self._copy_last_transcription)
+            self._update_status_item("Pronto")
+            self._set_recording_actions(recording=False, available=True)
 
     def _update_status_item(self, text: str) -> None:
-        self.menu["Stato: in avvio…"].title = f"Stato: {text}"
+        self._meeting_status_item.title = text
 
     # ── Drag and drop support ──────────────────────────────────────────────
 
@@ -438,8 +556,8 @@ class ClosedRoomApp(rumps.App):
         def set_status_transcribing():
             self.title = ICON_TRANSCRIBING
             self._update_status_item("Trascrizione da drop… ⏳")
-            self.menu["⏺ Avvia registrazione"].set_callback(None)
-            self.menu["⏹ Ferma registrazione"].set_callback(None)
+            self._start_item.set_callback(None)
+            self._stop_item.set_callback(None)
 
         run_on_main_thread(set_status_transcribing)
 
@@ -488,14 +606,51 @@ class ClosedRoomApp(rumps.App):
     # ── Global keyboard shortcuts ──────────────────────────────────────────
 
     def _start_shortcuts_listener(self) -> None:
-        """Start the global keyboard shortcuts listener using pynput."""
+        """Register core meeting hotkeys natively, then optional legacy shortcuts."""
+        self._native_hotkeys = None
+        try:
+            from local_asr_server.macos_hotkeys import (
+                CarbonHotKeyManager,
+                DEFAULT_MEETING_HOTKEYS,
+                HotKeySpec,
+            )
+
+            toggle_key, toggle_mods, toggle_label = DEFAULT_MEETING_HOTKEYS["toggle_recording"]
+            note_key, note_mods, note_label = DEFAULT_MEETING_HOTKEYS["add_note"]
+            shot_key, shot_mods, shot_label = DEFAULT_MEETING_HOTKEYS["screenshot"]
+            manager = CarbonHotKeyManager([
+                HotKeySpec(1, toggle_key, toggle_mods, toggle_label, self._shortcut_toggle_recording),
+                HotKeySpec(2, note_key, note_mods, note_label, self._shortcut_add_note),
+                HotKeySpec(3, shot_key, shot_mods, shot_label, self._shortcut_take_screenshot),
+            ])
+            failures = manager.start()
+            self._native_hotkeys = manager
+            if failures:
+                unavailable = ", ".join(failures)
+                logger.warning("Some native meeting shortcuts are unavailable: %s", unavailable)
+                rumps.notification(
+                    "ClosedRoom",
+                    "Shortcut non disponibile",
+                    f"{unavailable}. Le azioni restano disponibili dalla menu bar.",
+                )
+        except Exception as exc:
+            logger.warning("Native meeting shortcuts unavailable: %s", exc)
+            rumps.notification(
+                "ClosedRoom",
+                "Shortcut globali non disponibili",
+                "Puoi continuare a usare le azioni dalla menu bar.",
+            )
+
+        # Clipboard transcription/paste are separate power tools. Paste still
+        # synthesizes keyboard input, so only these legacy actions retain the
+        # Accessibility-gated pynput path.
         from local_asr_server.macos_permissions import accessibility_status
 
         permission = accessibility_status()
         if not permission.get("trusted"):
-            logger.warning(
-                "Global shortcuts disabled: macOS Accessibility permission is required "
-                "(System Settings > Privacy & Security > Accessibility)."
+            logger.info(
+                "Legacy clipboard shortcuts disabled because Accessibility permission is not granted; "
+                "core meeting shortcuts use native registration instead."
             )
             return
 
@@ -504,32 +659,38 @@ class ClosedRoomApp(rumps.App):
                 from pynput import keyboard
 
                 shortcuts = {
-                    "<cmd>+<shift>+r": self._shortcut_toggle_recording,
                     "<cmd>+<shift>+t": self._shortcut_transcribe_clipboard,
                     "<cmd>+<shift>+v": self._shortcut_paste_last_transcription,
                 }
 
-                logger.info("Starting global keyboard shortcut listener...")
+                logger.info("Starting Accessibility-gated legacy clipboard shortcuts...")
                 with keyboard.GlobalHotKeys(shortcuts) as listener:
                     listener.join()
             except Exception as exc:
-                logger.error("Global shortcuts listener failed: %s", exc)
+                logger.error("Legacy clipboard shortcut listener failed: %s", exc)
 
-        import threading
         threading.Thread(target=run_listener, daemon=True).start()
 
     def _shortcut_toggle_recording(self) -> None:
-        """Toggle recording via global keyboard shortcut."""
+        """Toggle recording through the canonical recording controller."""
         status = _get_server_status(self.app_port)
         server_status = status.get("status", "idle")
         if server_status == "recording":
             self.window_manager.evaluate_js("RecordingController.stop()")
-            rumps.notification("ClosedRoom", "Registrazione ⏹", "Salvataggio registrazione in corso…")
+            rumps.notification("ClosedRoom", "Registrazione", "Salvataggio del meeting in corso…")
         elif server_status == "idle":
             self.window_manager.evaluate_js("RecordingController.start()")
-            rumps.notification("ClosedRoom", "Registrazione ⏺", "Avvio registrazione…")
+            rumps.notification("ClosedRoom", "Registrazione", "Avvio meeting…")
         else:
-            rumps.notification("ClosedRoom", "Registrazione", "Il server è occupato con una trascrizione.")
+            rumps.notification("ClosedRoom", "Meeting non disponibile", "ClosedRoom sta preparando il meeting.")
+
+    def _shortcut_add_note(self) -> None:
+        """Open the same timestamped quick-note flow exposed by the menu bar."""
+        self._add_quick_note(None)
+
+    def _shortcut_take_screenshot(self) -> None:
+        """Use the same selected-display screenshot action as the menu bar."""
+        self._take_screenshot(None)
 
     def _shortcut_transcribe_clipboard(self) -> None:
         """Transcribe an audio file copied to the clipboard."""
@@ -612,16 +773,110 @@ class ClosedRoomApp(rumps.App):
     def _start_recording(self, _) -> None:
         """Trigger recording start in WKWebView."""
         if not _check_server_health(self.app_port):
-            self._update_status_item("Server non raggiungibile ⚠️")
+            self._update_status_item("ClosedRoom non disponibile")
             return
         self.window_manager.evaluate_js("RecordingController.start()")
 
     def _stop_recording(self, _) -> None:
         """Trigger recording stop in WKWebView."""
         if not _check_server_health(self.app_port):
-            self._update_status_item("Server non raggiungibile ⚠️")
+            self._update_status_item("ClosedRoom non disponibile")
             return
         self.window_manager.evaluate_js("RecordingController.stop()")
+
+    def _active_recording_payload(self) -> dict:
+        try:
+            payload = self._api_json("/v1/recordings/active")
+        except Exception as exc:
+            logger.warning("Unable to resolve active recording for menu action: %s", exc)
+            return {}
+        return payload if payload.get("active") else {}
+
+    def _open_recording_controls(self, _) -> None:
+        if not self._active_recording_payload():
+            rumps.notification("ClosedRoom", "", "Nessun meeting in registrazione.")
+            return
+        self.window_manager.show_overlay()
+
+    def _add_quick_note(self, _) -> None:
+        active = self._active_recording_payload()
+        recording_id = active.get("recording_id")
+        if not recording_id:
+            rumps.notification("ClosedRoom", "", "Nessun meeting in registrazione.")
+            return
+        try:
+            anchor = self._api_json(
+                f"/v1/recordings/{recording_id}/notes/anchor",
+                method="POST",
+            )
+        except Exception as exc:
+            logger.warning("Unable to anchor menu-bar note: %s", exc)
+            rumps.notification("ClosedRoom", "", "Impossibile iniziare la nota in questo momento.")
+            return
+
+        timestamp = float(anchor.get("timestamp") or 0.0)
+        minute = int(timestamp // 60)
+        second = int(timestamp % 60)
+        title = str(active.get("title") or "Meeting")
+        response = rumps.Window(
+            message=f"{title} · {minute}:{second:02d}",
+            title="Aggiungi nota",
+            default_text="",
+            ok="Salva",
+            cancel="Annulla",
+            dimensions=(360, 72),
+        ).run()
+        if not response.clicked:
+            return
+        note_text = str(response.text or "").strip()
+        if not note_text:
+            return
+        try:
+            self._api_json(
+                f"/v1/recordings/{recording_id}/notes",
+                method="POST",
+                payload={
+                    "request_id": f"menubar-note-{recording_id}-{uuid.uuid4()}",
+                    "timestamp": timestamp,
+                    "text": note_text,
+                },
+            )
+            rumps.notification("ClosedRoom", f"Nota salvata · {minute}:{second:02d}", "")
+        except Exception as exc:
+            logger.warning("Unable to save menu-bar note: %s", exc)
+            rumps.alert(
+                "Nota non salvata",
+                "ClosedRoom non è riuscito a salvare la nota. Il meeting continua normalmente.",
+            )
+
+    def _take_screenshot(self, _) -> None:
+        active = self._active_recording_payload()
+        recording_id = active.get("recording_id")
+        if not recording_id:
+            rumps.notification("ClosedRoom", "", "Nessun meeting in registrazione.")
+            return
+        if active.get("capture_backend") != "native":
+            rumps.notification("ClosedRoom", "", "Gli screenshot richiedono la registrazione nativa.")
+            return
+        display_id = active.get("screenshot_display_id")
+        if display_id is None:
+            self.window_manager.show_overlay()
+            rumps.notification("ClosedRoom", "", "Scegli lo schermo nei controlli di registrazione.")
+            return
+        try:
+            self._api_json(
+                f"/v1/recordings/{recording_id}/screenshots",
+                method="POST",
+                payload={
+                    "request_id": f"menubar-shot-{recording_id}-{uuid.uuid4()}",
+                    "display_id": int(display_id),
+                },
+                timeout=8.0,
+            )
+            rumps.notification("ClosedRoom", "Screenshot salvato", "")
+        except Exception as exc:
+            logger.warning("Unable to capture menu-bar screenshot: %s", exc)
+            rumps.notification("ClosedRoom", "Screenshot non salvato", "Apri i controlli per riprovare.")
 
     def _copy_last_transcription(self, _) -> None:
         """Copy the latest transcription text to clipboard."""
@@ -661,6 +916,9 @@ class ClosedRoomApp(rumps.App):
     def _quit(self, _) -> None:
         """Gracefully stop the server, close the window, and quit."""
         self._status_timer.stop()
+        native_hotkeys = getattr(self, "_native_hotkeys", None)
+        if native_hotkeys is not None:
+            native_hotkeys.stop()
         self.window_manager.close()
         self._server_thread.stop()
         clear_api_runtime(self.app_port)

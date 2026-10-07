@@ -17,12 +17,13 @@ const evidenceRoot = path.resolve(
     || path.join(root, 'dist/evidence/browser-call-screenshot'),
 );
 const sourceRevision = process.env.E2E_SOURCE_REVISION || 'unknown';
-const counts = { active: 0, displays: 0, display_select: 0, screenshots_get: 0, screenshots_post: 0, stop: 0, open_meeting: 0, meeting: 0, visual_frames: 0, visual_intelligence: 0, analysis_jobs: 0, analysis_runs: 0 };
+const counts = { active: 0, displays: 0, display_select: 0, screenshots_get: 0, screenshots_post: 0, note_anchor: 0, notes_get: 0, notes_post: 0, notes_patch: 0, stop: 0, open_meeting: 0, meeting: 0, visual_frames: 0, visual_intelligence: 0, analysis_jobs: 0, analysis_runs: 0 };
 const checkpoints = [];
 const sseClients = new Set();
 let frameIndex = 0;
 let active = true;
 let screenshots = [];
+let notes = [];
 let selectedDisplayId = null;
 
 const recording = {
@@ -39,6 +40,7 @@ const recording = {
   stopped_at: '2026-10-01T18:00:40Z',
   duration_seconds: 40,
   screenshot_count: 1,
+  note_count: 0,
 };
 
 function publicScreenshot(sequence = 0) {
@@ -55,20 +57,47 @@ function publicScreenshot(sequence = 0) {
   };
 }
 
+function publicNote(text = 'Ask Marco for updated launch numbers before Friday.', revision = 1) {
+  return {
+    note_id: 'note-001',
+    recording_id: MEETING_ID,
+    request_id: 'browser-e2e-note-request',
+    sequence: 0,
+    timestamp: 14,
+    created_at: '2026-10-01T18:00:14Z',
+    updated_at: revision > 1 ? '2026-10-01T18:00:42Z' : '2026-10-01T18:00:14Z',
+    text,
+    revision,
+    source_kind: 'user_note',
+  };
+}
+
 function structuredRun() {
   const sourceRef = {
     source_type: 'screenshot', source_id: 'screenshot:' + SCREENSHOT_ID,
     screenshot_id: SCREENSHOT_ID, timestamp: 12, confidence: 0.91,
     evidence_basis: 'visual_inference', machine_interpreted: true,
   };
+  const note = notes[0] || publicNote();
+  const noteRef = {
+    source_type: 'user_note', source_id: 'user_note:' + note.note_id,
+    note_id: note.note_id, timestamp: note.timestamp, revision: note.revision,
+    evidence_basis: 'user_authored', user_marked: true, user_authored: true,
+  };
   const result = {
     schema: { id: 'closedroom.meeting_notes', version: 2 },
     generated: {
-      summary: { text: 'The roadmap image shows the launch milestone.', source_refs: [sourceRef], evidence_basis: 'visual' },
+      summary: {
+        text: 'The roadmap shows the launch milestone, and the user marked a follow-up with Marco.',
+        source_refs: [sourceRef, noteRef],
+        evidence_basis: 'mixed',
+      },
       actions: [], decisions: [], risks: [],
     },
     metrics: { visual_source_count: 1 },
-    source_snapshot: { visual_sources: [{
+    source_snapshot: { user_note_sources: [{
+      note_id: note.note_id, timestamp: note.timestamp, revision: note.revision,
+    }], visual_sources: [{
       screenshot_id: SCREENSHOT_ID, sha256: 'synthetic-sha', timestamp: 12,
       content_type: 'slide', title: 'Launch roadmap', confidence: 0.91,
     }] },
@@ -89,7 +118,7 @@ function meetingFixture() {
   const run = structuredRun();
   return {
     id: MEETING_ID,
-    recording: { ...recording, screenshot_count: screenshots.length },
+    recording: { ...recording, screenshot_count: screenshots.length, note_count: notes.length },
     transcription: {
       id: 'transcription-shot', timestamp: '2026-10-01T18:00:41Z', model: 'synthetic',
       language: 'en', audio_filename: 'synthetic.wav', recording_id: MEETING_ID,
@@ -153,7 +182,7 @@ function overlayPayload() {
     active: true, recording_id: MEETING_ID, title: recording.title,
     capture_backend: 'native', capture_mode: 'both', started_at: '2026-10-01T18:00:00Z',
     bytes_written: 4096, mic_db: -20, system_db: -18, warnings: [],
-    screenshot_count: screenshots.length, screenshot_display_id: selectedDisplayId,
+    screenshot_count: screenshots.length, note_count: notes.length, screenshot_display_id: selectedDisplayId,
   } : { active: false };
 }
 function sendOverlay(res) { res.write('data: ' + JSON.stringify(overlayPayload()) + '\n\n'); }
@@ -198,6 +227,41 @@ function fixtureServer(port) {
       req.on('close', () => sseClients.delete(res));
       return;
     }
+    if (pathname === '/v1/recordings/' + MEETING_ID + '/notes/anchor' && req.method === 'POST') {
+      counts.note_anchor += 1;
+      return json(res, 200, {
+        recording_id: MEETING_ID,
+        timestamp: 14,
+        clock_source: 'native_recording_uptime',
+      });
+    }
+    if (pathname === '/v1/recordings/' + MEETING_ID + '/notes' && req.method === 'GET') {
+      counts.notes_get += 1;
+      return json(res, 200, { items: notes, total: notes.length });
+    }
+    if (pathname === '/v1/recordings/' + MEETING_ID + '/notes' && req.method === 'POST') {
+      counts.notes_post += 1;
+      const parsed = JSON.parse(await requestBody(req) || '{}');
+      if (Number(parsed.timestamp) !== 14) return json(res, 409, { detail: 'note_anchor_changed' });
+      if (!String(parsed.text || '').trim()) return json(res, 409, { detail: 'note_text_empty' });
+      if (notes.length) return json(res, 201, notes[0]);
+      const saved = publicNote(String(parsed.text).trim(), 1);
+      notes = [saved];
+      for (const client of sseClients) sendOverlay(client);
+      return json(res, 201, saved);
+    }
+    if (pathname === '/v1/recordings/' + MEETING_ID + '/notes/note-001' && req.method === 'PATCH') {
+      counts.notes_patch += 1;
+      const parsed = JSON.parse(await requestBody(req) || '{}');
+      const current = notes[0];
+      if (!current) return json(res, 404, { detail: 'Note not found' });
+      if (Number(parsed.revision) !== current.revision) {
+        return json(res, 409, { detail: 'Note revision conflict' });
+      }
+      notes = [publicNote(String(parsed.text || '').trim(), current.revision + 1)];
+      return json(res, 200, notes[0]);
+    }
+
     if (pathname === '/v1/recordings/' + MEETING_ID + '/screenshots' && req.method === 'POST') {
       counts.screenshots_post += 1;
       const parsed = JSON.parse(await requestBody(req) || '{}');
@@ -217,7 +281,7 @@ function fixtureServer(port) {
       active = false;
       for (const client of sseClients) { sendOverlay(client); client.end(); }
       sseClients.clear();
-      return json(res, 202, { recording: { ...recording, screenshot_count: screenshots.length } });
+      return json(res, 202, { recording: { ...recording, screenshot_count: screenshots.length, note_count: notes.length } });
     }
     if (pathname === '/v1/system/window/main/meeting/' + MEETING_ID && req.method === 'POST') {
       counts.open_meeting += 1;
@@ -565,14 +629,44 @@ try {
   await waitText(browser, ['Screenshots 2'], 5000, true);
   await checkpoint(browser, '03b-second-screenshot-persisted');
 
+  const noteOpened = await browser.execute(`
+    const button = document.querySelector('button[data-note-action="true"]');
+    if (!button || button.disabled) return false; button.click(); return true;
+  `);
+  if (!noteOpened) throw new Error('quick-note action unavailable');
+  await waitSelector(browser, '[data-note-composer="true"] textarea', 5000, true);
+  if (counts.note_anchor !== 1) throw new Error('note anchor was not captured exactly once: ' + counts.note_anchor);
+  const noteEntered = await browser.execute(`
+    const textarea = document.querySelector('[data-note-composer="true"] textarea');
+    if (!textarea) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    if (!setter) return false;
+    setter.call(textarea, 'Ask Marco for updated launch numbers before Friday.');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', code: 'Enter', bubbles: true, cancelable: true,
+    }));
+    return true;
+  `);
+  if (!noteEntered) throw new Error('quick-note text entry failed');
+  const noteDeadline = Date.now() + 8000;
+  while (counts.notes_post < 1 && Date.now() < noteDeadline) await sleep(50);
+  if (counts.notes_post !== 1 || notes.length !== 1) {
+    throw new Error('quick note was not persisted: ' + JSON.stringify(counts));
+  }
+  if (notes[0].timestamp !== 14) throw new Error('quick note did not preserve composer-open anchor');
+  await waitText(browser, ['Notes 1', 'Saved'], 5000, true);
+  await checkpoint(browser, '03c-user-note-persisted');
+
   await browser.clickCss('button[aria-label="Stop recording"]');
   await waitHash(browser, '#meeting/' + MEETING_ID, 10000);
   await waitText(browser, ['Screenshot evidence review'], 30000, true);
   if (counts.stop !== 1 || counts.open_meeting !== 1) throw new Error('stop/open counts unexpected: ' + JSON.stringify(counts));
   await waitSelector(browser, '[data-key-moments="true"]', 10000, true);
   await waitText(browser, ['Alex reviews the launch roadmap and validation plan.'], 5000, true);
-  await waitText(browser, ['The roadmap image shows the launch milestone.'], 10000, true);
+  await waitText(browser, ['The roadmap shows the launch milestone, and the user marked a follow-up with Marco.'], 10000, true);
   await waitText(browser, ['Screenshot · 00:12'], 10000);
+  await waitText(browser, ['Your note · 00:14'], 10000);
   await checkpoint(browser, '04-meeting-notes-cited');
 
   // Visual enrichment is disclosure-driven. The saved Meeting may already open
@@ -635,6 +729,41 @@ try {
 
   await browser.clickCss('#meeting-tab-transcript');
   await waitText(browser, ['Alex reviews the launch roadmap and validation plan.'], 5000, true);
+  await waitSelector(browser, '[data-user-note-id="note-001"]', 5000, true);
+  await waitText(browser, ['Ask Marco for updated launch numbers before Friday.'], 5000);
+  const noteAnchored = await browser.execute(`
+    const marker = document.querySelector('[data-user-note-id="note-001"]');
+    if (!marker) return false;
+    const segment = marker.closest('[class*="border-l-4"]');
+    return Boolean(segment && segment.innerText.includes('Alex reviews the launch roadmap'));
+  `);
+  if (!noteAnchored) throw new Error('user note marker was not anchored inside the transcript turn');
+  const editNoteOpened = await browser.execute(`
+    const marker = document.querySelector('[data-user-note-id="note-001"]');
+    const button = marker?.querySelector('button[aria-label="Edit note"]');
+    if (!button || button.disabled) return false; button.click(); return true;
+  `);
+  if (!editNoteOpened) throw new Error('user note edit action unavailable');
+  const noteEdited = await browser.execute(`
+    const marker = document.querySelector('[data-user-note-id="note-001"]');
+    const textarea = marker?.querySelector('textarea');
+    if (!textarea) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    if (!setter) return false;
+    setter.call(textarea, 'Ask Marco for updated launch numbers before Thursday.');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    const save = Array.from(marker.querySelectorAll('button')).find((node) => (node.innerText || '').trim() === 'Save');
+    if (!save || save.disabled) return false; save.click(); return true;
+  `);
+  if (!noteEdited) throw new Error('user note edit could not be submitted');
+  const editDeadline = Date.now() + 6000;
+  while (counts.notes_patch < 1 && Date.now() < editDeadline) await sleep(50);
+  if (counts.notes_patch !== 1 || notes[0]?.revision !== 2 || notes[0]?.timestamp !== 14) {
+    throw new Error('user note edit did not preserve revision/timestamp contract: ' + JSON.stringify({ counts, notes }));
+  }
+  await waitText(browser, ['Ask Marco for updated launch numbers before Thursday.'], 5000, true);
+  await checkpoint(browser, '06a-user-note-anchored-and-edited');
+
   await waitSelector(browser, 'button[data-screenshot-id="shot-001"]', 5000, true);
   const anchored = await browser.execute(`
     const marker = document.querySelector('button[data-screenshot-id="shot-001"]');
@@ -707,7 +836,7 @@ const manifest = {
   privacy_boundary: 'Synthetic meeting, transcript, notes and screenshot content only; evidence is restricted to the headless Chrome viewport.',
   residual_fidelity_gaps: [
     'does not prove real ScreenCaptureKit pixels, display withdrawal, TCC prompts or ClosedRoom overlay exclusion',
-    'does not exercise the packaged WKWebView process boundary or global shortcut delivery from another foreground app',
+    'does not exercise the packaged WKWebView process boundary, native menu-bar quick-note panel or global shortcut delivery from another foreground app',
     'does not prove physical audio devices, production local-VLM quality, latency or Metal resource pressure',
   ],
   error,
