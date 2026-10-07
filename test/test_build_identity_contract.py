@@ -43,12 +43,21 @@ class BuildIdentityContractTests(unittest.TestCase):
         )
 
         self.assertIn('DMG_BASENAME="${APP_NAME}-${APP_VERSION}"', build)
-        self.assertIn('STAGING_APP="$ROOT/dist/${APP_NAME}.app"', artifact)
+        self.assertIn(
+            'APP_BUNDLE_NAME="${CLOSEDROOM_APP_BUNDLE_NAME:-${APP_NAME}.app}"',
+            artifact,
+        )
+        self.assertIn('STAGING_APP="$ROOT/dist/$APP_BUNDLE_NAME"', artifact)
         self.assertIn(
             'FINAL_BASENAME="${APP_NAME}-${APP_VERSION}-${BUILD_ID}-${SOURCE_REVISION}"',
             artifact,
         )
-        self.assertIn('staging_app = root / "dist" / f"{app_name}.app"', production)
+        self.assertIn(
+            'app_bundle_name = os.getenv("CLOSEDROOM_APP_BUNDLE_NAME", f"{app_name}.app")',
+            production,
+        )
+        self.assertIn('staging_app = root / "dist" / app_bundle_name', production)
+        self.assertIn('env["CLOSEDROOM_APP_DISPLAY_NAME"] = app_name', production)
         self.assertIn(
             'final_basename = f"{app_name}-{version}-{build_id}-{revision[:12]}"',
             production,
