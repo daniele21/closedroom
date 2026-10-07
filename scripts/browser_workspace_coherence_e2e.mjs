@@ -477,7 +477,8 @@ try {
   if (themeBefore === themeAfter) throw new Error(`theme utility did not change theme: ${themeBefore}`);
   await checkpoint(browser, '04-theme-continuity');
 
-  await browser.click('.workspace-settings-trigger');
+  // Theme toggling intentionally keeps the utility menu open, so continue
+  // within the same menu instead of toggling it closed.
   await waitUntil(browser, 'workspace utility menu for settings', "return Boolean(document.querySelector('#app-settings-menu'));", 5000);
   await browser.clickMenuItemContaining(['Impostazioni', 'Settings']);
   await waitUntil(
