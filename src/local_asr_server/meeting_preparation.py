@@ -711,7 +711,9 @@ class MeetingPreparationManager:
         user_notes: list[dict[str, Any]] | None = None,
     ) -> str:
         screenshots = screenshots if screenshots is not None else self.services.recordings.list_screenshots(recording_id)
-        user_notes = user_notes if user_notes is not None else self.services.recordings.list_notes(recording_id)
+        if user_notes is None:
+            list_notes = getattr(self.services.recordings, "list_notes", None)
+            user_notes = list_notes(recording_id) if callable(list_notes) else []
         screenshot_material = [
             {
                 "screenshot_id": item.get("screenshot_id"),
