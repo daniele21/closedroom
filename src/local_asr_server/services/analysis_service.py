@@ -215,8 +215,13 @@ class AnalysisService:
             and provider_name in {"nemotron_local", "voxtral_local", "mock"}
         ):
             visual_sources = self._structured_visual_sources(body.recording_id)
-            if visual_sources:
-                transcription = {**transcription, "visual_sources": visual_sources}
+            user_note_sources = self._structured_user_note_sources(body.recording_id)
+            if visual_sources or user_note_sources:
+                transcription = {
+                    **transcription,
+                    "visual_sources": visual_sources,
+                    "user_note_sources": user_note_sources,
+                }
         try:
             input_hash = (
                 self._structured_input_hash(transcription or {"text": text_to_analyze})
@@ -333,10 +338,31 @@ class AnalysisService:
         }
         return [ordered[index] for index in sorted(selected_indices)]
 
+    def _structured_user_note_sources(self, recording_id: str) -> list[dict[str, Any]]:
+        """Project user-authored meeting notes into structured-note text evidence.
+
+        Notes stay local here just like implicit visual enrichment: cloud text
+        providers never receive them through this path.
+        """
+        try:
+            notes = self.services.recordings.list_notes(recording_id)
+        except (OSError, RecordingError):
+            return []
+        return [
+            {
+                "note_id": note.get("note_id"),
+                "timestamp": float(note.get("timestamp") or 0.0),
+                "text": str(note.get("text") or ""),
+                "revision": int(note.get("revision") or 1),
+            }
+            for note in notes
+            if note.get("note_id") and str(note.get("text") or "").strip()
+        ]
+
     @staticmethod
     def _structured_source_snapshot(transcription: dict[str, Any]) -> dict[str, Any]:
         return {
-            "version": 1,
+            "version": 2,
             "transcription_id": transcription.get("id"),
             "transcript_segment_count": len(transcription.get("segments") or []),
             "visual_sources": [
@@ -347,6 +373,18 @@ class AnalysisService:
                     "generation_id": source.get("generation_id"),
                 }
                 for source in transcription.get("visual_sources") or []
+                if isinstance(source, dict)
+            ],
+            "user_note_sources": [
+                {
+                    "note_id": source.get("note_id"),
+                    "timestamp": source.get("timestamp"),
+                    "revision": source.get("revision"),
+                    "text_sha256": hashlib.sha256(
+                        str(source.get("text") or "").encode("utf-8")
+                    ).hexdigest(),
+                }
+                for source in transcription.get("user_note_sources") or []
                 if isinstance(source, dict)
             ],
         }
@@ -399,10 +437,21 @@ class AnalysisService:
                 "confidence": source.get("confidence"),
                 "generation_id": source.get("generation_id"),
             })
+        user_note_sources = []
+        for source in transcription.get("user_note_sources") or []:
+            if not isinstance(source, dict):
+                continue
+            user_note_sources.append({
+                "note_id": source.get("note_id"),
+                "timestamp": source.get("timestamp"),
+                "text": source.get("text") or "",
+                "revision": source.get("revision"),
+            })
         payload = {
             "text": transcription.get("text") or "",
             "segments": segments,
             "visual_sources": visual_sources,
+            "user_note_sources": user_note_sources,
         }
         serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return cls._hash_text(serialized)
