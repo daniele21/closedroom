@@ -168,6 +168,20 @@ def get_static_dir() -> Path:
     return Path(__file__).parent / "static"
 
 
+def get_brand_assets_dir() -> Path:
+    """Return the canonical ClosedRoom brand-assets directory in dev or bundle mode."""
+    if is_bundled():
+        return get_bundle_dir() / "brand"
+    return Path(__file__).parent.parent.parent / "design" / "assets" / "brand"
+
+
+def get_brand_asset_path(filename: str) -> Path:
+    """Resolve one canonical brand asset without allowing path traversal."""
+    if Path(filename).name != filename:
+        raise ValueError(f"brand asset must be a filename, got: {filename!r}")
+    return get_brand_assets_dir() / filename
+
+
 # ── External binary helpers ───────────────────────────────────────────────────
 
 def get_ffmpeg_path() -> str:
