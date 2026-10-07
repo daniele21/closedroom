@@ -27,6 +27,7 @@ AUDIO_HELPER   = CACHE_DIR / "audio-helper" / "audio-helper"
 NATIVE_CAPTURE_HELPER = CACHE_DIR / "native-capture-helper" / "native-capture-helper"
 SPEAKER_DIARIZATION_HELPER = CACHE_DIR / "speaker-diarization-helper" / "speaker-diarization-helper"
 BUILD_ASSETS   = PROJECT_ROOT / "build_assets"                      # created by build.sh
+MENU_BAR_BRAND_MARK = PROJECT_ROOT / "design" / "assets" / "brand" / "closedroom-microphone-mark.png"
 APP_NAME       = os.environ.get("CLOSEDROOM_APP_NAME", "ClosedRoom")
 APP_BUNDLE_NAME = os.environ.get("CLOSEDROOM_APP_BUNDLE_NAME", f"{APP_NAME}.app")
 APP_DISPLAY_NAME = os.environ.get("CLOSEDROOM_APP_DISPLAY_NAME", APP_NAME)
@@ -92,6 +93,7 @@ if lib_dir.exists():
 
 extra_datas = [
     (str(STATIC_DIR), "static"),
+    (str(MENU_BAR_BRAND_MARK), "brand"),
 ]
 
 # local-llm-server owns runtime registry/config data. mlx-vlm 0.6.4 package
