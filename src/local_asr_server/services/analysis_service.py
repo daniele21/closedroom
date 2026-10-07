@@ -345,7 +345,10 @@ class AnalysisService:
         providers never receive them through this path.
         """
         try:
-            notes = self.services.recordings.list_notes(recording_id)
+            list_notes = getattr(self.services.recordings, "list_notes", None)
+            if not callable(list_notes):
+                return []
+            notes = list_notes(recording_id)
         except (OSError, RecordingError):
             return []
         return [
