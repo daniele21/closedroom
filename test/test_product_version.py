@@ -26,15 +26,18 @@ class ProductVersionTests(unittest.TestCase):
         production = (ROOT / "scripts" / "build_production_artifact.py").read_text(
             encoding="utf-8"
         )
+        create_dmg = (ROOT / "create_dmg.sh").read_text(encoding="utf-8")
 
         self.assertIn('scripts/product_version.py', build)
         self.assertIn('from product_version import read_product_version', spec_source)
         self.assertIn('scripts/product_version.py', artifact)
         self.assertIn('from product_version import read_product_version', production)
+        self.assertIn('scripts/product_version.py', create_dmg)
 
-        for source in (build, spec_source, artifact, production):
+        for source in (build, spec_source, artifact, production, create_dmg):
             self.assertNotIn('["project"]["version"]', source)
             self.assertNotIn("['project']['version']", source)
+            self.assertNotIn("pyproject.toml", source)
 
     def test_tag_round_trip_uses_repository_version(self) -> None:
         version = product_version.read_product_version(ROOT)
