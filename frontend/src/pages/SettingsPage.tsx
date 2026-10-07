@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Bug, ChevronDown, RefreshCw, SlidersHorizontal } from 'lucide-react';
-import { AccessibilityStatus, ApiClient, Settings } from '../api/apiClient';
+import { Bug, ChevronDown, PanelTop, RefreshCw, SlidersHorizontal } from 'lucide-react';
+import { AccessibilityStatus, ApiClient, MenuBarStatus, Settings } from '../api/apiClient';
 import {
   ASR_PROVIDERS,
   DEFAULTS,
@@ -82,11 +82,12 @@ export default function SettingsPage() {
   const [speakerDiarizationEnabled, setSpeakerDiarizationEnabled] = useState(false);
   const [visualIntelligenceEnabled, setVisualIntelligenceEnabled] = useState(false);
   const [accessibility, setAccessibility] = useState<AccessibilityStatus | null>(null);
+  const [menuBarStatus, setMenuBarStatus] = useState<MenuBarStatus | null>(null);
+  const [menuBarAction, setMenuBarAction] = useState(false);
   const [sysInfo, setSysInfo] = useState({
     server: '127.0.0.1:1236',
     activeModel: '',
     version: '1.0.0',
-    menubar: '',
   });
 
   const refreshLlmService = async () => {
@@ -94,6 +95,44 @@ export default function SettingsPage() {
       setLlmService(await ApiClient.getLlmService());
     } catch (err: any) {
       setLlmService({ name: 'llm', status: 'unknown', error: err.message });
+    }
+  };
+
+  const refreshMenuBarStatus = async () => {
+    try {
+      setMenuBarStatus(await ApiClient.menuBarStatus());
+    } catch (err: any) {
+      setMenuBarStatus({
+        available: false,
+        visible: false,
+        icon_loaded: false,
+        state: 'unavailable',
+        icon_asset: 'design/assets/brand/closedroom-microphone-mark.png',
+        repair_count: 0,
+        last_error: err?.message || 'menu_bar_status_unavailable',
+      });
+    }
+  };
+
+  const handleRefreshMenuBar = async () => {
+    setMenuBarAction(true);
+    try {
+      const status = await ApiClient.refreshMenuBar();
+      setMenuBarStatus(status);
+      showToast(
+        status.visible && status.icon_loaded
+          ? (lang === 'it' ? 'Icona della menu bar ripristinata.' : 'Menu bar icon restored.')
+          : (lang === 'it' ? 'ClosedRoom ha richiesto di mostrare di nuovo l’icona.' : 'ClosedRoom requested the menu bar icon again.'),
+        status.visible && status.icon_loaded ? 'success' : 'info',
+      );
+    } catch (err: any) {
+      showToast(
+        err?.message || (lang === 'it' ? 'Impossibile ripristinare la menu bar.' : 'Unable to restore the menu bar.'),
+        'error',
+      );
+      await refreshMenuBarStatus();
+    } finally {
+      setMenuBarAction(false);
     }
   };
 
@@ -141,6 +180,7 @@ export default function SettingsPage() {
       setVisualIntelligenceEnabled(Boolean(settings.visual_intelligence_enabled));
 
       void refreshLlmService();
+      void refreshMenuBarStatus();
       ApiClient.accessibilityStatus()
         .then(setAccessibility)
         .catch((err) => setAccessibility({
@@ -155,7 +195,6 @@ export default function SettingsPage() {
         server: '127.0.0.1:1236',
         activeModel: settings.default_model || t('common.notAvailable'),
         version: '1.0.0',
-        menubar: t('settings.sysActive'),
       });
     } catch (err: any) {
       showToast(err.message || (lang === 'it' ? 'Errore nel caricamento delle impostazioni' : 'Failed to load settings'), 'error');
@@ -354,6 +393,89 @@ export default function SettingsPage() {
               <strong className="mt-1 block text-sm text-text-primary">{analysisLocation}</strong>
             </div>
           </div>
+        </Card>
+
+        <Card className="flex flex-col gap-4" data-settings-menubar="true">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-border-subtle bg-bg-surface/40">
+                <img
+                  src="/brand/closedroom-microphone-mark.png"
+                  alt=""
+                  className="h-7 w-7 object-contain"
+                  aria-hidden="true"
+                />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <PanelTop className="h-4 w-4 text-text-muted" aria-hidden="true" />
+                  <h3 className="text-sm font-semibold text-text-primary">Menu bar</h3>
+                </div>
+                <p className="mt-1 text-xs text-text-muted">
+                  {lang === 'it'
+                    ? 'Questa è l’icona che ClosedRoom prova a mantenere visibile nella barra dei menu.'
+                    : 'This is the icon ClosedRoom tries to keep visible in the menu bar.'}
+                </p>
+              </div>
+            </div>
+            <Badge variant={menuBarStatus?.visible && menuBarStatus?.icon_loaded ? 'success' : 'warning'}>
+              {menuBarStatus?.visible && menuBarStatus?.icon_loaded
+                ? (lang === 'it' ? 'Attiva' : 'Active')
+                : (lang === 'it' ? 'Da verificare' : 'Check needed')}
+            </Badge>
+          </div>
+
+          <div className="rounded-xl border border-border-subtle bg-bg-surface/30 p-4">
+            <p className="text-sm text-text-secondary">
+              {menuBarStatus?.visible && menuBarStatus?.icon_loaded
+                ? (lang === 'it'
+                    ? 'ClosedRoom ha creato correttamente l’item della menu bar. Se non lo vedi, è probabilmente nascosto da macOS o da un menu-bar manager.'
+                    : 'ClosedRoom created the menu bar item correctly. If you still cannot see it, macOS or a menu bar manager is probably hiding it.')
+                : (lang === 'it'
+                    ? 'ClosedRoom non riesce ancora a confermare l’item della menu bar. Prova a ripristinarlo.'
+                    : 'ClosedRoom cannot confirm the menu bar item yet. Try restoring it.')}
+            </p>
+            {menuBarStatus?.last_error && menuBarStatus.last_error !== 'menubar_controller_unavailable' && (
+              <p className="mt-2 break-all font-mono text-[11px] text-danger">{menuBarStatus.last_error}</p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleRefreshMenuBar}
+                disabled={menuBarAction || menuBarStatus?.available === false}
+              >
+                <RefreshCw className={`mr-2 h-4 w-4 ${menuBarAction ? 'animate-spin' : ''}`} aria-hidden="true" />
+                {lang === 'it' ? 'Mostra di nuovo' : 'Show again'}
+              </Button>
+              <Button type="button" variant="ghost" onClick={refreshMenuBarStatus}>
+                {lang === 'it' ? 'Ricontrolla' : 'Check again'}
+              </Button>
+            </div>
+          </div>
+
+          <details className="group rounded-xl border border-border-subtle bg-bg-surface/20 px-4 py-3">
+            <summary className="cursor-pointer text-sm font-medium text-text-primary">
+              {lang === 'it' ? 'Non la vedi ancora?' : 'Still cannot see it?'}
+            </summary>
+            <div className="mt-3 space-y-2 text-xs leading-5 text-text-secondary">
+              <p>
+                {lang === 'it'
+                  ? '• Sui MacBook con notch, macOS può nascondere gli item quando la barra è piena: chiudi temporaneamente qualche altra icona e controlla di nuovo.'
+                  : '• On MacBooks with a notch, macOS can hide items when the bar is crowded: temporarily close another menu bar item and check again.'}
+              </p>
+              <p>
+                {lang === 'it'
+                  ? '• Se usi Bartender, Ice, Hidden Bar o app simili, imposta ClosedRoom tra gli elementi sempre visibili.'
+                  : '• If you use Bartender, Ice, Hidden Bar, or a similar app, set ClosedRoom to always visible there.'}
+              </p>
+              <p>
+                {lang === 'it'
+                  ? '• ClosedRoom deve rimanere in esecuzione. Se lo stato sopra è “Attiva” ma l’icona non appare, chiudi e riapri ClosedRoom dopo aver liberato spazio nella barra.'
+                  : '• ClosedRoom must keep running. If the status above says Active but the icon is still missing, quit and reopen ClosedRoom after freeing menu bar space.'}
+              </p>
+            </div>
+          </details>
         </Card>
 
         <Card className="overflow-hidden p-0">
@@ -655,7 +777,11 @@ export default function SettingsPage() {
                 <span className="text-text-muted">{t('settings.sysVersion')}</span>
                 <span className="font-mono text-text-primary">{sysInfo.version}</span>
                 <span className="text-text-muted">{t('settings.sysMacosMenu')}</span>
-                <span className="font-medium text-success">{sysInfo.menubar}</span>
+                <span className={`font-medium ${menuBarStatus?.visible && menuBarStatus?.icon_loaded ? 'text-success' : 'text-warning'}`}>
+                  {menuBarStatus?.visible && menuBarStatus?.icon_loaded
+                    ? (lang === 'it' ? 'Creata e visibile per macOS' : 'Created and visible to macOS')
+                    : (lang === 'it' ? 'Da verificare' : 'Needs checking')}
+                </span>
               </section>
             </div>
           )}
