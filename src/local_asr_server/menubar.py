@@ -181,11 +181,14 @@ def _request_api_json(
     method: str = "GET",
     payload: dict | None = None,
     timeout: float = 2.0,
+    bearer_token: str | None = None,
 ) -> dict:
     """Call ClosedRoom's authenticated-loopback-equivalent local API from the app shell."""
     import urllib.request
     data = None
     headers = {}
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -363,9 +366,47 @@ class ClosedRoomApp(rumps.App):
 
         self._set_recording_actions(recording=False, available=False)
 
+    def _refresh_api_session(self) -> None:
+        session = _request_api_json(self.app_port, "/v1/session")
+        self._api_bearer_token = session.get("token")
+
+    def _api_json(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        payload: dict | None = None,
+        timeout: float = 2.0,
+    ) -> dict:
+        import urllib.error
+
+        if not hasattr(self, "_api_bearer_token"):
+            self._refresh_api_session()
+        try:
+            return _request_api_json(
+                self.app_port,
+                path,
+                method=method,
+                payload=payload,
+                timeout=timeout,
+                bearer_token=self._api_bearer_token,
+            )
+        except urllib.error.HTTPError as exc:
+            if exc.code != 401:
+                raise
+            self._refresh_api_session()
+            return _request_api_json(
+                self.app_port,
+                path,
+                method=method,
+                payload=payload,
+                timeout=timeout,
+                bearer_token=self._api_bearer_token,
+            )
+
     def _refresh_recent_meetings(self) -> None:
         try:
-            payload = _request_api_json(self.app_port, "/v1/recordings?limit=3")
+            payload = self._api_json("/v1/recordings?limit=3")
         except Exception:
             return
         items = [
@@ -444,7 +485,7 @@ class ClosedRoomApp(rumps.App):
         if server_status == "recording":
             self.title = ICON_RECORDING
             try:
-                active = _request_api_json(self.app_port, "/v1/recordings/active")
+                active = self._api_json("/v1/recordings/active")
             except Exception:
                 active = {}
             title = str(active.get("title") or "Meeting").strip()
@@ -764,8 +805,7 @@ class ClosedRoomApp(rumps.App):
             rumps.notification("ClosedRoom", "", "Nessun meeting in registrazione.")
             return
         try:
-            anchor = _request_api_json(
-                self.app_port,
+            anchor = self._api_json(
                 f"/v1/recordings/{recording_id}/notes/anchor",
                 method="POST",
             )
@@ -792,8 +832,7 @@ class ClosedRoomApp(rumps.App):
         if not note_text:
             return
         try:
-            _request_api_json(
-                self.app_port,
+            self._api_json(
                 f"/v1/recordings/{recording_id}/notes",
                 method="POST",
                 payload={
@@ -825,8 +864,7 @@ class ClosedRoomApp(rumps.App):
             rumps.notification("ClosedRoom", "", "Scegli lo schermo nei controlli di registrazione.")
             return
         try:
-            _request_api_json(
-                self.app_port,
+            self._api_json(
                 f"/v1/recordings/{recording_id}/screenshots",
                 method="POST",
                 payload={
