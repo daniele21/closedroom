@@ -574,11 +574,9 @@ class ClosedRoomWindowManager:
         )
         drag_handle.window_manager = self
         drag_handle.setAutoresizingMask_(NSViewMinYMargin)
-        self.overlay_container.addSubview_positioned_relativeTo_(
-            drag_handle,
-            1,  # NSWindowAbove
-            self.overlay_webview,
-        )
+        # Added after the WKWebView so the drag target owns pointer events
+        # only inside its bounded header region.
+        self.overlay_container.addSubview_(drag_handle)
         self.overlay_drag_handle = drag_handle
         self._install_global_key_monitor()
 
