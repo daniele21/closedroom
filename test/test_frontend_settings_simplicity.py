@@ -36,6 +36,17 @@ class SettingsSimplicityContractTests(unittest.TestCase):
         self.assertGreater(start_runtime, diagnostics_start)
         self.assertGreater(model_path, diagnostics_start)
 
+    def test_menu_bar_recovery_is_visible_without_developer_mode(self) -> None:
+        menubar_start = self.source.index('data-settings-menubar="true"')
+        diagnostics_start = self.source.index('aria-controls="settings-developer-diagnostics"')
+
+        self.assertLess(menubar_start, diagnostics_start)
+        self.assertIn('/brand/closedroom-microphone-mark.png', self.source)
+        self.assertIn("handleRefreshMenuBar", self.source)
+        self.assertIn("Mostra di nuovo", self.source)
+        self.assertIn("Still cannot see it?", self.source)
+        self.assertIn("Bartender, Ice, Hidden Bar", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()
