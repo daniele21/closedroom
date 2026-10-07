@@ -61,6 +61,8 @@ def health(request: Request) -> dict:
             "GET /v1/capture/diagnostics",
             "GET /v1/capture/displays",
             "GET /v1/system/accessibility",
+            "GET /v1/system/menubar",
+            "POST /v1/system/menubar/refresh",
             "POST /v1/recordings/{id}/capture/start",
             "GET /v1/recordings/{id}/capture/events",
             "POST /v1/recordings/{id}/capture/stop",
@@ -187,6 +189,34 @@ def capture_diagnostics(request: Request):
 @router.get("/v1/system/accessibility")
 def system_accessibility():
     return accessibility_status()
+
+
+def _menubar_controller(request: Request):
+    return getattr(request.app.state, "menubar_controller", None)
+
+
+@router.get("/v1/system/menubar")
+def system_menubar_status(request: Request):
+    controller = _menubar_controller(request)
+    if controller is None:
+        return {
+            "available": False,
+            "visible": False,
+            "icon_loaded": False,
+            "state": "unavailable",
+            "icon_asset": "design/assets/brand/closedroom-microphone-mark.png",
+            "repair_count": 0,
+            "last_error": "menubar_controller_unavailable",
+        }
+    return controller.menu_bar_status()
+
+
+@router.post("/v1/system/menubar/refresh")
+def refresh_system_menubar(request: Request):
+    controller = _menubar_controller(request)
+    if controller is None:
+        raise HTTPException(status_code=409, detail="Menu bar controller is unavailable in this runtime")
+    return controller.repair_menu_bar()
 
 
 @router.get("/v1/capture/windows")
