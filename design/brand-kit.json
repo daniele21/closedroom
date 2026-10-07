@@ -10,7 +10,8 @@
     "favicon": "frontend/public/logo-light.png",
     "brand_lockup_stacked": "design/assets/brand/closedroom-primary-stacked-lockup.png",
     "brand_lockup_horizontal": "design/assets/brand/closedroom-primary-horizontal-lockup.png",
-    "brand_illustration_mark": "design/assets/brand/closedroom-microphone-mark.png"
+    "brand_illustration_mark": "design/assets/brand/closedroom-microphone-mark.png",
+    "menu_bar_icon": "design/assets/brand/closedroom-microphone-mark.png"
   },
   "tokens": {
     "colors": {
@@ -32,7 +33,8 @@
     "iconography": "Lucide React icons with semantic labels; preserve platform-appropriate clarity over decorative icon density",
     "motion": "restrained operational motion for feedback, recording state, continuity and progress; existing spring timing in frontend/src/index.css is a reference",
     "imagery": "functional-first product/architecture/reference imagery; decorative graphics must not carry required meaning",
-    "voice_microcopy": "concise, calm and operational; expose user outcome and recovery rather than internal service jargon"
+    "voice_microcopy": "concise, calm and operational; expose user outcome and recovery rather than internal service jargon",
+    "menu_bar_icon_treatment": "Use the canonical transparent microphone mark as a macOS template image; do not substitute SF Symbols, emoji, backgrounds or parallel icon assets."
   },
   "motion_tokens": {
     "durations": {
