@@ -23,7 +23,7 @@ from local_asr_server.visual_intelligence.service import visual_processing_ident
 
 MEETING_PREPARATION_JOB_TYPE = "meeting_preparation"
 MEETING_PREPARATION_PIPELINE = "meeting_default"
-PREPARATION_RESULT_VERSION = 3
+PREPARATION_RESULT_VERSION = 4
 
 logger = logging.getLogger("uvicorn.error")
 TerminalCallback = Callable[[dict[str, Any]], None]
@@ -82,11 +82,24 @@ class MeetingPreparationManager:
             }
             for item in selected_screenshots
         ]
+        user_notes = self.services.recordings.list_notes(recording_id)
+        user_note_source_snapshot = [
+            {
+                "note_id": item.get("note_id"),
+                "timestamp": item.get("timestamp"),
+                "revision": item.get("revision"),
+                "text_sha256": hashlib.sha256(
+                    str(item.get("text") or "").encode("utf-8")
+                ).hexdigest(),
+            }
+            for item in user_notes
+        ]
         audio_source_identity = self._audio_source_identity(recording_id)
         source_identity = self._source_identity(
             recording_id,
             audio_source_identity=audio_source_identity,
             screenshots=selected_screenshots,
+            user_notes=user_notes,
         )
         visual_material = (
             visual_processing_identity(load_settings())
@@ -145,6 +158,7 @@ class MeetingPreparationManager:
                 "preparation_key": preparation_key,
                 "include_screenshots": include_screenshots,
                 "screenshot_count": len(selected_screenshots),
+                "user_note_count": len(user_notes),
             },
             current_step="preparing_transcript",
             progress=5,
@@ -161,6 +175,8 @@ class MeetingPreparationManager:
             "screenshot_count": len(selected_screenshots),
             "available_screenshot_count": len(available_screenshots),
             "screenshot_source_snapshot": screenshot_source_snapshot,
+            "user_note_count": len(user_notes),
+            "user_note_source_snapshot": user_note_source_snapshot,
             "asr_identity": asr_identity,
             "visual_identity": visual_identity,
             "analysis_identity": analysis_identity,
@@ -691,8 +707,10 @@ class MeetingPreparationManager:
         *,
         audio_source_identity: str | None = None,
         screenshots: list[dict[str, Any]] | None = None,
+        user_notes: list[dict[str, Any]] | None = None,
     ) -> str:
         screenshots = screenshots if screenshots is not None else self.services.recordings.list_screenshots(recording_id)
+        user_notes = user_notes if user_notes is not None else self.services.recordings.list_notes(recording_id)
         screenshot_material = [
             {
                 "screenshot_id": item.get("screenshot_id"),
@@ -705,12 +723,24 @@ class MeetingPreparationManager:
             }
             for item in screenshots
         ]
+        user_note_material = [
+            {
+                "note_id": item.get("note_id"),
+                "timestamp": item.get("timestamp"),
+                "revision": item.get("revision"),
+                "text_sha256": hashlib.sha256(
+                    str(item.get("text") or "").encode("utf-8")
+                ).hexdigest(),
+            }
+            for item in user_notes
+        ]
         return _hash_json({
-            "version": 2,
+            "version": 3,
             "audio_source_identity": (
                 audio_source_identity or self._audio_source_identity(recording_id)
             ),
             "screenshots": screenshot_material,
+            "user_notes": user_note_material,
         })
 
     def _asr_identity(
