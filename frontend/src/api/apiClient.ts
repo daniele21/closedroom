@@ -678,6 +678,10 @@ export const ApiClient = {
     return (await request('/v1/system/menubar/refresh', { method: 'POST' })).json();
   },
 
+  async openMenuBarSettings(): Promise<{ opened: boolean; url: string }> {
+    return (await request('/v1/system/menubar/open-settings', { method: 'POST' })).json();
+  },
+
   async captureWindows(): Promise<{ windows: CaptureWindow[] }> {
     return (await request('/v1/capture/windows')).json();
   },

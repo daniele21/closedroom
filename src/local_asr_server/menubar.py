@@ -20,6 +20,7 @@ import sys
 import logging
 import json
 import socket
+import subprocess
 import threading
 import uuid
 import webbrowser
@@ -79,6 +80,7 @@ except ImportError:
 
 MENU_BAR_ICON_ASSET = "closedroom-microphone-mark.png"
 MENU_BAR_ICON_SOURCE = "design/assets/brand/closedroom-microphone-mark.png"
+MENU_BAR_SETTINGS_URL = "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension"
 
 STATUS_ITEM_STATES = {
     "idle": "ClosedRoom — pronto",
@@ -302,7 +304,7 @@ class ClosedRoomApp(rumps.App):
             name="ClosedRoom",
             title=None if icon_path else "CR",
             icon=icon_path,
-            template=bool(icon_path),
+            template=False,
             quit_button=None,  # we provide our own Esci item
         )
         self._ensure_status_item_visible()
@@ -354,9 +356,10 @@ class ClosedRoomApp(rumps.App):
             if image is None:
                 raise RuntimeError(f"unable to load menu-bar icon: {self._menu_bar_icon_path}")
 
-            # The source asset has transparent background. Template rendering is
-            # the macOS-native treatment that keeps it legible in light/dark menu bars.
-            image.setTemplate_(True)
+            # Keep the canonical transparent brand mark intact. The user-facing
+            # contract is the exact ClosedRoom microphone mark, not a synthetic
+            # monochrome/template derivative.
+            image.setTemplate_(False)
             image.setSize_((18.0, 18.0))
             self._status_item_image = image  # retain the NSImage for the item lifetime
 
@@ -442,6 +445,20 @@ class ClosedRoomApp(rumps.App):
         self._status_item_repair_count += 1
         run_on_main_thread(self._ensure_status_item_visible, wait=True)
         return self.menu_bar_status()
+
+    def open_menu_bar_settings(self) -> dict:
+        """Open macOS Menu Bar settings so the user can allow ClosedRoom."""
+        try:
+            subprocess.Popen(
+                ["/usr/bin/open", MENU_BAR_SETTINGS_URL],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return {"opened": True, "url": MENU_BAR_SETTINGS_URL}
+        except Exception as exc:
+            logger.exception("Failed to open macOS Menu Bar settings: %s", exc)
+            return {"opened": False, "url": MENU_BAR_SETTINGS_URL, "error": str(exc)}
 
     # ── Menu construction ──────────────────────────────────────────────────
 

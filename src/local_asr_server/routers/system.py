@@ -63,6 +63,7 @@ def health(request: Request) -> dict:
             "GET /v1/system/accessibility",
             "GET /v1/system/menubar",
             "POST /v1/system/menubar/refresh",
+            "POST /v1/system/menubar/open-settings",
             "POST /v1/recordings/{id}/capture/start",
             "GET /v1/recordings/{id}/capture/events",
             "POST /v1/recordings/{id}/capture/stop",
@@ -217,6 +218,17 @@ def refresh_system_menubar(request: Request):
     if controller is None:
         raise HTTPException(status_code=409, detail="Menu bar controller is unavailable in this runtime")
     return controller.repair_menu_bar()
+
+
+@router.post("/v1/system/menubar/open-settings")
+def open_system_menubar_settings(request: Request):
+    controller = _menubar_controller(request)
+    if controller is None:
+        raise HTTPException(status_code=409, detail="Menu bar controller is unavailable in this runtime")
+    result = controller.open_menu_bar_settings()
+    if not result.get("opened"):
+        raise HTTPException(status_code=500, detail=result.get("error") or "Unable to open Menu Bar settings")
+    return result
 
 
 @router.get("/v1/capture/windows")

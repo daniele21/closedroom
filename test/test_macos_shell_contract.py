@@ -18,7 +18,7 @@ class MacOSShellContractTests(unittest.TestCase):
         self.assertIn('MENU_BAR_ICON_ASSET = "closedroom-microphone-mark.png"', source)
         self.assertIn('MENU_BAR_ICON_SOURCE = "design/assets/brand/closedroom-microphone-mark.png"', source)
         self.assertIn("get_brand_asset_path(MENU_BAR_ICON_ASSET)", source)
-        self.assertIn("image.setTemplate_(True)", source)
+        self.assertIn("image.setTemplate_(False)", source)
         self.assertIn("status_item.setLength_(AppKit.NSSquareStatusItemLength)", source)
         self.assertIn("status_item.setVisible_(True)", source)
         self.assertIn("button.setImage_(image)", source)
@@ -27,6 +27,18 @@ class MacOSShellContractTests(unittest.TestCase):
         self.assertNotIn("self._setup_drag_and_drop()\n", source)
         self.assertIn("closedroom-microphone-mark.png", spec)
         self.assertIn('"menu_bar_icon": "design/assets/brand/closedroom-microphone-mark.png"', brand)
+
+    def test_menu_bar_settings_deep_link_is_owned_by_native_shell(self) -> None:
+        source = (ROOT / "src" / "local_asr_server" / "menubar.py").read_text(encoding="utf-8")
+        router = (ROOT / "src" / "local_asr_server" / "routers" / "system.py").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'MENU_BAR_SETTINGS_URL = "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension"',
+            source,
+        )
+        self.assertIn('def open_menu_bar_settings(self) -> dict:', source)
+        self.assertIn('"/usr/bin/open"', source)
+        self.assertIn('@router.post("/v1/system/menubar/open-settings")', router)
 
     def test_canonical_menu_bar_brand_mark_resolves_in_source_tree(self) -> None:
         mark = get_brand_asset_path("closedroom-microphone-mark.png")
@@ -68,8 +80,9 @@ class MacOSShellContractTests(unittest.TestCase):
         server = (ROOT / "src" / "local_asr_server" / "server.py").read_text(encoding="utf-8")
         smoke = (ROOT / "scripts" / "smoke_packaged_app.py").read_text(encoding="utf-8")
 
-        self.assertIn('src="/logo-dark.png"', app)
-        self.assertIn('src="/logo-light.png"', app)
+        self.assertIn('src="/brand/closedroom-microphone-mark.png"', app)
+        self.assertNotIn('src="/logo-dark.png"', app)
+        self.assertNotIn('src="/logo-light.png"', app)
         self.assertIn('"/logo-dark.png"', server)
         self.assertIn('"/logo-light.png"', server)
         self.assertIn("onError={() => setBrandLogoFailed(true)}", app)

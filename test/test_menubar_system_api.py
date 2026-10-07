@@ -11,6 +11,7 @@ from local_asr_server.routers import system
 class _FakeMenuBarController:
     def __init__(self) -> None:
         self.repair_calls = 0
+        self.settings_calls = 0
 
     def menu_bar_status(self) -> dict:
         return {
@@ -26,6 +27,13 @@ class _FakeMenuBarController:
     def repair_menu_bar(self) -> dict:
         self.repair_calls += 1
         return self.menu_bar_status()
+
+    def open_menu_bar_settings(self) -> dict:
+        self.settings_calls += 1
+        return {
+            "opened": True,
+            "url": "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension",
+        }
 
 
 def _request(controller=None):
@@ -64,6 +72,15 @@ class MenuBarSystemApiTests(unittest.TestCase):
         self.assertEqual(controller.repair_calls, 1)
         self.assertEqual(payload["repair_count"], 1)
         self.assertTrue(payload["visible"])
+
+    def test_open_settings_delegates_to_native_controller(self) -> None:
+        controller = _FakeMenuBarController()
+
+        payload = system.open_system_menubar_settings(_request(controller))
+
+        self.assertEqual(controller.settings_calls, 1)
+        self.assertTrue(payload["opened"])
+        self.assertIn("ControlCenter-Settings.extension", payload["url"])
 
     def test_refresh_rejects_non_menubar_runtime(self) -> None:
         with self.assertRaises(HTTPException) as caught:

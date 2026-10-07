@@ -16,6 +16,9 @@ class BundleDietContractTests(unittest.TestCase):
         self.assertTrue((frontend_public / "logo-light.png").is_file())
         self.assertTrue((static / "logo-dark.png").is_file())
         self.assertTrue((static / "logo-light.png").is_file())
+        self.assertTrue(
+            (ROOT / "design" / "assets" / "brand" / "closedroom-microphone-mark.png").is_file()
+        )
 
         for obsolete in ("favicon.svg", "logo.svg", "logo-dark.svg", "logo-light.svg"):
             self.assertFalse((frontend_public / obsolete).exists())
@@ -31,8 +34,11 @@ class BundleDietContractTests(unittest.TestCase):
         html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
         build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
-        self.assertIn('src="/logo-dark.png"', app)
-        self.assertIn('src="/logo-light.png"', app)
+        # The in-app wordmark uses the canonical transparent product mark.
+        # The legacy square PNGs remain separate packaging/favicon inputs only.
+        self.assertIn('src="/brand/closedroom-microphone-mark.png"', app)
+        self.assertNotIn('src="/logo-dark.png"', app)
+        self.assertNotIn('src="/logo-light.png"', app)
         self.assertIn('type="image/png" href="/logo-light.png"', html)
         self.assertIn('PNG_SOURCE="$SCRIPT_DIR/frontend/public/logo-dark.png"', build)
         self.assertNotIn("rsvg-convert", build)
