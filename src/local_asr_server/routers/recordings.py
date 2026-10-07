@@ -3,6 +3,7 @@ from __future__ import annotations
 from local_asr_server.app_services import get_services
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +18,8 @@ from local_asr_server.recordings import (
 )
 from local_asr_server.schemas import (
     CreateRecordingRequest,
+    RecordingNoteCreateRequest,
+    RecordingNoteUpdateRequest,
     ScreenshotCaptureRequest,
     ScreenshotDisplaySelectionRequest,
     UpdateRecordingRequest,
@@ -106,6 +109,102 @@ def list_screenshots(recording_id: str, request: Request):
         }
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/recordings/{recording_id}/notes/anchor")
+def recording_note_anchor(recording_id: str, request: Request):
+    services = get_services(request.app)
+    store = services.recordings
+    try:
+        recording = store.get(recording_id, include_result=False)
+        session = services.capture.get_session(recording_id)
+        if session is not None and not session.stopped:
+            return services.capture.recording_timestamp(recording_id)
+        if recording.get("status") != "recording":
+            raise RecordingConflict("Recording is not active")
+        created_at = datetime.fromisoformat(str(recording["created_at"]))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        timestamp = max(
+            0.0,
+            (datetime.now(timezone.utc) - created_at.astimezone(timezone.utc)).total_seconds(),
+        )
+        return {
+            "recording_id": recording_id,
+            "timestamp": timestamp,
+            "clock_source": "recording_created_at_fallback",
+        }
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/v1/recordings/{recording_id}/notes")
+def list_recording_notes(recording_id: str, request: Request):
+    try:
+        items = get_services(request.app).recordings.list_notes(recording_id)
+        return {"items": items, "total": len(items)}
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/recordings/{recording_id}/notes", status_code=201)
+def create_recording_note(
+    recording_id: str,
+    request: Request,
+    body: RecordingNoteCreateRequest,
+):
+    try:
+        return get_services(request.app).recordings.create_note(
+            recording_id,
+            request_id=body.request_id,
+            timestamp=body.timestamp,
+            text=body.text,
+        )
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=507, detail=str(exc)) from exc
+
+
+@router.patch("/v1/recordings/{recording_id}/notes/{note_id}")
+def update_recording_note(
+    recording_id: str,
+    note_id: str,
+    request: Request,
+    body: RecordingNoteUpdateRequest,
+):
+    try:
+        return get_services(request.app).recordings.update_note(
+            recording_id,
+            note_id,
+            text=body.text,
+            revision=body.revision,
+        )
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Note not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=507, detail=str(exc)) from exc
+
+
+@router.delete("/v1/recordings/{recording_id}/notes/{note_id}", status_code=204)
+def delete_recording_note(recording_id: str, note_id: str, request: Request):
+    try:
+        get_services(request.app).recordings.delete_note(recording_id, note_id)
+        return Response(status_code=204)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Note not found") from exc
     except RecordingConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -541,6 +640,7 @@ def get_active_recording(request: Request):
         "system_db": system_db,
         "warnings": warnings,
         "screenshot_count": int(active.get("screenshot_count") or 0),
+        "note_count": int(active.get("note_count") or 0),
         "screenshot_display_id": session.screenshot_display_id if session else None,
     }
 
@@ -704,6 +804,7 @@ def overlay_events(recording_id: str, request: Request):
                 "system_db": system_db,
                 "warnings": warnings,
                 "screenshot_count": int(active.get("screenshot_count") or 0),
+                "note_count": int(active.get("note_count") or 0),
                 "screenshot_display_id": session.screenshot_display_id if session else None,
             }
 
