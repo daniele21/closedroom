@@ -528,6 +528,16 @@ export interface AccessibilityStatus {
   error?: string | null;
 }
 
+export interface MenuBarStatus {
+  available: boolean;
+  visible: boolean;
+  icon_loaded: boolean;
+  state: 'idle' | 'recording' | 'transcribing' | 'error' | 'unavailable' | string;
+  icon_asset: string;
+  repair_count: number;
+  last_error?: string | null;
+}
+
 export interface Settings {
   transcriptions_dir: string;
   recordings_dir: string;
@@ -658,6 +668,14 @@ export const ApiClient = {
 
   async accessibilityStatus(): Promise<AccessibilityStatus> {
     return (await request('/v1/system/accessibility')).json();
+  },
+
+  async menuBarStatus(): Promise<MenuBarStatus> {
+    return (await request('/v1/system/menubar')).json();
+  },
+
+  async refreshMenuBar(): Promise<MenuBarStatus> {
+    return (await request('/v1/system/menubar/refresh', { method: 'POST' })).json();
   },
 
   async captureWindows(): Promise<{ windows: CaptureWindow[] }> {
