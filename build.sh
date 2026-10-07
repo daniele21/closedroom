@@ -150,7 +150,7 @@ if [[ "$SIGN_IDENTITY" == "-" ]]; then
 else
     command -v security >/dev/null 2>&1 || die "security tool not found; cannot verify signing identity"
     SIGNING_IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
-    if ! printf '%s\n' "$SIGNING_IDENTITIES" | grep -Fq -- "$SIGN_IDENTITY"; then
+    if ! grep -Fq -- "$SIGN_IDENTITY" <<<"$SIGNING_IDENTITIES"; then
         die "Code-signing identity not found: $SIGN_IDENTITY\n" \
             "  Available identities:\n$SIGNING_IDENTITIES"
     fi
