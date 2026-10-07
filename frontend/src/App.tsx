@@ -1,6 +1,5 @@
 import { lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
 import {
-  AudioWaveform,
   BarChart3,
   ChevronDown,
   FolderKanban,
@@ -306,26 +305,15 @@ function MainApp() {
             aria-label="ClosedRoom"
           >
             <span className="brand-mark brand-mark-compact" aria-hidden="true">
-              <span className="brand-mark-halo" />
               {!brandLogoFailed ? (
-                <>
-                  <img
-                    src="/logo-dark.png"
-                    alt=""
-                    className="brand-logo brand-logo-dark"
-                    onError={() => setBrandLogoFailed(true)}
-                  />
-                  <img
-                    src="/logo-light.png"
-                    alt=""
-                    className="brand-logo brand-logo-light"
-                    onError={() => setBrandLogoFailed(true)}
-                  />
-                </>
+                <img
+                  src="/brand/closedroom-microphone-mark.png"
+                  alt=""
+                  className="brand-logo brand-logo-canonical"
+                  onError={() => setBrandLogoFailed(true)}
+                />
               ) : (
-                <span className="brand-logo-fallback" data-brand-logo-fallback="true">
-                  <AudioWaveform aria-hidden="true" />
-                </span>
+                <span className="brand-logo-fallback" data-brand-logo-fallback="true">CR</span>
               )}
             </span>
             <span className="workspace-brand-copy">
