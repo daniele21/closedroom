@@ -78,6 +78,11 @@ class FrontendMeetingMomentNotesContractTests(unittest.TestCase):
         self.assertIn("Apri controlli registrazione", self.menubar)
         self.assertIn('self._update_status_item("Pronto")', self.menubar)
         self.assertIn('self._update_status_item(f"● {title}")', self.menubar)
+        self.assertIn('rumps.MenuItem("Recenti")', self.menubar)
+        self.assertIn("CarbonHotKeyManager", self.menubar)
+        self.assertIn('"<cmd>+<shift>+t"', self.menubar)
+        self.assertIn('"<cmd>+<shift>+v"', self.menubar)
+        self.assertNotIn('"<cmd>+<shift>+r": self._shortcut_toggle_recording', self.menubar)
         self.assertNotIn("Server attivo ✅", self.menubar)
 
 
