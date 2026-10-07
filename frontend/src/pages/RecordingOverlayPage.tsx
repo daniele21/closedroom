@@ -8,6 +8,7 @@ import {
   Loader2,
   Mic,
   Monitor,
+  PencilLine,
   Square,
   Volume2,
   X,
@@ -42,6 +43,15 @@ export default function RecordingOverlayPage() {
   const [screenshotFeedback, setScreenshotFeedback] = useState<'idle' | 'saved'>('idle');
   const [lastSavedScreenshotId, setLastSavedScreenshotId] = useState<string | null>(null);
   const [isUndoingScreenshot, setIsUndoingScreenshot] = useState(false);
+  const [noteCount, setNoteCount] = useState(0);
+  const [noteComposerOpen, setNoteComposerOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteAnchor, setNoteAnchor] = useState<number | null>(null);
+  const [isAnchoringNote, setIsAnchoringNote] = useState(false);
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isUndoingNote, setIsUndoingNote] = useState(false);
+  const [noteFeedback, setNoteFeedback] = useState<'idle' | 'saved'>('idle');
+  const [lastSavedNoteId, setLastSavedNoteId] = useState<string | null>(null);
 
   const logOverlay = useCallback((level: 'info' | 'warn' | 'error', message: string, data?: any) => {
     console[level === 'warn' ? 'warn' : level === 'error' ? 'error' : 'log'](`[Overlay] ${message}`, data || '');
@@ -86,7 +96,9 @@ export default function RecordingOverlayPage() {
   const selectedDisplayIdRef = useRef<number | null>(null);
   const pendingDisplayIdRef = useRef<number | null>(null);
   const displayPickerRef = useRef<HTMLDivElement | null>(null);
+  const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
   const screenshotFeedbackTimerRef = useRef<number | null>(null);
+  const noteFeedbackTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     selectedDisplayIdRef.current = selectedDisplayId;
@@ -165,6 +177,10 @@ export default function RecordingOverlayPage() {
           setIsStopping(false);
           setRecordingId(null);
           setScreenshotCount(0);
+          setNoteCount(0);
+          setNoteComposerOpen(false);
+          setNoteDraft('');
+          setNoteAnchor(null);
           setLastScreenshotAt(null);
           setLastSavedScreenshotId(null);
           if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -184,6 +200,7 @@ export default function RecordingOverlayPage() {
         setSignalLevelSystem(formatDb(data.system_db));
         setWarnings(data.warnings || []);
         setScreenshotCount(data.screenshot_count || 0);
+        setNoteCount(data.note_count || 0);
         const backendDisplayId = data.screenshot_display_id ? Number(data.screenshot_display_id) : null;
         const pendingSelection = pendingDisplayIdRef.current;
         if (
@@ -221,6 +238,7 @@ export default function RecordingOverlayPage() {
         recordingId: activeData.recording_id,
         captureBackend: activeData.capture_backend,
         screenshotCount: activeData.screenshot_count,
+        noteCount: activeData.note_count,
         selectedDisplayId: activeData.screenshot_display_id,
       });
       if (activeData.active && activeData.recording_id) {
@@ -232,6 +250,7 @@ export default function RecordingOverlayPage() {
         setBytesWritten(activeData.bytes_written || 0);
         setWarnings(activeData.warnings || []);
         setScreenshotCount(activeData.screenshot_count || 0);
+        setNoteCount(activeData.note_count || 0);
         const backendDisplayId = activeData.screenshot_display_id ?? null;
         const pendingSelection = pendingDisplayIdRef.current;
         if (
@@ -367,6 +386,7 @@ export default function RecordingOverlayPage() {
       }
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (screenshotFeedbackTimerRef.current) window.clearTimeout(screenshotFeedbackTimerRef.current);
+      if (noteFeedbackTimerRef.current) window.clearTimeout(noteFeedbackTimerRef.current);
     };
   }, [checkActiveRecording, connectSSE, loadDisplays]);
 
@@ -563,6 +583,87 @@ export default function RecordingOverlayPage() {
     }
   };
 
+  const closeNoteComposer = useCallback(() => {
+    setNoteComposerOpen(false);
+    setNoteDraft('');
+    setNoteAnchor(null);
+  }, []);
+
+  const handleOpenNote = async () => {
+    if (!recordingId || !isRecording || isStopping || isAnchoringNote || isSavingNote) return;
+    setIsAnchoringNote(true);
+    setErrorMsg(null);
+    try {
+      const anchor = await ApiClient.recordingNoteAnchor(recordingId);
+      setNoteAnchor(anchor.timestamp);
+      setNoteComposerOpen(true);
+      setIsDisplayPickerOpen(false);
+      window.requestAnimationFrame(() => noteInputRef.current?.focus());
+    } catch (err: any) {
+      const message = String(err?.message || 'Could not start a note for this moment.');
+      setErrorMsg(message);
+      logOverlay('error', 'Note anchor failed', { recordingId, error: message });
+    } finally {
+      setIsAnchoringNote(false);
+    }
+  };
+
+  const handleSaveNote = async () => {
+    if (!recordingId || noteAnchor === null || isSavingNote || isStopping) return;
+    const text = noteDraft.trim();
+    if (!text) return;
+    setIsSavingNote(true);
+    setErrorMsg(null);
+    try {
+      const saved = await ApiClient.createRecordingNote(recordingId, {
+        request_id: `overlay-note-${recordingId}-${crypto.randomUUID()}`,
+        timestamp: noteAnchor,
+        text,
+      });
+      setNoteCount((current) => Math.max(current + 1, saved.sequence + 1));
+      setLastSavedNoteId(saved.note_id);
+      setNoteFeedback('saved');
+      closeNoteComposer();
+      if (noteFeedbackTimerRef.current) window.clearTimeout(noteFeedbackTimerRef.current);
+      noteFeedbackTimerRef.current = window.setTimeout(() => {
+        setNoteFeedback('idle');
+        setLastSavedNoteId(null);
+      }, 4500);
+      logOverlay('info', 'User note committed', {
+        note_id: saved.note_id,
+        timestamp: saved.timestamp,
+        sequence: saved.sequence,
+      });
+    } catch (err: any) {
+      const message = String(err?.message || 'Unable to save note.');
+      setErrorMsg(message);
+      logOverlay('error', 'User note save failed', { recordingId, error: message });
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
+
+  const handleUndoNote = async () => {
+    if (!recordingId || !lastSavedNoteId || isUndoingNote || isStopping) return;
+    setIsUndoingNote(true);
+    setErrorMsg(null);
+    try {
+      await ApiClient.deleteRecordingNote(recordingId, lastSavedNoteId);
+      setNoteCount((current) => Math.max(0, current - 1));
+      setLastSavedNoteId(null);
+      setNoteFeedback('idle');
+      if (noteFeedbackTimerRef.current) {
+        window.clearTimeout(noteFeedbackTimerRef.current);
+        noteFeedbackTimerRef.current = null;
+      }
+    } catch (err: any) {
+      const message = String(err?.message || 'Unable to undo note.');
+      setErrorMsg(message);
+    } finally {
+      setIsUndoingNote(false);
+    }
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey && event.shiftKey && event.key === '9') {
@@ -577,9 +678,10 @@ export default function RecordingOverlayPage() {
   const resizeOverlayForState = useCallback(async (
     expanded: boolean,
     displayPickerOpen: boolean,
+    noteOpen = false,
   ) => {
     const width = 420;
-    const height = displayPickerOpen ? 300 : expanded ? 238 : 118;
+    const height = displayPickerOpen ? 300 : noteOpen ? (expanded ? 330 : 222) : expanded ? 238 : 118;
     if (window.name === 'ClosedRoomOverlay') {
       window.resizeTo(width, height + 52);
       return;
@@ -660,8 +762,8 @@ export default function RecordingOverlayPage() {
   };
 
   useEffect(() => {
-    void resizeOverlayForState(false, false);
-  }, [resizeOverlayForState]);
+    void resizeOverlayForState(isExpanded, isDisplayPickerOpen, noteComposerOpen);
+  }, [isDisplayPickerOpen, isExpanded, noteComposerOpen, resizeOverlayForState]);
 
   useEffect(() => {
     if (!isDisplayPickerOpen) return;
@@ -800,6 +902,46 @@ export default function RecordingOverlayPage() {
         </div>
       )}
 
+      {noteComposerOpen && (
+        <div
+          className="mt-2 rounded-xl border border-amber-200/20 bg-amber-100/[0.07] p-2"
+          data-note-composer="true"
+        >
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="font-mono text-[10px] font-semibold tabular-nums text-amber-100/85">
+              {noteAnchor === null
+                ? '—'
+                : `${Math.floor(noteAnchor / 60)}:${String(Math.floor(noteAnchor % 60)).padStart(2, '0')}`}
+            </span>
+            <span className="text-[9px] text-white/35">Enter to save · Esc to cancel</span>
+          </div>
+          <textarea
+            ref={noteInputRef}
+            value={noteDraft}
+            maxLength={4000}
+            rows={2}
+            placeholder="Add a note about this moment…"
+            onChange={(event) => setNoteDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeNoteComposer();
+                return;
+              }
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                void handleSaveNote();
+              }
+            }}
+            className="w-full resize-none rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-[11px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-amber-200/35"
+            aria-label="Note about this meeting moment"
+          />
+          {noteDraft.length >= 3600 && (
+            <div className="mt-1 text-right text-[8px] text-white/35">{noteDraft.length}/4000</div>
+          )}
+        </div>
+      )}
+
       <div className="mt-2 flex items-center gap-1.5">
         {captureMode !== 'pc_only' && (
           <div
@@ -912,6 +1054,42 @@ export default function RecordingOverlayPage() {
         </div>
 
         <div className={`flex h-9 shrink-0 overflow-hidden rounded-lg border ${
+          noteFeedback === 'saved'
+            ? 'border-amber-200/30 bg-amber-200/10'
+            : 'border-white/10 bg-white/[0.08]'
+        }`}>
+          <button
+            type="button"
+            onClick={() => void handleOpenNote()}
+            disabled={isStopping || isAnchoringNote || isSavingNote || isUndoingNote || !isRecording}
+            className="flex h-full items-center gap-1.5 px-2.5 text-[10px] font-semibold text-white/90 transition hover:bg-white/[0.05] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-35"
+            aria-label="Add note"
+            title="Add note about this moment"
+            data-note-action="true"
+          >
+            {isAnchoringNote || isSavingNote ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : noteFeedback === 'saved' ? (
+              <Check className="h-3.5 w-3.5 text-amber-100" aria-hidden="true" />
+            ) : (
+              <PencilLine className="h-3.5 w-3.5 text-amber-100/85" aria-hidden="true" />
+            )}
+            <span>{noteFeedback === 'saved' ? 'Saved' : noteCount}</span>
+          </button>
+          {lastSavedNoteId && (
+            <button
+              type="button"
+              onClick={() => void handleUndoNote()}
+              disabled={isUndoingNote || isStopping}
+              className="flex h-full items-center border-l border-amber-100/15 px-2 text-[9px] font-semibold text-amber-100/75 transition hover:bg-amber-100/10 disabled:opacity-35"
+              data-note-undo="true"
+            >
+              {isUndoingNote ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
+            </button>
+          )}
+        </div>
+
+        <div className={`flex h-9 shrink-0 overflow-hidden rounded-lg border ${
           screenshotFeedback === 'saved'
             ? 'border-emerald-300/30 bg-emerald-300/12'
             : 'border-white/10 bg-white/[0.08]'
@@ -1000,6 +1178,9 @@ export default function RecordingOverlayPage() {
           )}
           <div>
             Screenshots <span className="font-semibold text-white/75">{screenshotCount}</span>
+          </div>
+          <div>
+            Notes <span className="font-semibold text-white/75">{noteCount}</span>
           </div>
           <div>
             Last <span className="font-mono text-white/65">
