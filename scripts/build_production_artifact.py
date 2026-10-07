@@ -197,7 +197,7 @@ def main() -> int:
     )
     build_id = re.sub(r"[^A-Za-z0-9._-]+", "-", build_id)
     app_name = os.getenv("CLOSEDROOM_APP_NAME", "ClosedRoom")
-    staging_app = root / "dist" / f"{app_name}-{version}.app"
+    staging_app = root / "dist" / f"{app_name}.app"
     staging_dmg = root / "dist" / f"{app_name}-{version}.dmg"
     artifact_dir = (
         root / "dist" / "artifacts" / "macos-arm64-release-package" / build_id
