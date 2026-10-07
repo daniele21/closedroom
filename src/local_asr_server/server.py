@@ -20,7 +20,7 @@ from local_asr_server.jobs import JobStore
 from local_asr_server.native_capture import NativeCaptureManager
 from local_asr_server.recordings import RecordingStore
 from local_asr_server.transcription_jobs import TranscriptionJobManager
-from local_asr_server.paths import get_static_dir
+from local_asr_server.paths import get_brand_assets_dir, get_static_dir
 from local_asr_server.runtime.resource_policy import ResourcePolicy, recording_has_active_capture
 from local_asr_server.runtime.service_manager import RuntimeServiceManager
 from local_asr_server.runtime.workload_arbiter import HeavyWorkloadArbiter
@@ -214,6 +214,10 @@ def create_app(
     if public_dir.exists():
         app.mount("/public", StaticFiles(directory=str(public_dir)), name="public")
 
+    brand_assets_dir = get_brand_assets_dir()
+    if brand_assets_dir.exists():
+        app.mount("/brand", StaticFiles(directory=str(brand_assets_dir)), name="brand")
+
     @app.middleware("http")
     async def require_local_auth(request: Request, call_next):
         if (
@@ -222,6 +226,7 @@ def create_app(
             or request.url.path.startswith("/static/")
             or request.url.path.startswith("/public/")
             or request.url.path.startswith("/assets/")
+            or request.url.path.startswith("/brand/")
         ):
             return await call_next(request)
         token = (
