@@ -45,10 +45,17 @@ def latest_finalized_app(root: Path) -> tuple[Path, Path | None]:
             app_path = manifest_path.parent / app_name
             if app_path.is_dir():
                 return app_path, manifest_path
-    legacy = sorted((root / "dist").glob("ClosedRoom-*.app"), key=lambda path: path.stat().st_mtime, reverse=True)
+    stable_local = root / "dist" / "ClosedRoom.app"
+    if stable_local.is_dir():
+        return stable_local, None
+    legacy = sorted(
+        (root / "dist").glob("ClosedRoom-*.app"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
     if legacy:
         return legacy[0], None
-    raise FileNotFoundError("no finalized ClosedRoom .app found")
+    raise FileNotFoundError("no finalized or local ClosedRoom .app found")
 
 
 def bundle_executable(app_path: Path) -> Path:

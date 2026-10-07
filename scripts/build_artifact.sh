@@ -22,6 +22,7 @@ done
 command -v uv >/dev/null 2>&1 || { echo "uv is required" >&2; exit 1; }
 
 APP_NAME="${CLOSEDROOM_APP_NAME:-ClosedRoom}"
+APP_BUNDLE_NAME="${CLOSEDROOM_APP_BUNDLE_NAME:-${APP_NAME}.app}"
 APP_VERSION="$(python3 scripts/product_version.py --root "$ROOT")"
 SOURCE_REVISION="${CLOSEDROOM_SOURCE_REVISION:-$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)}"
 if [[ -n "$(git status --porcelain 2>/dev/null || true)" ]]; then DIRTY=true; else DIRTY=false; fi
@@ -40,7 +41,7 @@ fi
 BUILD_ID="$(printf '%s' "$BUILD_ID" | tr -cs 'A-Za-z0-9._-' '-')"
 LINEAGE="macos-arm64-${CHANNEL}-${VARIANT}"
 ARTIFACT_DIR="$ROOT/dist/artifacts/$LINEAGE/$BUILD_ID"
-STAGING_APP="$ROOT/dist/${APP_NAME}-${APP_VERSION}.app"
+STAGING_APP="$ROOT/dist/$APP_BUNDLE_NAME"
 STAGING_DMG="$ROOT/dist/${APP_NAME}-${APP_VERSION}.dmg"
 FINAL_BASENAME="${APP_NAME}-${APP_VERSION}-${BUILD_ID}-${SOURCE_REVISION}"
 FINAL_APP="$ARTIFACT_DIR/${FINAL_BASENAME}.app"

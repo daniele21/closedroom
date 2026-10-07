@@ -2,8 +2,8 @@
 # =============================================================================
 # build.sh — ClosedRoom macOS App Build Script
 #
-# Produces:  dist/ClosedRoom-<version>.app   (self-contained .app bundle)
-#            dist/ClosedRoom-<version>.dmg   (distributable disk image)
+# Produces:  dist/ClosedRoom.app             (stable local app identity)
+#            dist/ClosedRoom-<version>.dmg   (versioned distributable disk image)
 #
 # Usage:
 #   ./build.sh                           # full build (ad-hoc signed)
@@ -16,14 +16,20 @@
 #   treat every new build as a different identity and reset TCC permissions
 #   (microphone, screen recording) on each install.
 #
-#   To keep permissions stable across builds, set a real Apple signing identity:
+#   To keep permissions stable across local rebuilds, use one stable code-signing
+#   identity (Apple-issued or a trusted self-signed Code Signing certificate):
 #
-#     export CLOSEDROOM_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)"
-#     ./build.sh --no-dmg
+#     export CLOSEDROOM_SIGN_IDENTITY="ClosedRoom Local Development"
+#     ./build.sh --no-dmg --install
 #
 #   List available identities:
 #     security find-identity -v -p codesigning
 #
+#   Runtime identity stays stable across product versions:
+#     app bundle:  ClosedRoom.app
+#     bundle id:   com.closedroom.app
+#     display name: ClosedRoom
+#   VERSION owns the product SemVer; artifact/build ids identify individual builds.
 #   --install with ad-hoc signing is blocked to prevent TCC confusion.
 # =============================================================================
 set -euo pipefail
@@ -41,11 +47,12 @@ BUILD_ASSETS="$SCRIPT_DIR/build_assets"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$HOME/Library/Caches/ClosedRoom/uv}"
 export PYINSTALLER_CONFIG_DIR="${PYINSTALLER_CONFIG_DIR:-$SCRIPT_DIR/.cache/pyinstaller}"
 DIST_DIR="$SCRIPT_DIR/dist"
-APP_BUNDLE_BASENAME="${APP_NAME}-${APP_VERSION}"
-APP_BUNDLE_NAME="${APP_BUNDLE_BASENAME}.app"
+APP_BUNDLE_NAME="${CLOSEDROOM_APP_BUNDLE_NAME:-${APP_NAME}.app}"
+APP_DISPLAY_NAME="${CLOSEDROOM_APP_DISPLAY_NAME:-$APP_NAME}"
 APP_PATH="$DIST_DIR/$APP_BUNDLE_NAME"
-DMG_PATH="$DIST_DIR/${APP_BUNDLE_BASENAME}.dmg"
-LEGACY_APP_PATH="$DIST_DIR/$APP_NAME.app"
+DMG_BASENAME="${APP_NAME}-${APP_VERSION}"
+DMG_PATH="$DIST_DIR/${DMG_BASENAME}.dmg"
+LEGACY_VERSIONED_APP_PATH="$DIST_DIR/${APP_NAME}-${APP_VERSION}.app"
 CREATE_DMG=true
 CLEAN_BUILD=false
 INSTALL_TO_APPLICATIONS=false
@@ -62,7 +69,9 @@ fi
 
 
 # Code signing identity.
-# Use a real Apple identity to keep TCC permissions stable across builds.
+# Use one stable identity to keep TCC permissions stable across local rebuilds.
+# A trusted self-signed Code Signing identity is sufficient for same-Mac
+# development; distribution/release still requires Apple Developer ID.
 # Falls back to '-' (ad-hoc) when not set.
 SIGN_IDENTITY="${CLOSEDROOM_SIGN_IDENTITY:-}"
 
@@ -79,12 +88,38 @@ warn() { echo -e "${YELLOW}⚠ $*${NC}"; }
 die()  { echo -e "${RED}✗ $*${NC}" >&2; exit 1; }
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
-for arg in "$@"; do
-    case $arg in
-        --no-dmg)   CREATE_DMG=false ;;
-        --clean)    CLEAN_BUILD=true ;;
-        --install)  INSTALL_TO_APPLICATIONS=true ;;
-        --sign)     shift; SIGN_IDENTITY="$1" ;;
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-dmg)
+            CREATE_DMG=false
+            shift
+            ;;
+        --clean)
+            CLEAN_BUILD=true
+            shift
+            ;;
+        --install)
+            INSTALL_TO_APPLICATIONS=true
+            shift
+            ;;
+        --sign)
+            [[ $# -ge 2 ]] || die "--sign requires an identity name or fingerprint"
+            SIGN_IDENTITY="$2"
+            shift 2
+            ;;
+        --help|-h)
+            cat <<'EOF'
+Usage: ./build.sh [--no-dmg] [--clean] [--install] [--sign <identity>]
+
+The local app bundle identity is stable (ClosedRoom.app / com.closedroom.app).
+VERSION controls the product version embedded in Info.plist and versioned DMG name.
+Use a stable code-signing identity with --install to preserve macOS TCC identity.
+EOF
+            exit 0
+            ;;
+        *)
+            die "Unknown argument: $1"
+            ;;
     esac
 done
 
@@ -105,19 +140,28 @@ command -v swiftc   >/dev/null 2>&1 || die "swiftc not found. Install Xcode Comm
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
     warn "Ad-hoc signing: macOS TCC permissions (microphone, screen recording) will"
     warn "reset on every install because macOS treats each build as a new identity."
-    warn "Set CLOSEDROOM_SIGN_IDENTITY to a real Apple identity to avoid this."
+    warn "Set CLOSEDROOM_SIGN_IDENTITY to one stable code-signing identity to avoid this."
     if $INSTALL_TO_APPLICATIONS; then
         die "--install is not allowed with ad-hoc signing to prevent TCC confusion.\n" \
-            "  Use a real signing identity:\n" \
-            "    export CLOSEDROOM_SIGN_IDENTITY=\"Apple Development: Name (TEAMID)\"\n" \
+            "  Use a stable signing identity (self-signed is fine for local development):\n" \
+            "    export CLOSEDROOM_SIGN_IDENTITY=\"ClosedRoom Local Development\"\n" \
             "    ./build.sh --no-dmg --install"
+    fi
+else
+    command -v security >/dev/null 2>&1 || die "security tool not found; cannot verify signing identity"
+    SIGNING_IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+    if ! grep -Fq -- "$SIGN_IDENTITY" <<<"$SIGNING_IDENTITIES"; then
+        die "Code-signing identity not found: $SIGN_IDENTITY\n" \
+            "  Available identities:\n$SIGNING_IDENTITIES"
     fi
 fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════════"
 echo "  Building $APP_NAME v$APP_VERSION"
-echo "  Artifact: $APP_BUNDLE_NAME"
+echo "  App:      $APP_BUNDLE_NAME"
+echo "  Version:  $APP_VERSION"
+echo "  Bundle ID: $BUNDLE_ID"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
     echo "  Signing:  ad-hoc (TCC permissions will reset on install)"
 else
@@ -340,8 +384,8 @@ cd "$SCRIPT_DIR"
 
 log "  Removing stale app artifacts..."
 rm -rf "$APP_PATH"
-if [[ "$LEGACY_APP_PATH" != "$APP_PATH" ]]; then
-    rm -rf "$LEGACY_APP_PATH"
+if [[ "$LEGACY_VERSIONED_APP_PATH" != "$APP_PATH" ]]; then
+    rm -rf "$LEGACY_VERSIONED_APP_PATH"
 fi
 
 log "  Building python wheel..."
@@ -361,7 +405,7 @@ uv pip install --python build_venv "${WHEEL_FILE}[app,speechmatics]" "pyinstalle
 log "  Running PyInstaller from build_venv..."
 CLOSEDROOM_APP_NAME="$APP_NAME" \
 CLOSEDROOM_APP_BUNDLE_ID="$BUNDLE_ID" \
-CLOSEDROOM_APP_DISPLAY_NAME="$APP_BUNDLE_BASENAME" \
+CLOSEDROOM_APP_DISPLAY_NAME="$APP_DISPLAY_NAME" \
 CLOSEDROOM_APP_BUNDLE_NAME="$APP_BUNDLE_NAME" \
 build_venv/bin/pyinstaller \
     --clean \
@@ -553,8 +597,8 @@ if [[ "$SIGN_IDENTITY" == "-" ]]; then
     echo "  To install (TCC permissions will reset):"
     echo "    ditto $APP_PATH /Applications/$APP_BUNDLE_NAME"
     echo ""
-    echo "  ⚠  For stable TCC permissions across builds, use a real Apple identity:"
-    echo "    export CLOSEDROOM_SIGN_IDENTITY=\"Apple Development: Name (TEAMID)\""
+    echo "  ⚠  For stable TCC permissions across builds, use one stable signing identity:"
+    echo "    export CLOSEDROOM_SIGN_IDENTITY=\"ClosedRoom Local Development\""
     echo "    security find-identity -v -p codesigning  # list available identities"
     echo "    ./build.sh --no-dmg --install"
 else

@@ -60,7 +60,7 @@ Stable promotion is `dev -> main`, exact-head FULL plus applicable target-Mac ev
 
 ## GRP-2 — canonical ClosedRoom version
 
-Root `VERSION` is the sole product-version owner (`0.2.0`). `scripts/product_version.py` validates `X.Y.Z`, maps `vX.Y.Z`, and rejects mismatches. macOS build/package consumers use it; the native helper inherits it. `pyproject.toml` remains independent `local-asr-server` metadata (`0.1.0`). Tests prevent product build paths returning to package metadata.
+Root `VERSION` is the sole product-version owner (`0.2.0`). `scripts/product_version.py` validates `X.Y.Z`, maps `vX.Y.Z`, and rejects mismatches. macOS build/package consumers use it; the native helper inherits it. Runtime/install identity is deliberately independent from product version: local and packaged builds keep `ClosedRoom.app`, display name `ClosedRoom`, and bundle ID `com.closedroom.app` stable, while DMGs and immutable finalized artifacts carry product version plus build/source identity. `pyproject.toml` remains independent `local-asr-server` metadata (`0.1.0`). Tests prevent product build paths returning to package metadata or versioning the runtime app name.
 
 ## GRP-3 — release metadata and staging
 
