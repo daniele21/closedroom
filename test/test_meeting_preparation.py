@@ -702,6 +702,38 @@ class MeetingPreparationTests(unittest.TestCase):
         )
 
 
+    def test_user_notes_participate_in_source_identity_without_plaintext_snapshot(self) -> None:
+        self.recordings.notes = [{
+            "note_id": "note-1",
+            "timestamp": 12.5,
+            "text": "Ask Marco for updated numbers",
+            "revision": 1,
+        }]
+        first_identity = self.manager._source_identity("rec-1")
+
+        self.recordings.notes[0]["text"] = "Ask Marco for updated numbers before Friday"
+        self.recordings.notes[0]["revision"] = 2
+        second_identity = self.manager._source_identity("rec-1")
+
+        self.assertNotEqual(first_identity, second_identity)
+
+        self.transcriptions.current = self._transcription()
+        parent = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory([]),
+        )
+        state = self.store.get(parent["id"])
+        self.assertEqual(state["result"]["user_note_count"], 1)
+        snapshot = state["result"]["user_note_source_snapshot"][0]
+        self.assertEqual(snapshot["note_id"], "note-1")
+        self.assertEqual(snapshot["revision"], 2)
+        self.assertIn("text_sha256", snapshot)
+        self.assertNotIn("text", snapshot)
+
+
+
+
 class JobStorePreparationContractTests(unittest.TestCase):
     def test_existing_database_adds_dedupe_column_before_creating_index(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -781,36 +813,6 @@ class JobStorePreparationContractTests(unittest.TestCase):
             )
             self.assertTrue(replacement_created)
             self.assertEqual(replacement["id"], "parent-3")
-
-
-    def test_user_notes_participate_in_source_identity_without_plaintext_snapshot(self) -> None:
-        self.recordings.notes = [{
-            "note_id": "note-1",
-            "timestamp": 12.5,
-            "text": "Ask Marco for updated numbers",
-            "revision": 1,
-        }]
-        first_identity = self.manager._source_identity("rec-1")
-
-        self.recordings.notes[0]["text"] = "Ask Marco for updated numbers before Friday"
-        self.recordings.notes[0]["revision"] = 2
-        second_identity = self.manager._source_identity("rec-1")
-
-        self.assertNotEqual(first_identity, second_identity)
-
-        self.transcriptions.current = self._transcription()
-        parent = self.manager.create(
-            "rec-1",
-            start_transcription=self._queued_transcription_factory([]),
-            start_pipeline=self._completed_pipeline_factory([]),
-        )
-        state = self.store.get(parent["id"])
-        self.assertEqual(state["result"]["user_note_count"], 1)
-        snapshot = state["result"]["user_note_source_snapshot"][0]
-        self.assertEqual(snapshot["note_id"], "note-1")
-        self.assertEqual(snapshot["revision"], 2)
-        self.assertIn("text_sha256", snapshot)
-        self.assertNotIn("text", snapshot)
 
 
 if __name__ == "__main__":
