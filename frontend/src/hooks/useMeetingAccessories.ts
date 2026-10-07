@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiClient, MeetingDiagnostics, RecordingScreenshot } from '../api/apiClient';
+import { ApiClient, MeetingDiagnostics, RecordingNote, RecordingScreenshot } from '../api/apiClient';
 
 export type VisualFramesState = 'idle' | 'loading' | 'ready' | 'error';
 export type ScreenshotsState = 'idle' | 'loading' | 'ready' | 'error';
+export type NotesState = 'idle' | 'loading' | 'ready' | 'error';
 
 interface MeetingAccessoriesOptions {
   recordingId: string | null;
@@ -23,10 +24,13 @@ export function useMeetingAccessories({
   const [visualFramesError, setVisualFramesError] = useState<string | null>(null);
   const [screenshots, setScreenshots] = useState<RecordingScreenshot[]>([]);
   const [screenshotsState, setScreenshotsState] = useState<ScreenshotsState>('idle');
+  const [notes, setNotes] = useState<RecordingNote[]>([]);
+  const [notesState, setNotesState] = useState<NotesState>('idle');
 
   const diagnosticsGenerationRef = useRef(0);
   const visualFramesGenerationRef = useRef(0);
   const screenshotsGenerationRef = useRef(0);
+  const notesGenerationRef = useRef(0);
 
   const loadDiagnostics = useCallback(async () => {
     if (!recordingId || demoMode) return;
@@ -65,6 +69,22 @@ export function useMeetingAccessories({
     }
   }, [demoMode, recordingId]);
 
+  const loadNotes = useCallback(async () => {
+    if (!recordingId || demoMode) return;
+    const generation = ++notesGenerationRef.current;
+    setNotesState('loading');
+    try {
+      const payload = await ApiClient.recordingNotes(recordingId);
+      if (generation !== notesGenerationRef.current) return;
+      setNotes(payload.items || []);
+      setNotesState('ready');
+    } catch {
+      if (generation !== notesGenerationRef.current) return;
+      setNotes([]);
+      setNotesState('error');
+    }
+  }, [demoMode, recordingId]);
+
   const loadVisualFrames = useCallback(async () => {
     if (!recordingId || demoMode) return;
     const generation = ++visualFramesGenerationRef.current;
@@ -88,6 +108,7 @@ export function useMeetingAccessories({
     diagnosticsGenerationRef.current += 1;
     visualFramesGenerationRef.current += 1;
     screenshotsGenerationRef.current += 1;
+    notesGenerationRef.current += 1;
     setDiagnosticReport(null);
     setDiagnosticsLoading(false);
     setDiagnosticsError(null);
@@ -96,11 +117,14 @@ export function useMeetingAccessories({
     setVisualFramesError(null);
     setScreenshots([]);
     setScreenshotsState('idle');
+    setNotes([]);
+    setNotesState('idle');
 
     return () => {
       diagnosticsGenerationRef.current += 1;
       visualFramesGenerationRef.current += 1;
       screenshotsGenerationRef.current += 1;
+      notesGenerationRef.current += 1;
     };
   }, [demoMode, lang, recordingId]);
 
@@ -116,5 +140,8 @@ export function useMeetingAccessories({
     screenshots,
     screenshotsState,
     loadScreenshots,
+    notes,
+    notesState,
+    loadNotes,
   };
 }
