@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from local_asr_server.asr_provider import VAD_GUIDED_DEFAULT, VAD_POST_FILTER_DEFAULT
 
@@ -217,6 +217,17 @@ class ScreenshotCaptureRequest(BaseModel):
 
 class ScreenshotDisplaySelectionRequest(BaseModel):
     display_id: int
+
+
+class RecordingNoteCreateRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=128)
+    timestamp: float = Field(ge=0)
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class RecordingNoteUpdateRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    revision: int = Field(ge=1)
 
 
 class MeetingPreparationRequest(BaseModel):
