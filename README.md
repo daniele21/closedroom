@@ -248,9 +248,20 @@ UV_CACHE_DIR=.cache/uv uv run local-asr serve --reload
 
 ```bash
 ./build.sh --no-dmg
+# => dist/ClosedRoom.app
 ```
 
-The packaged application includes the native capture helper and FluidAudio diarization helper. Packaging and target-Mac behavior require the applicable macOS toolchain and real-environment validation.
+ClosedRoom keeps its installed/runtime identity stable across product versions: the app bundle is `ClosedRoom.app`, the display name is `ClosedRoom`, and the default bundle identifier is `com.closedroom.app`. Root `VERSION` owns the product SemVer embedded in the bundle and used by versioned DMGs/releases; individual finalized artifacts add build ID + source revision without changing the app identity.
+
+For repeated local testing with stable macOS TCC permissions, use one persistent code-signing identity and install the same bundle name each time:
+
+```bash
+export CLOSEDROOM_SIGN_IDENTITY="ClosedRoom Local Development"
+./build.sh --no-dmg --install
+# => /Applications/ClosedRoom.app
+```
+
+A trusted self-signed Code Signing identity is sufficient for same-Mac development. Public distribution still requires the production Developer ID + notarization path. The packaged application includes the native capture helper and FluidAudio diarization helper; target-Mac behavior still requires applicable real-environment validation.
 
 ## Current status and limits
 
