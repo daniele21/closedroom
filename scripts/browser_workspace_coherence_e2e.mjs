@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import net from 'node:net';
@@ -36,6 +37,110 @@ async function freePort() {
       server.close(() => resolve(port));
     });
   });
+}
+
+
+async function startSettingsFixture(port) {
+  const brandMark = await fsp.readFile(
+    path.join(root, 'design/assets/brand/closedroom-microphone-mark.png'),
+  );
+  let refreshCount = 0;
+  const settings = {
+    transcriptions_dir: '/tmp/closedroom-transcriptions',
+    recordings_dir: '/tmp/closedroom-recordings',
+    asr_provider: 'local',
+    speechmatics_region: 'eu',
+    speechmatics_model: 'enhanced',
+    speechmatics_diarization: 'speaker',
+    speechmatics_timeout_seconds: 900,
+    speechmatics_poll_interval_seconds: 5,
+    gemini_model: 'gemini-3.5-flash',
+    llm_provider: 'mock',
+    default_model: '',
+    default_language: 'it',
+    default_task: 'transcribe',
+    default_temperature: 0,
+    default_word_timestamps: false,
+    default_condition_on_previous: false,
+    local_llm_mode: 'disabled',
+    local_llm_url: 'http://127.0.0.1:8080',
+    local_llm_model: 'nemotron-nano-4b-q8',
+    local_llm_quality_preset: 'balanced',
+    local_llm_temperature: null,
+    local_llm_reasoning: 'auto',
+    local_llm_max_output_tokens: null,
+    local_llm_json_mode: true,
+    local_llm_model_path: '',
+    local_llm_model_paths: {},
+    meeting_auto_analysis: false,
+    meeting_default_pipeline: 'meeting_default',
+    speaker_diarization_enabled: false,
+    visual_intelligence_enabled: false,
+  };
+
+  const menuBarPayload = () => ({
+    available: true,
+    visible: true,
+    icon_loaded: true,
+    state: 'idle',
+    icon_asset: 'design/assets/brand/closedroom-microphone-mark.png',
+    repair_count: refreshCount,
+    last_error: null,
+  });
+
+  const server = http.createServer((request, response) => {
+    const pathname = new URL(request.url || '/', `http://127.0.0.1:${port}`).pathname;
+    const sendJson = (status, payload) => {
+      const body = Buffer.from(JSON.stringify(payload));
+      response.writeHead(status, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-length': String(body.length),
+      });
+      response.end(body);
+    };
+
+    if (request.method === 'GET' && pathname === '/health') {
+      return sendJson(200, { ok: true, app_name: 'ClosedRoom', default_model: '' });
+    }
+    if (request.method === 'GET' && pathname === '/v1/session') {
+      return sendJson(200, { ok: true });
+    }
+    if (request.method === 'GET' && pathname === '/v1/settings') {
+      return sendJson(200, settings);
+    }
+    if (request.method === 'GET' && pathname === '/v1/runtime/services/llm') {
+      return sendJson(200, { name: 'llm', status: 'stopped', mode: 'disabled' });
+    }
+    if (request.method === 'GET' && pathname === '/v1/system/accessibility') {
+      return sendJson(200, { available: true, trusted: true, required_for: [] });
+    }
+    if (request.method === 'GET' && pathname === '/v1/system/menubar') {
+      return sendJson(200, menuBarPayload());
+    }
+    if (request.method === 'POST' && pathname === '/v1/system/menubar/refresh') {
+      refreshCount += 1;
+      return sendJson(200, menuBarPayload());
+    }
+    if (request.method === 'GET' && pathname === '/brand/closedroom-microphone-mark.png') {
+      response.writeHead(200, {
+        'content-type': 'image/png',
+        'content-length': String(brandMark.length),
+        'cache-control': 'no-store',
+      });
+      return response.end(brandMark);
+    }
+    return sendJson(404, { detail: `fixture route not found: ${request.method} ${pathname}` });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+
+  return {
+    close: () => new Promise((resolve) => server.close(resolve)),
+    getRefreshCount: () => refreshCount,
+  };
 }
 
 async function portReady(port) {
@@ -247,20 +352,27 @@ await fsp.rm(evidenceRoot, { recursive: true, force: true });
 await fsp.mkdir(path.join(evidenceRoot, 'logs'), { recursive: true });
 const vitePort = await freePort();
 const driverPort = await freePort();
+const fixturePort = await freePort();
 const viteLog = fs.openSync(path.join(evidenceRoot, 'logs/vite.log'), 'w');
 const driverLog = fs.openSync(path.join(evidenceRoot, 'logs/chromedriver.log'), 'w');
 let vite;
 let driver;
 let browser;
+let settingsFixture;
 let video = null;
 let error = null;
 const observations = {};
 
 try {
+  settingsFixture = await startSettingsFixture(fixturePort);
   vite = launch(
     'pnpm',
     ['exec', 'vite', '--host', '127.0.0.1', '--port', String(vitePort), '--strictPort'],
-    { cwd: path.join(root, 'frontend'), env: { ...process.env }, stdio: ['ignore', viteLog, viteLog] },
+    {
+      cwd: path.join(root, 'frontend'),
+      env: { ...process.env, BACKEND_PORT: String(fixturePort) },
+      stdio: ['ignore', viteLog, viteLog],
+    },
   );
   await waitPort(vitePort, 15000, vite);
 
@@ -365,6 +477,78 @@ try {
   if (themeBefore === themeAfter) throw new Error(`theme utility did not change theme: ${themeBefore}`);
   await checkpoint(browser, '04-theme-continuity');
 
+  await browser.click('.workspace-settings-trigger');
+  await waitUntil(browser, 'workspace utility menu for settings', "return Boolean(document.querySelector('#app-settings-menu'));", 5000);
+  await browser.clickMenuItemContaining(['Impostazioni', 'Settings']);
+  await waitUntil(
+    browser,
+    'menu bar recovery settings',
+    "return Boolean(document.querySelector('[data-settings-menubar="true"]'));",
+    10000,
+    true,
+  );
+  await waitUntil(
+    browser,
+    'canonical menu bar mark preview',
+    `const image = document.querySelector('[data-settings-menubar="true"] img[src="/brand/closedroom-microphone-mark.png"]');
+     return Boolean(image && image.complete && image.naturalWidth > 0);`,
+    5000,
+    true,
+  );
+  observations.menuBarSettings = await browser.execute(`
+    const card = document.querySelector('[data-settings-menubar="true"]');
+    const image = card?.querySelector('img[src="/brand/closedroom-microphone-mark.png"]');
+    const restore = Array.from(card?.querySelectorAll('button') || []).find((button) =>
+      /mostra di nuovo|show again/i.test((button.innerText || button.textContent || '').trim())
+    );
+    const help = card?.querySelector('details');
+    if (help) help.open = true;
+    card?.scrollIntoView({ block: 'center' });
+    return {
+      present: Boolean(card),
+      imageLoaded: Boolean(image && image.complete && image.naturalWidth > 0),
+      activeStatus: /attiva|active/i.test(card?.innerText || card?.textContent || ''),
+      restoreEnabled: Boolean(restore && !restore.disabled),
+      helpVisible: Boolean(help),
+      hasNotchGuidance: /notch/i.test(card?.innerText || card?.textContent || ''),
+      hasManagerGuidance: /bartender|hidden bar|ice/i.test(card?.innerText || card?.textContent || ''),
+    };
+  `);
+  if (
+    !observations.menuBarSettings.present
+    || !observations.menuBarSettings.imageLoaded
+    || !observations.menuBarSettings.activeStatus
+    || !observations.menuBarSettings.restoreEnabled
+    || !observations.menuBarSettings.helpVisible
+    || !observations.menuBarSettings.hasNotchGuidance
+    || !observations.menuBarSettings.hasManagerGuidance
+  ) {
+    throw new Error(`menu bar Settings recovery is incomplete: ${JSON.stringify(observations.menuBarSettings)}`);
+  }
+  await checkpoint(browser, '05-menubar-settings');
+
+  const refreshCountBefore = settingsFixture.getRefreshCount();
+  const restoreClicked = await browser.execute(`
+    const card = document.querySelector('[data-settings-menubar="true"]');
+    const restore = Array.from(card?.querySelectorAll('button') || []).find((button) =>
+      /mostra di nuovo|show again/i.test((button.innerText || button.textContent || '').trim())
+    );
+    if (!restore || restore.disabled) return false;
+    restore.click();
+    return true;
+  `);
+  if (!restoreClicked) throw new Error('menu bar Show again action is unavailable');
+  const refreshDeadline = Date.now() + 5000;
+  while (settingsFixture.getRefreshCount() <= refreshCountBefore && Date.now() < refreshDeadline) {
+    await sleep(100);
+  }
+  if (settingsFixture.getRefreshCount() <= refreshCountBefore) {
+    throw new Error('menu bar Show again did not reach the local repair endpoint');
+  }
+  observations.menuBarSettings.refreshRoundTrip = true;
+  observations.menuBarSettings.refreshCount = settingsFixture.getRefreshCount();
+  await checkpoint(browser, '06-menubar-restored');
+
   await browser.setWindow(780, 900);
   await sleep(350);
   observations.compact = await browser.execute(`
@@ -438,6 +622,7 @@ try {
   if (browser) await browser.close();
   await stop(driver);
   await stop(vite);
+  if (settingsFixture) await settingsFixture.close();
   fs.closeSync(viteLog);
   fs.closeSync(driverLog);
 }
@@ -454,8 +639,8 @@ const manifest = {
   video,
   privacy_boundary: 'Deterministic in-app demo data only; captures are restricted to the headless Chrome viewport.',
   residual_fidelity_gaps: [
-    'headless Chrome proves responsive workspace semantics but not the packaged WKWebView window chrome',
-    'does not prove VoiceOver spoken-output quality or real macOS focus-ring rendering',
+    'headless Chrome proves responsive workspace and menu-bar recovery semantics but not physical NSStatusItem placement in the packaged WKWebView/Cocoa app',
+    'does not prove notch/menu-bar-manager visibility, VoiceOver spoken-output quality or real macOS focus-ring rendering',
     'does not exercise TCC/native capture or production MLX/Metal behavior',
   ],
   error,
