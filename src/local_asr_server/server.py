@@ -54,6 +54,8 @@ PUBLIC_AUTH_PATHS = {
     "/logo.svg",
     "/logo-dark.svg",
     "/logo-light.svg",
+    "/logo-dark.png",
+    "/logo-light.png",
 }
 
 
