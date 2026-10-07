@@ -33,6 +33,7 @@ from AppKit import (
     NSFloatingWindowLevel,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSColor,
+    NSCursor,
     NSView,
     NSViewMinYMargin,
     NSEvent,
@@ -92,13 +93,52 @@ class ClosedRoomActivationObserver(NSObject):
 
 
 class DragHandleView(NSView):
-    """A transparent custom NSView subclass overlaying the WKWebView to enable window dragging."""
+    """Native drag region that owns overlay movement above the WKWebView.
 
-    def mouseDownCanMoveWindow(self) -> bool:
-        return True
+    WKWebView consumes mouse events, so relying on movableByWindowBackground
+    is not sufficient for a borderless panel. This view tracks the pointer in
+    screen coordinates and moves the NSPanel explicitly.
+    """
 
     def acceptsFirstMouse_(self, event) -> bool:
         return True
+
+    def mouseDownCanMoveWindow(self) -> bool:
+        # Movement is handled explicitly below so it stays deterministic even
+        # when the panel content is a full-size WKWebView.
+        return False
+
+    def mouseDown_(self, event) -> None:
+        window = self.window()
+        if window is None:
+            return
+        mouse = NSEvent.mouseLocation()
+        origin = window.frame().origin
+        self._drag_start_mouse = (float(mouse.x), float(mouse.y))
+        self._drag_start_origin = (float(origin.x), float(origin.y))
+        NSCursor.closedHandCursor().set()
+
+    def mouseDragged_(self, event) -> None:
+        window = self.window()
+        start_mouse = getattr(self, "_drag_start_mouse", None)
+        start_origin = getattr(self, "_drag_start_origin", None)
+        if window is None or start_mouse is None or start_origin is None:
+            return
+        mouse = NSEvent.mouseLocation()
+        dx = float(mouse.x) - start_mouse[0]
+        dy = float(mouse.y) - start_mouse[1]
+        window.setFrameOrigin_((start_origin[0] + dx, start_origin[1] + dy))
+
+    def mouseUp_(self, event) -> None:
+        NSCursor.openHandCursor().set()
+        manager = getattr(self, "window_manager", None)
+        if manager is not None:
+            manager._save_overlay_position()
+        self._drag_start_mouse = None
+        self._drag_start_origin = None
+
+    def resetCursorRects(self) -> None:
+        self.addCursorRect_cursor_(self.bounds(), NSCursor.openHandCursor())
 
 
 class ClosedRoomWindowManager:
@@ -110,6 +150,8 @@ class ClosedRoomWindowManager:
         self.webview: Optional[objc.objc_object] = None
         self.overlay_window: Optional[NSPanel] = None
         self.overlay_webview: Optional[objc.objc_object] = None
+        self.overlay_container: Optional[NSView] = None
+        self.overlay_drag_handle: Optional[DragHandleView] = None
         self._overlay_capture_window_id: int | None = None
         self._overlay_visible = False
         self._delegate: Optional[ClosedRoomWindowDelegate] = None
@@ -488,15 +530,22 @@ class ClosedRoomWindowManager:
             
         self.overlay_window.setCollectionBehavior_(behavior)
         self.overlay_window.setHidesOnDeactivate_(False)
-        self.overlay_window.setMovableByWindowBackground_(True) # Allow dragging from anywhere
+        # The WKWebView fills the panel and consumes mouse events. Keep generic
+        # background dragging disabled and expose one explicit native drag zone.
+        self.overlay_window.setMovableByWindowBackground_(False)
         self.overlay_window.setHasShadow_(True)
-        
-        # Make the panel background transparent to support CSS glassmorphism and rounded corners
+
+        # Make the panel background transparent to support CSS glassmorphism and rounded corners.
         self.overlay_window.setOpaque_(False)
         self.overlay_window.setBackgroundColor_(NSColor.clearColor())
 
-        # Create WKWebView
-        content_rect = self.overlay_window.contentView().frame()
+        # Own the panel hierarchy in a native container. The WKWebView remains
+        # fully interactive while a small native drag view is layered above it.
+        content_rect = ((0, 0), (width, height))
+        self.overlay_container = NSView.alloc().initWithFrame_(content_rect)
+        self.overlay_container.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        self.overlay_window.setContentView_(self.overlay_container)
+
         self.overlay_webview = WKWebView.alloc().initWithFrame_(content_rect)
         self.overlay_webview.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
         if hasattr(self.overlay_webview, "setInspectable_"):
@@ -504,33 +553,30 @@ class ClosedRoomWindowManager:
                 self.overlay_webview.setInspectable_(True)
             except Exception:
                 pass
-        
-        # Set transparent webview background (works for WebKit)
+
+        # Set transparent webview background (works for WebKit).
         self.overlay_webview.setValue_forKey_(False, "drawsBackground")
 
-        # Set corner radius and masksToBounds for overlay window contentView and webview
         corner_radius = 22.0
-        content = self.overlay_window.contentView()
-        content.setWantsLayer_(True)
-        content.layer().setCornerRadius_(corner_radius)
-        content.layer().setMasksToBounds_(True)
+        self.overlay_container.setWantsLayer_(True)
+        self.overlay_container.layer().setCornerRadius_(corner_radius)
+        self.overlay_container.layer().setMasksToBounds_(True)
 
         self.overlay_webview.setWantsLayer_(True)
         self.overlay_webview.layer().setCornerRadius_(corner_radius)
         self.overlay_webview.layer().setMasksToBounds_(True)
+        self.overlay_container.addSubview_(self.overlay_webview)
 
-        self.overlay_window.setContentView_(self.overlay_webview)
-
-        # Add native transparent drag handle above the WKWebView on the top-left area
+        # Keep the drag target away from timer / expand / close controls on the
+        # right. It remains anchored to the top as the overlay changes height.
         drag_handle = DragHandleView.alloc().initWithFrame_(
-            ((12, height - 42), (190, 34))
+            ((8, height - 42), (168, 38))
         )
+        drag_handle.window_manager = self
         drag_handle.setAutoresizingMask_(NSViewMinYMargin)
-        self.overlay_window.contentView().addSubview_positioned_relativeTo_(
-            drag_handle,
-            1,  # NSWindowAbove
-            None
-        )
+        # Added after the WKWebView so the drag target owns pointer events
+        # only inside its bounded header region.
+        self.overlay_container.addSubview_(drag_handle)
         self.overlay_drag_handle = drag_handle
         self._install_global_key_monitor()
 
@@ -564,6 +610,8 @@ class ClosedRoomWindowManager:
         self._delegate = None
         self.webview = None
         self.overlay_webview = None
+        self.overlay_container = None
+        self.overlay_drag_handle = None
 
 
 class MainThreadHelper(NSObject):

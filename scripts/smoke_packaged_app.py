@@ -93,6 +93,13 @@ def fetch_text(url: str, timeout: float = 2.0) -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
+def probe_image_asset(url: str, timeout: float = 2.0) -> bool:
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        body = response.read()
+        content_type = str(response.headers.get("Content-Type") or "").lower()
+        return response.status == 200 and content_type.startswith("image/") and len(body) > 0
+
+
 def probe_archive_search(port: int, timeout: float = 5.0) -> dict[str, Any]:
     """Exercise the authenticated meeting-search path in the frozen Python runtime.
 
@@ -222,6 +229,7 @@ def main() -> int:
 
             health: dict[str, Any] = {}
             root_loaded = False
+            brand_asset_loaded = False
 
             def ready() -> bool:
                 nonlocal health, root_loaded
@@ -239,6 +247,12 @@ def main() -> int:
             archive_search_payload: dict[str, Any] | None = None
             archive_search_error: str | None = None
             if ready_ok:
+                try:
+                    brand_asset_loaded = probe_image_asset(
+                        f"http://127.0.0.1:{port}/logo-dark.png"
+                    )
+                except Exception:
+                    brand_asset_loaded = False
                 try:
                     archive_search_payload = probe_archive_search(port)
                 except Exception as exc:
@@ -274,6 +288,8 @@ def main() -> int:
             errors.append(f"packaged runtime import probe failed: {runtime_probe_error}")
         if not ready_ok:
             errors.append("packaged server/static root did not reach readiness")
+        if ready_ok and not brand_asset_loaded:
+            errors.append("packaged ClosedRoom brand asset is unavailable")
         if archive_search_error:
             errors.append(f"packaged archive search/FTS5 probe failed: {archive_search_error}")
         if process.returncode not in (0, 130):
@@ -298,6 +314,7 @@ def main() -> int:
             "port": port,
             "health_ok": bool(health.get("ok")),
             "static_root_loaded": root_loaded,
+            "brand_asset_loaded": brand_asset_loaded,
             "archive_search_fts5_ok": archive_search_payload is not None,
             "archive_search_probe": archive_search_payload,
             "runtime_imports_ok": runtime_probe_payload is not None and runtime_probe_error is None,
