@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  GripHorizontal,
   Loader2,
   Mic,
   Monitor,
@@ -831,6 +832,14 @@ export default function RecordingOverlayPage() {
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="flex h-5 w-4 shrink-0 items-center justify-center text-white/30"
+            data-overlay-drag-region="true"
+            title="Drag to move"
+            aria-hidden="true"
+          >
+            <GripHorizontal className="h-3.5 w-3.5" />
+          </span>
           <span
             className={`h-2.5 w-2.5 shrink-0 rounded-full ${
               isStopping
