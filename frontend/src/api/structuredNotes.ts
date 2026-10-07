@@ -3,17 +3,20 @@ import type { AnalysisRun } from './apiClient';
 export type StructuredNoteItemKind = 'action' | 'decision';
 
 export interface StructuredNoteSourceRef {
-  source_type?: 'transcript' | 'screenshot';
+  source_type?: 'transcript' | 'screenshot' | 'user_note';
   source_id?: string;
   segment_id?: string | number;
   start?: number | null;
   end?: number | null;
   speaker?: string | null;
   screenshot_id?: string;
+  note_id?: string;
   timestamp?: number;
   confidence?: number | null;
   evidence_basis?: 'spoken' | 'visual_inference' | string;
   machine_interpreted?: boolean;
+  user_marked?: boolean;
+  user_authored?: boolean;
 }
 
 export interface StructuredNoteItem {
