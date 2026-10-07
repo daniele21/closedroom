@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
+from local_asr_server.paths import get_brand_asset_path
+
 
 ROOT = Path(__file__).parents[1]
 
@@ -25,6 +27,17 @@ class MacOSShellContractTests(unittest.TestCase):
         self.assertNotIn("self._setup_drag_and_drop()\n", source)
         self.assertIn("closedroom-microphone-mark.png", spec)
         self.assertIn('"menu_bar_icon": "design/assets/brand/closedroom-microphone-mark.png"', brand)
+
+    def test_canonical_menu_bar_brand_mark_resolves_in_source_tree(self) -> None:
+        mark = get_brand_asset_path("closedroom-microphone-mark.png")
+
+        self.assertTrue(mark.is_file(), mark)
+        self.assertEqual(
+            mark.resolve(),
+            (ROOT / "design" / "assets" / "brand" / "closedroom-microphone-mark.png").resolve(),
+        )
+        with self.assertRaises(ValueError):
+            get_brand_asset_path("../closedroom-microphone-mark.png")
 
     def test_overlay_drag_is_owned_by_native_view_above_webview(self) -> None:
         source = (ROOT / "src" / "local_asr_server" / "window.py").read_text(encoding="utf-8")
