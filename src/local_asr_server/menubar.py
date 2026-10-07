@@ -76,11 +76,19 @@ except ImportError:
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-# Status icons shown in the menu bar (using SF Symbols via text fallbacks)
+# Native menu-bar states. Emoji remain only as a fallback if AppKit cannot
+# resolve an SF Symbol on the running macOS version.
 ICON_IDLE = "🎙️"
 ICON_RECORDING = "🔴"
 ICON_TRANSCRIBING = "⏳"
 ICON_ERROR = "⚠️"
+
+STATUS_ITEM_STATES = {
+    "idle": ("waveform", "ClosedRoom — pronto", ICON_IDLE),
+    "recording": ("record.circle", "ClosedRoom — registrazione in corso", ICON_RECORDING),
+    "transcribing": ("hourglass", "ClosedRoom — elaborazione in corso", ICON_TRANSCRIBING),
+    "error": ("exclamationmark.triangle", "ClosedRoom — non disponibile", ICON_ERROR),
+}
 
 
 # ── Server thread ─────────────────────────────────────────────────────────────
@@ -284,12 +292,15 @@ class ClosedRoomApp(rumps.App):
     """
 
     def __init__(self) -> None:
-        # Use a plain text title while we load; we'll update after server starts
+        # Let rumps own menu lifecycle, then project state through a native
+        # square SF Symbol so the menu-bar item is stable and compact.
         super().__init__(
             name="ClosedRoom",
             title=ICON_IDLE,
             quit_button=None,  # we provide our own Esci item
         )
+        self._status_icon_state = "idle"
+        self._set_status_icon("idle")
 
         # Build the menu
         self._build_menu()
@@ -318,7 +329,39 @@ class ClosedRoomApp(rumps.App):
         """One-shot timer to show the window once the Cocoa run loop is active."""
         timer.stop()
         self._setup_drag_and_drop()
+        # Re-apply after the status button is fully attached to the Cocoa run
+        # loop (and after optional drag/drop setup touches its native class).
+        self._set_status_icon(self._status_icon_state)
         self.window_manager.show()
+
+    def _set_status_icon(self, state: str) -> None:
+        """Render one native template icon in a fixed square status-item slot."""
+        symbol_name, accessibility_label, fallback = STATUS_ITEM_STATES.get(
+            state,
+            STATUS_ITEM_STATES["idle"],
+        )
+        self._status_icon_state = state
+        try:
+            import AppKit
+
+            status_item = self._nsapp.nsstatusitem
+            button = status_item.button()
+            image = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+                symbol_name,
+                accessibility_label,
+            )
+            if image is None:
+                raise RuntimeError(f"SF Symbol unavailable: {symbol_name}")
+            image.setTemplate_(True)
+            image.setSize_((17.0, 17.0))
+            status_item.setLength_(AppKit.NSSquareStatusItemLength)
+            button.setImage_(image)
+            button.setImagePosition_(AppKit.NSImageOnly)
+            button.setTitle_("")
+            button.setToolTip_(accessibility_label)
+        except Exception as exc:
+            logger.warning("Falling back to text menu-bar status icon: %s", exc)
+            self.title = fallback
 
     # ── Menu construction ──────────────────────────────────────────────────
 
@@ -474,7 +517,7 @@ class ClosedRoomApp(rumps.App):
         """Project canonical recording/job state into the menu bar."""
         status = _get_server_status(self.app_port)
         if not status:
-            self.title = ICON_ERROR
+            self._set_status_icon("error")
             self._update_status_item("ClosedRoom non disponibile")
             self._set_recording_actions(recording=False, available=False)
             return
@@ -483,7 +526,7 @@ class ClosedRoomApp(rumps.App):
         self._refresh_recent_meetings()
 
         if server_status == "recording":
-            self.title = ICON_RECORDING
+            self._set_status_icon("recording")
             try:
                 active = self._api_json("/v1/recordings/active")
             except Exception:
@@ -492,12 +535,12 @@ class ClosedRoomApp(rumps.App):
             self._update_status_item(f"● {title}")
             self._set_recording_actions(recording=True, available=True)
         elif server_status == "transcribing":
-            self.title = ICON_TRANSCRIBING
+            self._set_status_icon("transcribing")
             self._update_status_item("Preparazione in corso…")
             self._set_recording_actions(recording=False, available=False)
             self._copy_transcript_item.set_callback(self._copy_last_transcription)
         else:
-            self.title = ICON_IDLE
+            self._set_status_icon("idle")
             self._update_status_item("Pronto")
             self._set_recording_actions(recording=False, available=True)
 
@@ -554,7 +597,7 @@ class ClosedRoomApp(rumps.App):
         from local_asr_server.window import run_on_main_thread
 
         def set_status_transcribing():
-            self.title = ICON_TRANSCRIBING
+            self._set_status_icon("transcribing")
             self._update_status_item("Trascrizione da drop… ⏳")
             self._start_item.set_callback(None)
             self._stop_item.set_callback(None)
