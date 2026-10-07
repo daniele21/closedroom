@@ -83,6 +83,13 @@ class BuildIdentityContractTests(unittest.TestCase):
         )
         self.assertNotIn("pyproject.toml", create_dmg)
 
+    def test_packaged_smoke_accepts_stable_direct_build(self) -> None:
+        smoke = (ROOT / "scripts" / "smoke_packaged_app.py").read_text(encoding="utf-8")
+
+        self.assertIn('stable_local = root / "dist" / "ClosedRoom.app"', smoke)
+        self.assertIn("if stable_local.is_dir():", smoke)
+        self.assertIn("return stable_local, None", smoke)
+
 
 if __name__ == "__main__":
     unittest.main()
