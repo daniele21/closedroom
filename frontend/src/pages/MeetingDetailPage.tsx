@@ -36,8 +36,9 @@ import { useTranslation } from '../i18n/i18n';
 import { getDemoMeetings } from '../features/demo/demoData';
 import { AnalysisSetupModal, AnalysisSetupSelection } from '../components/ui/AnalysisSetupModal';
 import { Sheet, SheetContent, SheetHeader, SheetBody } from '../components/ui/Sheet';
+import { Dialog, DialogContent, DialogHeader, DialogBody } from '../components/ui/Dialog';
 import { cn } from '../utils/cn';
-import { formatJobProgress } from '../utils/jobs';
+import { localizeJobStep } from '../utils/jobs';
 import { VisualIntelligencePanel } from '../components/meeting/VisualIntelligencePanel';
 import { VisualDebugPanel } from '../components/meeting/VisualDebugPanel';
 import { StructuredNotesEditor } from '../components/meeting/StructuredNotesEditor';
@@ -213,6 +214,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [analysisSetupOpen, setAnalysisSetupOpen] = useState(false);
   const [analysisPipelineTarget, setAnalysisPipelineTarget] = useState('meeting_default');
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   const [activeTab, setActiveTab] = useState<MeetingTab>('transcript');
   const [currentTime, setCurrentTime] = useState(0);
@@ -603,16 +606,14 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
 
   const handleDeleteMeeting = async () => {
     if (!meeting?.recording.archived_at || demoMode || isBusy) return;
-    if (!window.confirm(lang === 'it'
-      ? 'Eliminare definitivamente questo meeting? Audio, screenshot, note e trascrizioni saranno cancellati dal dispositivo. Questa azione non è reversibile.'
-      : 'Permanently delete this meeting? Audio, screenshots, notes, and transcripts will be removed from this device. This cannot be undone.')) return;
     setBusyAction('delete');
-    setError(null);
+    setDeleteError(null);
     try {
       await ApiClient.deleteMeeting(meeting.id);
+      setDeleteConfirmOpen(false);
       navigateTo('home');
     } catch (err: any) {
-      setError(err?.message || (lang === 'it' ? 'Impossibile eliminare il meeting' : 'Could not delete meeting'));
+      setDeleteError(err?.message || (lang === 'it' ? 'Impossibile eliminare il meeting' : 'Could not delete meeting'));
     } finally {
       setBusyAction(null);
     }
@@ -868,7 +869,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 variant="ghost"
                 size="sm"
                 disabled={demoMode || isBusy}
-                onClick={() => void handleDeleteMeeting()}
+                onClick={() => { setDeleteError(null); setDeleteConfirmOpen(true); }}
                 className="h-8 px-2.5 text-danger"
                 data-meeting-delete-action="true"
               >
@@ -959,7 +960,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     <span className="font-medium text-text-primary">
                       {job.type === 'meeting_preparation'
                         ? preparationProgressLabel(job.current_step, lang)
-                        : formatJobProgress(job, t)}
+                        : localizeJobStep(job.current_step || job.status, t)}
                     </span>
                     <span className="shrink-0 font-mono tabular-nums text-text-secondary">
                       {job.progress > 0 ? `${Math.min(job.progress, 100)}%` : (lang === 'it' ? 'In corso' : 'Working')}
@@ -2133,6 +2134,46 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
         </div>
       )}
+
+      <Dialog
+        open={deleteConfirmOpen}
+        onOpenChange={(open) => {
+          if (busyAction === 'delete') return;
+          setDeleteConfirmOpen(open);
+          if (!open) setDeleteError(null);
+        }}
+      >
+        <DialogContent size="sm" data-meeting-delete-confirm="true">
+          <DialogHeader
+            title={lang === 'it' ? 'Eliminare definitivamente il meeting?' : 'Permanently delete meeting?'}
+            description={lang === 'it'
+              ? 'Audio, screenshot, note e trascrizioni verranno rimossi dal dispositivo. Non è possibile annullare.'
+              : 'Audio, screenshots, notes and transcripts will be removed from this device. This cannot be undone.'}
+          />
+          <DialogBody>
+            <p className="text-sm text-text-secondary">
+              {lang === 'it'
+                ? 'Se il meeting è collegato a elaborazioni ancora attive o risultati condivisi, ClosedRoom impedirà la cancellazione per proteggere i dati.'
+                : 'If active processing or shared results depend on this meeting, ClosedRoom will block deletion to protect your data.'}
+            </p>
+            {deleteError && <p role="alert" className="mt-3 text-sm text-danger">{deleteError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" size="sm" disabled={busyAction === 'delete'} onClick={() => setDeleteConfirmOpen(false)}>
+                {lang === 'it' ? 'Annulla' : 'Cancel'}
+              </Button>
+              <button
+                type="button"
+                disabled={busyAction === 'delete'}
+                onClick={() => void handleDeleteMeeting()}
+                className="rounded-lg bg-danger px-3 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                data-meeting-delete-confirm-action="true"
+              >
+                {busyAction === 'delete' ? (lang === 'it' ? 'Eliminazione…' : 'Deleting…') : (lang === 'it' ? 'Elimina definitivamente' : 'Delete permanently')}
+              </button>
+            </div>
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
 
       <AnalysisSetupModal
         isOpen={analysisSetupOpen}

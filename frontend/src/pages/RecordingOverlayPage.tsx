@@ -1093,8 +1093,9 @@ export default function RecordingOverlayPage() {
             onClick={() => void handleOpenNote()}
             disabled={isStopping || isAnchoringNote || isSavingNote || isUndoingNote || !isRecording}
             className="flex h-full items-center gap-1.5 px-2.5 text-[10px] font-semibold text-white/90 transition hover:bg-white/[0.05] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-35"
-            aria-label="Add note"
-            title="Add note about this moment"
+            aria-label={noteComposerOpen ? 'Close note' : 'Add note'}
+            aria-expanded={noteComposerOpen}
+            title={noteComposerOpen ? 'Close note editor' : 'Add note about this moment'}
             data-note-action="true"
           >
             {isAnchoringNote || isSavingNote ? (
