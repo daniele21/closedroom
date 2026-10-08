@@ -4,7 +4,7 @@
  * Used by DashboardPage as progressive disclosure for the meeting list.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, FileAudio, FolderKanban, Search, Sparkles, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogBody } from '../ui/Dialog';
 import { Badge } from '../ui/Badge';
@@ -13,7 +13,7 @@ import { useTranslation } from '../../i18n/i18n';
 import { formatProjectDate, getDurationSeconds } from '../../utils/formatters';
 import { meetingTitle } from '../../utils/meetingInsights';
 import { ANALYSIS_TYPE_LABELS } from '../../api/config';
-import type { Meeting } from '../../api/apiClient';
+import { ApiClient, type Meeting } from '../../api/apiClient';
 
 // ─── Status filter options ───────────────────────────────────────────────────
 
@@ -127,11 +127,50 @@ export function MeetingListDialog({
   const { t, lang } = useTranslation();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedMeetings, setArchivedMeetings] = useState<Meeting[]>([]);
+  const [archivedPage, setArchivedPage] = useState(0);
+  const [archiveHasMore, setArchiveHasMore] = useState(false);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveError, setArchiveError] = useState(false);
 
+  useEffect(() => {
+    if (!open) {
+      setShowArchived(false);
+      return;
+    }
+    // Each opening starts with the main collection and a fresh archive view.
+    setArchivedMeetings([]);
+    setArchivedPage(0);
+    setArchiveHasMore(false);
+  }, [open]);
+
+  const loadArchived = async (page: number) => {
+    setArchiveLoading(true);
+    setArchiveError(false);
+    try {
+      const result = await ApiClient.listArchivedMeetings(page);
+      setArchivedMeetings((previous) => page === 1 ? result.items : [...previous, ...result.items]);
+      setArchivedPage(page);
+      setArchiveHasMore(result.has_more);
+    } catch {
+      setArchiveError(true);
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open && showArchived && archivedPage === 0 && !archiveLoading && !archiveError) {
+      void loadArchived(1);
+    }
+  }, [open, showArchived, archivedPage, archiveLoading, archiveError]);
+
+  const visibleMeetings = showArchived ? archivedMeetings : meetings;
   const displayTitle = title ?? t('dashboard.meetingsTitle');
 
   const filtered = useMemo(() => {
-    let result = meetings;
+    let result = visibleMeetings;
     if (statusFilter === 'ready') result = result.filter((m) => m.status === 'ready');
     else if (statusFilter === 'transcribed') result = result.filter((m) => Boolean(m.transcription));
     else if (statusFilter === 'recorded') result = result.filter((m) => !m.transcription);
@@ -146,7 +185,7 @@ export function MeetingListDialog({
       );
     }
     return result;
-  }, [meetings, query, statusFilter]);
+  }, [visibleMeetings, query, statusFilter]);
 
   const statusOptions: { value: StatusFilter; label: string }[] = [
     { value: 'all', label: lang === 'it' ? 'Tutti' : 'All' },
@@ -164,8 +203,21 @@ export function MeetingListDialog({
       >
         <DialogHeader
           title={displayTitle}
-          description={lang === 'it' ? `${meetings.length} meeting nel periodo selezionato` : `${meetings.length} meetings in selected period`}
+          description={showArchived
+            ? (lang === 'it' ? 'Meeting archiviati · tutti i periodi' : 'Archived meetings · all periods')
+            : (lang === 'it' ? `${meetings.length} meeting nel periodo selezionato` : `${meetings.length} meetings in selected period`)}
         />
+
+        <div className="flex gap-2 border-b border-border-subtle px-5 pt-3">
+          <button type="button" onClick={() => setShowArchived(false)} aria-pressed={!showArchived}
+            className={cn('rounded-t-md px-3 py-2 text-xs font-semibold', !showArchived ? 'bg-bg-hover text-text-primary' : 'text-text-muted hover:text-text-primary')}>
+            {lang === 'it' ? 'Attivi' : 'Active'}
+          </button>
+          <button type="button" onClick={() => setShowArchived(true)} aria-pressed={showArchived}
+            className={cn('rounded-t-md px-3 py-2 text-xs font-semibold', showArchived ? 'bg-bg-hover text-text-primary' : 'text-text-muted hover:text-text-primary')} data-archived-meetings="true">
+            {lang === 'it' ? 'Archiviati' : 'Archived'}
+          </button>
+        </div>
 
         {/* Filter bar */}
         <div className="flex flex-wrap items-center gap-3 border-b border-border-subtle bg-bg-surface px-5 py-3">
@@ -205,7 +257,7 @@ export function MeetingListDialog({
             )}
           </label>
 
-          {filtered.length !== meetings.length && (
+          {filtered.length !== visibleMeetings.length && (
             <span className="text-xs text-text-muted">
               {filtered.length} {lang === 'it' ? 'risultati' : 'results'}
             </span>
@@ -214,7 +266,14 @@ export function MeetingListDialog({
 
         {/* List */}
         <DialogBody className="flex flex-col p-2 overflow-y-auto">
-          {filtered.length === 0 ? (
+          {archiveError && showArchived && (
+            <button type="button" onClick={() => void loadArchived(archivedPage || 1)} className="p-3 text-xs text-danger underline">
+              {lang === 'it' ? 'Impossibile caricare l’archivio · Riprova' : 'Could not load archive · Retry'}
+            </button>
+          )}
+          {archiveLoading && archivedPage === 0 ? (
+            <p className="p-4 text-center text-xs text-text-muted">{lang === 'it' ? 'Caricamento archivio…' : 'Loading archive…'}</p>
+          ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Sparkles className="mb-3 h-8 w-8 text-text-muted" />
               <p className="text-sm text-text-muted">
@@ -224,17 +283,25 @@ export function MeetingListDialog({
               </p>
             </div>
           ) : (
-            filtered.map((meeting) => (
-              <MeetingRow
-                key={meeting.id}
-                meeting={meeting}
-                lang={lang}
-                onClick={() => {
-                  onOpenMeeting(meeting.id);
-                  onOpenChange(false);
-                }}
-              />
-            ))
+            <>
+              {filtered.map((meeting) => (
+                <MeetingRow
+                  key={meeting.id}
+                  meeting={meeting}
+                  lang={lang}
+                  onClick={() => {
+                    onOpenMeeting(meeting.id);
+                    onOpenChange(false);
+                  }}
+                />
+              ))}
+              {showArchived && archiveHasMore && !query && (
+                <button type="button" disabled={archiveLoading} onClick={() => void loadArchived(archivedPage + 1)}
+                  className="mx-auto my-2 rounded-lg border border-border-subtle px-3 py-2 text-xs text-text-secondary hover:text-text-primary disabled:opacity-50">
+                  {archiveLoading ? '…' : (lang === 'it' ? 'Carica altri' : 'Load more')}
+                </button>
+              )}
+            </>
           )}
         </DialogBody>
       </DialogContent>
