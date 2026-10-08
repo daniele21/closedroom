@@ -1566,11 +1566,43 @@ class RecordingStore:
                     (original / ".meeting-deletion.json").unlink(missing_ok=True)
                 else:
                     # SQLite committed: a crash only interrupted filesystem cleanup.
-                    shutil.rmtree(staged)
                     if export_stage.exists():
                         shutil.rmtree(export_stage)
+                    shutil.rmtree(staged)
             except Exception:
                 logger.exception("Staged meeting deletion needs manual recovery: %s", staged)
+
+        # A crash may occur after staging the export files but before the
+        # recording directory is renamed. An earlier restore may also have
+        # moved the recording back before completing export recovery.
+        for manifest_path in self.root.glob("*/*/.meeting-deletion.json"):
+            session_dir = manifest_path.parent
+            try:
+                metadata = json.loads((session_dir / "metadata.json").read_text(encoding="utf-8"))
+                recording_id = str(uuid.UUID(str(metadata["id"])))
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                export_root = Path(manifest["transcriptions_root"]).expanduser().resolve()
+                export_stage = export_root / f".meeting-deleting-{recording_id}"
+                with self.catalog.connection() as conn:
+                    existing = conn.execute(
+                        "SELECT 1 FROM recordings WHERE id = ?", (recording_id,),
+                    ).fetchone()
+                if not existing:
+                    # A deletion that committed before recovering this metadata.
+                    if export_stage.exists():
+                        shutil.rmtree(export_stage)
+                    shutil.rmtree(session_dir)
+                    continue
+                if export_stage.exists():
+                    for staged_file in export_stage.iterdir():
+                        destination = export_root / staged_file.name
+                        if destination.exists():
+                            raise RuntimeError("Cannot overwrite transcription during recovery")
+                        staged_file.rename(destination)
+                    export_stage.rmdir()
+                manifest_path.unlink(missing_ok=True)
+            except Exception:
+                logger.exception("Meeting deletion precommit recovery failed: %s", session_dir)
 
     def delete_archived_meeting(self, recording_id: str, *, transcriptions_root: Path) -> None:
         """Permanently purge one archived meeting and its exclusive local artifacts.
@@ -1730,7 +1762,8 @@ class RecordingStore:
                     if session_dir.exists():
                         (session_dir / ".meeting-deletion.json").unlink(missing_ok=True)
                 raise
-            for path in (staged, export_stage):
+            # Keep the staged manifest until export cleanup has succeeded.
+            for path in (export_stage, staged):
                 if path.exists():
                     try:
                         shutil.rmtree(path)
