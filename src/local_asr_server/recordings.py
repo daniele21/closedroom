@@ -196,6 +196,7 @@ class RecordingStore:
             "created_at": _utc_now(),
             "stopped_at": None,
             "completed_at": None,
+            "archived_at": None,
             "mime_type": mime_type,
             "extension": extension,
             "chunk_count": 0,
@@ -245,6 +246,19 @@ class RecordingStore:
 
     def update_title(self, recording_id: str, title: str) -> dict[str, Any]:
         return self.update(recording_id, title=title)
+
+    def set_archived(self, recording_id: str, archived: bool) -> dict[str, Any]:
+        """Persist reversible meeting visibility in the recording source of truth."""
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            if metadata["status"] in {"recording", "finalizing", "transcribing"}:
+                raise RecordingConflict("Cannot change archive state while recording or transcribing")
+            metadata["archived_at"] = (
+                metadata.get("archived_at") or _utc_now()
+            ) if archived else None
+            self._write_metadata(session_dir, metadata)
+            self._upsert_catalog(metadata)
+            return self.public_metadata(metadata)
 
     def append_chunk(
         self,
@@ -1529,12 +1543,14 @@ class RecordingStore:
                     response["result"] = json.load(result_file)
         return response
 
-    def list(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list(self, limit: int = 20, *, include_archived: bool = False) -> list[dict[str, Any]]:
         items = []
         for metadata_path in self.root.glob("*/*/metadata.json"):
             try:
                 with metadata_path.open("r", encoding="utf-8") as metadata_file:
-                    items.append(self.public_metadata(json.load(metadata_file)))
+                    item = self.public_metadata(json.load(metadata_file))
+                    if include_archived or not item.get("archived_at"):
+                        items.append(item)
             except (OSError, json.JSONDecodeError, KeyError):
                 continue
         items.sort(key=lambda item: item["created_at"], reverse=True)

@@ -1,5 +1,6 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState, useRef } from 'react';
 import {
+  Archive,
   ArrowLeft,
   Bookmark,
   ChevronDown,
@@ -15,6 +16,7 @@ import {
   PencilLine,
   PlayCircle,
   RefreshCw,
+  RotateCcw,
   Sparkles,
   Users,
   XCircle,
@@ -579,6 +581,25 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     );
   };
 
+  const handleArchiveState = async (archived: boolean) => {
+    if (!meeting || demoMode || isBusy) return;
+    setBusyAction('archive');
+    setError(null);
+    try {
+      if (archived) {
+        await ApiClient.archiveMeeting(meeting.id);
+        navigateTo('home');
+      } else {
+        await ApiClient.restoreMeeting(meeting.id);
+        await load();
+      }
+    } catch (err: any) {
+      setError(err?.message || (lang === 'it' ? 'Impossibile aggiornare l’archivio' : 'Could not update archive'));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const startDefaultTranscription = async () => {
     if (!meeting || demoMode || isBusy) return;
     setBusyAction('transcription');
@@ -813,6 +834,17 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
 
           <div className="flex items-center gap-1.5 mt-2 sm:mt-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={demoMode || isBusy}
+              onClick={() => void handleArchiveState(!meeting.recording.archived_at)}
+              className="h-8 px-2.5"
+              data-meeting-archive-action="true"
+            >
+              {meeting.recording.archived_at ? <RotateCcw className="w-4 h-4" aria-hidden="true" /> : <Archive className="w-4 h-4" aria-hidden="true" />}
+              <span>{meeting.recording.archived_at ? (lang === 'it' ? 'Ripristina' : 'Restore') : (lang === 'it' ? 'Archivia' : 'Archive')}</span>
+            </Button>
             <Button
               variant="ghost"
               size="sm"

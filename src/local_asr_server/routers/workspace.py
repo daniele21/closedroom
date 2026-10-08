@@ -31,10 +31,11 @@ def list_meetings(
     page: int = Query(default=1, ge=1),
     q: str | None = Query(default=None, max_length=512),
     project_name: str | None = Query(default=None, max_length=200),
+    archived: bool = False,
 ):
     # Keep the existing recent-meetings response untouched for current consumers.
     # Passing q (including q="") opts into the complete, paged archive projection.
-    if q is None and page == 1 and project_name is None:
+    if q is None and page == 1 and project_name is None and not archived:
         return _build_meetings(request.app, limit=limit)
 
     services = get_services(request.app)
@@ -44,6 +45,7 @@ def list_meetings(
             page=page,
             limit=min(limit, 50),
             project_name=project_name,
+            archived=archived,
         )
     except MeetingSearchUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -66,6 +68,48 @@ def list_meetings(
         "limit": result.limit,
         "has_more": result.has_more,
     }
+
+
+def _ensure_meeting_idle(services, recording_id: str) -> None:
+    # Never archive a meeting with a running pipeline; preparation can own
+    # active transcription and analysis jobs without changing recording status.
+    with services.catalog.connection() as conn:
+        active = conn.execute(
+            """
+            SELECT 1 FROM jobs
+            WHERE scope_type = 'recording' AND scope_id = ?
+              AND status IN ('queued', 'running', 'waiting_for_service',
+                             'retrying', 'cancel_requested', 'cancelling')
+            LIMIT 1
+            """,
+            (recording_id,),
+        ).fetchone()
+    if active:
+        raise HTTPException(status_code=409, detail="Wait for active meeting processing to finish")
+
+
+@router.post("/v1/meetings/{recording_id}/archive")
+def archive_meeting(recording_id: str, request: Request):
+    services = get_services(request.app)
+    _ensure_meeting_idle(services, recording_id)
+    try:
+        return services.recordings.set_archived(recording_id, True)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Meeting not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/meetings/{recording_id}/restore")
+def restore_meeting(recording_id: str, request: Request):
+    services = get_services(request.app)
+    _ensure_meeting_idle(services, recording_id)
+    try:
+        return services.recordings.set_archived(recording_id, False)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Meeting not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/v1/meetings/{recording_id}")
