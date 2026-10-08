@@ -101,7 +101,8 @@ class CatalogStore:
                 capture_status TEXT,
                 quality_report TEXT,
                 warnings TEXT,
-                visual_intelligence TEXT
+                visual_intelligence TEXT,
+                archived_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS transcriptions (
@@ -185,6 +186,7 @@ class CatalogStore:
         self._ensure_column(conn, "recordings", "quality_report", "TEXT")
         self._ensure_column(conn, "recordings", "warnings", "TEXT")
         self._ensure_column(conn, "recordings", "visual_intelligence", "TEXT")
+        self._ensure_column(conn, "recordings", "archived_at", "TEXT")
         self._ensure_column(conn, "transcriptions", "source_tracks", "TEXT")
         self._ensure_column(conn, "transcriptions", "asr_provider", "TEXT")
         self._ensure_column(conn, "transcriptions", "backend", "TEXT")
@@ -213,8 +215,8 @@ class CatalogStore:
                     id, title, project_name, status, created_at, stopped_at, completed_at,
                     mime_type, extension, chunk_count, bytes_written, model, language, error,
                     relative_dir, audio_file, capture_mode, primary_track_id, audio_tracks,
-                    capture_backend, capture_status, quality_report, warnings, visual_intelligence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    capture_backend, capture_status, quality_report, warnings, visual_intelligence, archived_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title = excluded.title,
                     project_name = excluded.project_name,
@@ -237,7 +239,8 @@ class CatalogStore:
                     capture_status = excluded.capture_status,
                     quality_report = excluded.quality_report,
                     warnings = excluded.warnings,
-                    visual_intelligence = excluded.visual_intelligence
+                    visual_intelligence = excluded.visual_intelligence,
+                    archived_at = excluded.archived_at
                 """,
                 (
                     metadata["id"],
@@ -264,6 +267,7 @@ class CatalogStore:
                     _json_dump(metadata.get("quality_report")),
                     _json_dump(metadata.get("warnings", [])),
                     _json_dump(metadata.get("visual_intelligence")),
+                    metadata.get("archived_at"),
                 ),
             )
 

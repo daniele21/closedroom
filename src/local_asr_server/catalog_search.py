@@ -58,6 +58,7 @@ class CatalogMeetingSearch:
         page: int = 1,
         limit: int = 25,
         project_name: str | None = None,
+        archived: bool = False,
     ) -> MeetingSearchPage:
         page = max(1, int(page))
         limit = max(1, min(int(limit), 50))
@@ -72,6 +73,7 @@ class CatalogMeetingSearch:
             if terms:
                 match = " AND ".join(f'"{term}"*' for term in terms)
                 project_clause = "AND recordings.project_name = ?" if project else ""
+                archive_clause = "AND recordings.archived_at IS NOT NULL" if archived else "AND recordings.archived_at IS NULL"
                 params: list[Any] = [match]
                 if project:
                     params.append(project)
@@ -81,7 +83,7 @@ class CatalogMeetingSearch:
                         SELECT COUNT(*)
                         FROM meeting_search_fts
                         JOIN recordings ON recordings.id = meeting_search_fts.recording_id
-                        WHERE meeting_search_fts MATCH ? {project_clause}
+                        WHERE meeting_search_fts MATCH ? {project_clause} {archive_clause}
                         """,
                         params,
                     ).fetchone()[0]
@@ -91,7 +93,7 @@ class CatalogMeetingSearch:
                     SELECT meeting_search_fts.recording_id
                     FROM meeting_search_fts
                     JOIN recordings ON recordings.id = meeting_search_fts.recording_id
-                    WHERE meeting_search_fts MATCH ? {project_clause}
+                    WHERE meeting_search_fts MATCH ? {project_clause} {archive_clause}
                     ORDER BY bm25(meeting_search_fts), meeting_search_fts.created_at DESC,
                              meeting_search_fts.recording_id ASC
                     LIMIT ? OFFSET ?
@@ -99,11 +101,12 @@ class CatalogMeetingSearch:
                     [*params, limit, offset],
                 ).fetchall()
             else:
-                project_clause = "WHERE project_name = ?" if project else ""
+                project_clause = "AND project_name = ?" if project else ""
+                archive_clause = "archived_at IS NOT NULL" if archived else "archived_at IS NULL"
                 params = [project] if project else []
                 total = int(
                     conn.execute(
-                        f"SELECT COUNT(*) FROM recordings {project_clause}",
+                        f"SELECT COUNT(*) FROM recordings WHERE {archive_clause} {project_clause}",
                         params,
                     ).fetchone()[0]
                 )
@@ -111,7 +114,7 @@ class CatalogMeetingSearch:
                     f"""
                     SELECT id AS recording_id
                     FROM recordings
-                    {project_clause}
+                    WHERE {archive_clause} {project_clause}
                     ORDER BY created_at DESC, id ASC
                     LIMIT ? OFFSET ?
                     """,

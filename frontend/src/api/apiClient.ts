@@ -22,6 +22,7 @@ export interface Recording {
   id: string;
   title: string;
   project_name: string;
+  archived_at?: string | null;
   status: RecordingStatus;
   error?: string | null;
   partial?: boolean;
@@ -1012,6 +1013,22 @@ export const ApiClient = {
 
   async listMeetings(limit = 50): Promise<{ items: Meeting[] }> {
     return (await request(`/v1/meetings?limit=${limit}`)).json();
+  },
+
+  async listArchivedMeetings(page = 1): Promise<{ items: Meeting[]; total: number; has_more: boolean }> {
+    return (await request(`/v1/meetings?q=&archived=true&limit=50&page=${page}`)).json();
+  },
+
+  async archiveMeeting(recordingId: string): Promise<Recording> {
+    return (await request(`/v1/meetings/${encodeURIComponent(recordingId)}/archive`, { method: 'POST' })).json();
+  },
+
+  async restoreMeeting(recordingId: string): Promise<Recording> {
+    return (await request(`/v1/meetings/${encodeURIComponent(recordingId)}/restore`, { method: 'POST' })).json();
+  },
+
+  async deleteMeeting(recordingId: string): Promise<void> {
+    await request(`/v1/meetings/${encodeURIComponent(recordingId)}`, { method: 'DELETE' });
   },
 
   async getMeeting(recordingId: string): Promise<Meeting> {

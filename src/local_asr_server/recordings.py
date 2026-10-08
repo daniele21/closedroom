@@ -133,6 +133,7 @@ class RecordingStore:
             conflict_error=RecordingConflict,
             not_found_error=RecordingNotFound,
         )
+        self._recover_interrupted_deletions()
         self._mark_interrupted_jobs()
         self._reconcile_screenshot_assets()
         self.sync_catalog()
@@ -196,6 +197,7 @@ class RecordingStore:
             "created_at": _utc_now(),
             "stopped_at": None,
             "completed_at": None,
+            "archived_at": None,
             "mime_type": mime_type,
             "extension": extension,
             "chunk_count": 0,
@@ -245,6 +247,19 @@ class RecordingStore:
 
     def update_title(self, recording_id: str, title: str) -> dict[str, Any]:
         return self.update(recording_id, title=title)
+
+    def set_archived(self, recording_id: str, archived: bool) -> dict[str, Any]:
+        """Persist reversible meeting visibility in the recording source of truth."""
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            if metadata["status"] in {"recording", "finalizing", "transcribing"}:
+                raise RecordingConflict("Cannot change archive state while recording or transcribing")
+            metadata["archived_at"] = (
+                metadata.get("archived_at") or _utc_now()
+            ) if archived else None
+            self._write_metadata(session_dir, metadata)
+            self._upsert_catalog(metadata)
+            return self.public_metadata(metadata)
 
     def append_chunk(
         self,
@@ -1510,6 +1525,252 @@ class RecordingStore:
             self._upsert_catalog(metadata)
             return self.public_metadata(metadata)
 
+
+    def _recover_interrupted_deletions(self) -> None:
+        """Resolve staged local deletions before catalog reconciliation can reimport them."""
+        if self.catalog is None:
+            return
+        for staged in self.root.glob(".meeting-deleting-*"):
+            if not staged.is_dir():
+                continue
+            metadata_path = staged / "metadata.json"
+            manifest_path = staged / ".meeting-deletion.json"
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                recording_id = str(uuid.UUID(str(metadata["id"])))
+                if staged.name != f".meeting-deleting-{recording_id}":
+                    raise ValueError("Staged deletion identity mismatch")
+                original = (self.root / metadata["relative_dir"]).resolve()
+                if self.root not in original.parents:
+                    raise ValueError("Staged recording path escapes storage root")
+                exports_root = Path(manifest["transcriptions_root"]).expanduser().resolve()
+                export_stage = exports_root / f".meeting-exports-deleting-{recording_id}"
+                with self.catalog.connection() as conn:
+                    row = conn.execute(
+                        "SELECT 1 FROM recordings WHERE id = ?", (recording_id,),
+                    ).fetchone()
+                if row:
+                    # SQLite did not commit deletion: restore every staged artifact.
+                    if original.exists():
+                        raise RuntimeError("Original and staged recording both exist")
+                    original.parent.mkdir(parents=True, exist_ok=True)
+                    staged.rename(original)
+                    if export_stage.exists():
+                        for file in export_stage.iterdir():
+                            destination = exports_root / file.name
+                            if destination.exists():
+                                raise RuntimeError("Cannot overwrite existing transcription export")
+                            file.rename(destination)
+                        export_stage.rmdir()
+                    (original / ".meeting-deletion.json").unlink(missing_ok=True)
+                else:
+                    # SQLite committed: a crash only interrupted filesystem cleanup.
+                    if export_stage.exists():
+                        shutil.rmtree(export_stage)
+                    shutil.rmtree(staged)
+            except Exception:
+                logger.exception("Staged meeting deletion needs manual recovery: %s", staged)
+
+        # A crash may occur after staging the export files but before the
+        # recording directory is renamed. An earlier restore may also have
+        # moved the recording back before completing export recovery.
+        for manifest_path in self.root.glob("*/*/.meeting-deletion.json"):
+            session_dir = manifest_path.parent
+            try:
+                metadata = json.loads((session_dir / "metadata.json").read_text(encoding="utf-8"))
+                recording_id = str(uuid.UUID(str(metadata["id"])))
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                export_root = Path(manifest["transcriptions_root"]).expanduser().resolve()
+                export_stage = export_root / f".meeting-exports-deleting-{recording_id}"
+                with self.catalog.connection() as conn:
+                    existing = conn.execute(
+                        "SELECT 1 FROM recordings WHERE id = ?", (recording_id,),
+                    ).fetchone()
+                if not existing:
+                    # A deletion that committed before recovering this metadata.
+                    if export_stage.exists():
+                        shutil.rmtree(export_stage)
+                    shutil.rmtree(session_dir)
+                    continue
+                if export_stage.exists():
+                    for staged_file in export_stage.iterdir():
+                        destination = export_root / staged_file.name
+                        if destination.exists():
+                            raise RuntimeError("Cannot overwrite transcription during recovery")
+                        staged_file.rename(destination)
+                    export_stage.rmdir()
+                manifest_path.unlink(missing_ok=True)
+            except Exception:
+                logger.exception("Meeting deletion precommit recovery failed: %s", session_dir)
+
+    def delete_archived_meeting(self, recording_id: str, *, transcriptions_root: Path) -> None:
+        """Permanently purge one archived meeting and its exclusive local artifacts.
+
+        Files are staged off both scanners before SQL deletion. Startup recovery
+        either restores the staged files (uncommitted) or finishes the purge.
+        Shared derived artifacts must be separated before deletion.
+        """
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            if not metadata.get("archived_at"):
+                raise RecordingConflict("Archive the meeting before permanently deleting it")
+            if metadata["status"] in {"recording", "finalizing", "transcribing"}:
+                raise RecordingConflict("Meeting is still capturing or transcribing")
+            if self.catalog is None:
+                raise RecordingConflict("Meeting catalog unavailable")
+            root = session_dir.parent.parent.resolve()
+            export_root = transcriptions_root.expanduser().resolve()
+            staged = root / f".meeting-deleting-{recording_id}"
+            export_stage = export_root / f".meeting-exports-deleting-{recording_id}"
+            if staged.exists() or export_stage.exists():
+                raise RecordingConflict("Pending deletion recovery must finish first")
+
+            moved_exports: list[Path] = []
+            moved_session = False
+            committed = False
+            try:
+                with self.catalog.connection() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    existing = conn.execute(
+                        "SELECT 1 FROM recordings WHERE id = ?", (recording_id,),
+                    ).fetchone()
+                    if existing is None:
+                        raise RecordingConflict("Meeting catalog out of sync")
+                    transcripts = conn.execute(
+                        "SELECT id, file_name, merged_into, merged_sources FROM transcriptions "
+                        "WHERE recording_id = ?",
+                        (recording_id,),
+                    ).fetchall()
+                    transcript_ids = {row["id"] for row in transcripts}
+                    if any(row["merged_into"] or row["merged_sources"] for row in transcripts):
+                        raise RecordingConflict("Separate merged transcriptions before deleting this meeting")
+                    for row in conn.execute(
+                        "SELECT id, merged_sources FROM transcriptions "
+                        "WHERE recording_id != ? AND merged_sources IS NOT NULL",
+                        (recording_id,),
+                    ):
+                        sources = json.loads(row["merged_sources"] or "[]")
+                        if any(
+                            source.get("id") in transcript_ids
+                            or source.get("recording_id") == recording_id
+                            for source in sources if isinstance(source, dict)
+                        ):
+                            raise RecordingConflict("Meeting is used by a merged transcription")
+
+                    owned_analysis = conn.execute(
+                        "SELECT id, transcription_id, scope_type, scope_id, recording_id, source_ids_json "
+                        "FROM analysis_runs",
+                    ).fetchall()
+                    def owns_analysis(row) -> bool:
+                        return (
+                            row["recording_id"] == recording_id
+                            or (row["scope_type"] == "recording" and row["scope_id"] == recording_id)
+                            or row["transcription_id"] in transcript_ids
+                        )
+                    for row in owned_analysis:
+                        sources = json.loads(row["source_ids_json"] or "[]")
+                        if (
+                            not owns_analysis(row)
+                            and isinstance(sources, list)
+                            and (recording_id in sources or any(tid in sources for tid in transcript_ids))
+                        ):
+                            raise RecordingConflict("Meeting is referenced by shared analysis")
+
+                    jobs = conn.execute(
+                        "SELECT id, scope_type, scope_id, status, payload_json, result_json FROM jobs",
+                    ).fetchall()
+                    owned_job_ids = {
+                        row["id"] for row in jobs
+                        if (row["scope_type"] == "recording" and row["scope_id"] == recording_id)
+                        or (row["scope_type"] == "transcription" and row["scope_id"] in transcript_ids)
+                    }
+                    active_statuses = {
+                        "queued", "running", "waiting_for_service", "retrying",
+                        "cancel_requested", "cancelling",
+                    }
+                    if any(row["id"] in owned_job_ids and row["status"] in active_statuses for row in jobs):
+                        raise RecordingConflict("Wait for active meeting processing to finish")
+                    for row in jobs:
+                        if row["id"] in owned_job_ids:
+                            continue
+                        content = (row["payload_json"] or "") + (row["result_json"] or "")
+                        if recording_id in content or any(tid in content for tid in transcript_ids):
+                            raise RecordingConflict("Meeting is referenced by shared processing")
+                    for link in conn.execute("SELECT parent_job_id, child_job_id FROM job_links"):
+                        if (link["parent_job_id"] in owned_job_ids) != (link["child_job_id"] in owned_job_ids):
+                            raise RecordingConflict("Meeting is part of shared job processing")
+
+                    exports = []
+                    for row in transcripts:
+                        name = row["file_name"]
+                        if not name:
+                            continue
+                        file_path = export_root / name
+                        if (
+                            Path(name).name != name or not name.startswith("transcript_")
+                            or not name.endswith(".json") or file_path.is_symlink()
+                        ):
+                            raise RecordingConflict("Unsafe transcription export path")
+                        exports.extend([file_path, file_path.with_suffix(".txt")])
+                    self._write_json_atomic(
+                        session_dir / ".meeting-deletion.json",
+                        {"transcriptions_root": str(export_root)},
+                    )
+                    existing_exports = [path for path in exports if path.exists()]
+                    if existing_exports:
+                        export_stage.mkdir(parents=True)
+                        for path in existing_exports:
+                            if path.is_symlink():
+                                raise RecordingConflict("Unsafe transcription export link")
+                            path.rename(export_stage / path.name)
+                            moved_exports.append(path)
+                    session_dir.rename(staged)
+                    moved_session = True
+
+                    for row in owned_analysis:
+                        if owns_analysis(row):
+                            conn.execute("DELETE FROM analysis_runs WHERE id = ?", (row["id"],))
+                    for job_id in owned_job_ids:
+                        conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+                    conn.execute("DELETE FROM transcriptions WHERE recording_id = ?", (recording_id,))
+                    conn.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
+                    # Cache values may contain data from this meeting without provenance.
+                    conn.execute("DELETE FROM analysis_cache")
+                committed = True
+            except Exception:
+                if not committed:
+                    # Best effort immediate rollback. Startup recovery is the
+                    # durable fallback for a crash or an incomplete filesystem rollback.
+                    if moved_session and staged.exists() and not session_dir.exists():
+                        try:
+                            staged.rename(session_dir)
+                        except OSError:
+                            logger.exception("Could not restore staged meeting %s", recording_id)
+                    if export_stage.exists():
+                        for path in moved_exports:
+                            candidate = export_stage / path.name
+                            if candidate.exists() and not path.exists():
+                                try:
+                                    candidate.rename(path)
+                                except OSError:
+                                    logger.exception("Could not restore transcript export %s", path)
+                        try:
+                            export_stage.rmdir()
+                        except OSError:
+                            pass
+                    if session_dir.exists():
+                        (session_dir / ".meeting-deletion.json").unlink(missing_ok=True)
+                raise
+            # Keep the staged manifest until export cleanup has succeeded.
+            for path in (export_stage, staged):
+                if path.exists():
+                    try:
+                        shutil.rmtree(path)
+                    except OSError:
+                        # Never re-expose staged data. The next startup will finish it.
+                        logger.exception("Deferred staged deletion cleanup: %s", path)
+
     def discard(self, recording_id: str) -> None:
         with self._lock_for(recording_id):
             session_dir, metadata = self._load(recording_id)
@@ -1529,12 +1790,14 @@ class RecordingStore:
                     response["result"] = json.load(result_file)
         return response
 
-    def list(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list(self, limit: int = 20, *, include_archived: bool = False) -> list[dict[str, Any]]:
         items = []
         for metadata_path in self.root.glob("*/*/metadata.json"):
             try:
                 with metadata_path.open("r", encoding="utf-8") as metadata_file:
-                    items.append(self.public_metadata(json.load(metadata_file)))
+                    item = self.public_metadata(json.load(metadata_file))
+                    if include_archived or not item.get("archived_at"):
+                        items.append(item)
             except (OSError, json.JSONDecodeError, KeyError):
                 continue
         items.sort(key=lambda item: item["created_at"], reverse=True)

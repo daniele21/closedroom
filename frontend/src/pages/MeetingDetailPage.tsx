@@ -1,10 +1,10 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState, useRef } from 'react';
 import {
+  Archive,
   ArrowLeft,
   Bookmark,
   ChevronDown,
   CheckCircle2,
-  Clock3,
   FileText,
   History,
   Info,
@@ -15,7 +15,9 @@ import {
   PencilLine,
   PlayCircle,
   RefreshCw,
+  RotateCcw,
   Sparkles,
+  Trash2,
   Users,
   XCircle,
 } from 'lucide-react';
@@ -33,8 +35,9 @@ import { useTranslation } from '../i18n/i18n';
 import { getDemoMeetings } from '../features/demo/demoData';
 import { AnalysisSetupModal, AnalysisSetupSelection } from '../components/ui/AnalysisSetupModal';
 import { Sheet, SheetContent, SheetHeader, SheetBody } from '../components/ui/Sheet';
+import { Dialog, DialogContent, DialogHeader, DialogBody } from '../components/ui/Dialog';
 import { cn } from '../utils/cn';
-import { formatJobProgress } from '../utils/jobs';
+import { localizeJobStep } from '../utils/jobs';
 import { VisualIntelligencePanel } from '../components/meeting/VisualIntelligencePanel';
 import { VisualDebugPanel } from '../components/meeting/VisualDebugPanel';
 import { StructuredNotesEditor } from '../components/meeting/StructuredNotesEditor';
@@ -210,6 +213,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [analysisSetupOpen, setAnalysisSetupOpen] = useState(false);
   const [analysisPipelineTarget, setAnalysisPipelineTarget] = useState('meeting_default');
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   const [activeTab, setActiveTab] = useState<MeetingTab>('transcript');
   const [currentTime, setCurrentTime] = useState(0);
@@ -579,6 +584,40 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     );
   };
 
+  const handleArchiveState = async (archived: boolean) => {
+    if (!meeting || demoMode || isBusy) return;
+    setBusyAction('archive');
+    setError(null);
+    try {
+      if (archived) {
+        await ApiClient.archiveMeeting(meeting.id);
+        navigateTo('home');
+      } else {
+        await ApiClient.restoreMeeting(meeting.id);
+        await load();
+      }
+    } catch (err: any) {
+      setError(err?.message || (lang === 'it' ? 'Impossibile aggiornare l’archivio' : 'Could not update archive'));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleDeleteMeeting = async () => {
+    if (!meeting?.recording.archived_at || demoMode || isBusy) return;
+    setBusyAction('delete');
+    setDeleteError(null);
+    try {
+      await ApiClient.deleteMeeting(meeting.id);
+      setDeleteConfirmOpen(false);
+      navigateTo('home');
+    } catch (err: any) {
+      setDeleteError(err?.message || (lang === 'it' ? 'Impossibile eliminare il meeting' : 'Could not delete meeting'));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const startDefaultTranscription = async () => {
     if (!meeting || demoMode || isBusy) return;
     setBusyAction('transcription');
@@ -816,6 +855,30 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
             <Button
               variant="ghost"
               size="sm"
+              disabled={demoMode || isBusy}
+              onClick={() => void handleArchiveState(!meeting.recording.archived_at)}
+              className="h-8 px-2.5"
+              data-meeting-archive-action="true"
+            >
+              {meeting.recording.archived_at ? <RotateCcw className="w-4 h-4" aria-hidden="true" /> : <Archive className="w-4 h-4" aria-hidden="true" />}
+              <span>{meeting.recording.archived_at ? (lang === 'it' ? 'Ripristina' : 'Restore') : (lang === 'it' ? 'Archivia' : 'Archive')}</span>
+            </Button>
+            {meeting.recording.archived_at && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={demoMode || isBusy}
+                onClick={() => { setDeleteError(null); setDeleteConfirmOpen(true); }}
+                className="h-8 px-2.5 text-danger"
+                data-meeting-delete-action="true"
+              >
+                <Trash2 className="w-4 h-4" aria-hidden="true" />
+                <span>{lang === 'it' ? 'Elimina definitivamente' : 'Delete permanently'}</span>
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowAudioPlayer((prev) => !prev)}
               className={cn('h-8 px-2.5', showAudioPlayer && 'bg-bg-hover text-text-primary')}
               aria-expanded={showAudioPlayer}
@@ -884,23 +947,40 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         >
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 min-w-0 flex-1">
             <div className="flex items-center gap-2 text-sm font-semibold text-text-primary shrink-0">
-              <Clock3 className="w-4 h-4 text-warning" aria-hidden="true" />
+              <Loader2 className="w-4 h-4 animate-spin text-warning" aria-hidden="true" />
               <span>{activePreparation
                 ? (lang === 'it' ? 'Preparazione note' : 'Preparing notes')
                 : t('meeting.processingTitle')}</span>
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-text-secondary">
               {displayedActiveJobs.map((job) => (
-                <div key={job.id} className="flex items-center gap-2">
-                  <span className="font-medium text-text-primary">
-                    {job.type === 'meeting_preparation'
-                      ? preparationProgressLabel(job.current_step, lang)
-                      : `${job.type}: ${formatJobProgress(job, t)}`}
-                  </span>
+                <div key={job.id} className="flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-48" data-meeting-job-progress={job.type}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-text-primary">
+                      {job.type === 'meeting_preparation'
+                        ? preparationProgressLabel(job.current_step, lang)
+                        : localizeJobStep(job.current_step || job.status, t)}
+                    </span>
+                    <span className="shrink-0 font-mono tabular-nums text-text-secondary">
+                      {job.progress > 0 ? `${Math.min(job.progress, 100)}%` : (lang === 'it' ? 'In corso' : 'Working')}
+                    </span>
+                  </div>
+                  {job.progress > 0 ? (
+                    <progress
+                      className="h-1.5 w-full accent-accent"
+                      max={100}
+                      value={Math.min(job.progress, 100)}
+                      aria-label={lang === 'it' ? 'Avanzamento elaborazione' : 'Processing progress'}
+                    />
+                  ) : (
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-warning/15" role="status" aria-label={lang === 'it' ? 'Elaborazione in corso' : 'Processing in progress'}>
+                      <div className="h-full w-1/3 animate-pulse rounded-full bg-warning" />
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleCancelJob(job.id, job.type)}
-                    className="text-danger hover:text-danger-hover transition-colors font-semibold text-[11px] flex items-center gap-1 cursor-pointer bg-danger/10 hover:bg-danger/20 px-2 py-0.5 rounded"
+                    className="self-start text-danger hover:text-danger-hover transition-colors font-semibold text-[11px] flex items-center gap-1 cursor-pointer bg-danger/10 hover:bg-danger/20 px-2 py-0.5 rounded"
                   >
                     <XCircle className="w-3 h-3" aria-hidden="true" />
                     {t('common.cancel')}
@@ -2053,6 +2133,46 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
         </div>
       )}
+
+      <Dialog
+        open={deleteConfirmOpen}
+        onOpenChange={(open) => {
+          if (busyAction === 'delete') return;
+          setDeleteConfirmOpen(open);
+          if (!open) setDeleteError(null);
+        }}
+      >
+        <DialogContent size="sm" dataTour="meeting-delete-confirm">
+          <DialogHeader
+            title={lang === 'it' ? 'Eliminare definitivamente il meeting?' : 'Permanently delete meeting?'}
+            description={lang === 'it'
+              ? 'Audio, screenshot, note e trascrizioni verranno rimossi dal dispositivo. Non è possibile annullare.'
+              : 'Audio, screenshots, notes and transcripts will be removed from this device. This cannot be undone.'}
+          />
+          <DialogBody>
+            <p className="text-sm text-text-secondary">
+              {lang === 'it'
+                ? 'Se il meeting è collegato a elaborazioni ancora attive o risultati condivisi, ClosedRoom impedirà la cancellazione per proteggere i dati.'
+                : 'If active processing or shared results depend on this meeting, ClosedRoom will block deletion to protect your data.'}
+            </p>
+            {deleteError && <p role="alert" className="mt-3 text-sm text-danger">{deleteError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" size="sm" disabled={busyAction === 'delete'} onClick={() => setDeleteConfirmOpen(false)}>
+                {lang === 'it' ? 'Annulla' : 'Cancel'}
+              </Button>
+              <button
+                type="button"
+                disabled={busyAction === 'delete'}
+                onClick={() => void handleDeleteMeeting()}
+                className="rounded-lg bg-danger px-3 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                data-meeting-delete-confirm-action="true"
+              >
+                {busyAction === 'delete' ? (lang === 'it' ? 'Eliminazione…' : 'Deleting…') : (lang === 'it' ? 'Elimina definitivamente' : 'Delete permanently')}
+              </button>
+            </div>
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
 
       <AnalysisSetupModal
         isOpen={analysisSetupOpen}
