@@ -34,7 +34,7 @@ class MeetingLifecycleFrontendContracts(unittest.TestCase):
         self.assertIn("ApiClient.archiveMeeting(meeting.id)", detail)
         self.assertIn("ApiClient.restoreMeeting(meeting.id)", detail)
         self.assertIn("ApiClient.deleteMeeting(meeting.id)", detail)
-        self.assertIn('data-meeting-delete-confirm="true"', detail)
+        self.assertIn('dataTour="meeting-delete-confirm"', detail)
         self.assertIn('data-meeting-delete-confirm-action="true"', detail)
         self.assertNotIn("window.confirm", detail)
         self.assertIn("meeting.recording.archived_at &&", detail)
