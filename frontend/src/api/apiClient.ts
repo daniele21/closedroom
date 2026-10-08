@@ -1027,6 +1027,10 @@ export const ApiClient = {
     return (await request(`/v1/meetings/${encodeURIComponent(recordingId)}/restore`, { method: 'POST' })).json();
   },
 
+  async deleteMeeting(recordingId: string): Promise<void> {
+    await request(`/v1/meetings/${encodeURIComponent(recordingId)}`, { method: 'DELETE' });
+  },
+
   async getMeeting(recordingId: string): Promise<Meeting> {
     return (await request(`/v1/meetings/${recordingId}`)).json();
   },

@@ -18,6 +18,7 @@ import {
   RefreshCw,
   RotateCcw,
   Sparkles,
+  Trash2,
   Users,
   XCircle,
 } from 'lucide-react';
@@ -600,6 +601,23 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     }
   };
 
+  const handleDeleteMeeting = async () => {
+    if (!meeting?.recording.archived_at || demoMode || isBusy) return;
+    if (!window.confirm(lang === 'it'
+      ? 'Eliminare definitivamente questo meeting? Audio, screenshot, note e trascrizioni saranno cancellati dal dispositivo. Questa azione non è reversibile.'
+      : 'Permanently delete this meeting? Audio, screenshots, notes, and transcripts will be removed from this device. This cannot be undone.')) return;
+    setBusyAction('delete');
+    setError(null);
+    try {
+      await ApiClient.deleteMeeting(meeting.id);
+      navigateTo('home');
+    } catch (err: any) {
+      setError(err?.message || (lang === 'it' ? 'Impossibile eliminare il meeting' : 'Could not delete meeting'));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const startDefaultTranscription = async () => {
     if (!meeting || demoMode || isBusy) return;
     setBusyAction('transcription');
@@ -845,6 +863,19 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
               {meeting.recording.archived_at ? <RotateCcw className="w-4 h-4" aria-hidden="true" /> : <Archive className="w-4 h-4" aria-hidden="true" />}
               <span>{meeting.recording.archived_at ? (lang === 'it' ? 'Ripristina' : 'Restore') : (lang === 'it' ? 'Archivia' : 'Archive')}</span>
             </Button>
+            {meeting.recording.archived_at && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={demoMode || isBusy}
+                onClick={() => void handleDeleteMeeting()}
+                className="h-8 px-2.5 text-danger"
+                data-meeting-delete-action="true"
+              >
+                <Trash2 className="w-4 h-4" aria-hidden="true" />
+                <span>{lang === 'it' ? 'Elimina definitivamente' : 'Delete permanently'}</span>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"

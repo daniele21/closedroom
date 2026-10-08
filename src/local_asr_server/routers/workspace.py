@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from local_asr_server.app_services import get_services
 from local_asr_server.catalog_search import CatalogMeetingSearch, MeetingSearchUnavailable
@@ -110,6 +110,23 @@ def restore_meeting(recording_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Meeting not found") from exc
     except RecordingConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.delete("/v1/meetings/{recording_id}", status_code=204)
+def delete_meeting(recording_id: str, request: Request):
+    services = get_services(request.app)
+    _ensure_meeting_idle(services, recording_id)
+    try:
+        services.recordings.delete_archived_meeting(
+            recording_id, transcriptions_root=services.transcriptions.root,
+        )
+        return Response(status_code=204)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Meeting not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=507, detail="Could not remove local meeting files") from exc
 
 
 @router.get("/v1/meetings/{recording_id}")
