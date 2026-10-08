@@ -127,7 +127,7 @@ class MeetingLifecycleApiTests(unittest.TestCase):
         export_root = self.services.transcriptions.root
         export_file = next(export_root.glob(f"transcript_*_{saved['id'][:8]}.json"))
         stage = session.parent.parent / f".meeting-deleting-{recording_id}"
-        export_stage = export_root / stage.name
+        export_stage = export_root / f".meeting-exports-deleting-{recording_id}"
         (session / ".meeting-deletion.json").write_text(
             json.dumps({"transcriptions_root": str(export_root)}), encoding="utf-8",
         )

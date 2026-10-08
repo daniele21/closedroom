@@ -1545,7 +1545,7 @@ class RecordingStore:
                 if self.root not in original.parents:
                     raise ValueError("Staged recording path escapes storage root")
                 exports_root = Path(manifest["transcriptions_root"]).expanduser().resolve()
-                export_stage = exports_root / staged.name
+                export_stage = exports_root / f".meeting-exports-deleting-{recording_id}"
                 with self.catalog.connection() as conn:
                     row = conn.execute(
                         "SELECT 1 FROM recordings WHERE id = ?", (recording_id,),
@@ -1582,7 +1582,7 @@ class RecordingStore:
                 recording_id = str(uuid.UUID(str(metadata["id"])))
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 export_root = Path(manifest["transcriptions_root"]).expanduser().resolve()
-                export_stage = export_root / f".meeting-deleting-{recording_id}"
+                export_stage = export_root / f".meeting-exports-deleting-{recording_id}"
                 with self.catalog.connection() as conn:
                     existing = conn.execute(
                         "SELECT 1 FROM recordings WHERE id = ?", (recording_id,),
@@ -1622,7 +1622,7 @@ class RecordingStore:
             root = session_dir.parent.parent.resolve()
             export_root = transcriptions_root.expanduser().resolve()
             staged = root / f".meeting-deleting-{recording_id}"
-            export_stage = export_root / staged.name
+            export_stage = export_root / f".meeting-exports-deleting-{recording_id}"
             if staged.exists() or export_stage.exists():
                 raise RecordingConflict("Pending deletion recovery must finish first")
 
