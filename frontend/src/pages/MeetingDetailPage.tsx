@@ -5,7 +5,6 @@ import {
   Bookmark,
   ChevronDown,
   CheckCircle2,
-  Clock3,
   FileText,
   History,
   Info,
