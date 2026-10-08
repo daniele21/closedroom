@@ -2142,7 +2142,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           if (!open) setDeleteError(null);
         }}
       >
-        <DialogContent size="sm" data-meeting-delete-confirm="true">
+        <DialogContent size="sm" dataTour="meeting-delete-confirm">
           <DialogHeader
             title={lang === 'it' ? 'Eliminare definitivamente il meeting?' : 'Permanently delete meeting?'}
             description={lang === 'it'
