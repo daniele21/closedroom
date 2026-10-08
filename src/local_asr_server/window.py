@@ -92,6 +92,17 @@ class ClosedRoomActivationObserver(NSObject):
         self._callback()
 
 
+class InteractiveOverlayPanel(NSPanel):
+    """A non-activating overlay that still accepts keyboard focus for notes.
+
+    NSPanel's default key-window policy can leave the embedded WKWebView
+    clickable but unable to become first responder for text input.
+    """
+
+    def canBecomeKeyWindow(self) -> bool:
+        return True
+
+
 class DragHandleView(NSView):
     """Native drag region that owns overlay movement above the WKWebView.
 
@@ -513,7 +524,7 @@ class ClosedRoomWindowManager:
             rect = ((screen_x + screen_w - width - 40, screen_y + screen_h - height - 40), (width, height))
 
         # Create overlay window (NSPanel)
-        self.overlay_window = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+        self.overlay_window = InteractiveOverlayPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             rect, style_mask, NSBackingStoreBuffered, False
         )
         self.overlay_window.setTitle_("ClosedRoom Recording Overlay")

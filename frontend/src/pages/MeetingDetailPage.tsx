@@ -884,23 +884,40 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         >
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 min-w-0 flex-1">
             <div className="flex items-center gap-2 text-sm font-semibold text-text-primary shrink-0">
-              <Clock3 className="w-4 h-4 text-warning" aria-hidden="true" />
+              <Loader2 className="w-4 h-4 animate-spin text-warning" aria-hidden="true" />
               <span>{activePreparation
                 ? (lang === 'it' ? 'Preparazione note' : 'Preparing notes')
                 : t('meeting.processingTitle')}</span>
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-text-secondary">
               {displayedActiveJobs.map((job) => (
-                <div key={job.id} className="flex items-center gap-2">
-                  <span className="font-medium text-text-primary">
-                    {job.type === 'meeting_preparation'
-                      ? preparationProgressLabel(job.current_step, lang)
-                      : `${job.type}: ${formatJobProgress(job, t)}`}
-                  </span>
+                <div key={job.id} className="flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-48" data-meeting-job-progress={job.type}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-text-primary">
+                      {job.type === 'meeting_preparation'
+                        ? preparationProgressLabel(job.current_step, lang)
+                        : formatJobProgress(job, t)}
+                    </span>
+                    <span className="shrink-0 font-mono tabular-nums text-text-secondary">
+                      {job.progress > 0 ? `${Math.min(job.progress, 100)}%` : (lang === 'it' ? 'In corso' : 'Working')}
+                    </span>
+                  </div>
+                  {job.progress > 0 ? (
+                    <progress
+                      className="h-1.5 w-full accent-accent"
+                      max={100}
+                      value={Math.min(job.progress, 100)}
+                      aria-label={lang === 'it' ? 'Avanzamento elaborazione' : 'Processing progress'}
+                    />
+                  ) : (
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-warning/15" role="status" aria-label={lang === 'it' ? 'Elaborazione in corso' : 'Processing in progress'}>
+                      <div className="h-full w-1/3 animate-pulse rounded-full bg-warning" />
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleCancelJob(job.id, job.type)}
-                    className="text-danger hover:text-danger-hover transition-colors font-semibold text-[11px] flex items-center gap-1 cursor-pointer bg-danger/10 hover:bg-danger/20 px-2 py-0.5 rounded"
+                    className="self-start text-danger hover:text-danger-hover transition-colors font-semibold text-[11px] flex items-center gap-1 cursor-pointer bg-danger/10 hover:bg-danger/20 px-2 py-0.5 rounded"
                   >
                     <XCircle className="w-3 h-3" aria-hidden="true" />
                     {t('common.cancel')}

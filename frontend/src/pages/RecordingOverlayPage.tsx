@@ -591,6 +591,10 @@ export default function RecordingOverlayPage() {
   }, []);
 
   const handleOpenNote = async () => {
+    if (noteComposerOpen) {
+      closeNoteComposer();
+      return;
+    }
     if (!recordingId || !isRecording || isStopping || isAnchoringNote || isSavingNote) return;
     setIsAnchoringNote(true);
     setErrorMsg(null);
@@ -682,7 +686,7 @@ export default function RecordingOverlayPage() {
     noteOpen = false,
   ) => {
     const width = 420;
-    const height = displayPickerOpen ? 300 : noteOpen ? (expanded ? 330 : 222) : expanded ? 238 : 118;
+    const height = displayPickerOpen ? 300 : noteOpen ? (expanded ? 370 : 286) : expanded ? 238 : 118;
     if (window.name === 'ClosedRoomOverlay') {
       window.resizeTo(width, height + 52);
       return;
@@ -922,7 +926,17 @@ export default function RecordingOverlayPage() {
                 ? '—'
                 : `${Math.floor(noteAnchor / 60)}:${String(Math.floor(noteAnchor % 60)).padStart(2, '0')}`}
             </span>
-            <span className="text-[9px] text-white/35">Enter to save · Esc to cancel</span>
+            <button
+              type="button"
+              onClick={closeNoteComposer}
+              disabled={isSavingNote}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-40"
+              aria-label="Close note editor"
+              data-note-close="true"
+            >
+              <X className="h-3 w-3" aria-hidden="true" />
+              Close
+            </button>
           </div>
           <textarea
             ref={noteInputRef}
@@ -942,9 +956,16 @@ export default function RecordingOverlayPage() {
                 void handleSaveNote();
               }
             }}
-            className="w-full resize-none rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-[11px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-amber-200/35"
+            className="w-full select-text resize-none rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-[11px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-amber-200/35"
             aria-label="Note about this meeting moment"
           />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="text-[9px] text-white/40">Enter to save · Shift+Enter for a new line</span>
+            <div className="flex gap-1.5">
+              <button type="button" onClick={closeNoteComposer} disabled={isSavingNote} className="rounded-md px-2 py-1 text-[10px] text-white/60 hover:bg-white/10 disabled:opacity-40">Cancel</button>
+              <button type="button" onClick={() => void handleSaveNote()} disabled={!noteDraft.trim() || isSavingNote} className="rounded-md bg-amber-200/20 px-2.5 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-200/30 disabled:opacity-40" data-note-save="true">{isSavingNote ? 'Saving…' : 'Save note'}</button>
+            </div>
+          </div>
           {noteDraft.length >= 3600 && (
             <div className="mt-1 text-right text-[8px] text-white/35">{noteDraft.length}/4000</div>
           )}
