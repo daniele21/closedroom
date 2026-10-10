@@ -8,6 +8,8 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from pydantic import BaseModel, Field
+from typing import Literal
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from local_asr_server.audio_router import AudioRouter
@@ -217,6 +219,38 @@ def refresh_system_menubar(request: Request):
     if controller is None:
         raise HTTPException(status_code=409, detail="Menu bar controller is unavailable in this runtime")
     return controller.repair_menu_bar()
+
+
+class MeetingStartIntentRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=128)
+
+
+class MeetingStartFeedbackRequest(MeetingStartIntentRequest):
+    phase: Literal["preparing", "blocked", "failed", "recording_ready"]
+
+
+@router.post("/v1/system/meeting-detection/authorize")
+def authorize_meeting_detection(request: Request):
+    controller = _menubar_controller(request)
+    if controller is None:
+        raise HTTPException(status_code=409, detail="Native meeting detection is unavailable")
+    return {"requested": controller.authorize_meeting_detection()}
+
+
+@router.post("/v1/system/meeting-detection/claim-intent")
+def claim_meeting_start_intent(request: Request, body: MeetingStartIntentRequest):
+    controller = _menubar_controller(request)
+    if controller is None:
+        raise HTTPException(status_code=409, detail="Native meeting detection is unavailable")
+    return {"accepted": controller.claim_meeting_start_intent(body.token)}
+
+
+@router.post("/v1/system/meeting-detection/start-feedback")
+def meeting_start_feedback(request: Request, body: MeetingStartFeedbackRequest):
+    controller = _menubar_controller(request)
+    if controller is None:
+        raise HTTPException(status_code=409, detail="Native meeting detection is unavailable")
+    return {"accepted": controller.meeting_start_feedback(body.token, body.phase)}
 
 
 @router.get("/v1/capture/windows")
