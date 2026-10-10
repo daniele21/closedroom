@@ -659,6 +659,8 @@ class ClosedRoomApp(rumps.App):
         from local_asr_server.settings import load_settings
         if load_settings().get("meeting_detection_enabled") is not True:
             return
+        if candidate_id != self._meeting_suggested_id:
+            return  # an older notification cannot consume a newer call
         if action == "record":
             # A stale notification must not record after the call has ended,
             # even if session hysteresis has not expired yet.
