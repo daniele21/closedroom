@@ -679,6 +679,20 @@ export const ApiClient = {
     return (await request('/v1/system/menubar/refresh', { method: 'POST' })).json();
   },
 
+  async claimMeetingStartIntent(token: string): Promise<{ accepted: boolean }> {
+    return (await request('/v1/system/meeting-detection/claim-intent', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })).json();
+  },
+
+  async meetingStartFeedback(token: string, phase: 'preparing' | 'blocked' | 'failed' | 'recording_ready'): Promise<void> {
+    await request('/v1/system/meeting-detection/start-feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, phase }),
+    });
+  },
+
   async captureWindows(): Promise<{ windows: CaptureWindow[] }> {
     return (await request('/v1/capture/windows')).json();
   },
