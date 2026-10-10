@@ -71,7 +71,8 @@ class CoreAudioInputObserver:
             recognized = {bundle for pid in active
                           if (bundle := lookup(pid)) in SUPPORTED_APPS}
             return ActivityObservation("supported", frozenset(recognized))
-        except (OSError, AttributeError, ValueError, RuntimeError):
+        except Exception:
+            # OSStatus, dynamic PyObjC failures and races must fail closed.
             return ActivityObservation("unknown", reason="coreaudio_unavailable")
 
     @staticmethod
@@ -198,9 +199,8 @@ class MeetingSuggestionPolicy:
         if busy:
             # If ClosedRoom is already recording this call, never prompt on Stop.
             for candidate in self._sessions.values():
-                if now - candidate.first_seen >= self.activation_seconds:
-                    candidate.prompted = True
-                    candidate.dismissed = True
+                candidate.prompted = True
+                candidate.dismissed = True
             return []
         to_notify: list[MeetingCandidate] = []
         for candidate in self._sessions.values():
