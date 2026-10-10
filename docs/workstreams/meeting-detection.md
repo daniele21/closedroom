@@ -87,9 +87,3 @@ W1 branches: `feat/meeting-detection-{core,notifications,start,preferences}`. Ow
 **Axes:** PRODUCT_FEATURE; ITERATION per lane -> INTEGRATION `dev`; SCOPED for policy/settings, STRONG for shared native/recording integration, FULL on selector/release; AGENT_LOCAL or REMOTE_AUTOMATED for deterministic checks, REAL_ENVIRONMENT only for physical evidence. Never silently downgrade.
 
 **Done:** user opt-in, supported-app suggestion, explicit once-only action, true recording readiness, suppress repeat prompts and preserve manual flows; evidence and durable docs agree.
-
-### Integration checkpoint — 2026-10-10
-
-- MD-1..4 implemented on separate branches and consolidated in `feat/meeting-detection-integration`; MD-5 source wired: CoreAudio, UNUserNotificationCenter, settings, secure nonce/claim, canonical recorder and stop API. The old undefined `RecordingController` shell calls were replaced.
-- Supported v0 allowlist: Zoom and Teams; browser microphone signals are insufficient. Feature OFF by default, no media data transfer.
-- CI/native/TCC evidence pending; PR #105 may conflict. Refresh head/base and validate before completing MD-6.
