@@ -78,6 +78,8 @@ export default function SettingsPage() {
   const [llmLogs, setLlmLogs] = useState('');
 
   const [meetingAutoAnalysis, setMeetingAutoAnalysis] = useState(false);
+  const [meetingDetectionEnabled, setMeetingDetectionEnabled] = useState(false);
+  const [meetingDetectionWasEnabled, setMeetingDetectionWasEnabled] = useState(false);
   const [meetingDefaultPipeline, setMeetingDefaultPipeline] = useState('meeting_default');
   const [speakerDiarizationEnabled, setSpeakerDiarizationEnabled] = useState(false);
   const [visualIntelligenceEnabled, setVisualIntelligenceEnabled] = useState(false);
@@ -175,6 +177,8 @@ export default function SettingsPage() {
       setLocalLlmJsonMode(llm.jsonMode);
 
       setMeetingAutoAnalysis(settings.meeting_auto_analysis || false);
+      setMeetingDetectionEnabled(Boolean(settings.meeting_detection_enabled));
+      setMeetingDetectionWasEnabled(Boolean(settings.meeting_detection_enabled));
       setMeetingDefaultPipeline(settings.meeting_default_pipeline || 'meeting_default');
       setSpeakerDiarizationEnabled(Boolean(settings.speaker_diarization_enabled));
       setVisualIntelligenceEnabled(Boolean(settings.visual_intelligence_enabled));
@@ -277,6 +281,7 @@ export default function SettingsPage() {
           jsonMode: localLlmJsonMode,
         }, showDiagnostics),
         meeting_auto_analysis: meetingAutoAnalysis,
+        meeting_detection_enabled: meetingDetectionEnabled,
         meeting_default_pipeline: meetingDefaultPipeline,
         speaker_diarization_enabled: speakerDiarizationEnabled,
         visual_intelligence_enabled: visualIntelligenceEnabled,
@@ -285,6 +290,12 @@ export default function SettingsPage() {
       if (speechmaticsApiKey.trim()) payload.speechmatics_api_key = speechmaticsApiKey.trim();
 
       await ApiClient.updateSettings(payload);
+      if (meetingDetectionEnabled && !meetingDetectionWasEnabled) {
+        // Permission is requested only after the user explicitly enables and saves.
+        await ApiClient.authorizeMeetingDetection().catch(() => {
+          showToast(lang === 'it' ? 'Notifiche non disponibili: puoi registrare dalla menu bar.' : 'Notifications unavailable: recording remains available from the menu bar.', 'warning');
+        });
+      }
       showToast(t('settings.successSave'), 'success');
       await loadSettings();
     } catch (err: any) {
@@ -393,6 +404,34 @@ export default function SettingsPage() {
               <strong className="mt-1 block text-sm text-text-primary">{analysisLocation}</strong>
             </div>
           </div>
+        </Card>
+
+        <Card className="flex flex-col gap-3" data-settings-meeting-detection="true">
+          <h3 className="text-sm font-semibold text-text-primary">
+            {lang === 'it' ? 'Rilevamento riunioni' : 'Meeting detection'}
+          </h3>
+          <p className="text-xs text-text-secondary">
+            {lang === 'it'
+              ? 'Quando Zoom o Teams usano il microfono, ClosedRoom può proporti di registrare. Il rilevamento avviene sul Mac senza ascoltare l’audio. Non registra senza un tuo click.'
+              : 'When Zoom or Teams use the microphone, ClosedRoom can suggest recording. Detection stays on your Mac without listening to audio. Recording requires your click.'}
+          </p>
+          <Checkbox
+            variant="toggle"
+            label={lang === 'it' ? 'Suggerisci di registrare i meeting' : 'Suggest recording meetings'}
+            checked={meetingDetectionEnabled}
+            onChange={(event) => setMeetingDetectionEnabled(event.target.checked)}
+          />
+          <p className="text-xs text-text-muted" role="status">
+            {lang === 'it'
+              ? 'Disattivato inizialmente. Salva per attivare e richiedere il permesso per le notifiche; avvia ClosedRoom al login se vuoi ricevere i suggerimenti.'
+              : 'Off by default. Save to enable and request notification permission; start ClosedRoom at login for background suggestions.'}
+          </p>
+          {meetingDetectionEnabled && menuBarStatus?.meeting_detection && (
+            <p className="text-xs text-text-muted">
+              {lang === 'it' ? 'Monitoraggio' : 'Monitor'}: {menuBarStatus.meeting_detection.capability}
+              {' · '}{lang === 'it' ? 'Notifiche' : 'Notifications'}: {menuBarStatus.meeting_detection.notifications}
+            </p>
+          )}
         </Card>
 
         <Card className="flex flex-col gap-4" data-settings-menubar="true">
