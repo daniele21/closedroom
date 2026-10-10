@@ -134,7 +134,8 @@ class MeetingNotificationCenter:
 
             run_on_main_thread(configure, wait=True)
             return self._center is not None
-        except (ImportError, AttributeError, RuntimeError, OSError):
+        except Exception:
+            # Missing framework/bridge must never crash the menu-bar app.
             self._authorization = "unsupported"
             return False
 
