@@ -44,6 +44,10 @@ class SettingsSimplicityContractTests(unittest.TestCase):
         self.assertIn('/brand/closedroom-microphone-mark.png', self.source)
         self.assertIn("handleRefreshMenuBar", self.source)
         self.assertIn("Mostra di nuovo", self.source)
+        self.assertIn("Apri impostazioni Barra dei menu", self.source)
+        self.assertIn("Consenti nella barra dei menu", self.source)
+        self.assertIn("Item creato", self.source)
+        self.assertNotIn("Creata e visibile per macOS", self.source)
         self.assertIn("Still cannot see it?", self.source)
         self.assertIn("Bartender, Ice, Hidden Bar", self.source)
 

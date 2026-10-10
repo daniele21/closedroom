@@ -120,10 +120,10 @@ export default function SettingsPage() {
       const status = await ApiClient.refreshMenuBar();
       setMenuBarStatus(status);
       showToast(
-        status.visible && status.icon_loaded
-          ? (lang === 'it' ? 'Icona della menu bar ripristinata.' : 'Menu bar icon restored.')
-          : (lang === 'it' ? 'ClosedRoom ha richiesto di mostrare di nuovo l’icona.' : 'ClosedRoom requested the menu bar icon again.'),
-        status.visible && status.icon_loaded ? 'success' : 'info',
+        lang === 'it'
+          ? 'ClosedRoom ha richiesto nuovamente l’item alla barra dei menu.'
+          : 'ClosedRoom requested the menu bar item again.',
+        'info',
       );
     } catch (err: any) {
       showToast(
@@ -133,6 +133,23 @@ export default function SettingsPage() {
       await refreshMenuBarStatus();
     } finally {
       setMenuBarAction(false);
+    }
+  };
+
+  const handleOpenMenuBarSettings = async () => {
+    try {
+      await ApiClient.openMenuBarSettings();
+      showToast(
+        lang === 'it'
+          ? 'Nelle impostazioni, abilita ClosedRoom sotto “Consenti nella barra dei menu”.'
+          : 'In System Settings, enable ClosedRoom under “Allow in the Menu Bar”.',
+        'info',
+      );
+    } catch (err: any) {
+      showToast(
+        err?.message || (lang === 'it' ? 'Impossibile aprire le impostazioni della barra dei menu.' : 'Unable to open Menu Bar settings.'),
+        'error',
+      );
     }
   };
 
@@ -398,11 +415,11 @@ export default function SettingsPage() {
         <Card className="flex flex-col gap-4" data-settings-menubar="true">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-border-subtle bg-bg-surface/40">
+              <div className="flex h-11 w-14 shrink-0 items-center justify-center">
                 <img
                   src="/brand/closedroom-microphone-mark.png"
                   alt=""
-                  className="h-7 w-7 object-contain"
+                  className="h-10 w-auto object-contain"
                   aria-hidden="true"
                 />
               </div>
@@ -413,32 +430,31 @@ export default function SettingsPage() {
                 </div>
                 <p className="mt-1 text-xs text-text-muted">
                   {lang === 'it'
-                    ? 'Questa è l’icona che ClosedRoom prova a mantenere visibile nella barra dei menu.'
-                    : 'This is the icon ClosedRoom tries to keep visible in the menu bar.'}
+                    ? 'ClosedRoom usa il mark trasparente ufficiale anche nella barra dei menu.'
+                    : 'ClosedRoom uses the canonical transparent mark in the menu bar too.'}
                 </p>
               </div>
             </div>
-            <Badge variant={menuBarStatus?.visible && menuBarStatus?.icon_loaded ? 'success' : 'warning'}>
-              {menuBarStatus?.visible && menuBarStatus?.icon_loaded
-                ? (lang === 'it' ? 'Attiva' : 'Active')
+            <Badge variant={menuBarStatus?.available && menuBarStatus?.icon_loaded ? 'info' : 'warning'}>
+              {menuBarStatus?.available && menuBarStatus?.icon_loaded
+                ? (lang === 'it' ? 'Item creato' : 'Item created')
                 : (lang === 'it' ? 'Da verificare' : 'Check needed')}
             </Badge>
           </div>
 
           <div className="rounded-xl border border-border-subtle bg-bg-surface/30 p-4">
-            <p className="text-sm text-text-secondary">
-              {menuBarStatus?.visible && menuBarStatus?.icon_loaded
-                ? (lang === 'it'
-                    ? 'ClosedRoom ha creato correttamente l’item della menu bar. Se non lo vedi, è probabilmente nascosto da macOS o da un menu-bar manager.'
-                    : 'ClosedRoom created the menu bar item correctly. If you still cannot see it, macOS or a menu bar manager is probably hiding it.')
-                : (lang === 'it'
-                    ? 'ClosedRoom non riesce ancora a confermare l’item della menu bar. Prova a ripristinarlo.'
-                    : 'ClosedRoom cannot confirm the menu bar item yet. Try restoring it.')}
+            <h4 className="text-sm font-semibold text-text-primary">
+              {lang === 'it' ? '1. Consenti ClosedRoom nella barra dei menu' : '1. Allow ClosedRoom in the menu bar'}
+            </h4>
+            <p className="mt-1 text-sm text-text-secondary">
+              {lang === 'it'
+                ? 'Su macOS 26 un item può essere creato dall’app ma non mostrato. Apri Impostazioni di Sistema → Barra dei menu e attiva ClosedRoom nella sezione “Consenti nella barra dei menu”.'
+                : 'On macOS 26 an item can be created by the app but still not shown. Open System Settings → Menu Bar and enable ClosedRoom under “Allow in the Menu Bar”.'}
             </p>
-            {menuBarStatus?.last_error && menuBarStatus.last_error !== 'menubar_controller_unavailable' && (
-              <p className="mt-2 break-all font-mono text-[11px] text-danger">{menuBarStatus.last_error}</p>
-            )}
             <div className="mt-3 flex flex-wrap gap-2">
+              <Button type="button" variant="primary" onClick={handleOpenMenuBarSettings}>
+                {lang === 'it' ? 'Apri impostazioni Barra dei menu' : 'Open Menu Bar settings'}
+              </Button>
               <Button
                 type="button"
                 variant="secondary"
@@ -461,18 +477,18 @@ export default function SettingsPage() {
             <div className="mt-3 space-y-2 text-xs leading-5 text-text-secondary">
               <p>
                 {lang === 'it'
-                  ? '• Sui MacBook con notch, macOS può nascondere gli item quando la barra è piena: chiudi temporaneamente qualche altra icona e controlla di nuovo.'
-                  : '• On MacBooks with a notch, macOS can hide items when the bar is crowded: temporarily close another menu bar item and check again.'}
+                  ? '• Prima controlla Impostazioni di Sistema → Barra dei menu → Consenti nella barra dei menu → ClosedRoom.'
+                  : '• First check System Settings → Menu Bar → Allow in the Menu Bar → ClosedRoom.'}
+              </p>
+              <p>
+                {lang === 'it'
+                  ? '• “Item creato” significa che AppKit ha costruito correttamente l’item; macOS può comunque nasconderlo temporaneamente se non c’è spazio, soprattutto sui MacBook con notch.'
+                  : '• “Item created” means AppKit created it correctly; macOS can still hide it temporarily when space is tight, especially on MacBooks with a notch.'}
               </p>
               <p>
                 {lang === 'it'
                   ? '• Se usi Bartender, Ice, Hidden Bar o app simili, imposta ClosedRoom tra gli elementi sempre visibili.'
                   : '• If you use Bartender, Ice, Hidden Bar, or a similar app, set ClosedRoom to always visible there.'}
-              </p>
-              <p>
-                {lang === 'it'
-                  ? '• ClosedRoom deve rimanere in esecuzione. Se lo stato sopra è “Attiva” ma l’icona non appare, chiudi e riapri ClosedRoom dopo aver liberato spazio nella barra.'
-                  : '• ClosedRoom must keep running. If the status above says Active but the icon is still missing, quit and reopen ClosedRoom after freeing menu bar space.'}
               </p>
             </div>
           </details>
@@ -778,8 +794,8 @@ export default function SettingsPage() {
                 <span className="font-mono text-text-primary">{sysInfo.version}</span>
                 <span className="text-text-muted">{t('settings.sysMacosMenu')}</span>
                 <span className={`font-medium ${menuBarStatus?.visible && menuBarStatus?.icon_loaded ? 'text-success' : 'text-warning'}`}>
-                  {menuBarStatus?.visible && menuBarStatus?.icon_loaded
-                    ? (lang === 'it' ? 'Creata e visibile per macOS' : 'Created and visible to macOS')
+                  {menuBarStatus?.available && menuBarStatus?.icon_loaded
+                    ? (lang === 'it' ? 'Item AppKit creato' : 'AppKit item created')
                     : (lang === 'it' ? 'Da verificare' : 'Needs checking')}
                 </span>
               </section>
