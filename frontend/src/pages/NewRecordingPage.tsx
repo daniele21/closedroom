@@ -280,7 +280,6 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
       }
     })();
     // Intent must be claimed once per mounted page, even while recorder state changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStartToken, settingsLoaded, nativeCaptureChecked, nativeCaptureReady, readyToRecord]);
 
   useEffect(() => {
