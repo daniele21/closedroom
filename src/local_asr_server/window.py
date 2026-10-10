@@ -193,7 +193,7 @@ class ClosedRoomWindowManager:
             ns_url = NSURL.URLWithString_(url)
             request = NSURLRequest.requestWithURL_(ns_url)
             self.webview.loadRequest_(request)
-            logger.info("WebView loading URL: %s", url)
+            logger.info("Main WebView route navigation requested")
 
     def evaluate_js(self, js_code: str) -> None:
         """Evaluate JavaScript in the webview on the main thread."""
