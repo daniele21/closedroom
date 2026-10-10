@@ -184,8 +184,11 @@ class ClosedRoomWindowManager:
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
 
     def load_url(self, url: str) -> None:
-        """Load a new URL into the webview."""
-        self.url = url
+        """Navigate the main webview, keeping the origin for the overlay.
+
+        The origin in self.url is shared by a separate overlay WKWebView;
+        replacing it with a hash route makes the overlay load the wrong page.
+        """
         if self.webview:
             ns_url = NSURL.URLWithString_(url)
             request = NSURLRequest.requestWithURL_(ns_url)
