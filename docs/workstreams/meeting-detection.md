@@ -10,16 +10,16 @@ Baseline inspected: `dev@53662a1744632abf37d127cf253c1d70a667585d` on 2026-10-10
 **Outcome:** after explicit opt-in, the macOS menu-bar companion recognizes plausible active input use by a *supported* call app and offers a generic actionable macOS notification. **Record** requests the *existing* capture path; preparing is distinguished from actual recording, and the native overlay appears only on capture `ready`. **Not now** suppresses this call.
 **Non-goals v0:** calendar, browser-tab/meeting-title/participant extraction, automatic start/stop, audio listening/classification, screen-content capture, remote processing, a second recording service/queue. Browser microphone activity alone is not proof of Google Meet.
 **Defaults:** detection OFF; request notification authorization after opting in; recording `both` (mic + computer) as today; optional screen-context capture OFF; do not silently downgrade capture sources.
-**Product risks:** VALUE (does suggestion help people record?); USABILITY (annoyance, focus theft); FEASIBILITY (CoreAudio per-process activity, notification callbacks when hidden, background-start contract); VIABILITY (CPU/RSS/wakeups, compatibility). If feasibility fails, decide NARROW_SCOPE, CHOOSE_ALTERNATIVE or DO_NOT_BUILD rather than pretending every microphone event is a meeting.
-**Evidence:** local aggregate suggestion->record/ignore counters and false-positive scenarios, without meeting content. SHIPPED is not proof of usefulness.
+**Product risks:** VALUE (opt-in conversion); USABILITY (annoyance/focus); FEASIBILITY (CoreAudio, background notification/start); VIABILITY (resource use/OS coverage). If unsupported, NARROW_SCOPE, CHOOSE_ALTERNATIVE or DO_NOT_BUILD.
+**Evidence:** local content-free conversion/false-positive observations; SHIPPED is not product success.
 
 ## Canonical ownership and invariants
 
 - Native shell: `src/local_asr_server/menubar.py`; main-thread Cocoa/window and native overlay: `window.py`; settings persisted by `settings.py` and exposed by existing Settings page/routes.
-- Today `NewRecordingPage.tsx` -> `useRecorder.ts` orchestrates start via the existing capture reservation, API and `NativeCaptureManager`/`RecordingStore`. `HeavyWorkloadArbiter` alone schedules heavy work. `menubar.py` currently calls `RecordingController.start()` in WKWebView: **audit its actual delivery/ack across routes and hidden windows** before relying on it.
-- Add only a lightweight shell-local detection/suggestion policy; canonical active/preparing/recording states must still come from the existing recording owner. Never create a parallel capture lifecycle, persisted meeting state or AI scheduler.
-- Local-only. No audio buffers, content-based detection, remote requests, app/tab inventories in telemetry, transcript/path/title logging. Volatile session token and bounded content-free diagnostic outcomes only. Separate opt-in from macOS notification and capture/TCC permissions.
-- No foreground focus on the happy path. `Preparing` is cancellable; only real capture `ready` starts REC/timer/overlay. Preserve manual New Meeting, browser-development recording fallback, notes, screenshots, Stop and recovery.
+- `NewRecordingPage.tsx` -> `useRecorder.ts` owns start via existing reservation/API/`NativeCaptureManager`/`RecordingStore`; `HeavyWorkloadArbiter` owns heavy work. `menubar.py` calls `RecordingController.start()`: **verify delivery/ack on all routes and hidden windows**.
+- Add only shell-local suggestion state; canonical recording states remain with existing owner. No second capture, meeting store or scheduler.
+- Local-only; no audio buffers/content detection/remote calls/sensitive logs. Only volatile session tokens and bounded diagnostic reasons. Opt-in, notification and capture/TCC grants are distinct.
+- No focus theft; `Preparing` cancellable, actual `ready` gates REC/timer/overlay; preserve manual/browser recording, note, screenshot, Stop and recovery.
 - Capability `supported|unsupported|unknown` must distinguish inability to inspect CoreAudio from an inactive call. If notifications are unavailable, preserve menu-bar and manual access.
 
 ## UX contract and edge states
@@ -66,7 +66,7 @@ MD-6  E2E, physical Mac, UX docs, rollout
 | MD-3 / C | BLOCKED on MD-0 | `frontend/src/hooks/useRecorder.ts`, directly consumed recording controller/bridge or service/API contract, focused tests | Exactly one start owner shared by manual/menu-bar/notification, acknowledged despite hidden or non-recording route, atomic reservation, wait-for-AI cancel, correct error/ready, no duplicate session; browser/manual flow unchanged. Coordinate exclusive `useRecorder` ownership with AC-1. |
 | MD-4 / D | BLOCKED on MD-0 | `settings.py`, Settings router/schema, `frontend/src/pages/SettingsPage.tsx`, related i18n/UI tests | `meeting_detection_enabled=false` default; user-readable privacy/capability and opt-in UI, clear status and diagnostics; permission request only after opt-in, opt-out persists; no modal/onboarding blocking recording. No `menubar.py` edits. |
 
-W1 branches: `feat/meeting-detection-core`, `feat/meeting-detection-notifications`, `feat/meeting-detection-start`, `feat/meeting-detection-preferences`. Validate owner-local work independently; publish short focused PRs to `dev` behind off-by-default behavior and converge early instead of building a long stacked PR tree. Resolve current base/PR #105 movement and API mismatches before each merge.
+W1 branches: `feat/meeting-detection-core`, `feat/meeting-detection-notifications`, `feat/meeting-detection-start`, `feat/meeting-detection-preferences`. Run owner-local gates, merge small disabled-by-default PRs into refreshed `dev`, avoid stacked long-lived changes and resolve PR #105 conflicts.
 
 **MD-5 — BLOCKED on MD-1..4; single integration owner.** Wire only this lane into `menubar.py` and `window.py` (and necessary app lifecycle/packaging), start/stop detector, keep delegate retained and Cocoa calls on main thread, ensure one monitor per process and bounded shutdown, expose contextual menu-bar action, actionable-notification start and fallback when notifications denied, foreground preservation, truthful preparing/ready/recovery and native overlay after real capture. Coordinate PR #105 changes; no competing edits to these files.
 
