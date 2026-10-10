@@ -196,6 +196,11 @@ class MeetingSuggestionPolicy:
                     first_seen=now, last_seen=now,
                 )
         if busy:
+            # If ClosedRoom is already recording this call, never prompt on Stop.
+            for candidate in self._sessions.values():
+                if now - candidate.first_seen >= self.activation_seconds:
+                    candidate.prompted = True
+                    candidate.dismissed = True
             return []
         to_notify: list[MeetingCandidate] = []
         for candidate in self._sessions.values():
