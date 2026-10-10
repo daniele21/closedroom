@@ -11,9 +11,15 @@ class MeetingDetectionFrontendContractTests(unittest.TestCase):
         page = (ROOT / "frontend/src/pages/NewRecordingPage.tsx").read_text()
         self.assertIn("claimMeetingStartIntent(autoStartToken)", page)
         self.assertIn("if (!claimed.accepted) return", page)
-        self.assertIn("!nativeCaptureReady || !readyToRecord", page)
+        self.assertIn("!nativeCaptureReady || !storageReady", page)
         self.assertIn("recorder.startRecording('', '', '', 'both', undefined, '', true)", page)
         self.assertIn("meetingStartFeedback(autoStartToken, 'recording_ready')", page)
+        harness = (ROOT / "scripts/browser_record_while_ai_busy_e2e.mjs").read_text()
+        self.assertIn("NOTIFICATION_START", harness)
+        self.assertIn("notificationClaims !== 1", harness)
+        self.assertIn("meeting-detection-start", harness)
+        suite = (ROOT / "scripts/browser_meeting_ui_e2e.mjs").read_text()
+        self.assertIn("CLOSEDROOM_MEETING_DETECTION_E2E: '1'", suite)
 
     def test_auto_route_is_distinct_from_opening_saved_recording(self):
         app = (ROOT / "frontend/src/App.tsx").read_text()
