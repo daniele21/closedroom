@@ -9,13 +9,13 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
 - PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio benchmark tooling; dual-track audio remains canonical pending representative evidence.
 - PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and adaptive Today/Meeting/Projects workspace.
-- PRS-17 candidate `c1c79f31` passed FULL preflight #306, including 411 Python tests and declared Meeting FULL_MEDIA journeys.
+- PRS-17 passed FULL preflight #306 (411 Python tests and Meeting FULL_MEDIA).
 - PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
-- PR #65 made Search release evidence prove accessible open/focus/close rather than synthetic Cmd-K/Escape delivery; shortcuts remain technically tested but are not a stable-source blocker.
-- PRS-18 measured product/runtime release evidence remains active.
+- PR #65 verified Search open/focus/close accessibility; shortcut delivery stays nonblocking.
+- PRS-18 target-Mac evidence remains active.
 - GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata; runtime/install identity stays stable as `ClosedRoom.app` / `ClosedRoom` / `com.closedroom.app`, while DMGs/finalized artifacts carry version + build/source identity.
 - GRP-3 stages immutable production artifacts with exact identity and checksums.
-- GRP-4/5 publish draft releases from trusted same-SHA production artifacts; Apple environment/authority remains external and required.
+- GRP-4/5 draft releases use trusted same-SHA artifacts; Apple authority remains required.
 
 ## Current integration state
 
@@ -28,7 +28,7 @@ PRS-18 has two target-Mac evidence paths:
 - **production distribution evidence**: `release_build` produces the exact Developer-ID-signed, timestamped, notarized/stapled app + DMG and Gatekeeper proof; `release_evidence` exercises that immutable artifact through WKWebView/TCC FULL_MEDIA, local MLX/resource/thermal, PRS-9 and PRS-16 contention evidence;
 - **LOCAL REAL_ENVIRONMENT**: `python3 scripts/run_local_real_environment_suite.py` builds or reuses one exact finalized **ad-hoc** Apple-Silicon app and runs the same physical product/runtime evidence owners. Evidence lives under `dist/evidence/local-real-environment/<revision>/`. This can prove target-Mac behavior for stable-source promotion, never signed public distribution.
 
-The local adapter does not weaken the production-signing path.
+Ad-hoc evidence never substitutes for production signing.
 
 ## Stable-source evidence still pending
 
@@ -47,7 +47,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 
 ## Active workstreams
 
-- [`meeting-detection.md`](workstreams/meeting-detection.md): MD-1..5 source candidate on `feat/meeting-detection-integration` (CoreAudio/notification/opt-in/start), not integrated in `dev`; exact-head automated and target-Mac evidence pending.
+- [`meeting-detection.md`](workstreams/meeting-detection.md): candidate on integration branch, not in `dev`; gates and target-Mac proof pending.
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
