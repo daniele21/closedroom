@@ -660,7 +660,17 @@ class ClosedRoomApp(rumps.App):
         if load_settings().get("meeting_detection_enabled") is not True:
             return
         if action == "record":
-            if not self._meeting_policy.resolve_action(candidate_id, "record"):
+            # A stale notification must not record after the call has ended,
+            # even if session hysteresis has not expired yet.
+            candidate = self._meeting_policy.active_candidate(candidate_id)
+            if candidate is None:
+                return
+            observation = self._meeting_observer.scan()
+            if observation.capability != "supported" or candidate.bundle_id not in observation.active_bundle_ids:
+                self._meeting_policy.resolve_action(candidate_id, "ignore")
+                self._clear_meeting_suggestion()
+                return
+            if not self._meeting_policy.resolve_action(candidate_id, "record"): 
                 return  # duplicated, expired or not the current call
             self._clear_meeting_suggestion()
             self._issue_meeting_start_intent()
