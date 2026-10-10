@@ -537,9 +537,11 @@ export interface MenuBarStatus {
   icon_asset: string;
   repair_count: number;
   last_error?: string | null;
+  meeting_detection?: { enabled: boolean; capability: string; notifications: string };
 }
 
 export interface Settings {
+  meeting_detection_enabled?: boolean;
   transcriptions_dir: string;
   recordings_dir: string;
   asr_provider?: 'local' | 'speechmatics' | string;
@@ -677,6 +679,10 @@ export const ApiClient = {
 
   async refreshMenuBar(): Promise<MenuBarStatus> {
     return (await request('/v1/system/menubar/refresh', { method: 'POST' })).json();
+  },
+
+  async authorizeMeetingDetection(): Promise<{requested: boolean}> {
+    return (await request('/v1/system/meeting-detection/authorize', { method: 'POST' })).json();
   },
 
   async captureWindows(): Promise<{ windows: CaptureWindow[] }> {
