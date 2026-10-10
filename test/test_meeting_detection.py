@@ -46,10 +46,13 @@ class MeetingDetectionTests(unittest.TestCase):
 
     def test_busy_and_unknown_fail_closed(self):
         p = MeetingSuggestionPolicy()
-        p.observe(active(TEAMS), enabled=True, busy=True, now=0)
+        p.observe(active(TEAMS), enabled=True, busy=False, now=0)
         self.assertEqual(p.observe(ActivityObservation("unknown"), enabled=True, busy=False, now=5), [])
         self.assertEqual(len(p.observe(active(TEAMS), enabled=True, busy=False, now=6)), 1)
         self.assertEqual(p.observe(active("com.google.Chrome"), enabled=True, busy=False, now=15), [])
+        already_recording = MeetingSuggestionPolicy()
+        already_recording.observe(active(TEAMS), enabled=True, busy=True, now=0)
+        self.assertEqual(already_recording.observe(active(TEAMS), enabled=True, busy=False, now=6), [])
 
     def test_detector_has_no_non_macos_success_fallback(self):
         observation = CoreAudioInputObserver().scan()
