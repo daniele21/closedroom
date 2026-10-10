@@ -396,6 +396,28 @@
         "production signing/notarization and MLX/Metal inference quality remain outside this journey"
       ],
       "automation_gap_reason": "Interactive WKWebView plus TCC-backed microphone/system-audio capture requires the target Mac; integration uses affected automated frontend/source/package evidence and carries this residual target-environment delta to release."
+    },
+    {
+      "id": "meeting-detection-start",
+      "claim": "After explicit opt-in, a supported native call detection suggestion yields one actionable Record intent; the authenticated one-time claim enters the existing cancellable recording lifecycle without premature REC, and Stop persists the meeting.",
+      "ui_surface": true,
+      "minimum_ui_evidence_mode": "full_media",
+      "target_environment_refs": [
+        "closedroom-macos-apple-silicon"
+      ],
+      "automated_environment_refs": [
+        "browser-macos-arm64-ci",
+        "source-contract-suite"
+      ],
+      "minimum_automated_fidelity": "simulated_or_emulated",
+      "real_environment_confirmation": "required",
+      "real_environment_runner": "target-macos-real",
+      "residual_gaps": [
+        "Headless browser fixtures cover the one-time intent and recording UI but cannot prove CoreAudio microphone-app identification or actual UNUserNotificationCenter callback delivery",
+        "Packaged WKWebView hidden-window focus, real native microphone/system audio and TCC prompts require representative Mac evidence",
+        "Notification annoyance, VoiceOver output and subjective usability require real human confirmation"
+      ],
+      "automation_gap_reason": ""
     }
   ]
 }

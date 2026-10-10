@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Bug,
   CheckCircle2,
@@ -25,9 +25,10 @@ import { Select } from '../components/ui/Select';
 
 interface NewRecordingPageProps {
   navigateTo: (page: string, detail?: string | null) => void;
+  autoStartToken?: string;
 }
 
-export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) {
+export default function NewRecordingPage({ navigateTo, autoStartToken }: NewRecordingPageProps) {
   const { t, lang } = useTranslation();
   const { showToast } = useToast();
 
@@ -36,6 +37,8 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
   const [sourceMode, setSourceMode] = useState<'both' | 'mic_only' | 'pc_only'>('both');
   const [recordingsDir, setRecordingsDir] = useState('');
   const [storageConfigured, setStorageConfigured] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const autoStartClaimedRef = useRef<string | null>(null);
   const [projectsList, setProjectsList] = useState<string[]>([]);
   const [permissionLoading, setPermissionLoading] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
@@ -112,6 +115,8 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
         setProjectsList((projects.items || []).filter((project) => !project.is_unassigned).map((project) => project.name));
       } catch {
         // Readiness below exposes configuration gaps without blocking the rest of the app shell.
+      } finally {
+        setSettingsLoaded(true);
       }
     };
     void loadSettings();
@@ -252,6 +257,39 @@ export default function NewRecordingPage({ navigateTo }: NewRecordingPageProps) 
         : 'ClosedRoom could not configure audio automatically. Open Audio recovery to choose a source.',
     };
   })();
+
+  useEffect(() => {
+    if (!autoStartToken || !settingsLoaded || !nativeCaptureChecked || autoStartClaimedRef.current === autoStartToken) return;
+    autoStartClaimedRef.current = autoStartToken;
+    // A hash route alone is insufficient authority to start recording. The native
+    // shell must issue a one-time nonce and the authenticated API must claim it.
+    void (async () => {
+      try {
+        const claimed = await ApiClient.claimMeetingStartIntent(autoStartToken);
+        if (!claimed.accepted) return;
+        if (!nativeCaptureReady || !storageReady) {
+          await ApiClient.meetingStartFeedback(autoStartToken, 'blocked');
+          showToast(lang === 'it' ? 'Completa i permessi o la cartella prima di registrare.' : 'Complete permissions or storage setup before recording.', 'warning');
+          return;
+        }
+        await ApiClient.meetingStartFeedback(autoStartToken, 'preparing');
+        await recorder.startRecording('', '', '', 'both', undefined, '', true);
+      } catch {
+        void ApiClient.meetingStartFeedback(autoStartToken, 'failed').catch(() => {});
+        showToast(lang === 'it' ? 'Impossibile avviare dalla notifica.' : 'Unable to start from notification.', 'error');
+      }
+    })();
+    // Intent must be claimed once per mounted page, even while recorder state changes.
+  }, [autoStartToken, settingsLoaded, nativeCaptureChecked, nativeCaptureReady, storageReady]);
+
+  useEffect(() => {
+    if (!autoStartToken || autoStartClaimedRef.current !== autoStartToken) return;
+    if (recorder.isRecording) {
+      void ApiClient.meetingStartFeedback(autoStartToken, 'recording_ready').catch(() => {});
+    } else if (recorder.statusState === 'error') {
+      void ApiClient.meetingStartFeedback(autoStartToken, 'failed').catch(() => {});
+    }
+  }, [autoStartToken, recorder.isRecording, recorder.statusState]);
 
   const start = () => recorder.startRecording(
     title,

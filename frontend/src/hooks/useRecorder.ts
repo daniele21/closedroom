@@ -490,9 +490,10 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     mode: 'both' | 'mic_only' | 'pc_only' = 'both',
     visualWindowId?: number,
     visualCaptureLabel = '',
+    requireNative = false,
   ) => {
     if (startInFlightRef.current || isRecordingRef.current) return;
-    if (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia) {
+    if (!requireNative && (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia)) {
       showToast(t('recording.unsupportedBrowser'), 'error');
       return;
     }
@@ -518,6 +519,11 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         capabilityCheckFailed = true;
         return null;
       });
+
+      // Notification starts must never silently use a browser/BlackHole fallback.
+      if (requireNative && !(capabilities?.default_backend === 'native' && capabilities.native.available)) {
+        throw new Error(t('recording.nativeCaptureUnavailableUnknown'));
+      }
 
       const initialReservation = await createCaptureReservation();
       captureReservationIdRef.current = initialReservation.reservation_id;

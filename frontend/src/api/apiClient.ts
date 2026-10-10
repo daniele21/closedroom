@@ -537,9 +537,11 @@ export interface MenuBarStatus {
   icon_asset: string;
   repair_count: number;
   last_error?: string | null;
+  meeting_detection?: { enabled: boolean; capability: string; notifications: string };
 }
 
 export interface Settings {
+  meeting_detection_enabled?: boolean;
   transcriptions_dir: string;
   recordings_dir: string;
   asr_provider?: 'local' | 'speechmatics' | string;
@@ -677,6 +679,24 @@ export const ApiClient = {
 
   async refreshMenuBar(): Promise<MenuBarStatus> {
     return (await request('/v1/system/menubar/refresh', { method: 'POST' })).json();
+  },
+
+  async claimMeetingStartIntent(token: string): Promise<{ accepted: boolean }> {
+    return (await request('/v1/system/meeting-detection/claim-intent', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })).json();
+  },
+
+  async meetingStartFeedback(token: string, phase: 'preparing' | 'blocked' | 'failed' | 'recording_ready'): Promise<void> {
+    await request('/v1/system/meeting-detection/start-feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, phase }),
+    });
+  },
+
+  async authorizeMeetingDetection(): Promise<{ requested: boolean }> {
+    return (await request('/v1/system/meeting-detection/authorize', { method: 'POST' })).json();
   },
 
   async captureWindows(): Promise<{ windows: CaptureWindow[] }> {

@@ -54,6 +54,15 @@ const journeys = [
     },
   },
   {
+    script: 'scripts/browser_record_while_ai_busy_e2e.mjs',
+    env: {
+      CLOSEDROOM_MEETING_DETECTION_E2E: '1',
+      CLOSEDROOM_RECORD_WHILE_AI_BUSY_E2E_EVIDENCE:
+        process.env.CLOSEDROOM_MEETING_DETECTION_E2E_EVIDENCE
+        || path.join(canonicalEvidenceRoot, 'meeting-detection-start'),
+    },
+  },
+  {
     script: 'scripts/browser_workspace_coherence_e2e.mjs',
     env: {
       CLOSEDROOM_WORKSPACE_COHERENCE_E2E_EVIDENCE:
