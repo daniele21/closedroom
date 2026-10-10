@@ -267,7 +267,7 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
       try {
         const claimed = await ApiClient.claimMeetingStartIntent(autoStartToken);
         if (!claimed.accepted) return;
-        if (!nativeCaptureReady || !readyToRecord) {
+        if (!nativeCaptureReady || !storageReady) {
           await ApiClient.meetingStartFeedback(autoStartToken, 'blocked');
           showToast(lang === 'it' ? 'Completa i permessi o la cartella prima di registrare.' : 'Complete permissions or storage setup before recording.', 'warning');
           return;
@@ -280,7 +280,7 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
       }
     })();
     // Intent must be claimed once per mounted page, even while recorder state changes.
-  }, [autoStartToken, settingsLoaded, nativeCaptureChecked, nativeCaptureReady, readyToRecord]);
+  }, [autoStartToken, settingsLoaded, nativeCaptureChecked, nativeCaptureReady, storageReady]);
 
   useEffect(() => {
     if (!autoStartToken || autoStartClaimedRef.current !== autoStartToken) return;
