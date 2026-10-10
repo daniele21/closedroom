@@ -20,6 +20,8 @@ import sys
 import logging
 import json
 import socket
+import secrets
+import time
 import threading
 import uuid
 import webbrowser
@@ -50,6 +52,8 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     # workers preload their own MLX runtime through build_assets/hooks/pyi_rth_mlx.py.
 
 from local_asr_server.window import ClosedRoomWindowManager
+from local_asr_server.meeting_detection import CoreAudioInputObserver, MeetingSuggestionPolicy, SUPPORTED_APPS
+from local_asr_server.macos_meeting_notifications import MeetingNotificationCenter
 from local_asr_server.app_identity import get_app_identity
 from local_asr_server.paths import get_brand_asset_path
 from local_asr_server.runtime.models import (
@@ -316,6 +320,16 @@ class ClosedRoomApp(rumps.App):
         # Initialize the window manager
         self.window_manager = ClosedRoomWindowManager(self.app_url)
 
+        # Meeting suggestions are local and disabled until the user opts in.
+        self._meeting_observer = CoreAudioInputObserver()
+        self._meeting_policy = MeetingSuggestionPolicy()
+        self._meeting_notifications = MeetingNotificationCenter(self._on_meeting_notification)
+        self._meeting_notifications.start()  # delegate installed at app launch
+        self._meeting_capability = 'unknown'
+        self._meeting_suggested_id: str | None = None
+        self._meeting_intents: dict[str, dict] = {}
+        self._meeting_intent_lock = threading.Lock()
+
         # Start the server
         self._server_thread = _ServerThread(self, self.app_port)
         self._server_thread.start()
@@ -420,6 +434,7 @@ class ClosedRoomApp(rumps.App):
                     "icon_asset": MENU_BAR_ICON_SOURCE,
                     "repair_count": self._status_item_repair_count,
                     "last_error": self._status_item_last_error,
+                    "meeting_detection": self.meeting_detection_status(),
                 })
             except Exception as exc:
                 snapshot.update({
@@ -456,6 +471,8 @@ class ClosedRoomApp(rumps.App):
         )
 
         self._meeting_status_item = rumps.MenuItem("Avvio…")
+        self._detected_meeting_item = rumps.MenuItem("Nessuna chiamata rilevata")
+        self._detected_meeting_item.set_callback(None)
         self._start_item = rumps.MenuItem("＋ Nuovo meeting", callback=self._start_recording)
         self._recent_item = rumps.MenuItem("Recenti")
         self._recent_signature: tuple[tuple[str, str], ...] = ()
@@ -471,6 +488,7 @@ class ClosedRoomApp(rumps.App):
         self.menu = [
             rumps.MenuItem("Apri ClosedRoom", callback=self._open_window),
             self._meeting_status_item,
+            self._detected_meeting_item,
             rumps.separator,
             self._start_item,
             self._recent_item,
@@ -572,6 +590,143 @@ class ClosedRoomApp(rumps.App):
         self._stop_item.set_callback(self._stop_recording if available and recording else None)
         self._copy_transcript_item.set_callback(self._copy_last_transcription if available else None)
 
+    # ── Opt-in meeting suggestions (never a second recording owner) ────────
+
+    def meeting_detection_status(self) -> dict:
+        from local_asr_server.settings import load_settings
+        return {
+            "enabled": load_settings().get("meeting_detection_enabled") is True,
+            "capability": self._meeting_capability,
+            "notifications": self._meeting_notifications.authorization,
+        }
+
+    def authorize_meeting_detection(self) -> bool:
+        from local_asr_server.settings import load_settings
+        if load_settings().get("meeting_detection_enabled") is not True:
+            return False
+        return self._meeting_notifications.request_authorization()
+
+    def _clear_meeting_suggestion(self) -> None:
+        if self._meeting_suggested_id:
+            self._meeting_notifications.dismiss(self._meeting_suggested_id)
+        self._meeting_suggested_id = None
+        self._detected_meeting_item.title = "Nessuna chiamata rilevata"
+        self._detected_meeting_item.set_callback(None)
+
+    def _refresh_meeting_detection(self, server_status: str) -> None:
+        from local_asr_server.settings import load_settings
+        if load_settings().get("meeting_detection_enabled") is not True:
+            self._meeting_policy.reset()
+            self._meeting_capability = "disabled"
+            self._clear_meeting_suggestion()
+            return
+
+        observation = self._meeting_observer.scan()
+        self._meeting_capability = observation.capability
+        with self._meeting_intent_lock:
+            pending = any(
+                item["phase"] in {"issued", "claimed", "preparing"}
+                and time.monotonic() - item["issued"] < 120
+                for item in self._meeting_intents.values()
+            )
+        busy = server_status == "recording" or pending
+        candidates = self._meeting_policy.observe(observation, enabled=True, busy=busy)
+        if self._meeting_suggested_id and (
+            busy or self._meeting_policy.active_candidate(self._meeting_suggested_id) is None
+        ):
+            self._clear_meeting_suggestion()
+        for candidate in candidates:
+            if self._meeting_suggested_id is not None:
+                break
+            self._meeting_suggested_id = candidate.candidate_id
+            label = SUPPORTED_APPS[candidate.bundle_id]
+            self._detected_meeting_item.title = f"Registra chiamata {label}"
+            self._detected_meeting_item.set_callback(
+                lambda _, cid=candidate.candidate_id: self._meeting_notification_action(cid, "record")
+            )
+            self._meeting_notifications.notify(candidate.candidate_id, app_label=label)
+
+    def _on_meeting_notification(self, candidate_id: str, action: str) -> None:
+        # UNUserNotificationCenter may invoke its delegate off the Cocoa thread.
+        from local_asr_server.window import run_on_main_thread
+        run_on_main_thread(lambda: self._meeting_notification_action(candidate_id, action))
+
+    def _meeting_notification_action(self, candidate_id: str, action: str) -> None:
+        from local_asr_server.settings import load_settings
+        if load_settings().get("meeting_detection_enabled") is not True:
+            return
+        if action == "record":
+            if not self._meeting_policy.resolve_action(candidate_id, "record"):
+                return  # duplicated, expired or not the current call
+            self._clear_meeting_suggestion()
+            self._issue_meeting_start_intent()
+        elif action in {"ignore", "dismiss", "body_open"}:
+            self._meeting_policy.resolve_action(candidate_id, "ignore")
+            self._clear_meeting_suggestion()
+            if action == "body_open":
+                self.window_manager.load_url(f"{self.app_url}/#recording")
+                self.window_manager.show()
+
+    def _issue_meeting_start_intent(self) -> None:
+        # A token authorizes a single claim by the authenticated WKWebView.
+        # It does NOT create a recording or bypass the capture reservation.
+        if not _check_server_health(self.app_port):
+            rumps.notification("ClosedRoom", "Non disponibile", "Apri ClosedRoom per riprovare.")
+            return
+        status = _get_server_status(self.app_port)
+        if status.get("status") == "recording":
+            self.window_manager.show_overlay()
+            return
+        with self._meeting_intent_lock:
+            if any(item["phase"] in {"issued", "claimed", "preparing"}
+                   and time.monotonic() - item["issued"] < 120
+                   for item in self._meeting_intents.values()):
+                return
+            token = secrets.token_urlsafe(24)
+            self._meeting_intents = {token: {"phase": "issued", "issued": time.monotonic()}}
+        # load_url does not focus/activate the window: the call stays foreground.
+        if self.window_manager.webview is None:
+            self.window_manager._create_window()
+        self.window_manager.load_url(f"{self.app_url}/#recording/auto/{token}")
+        rumps.notification("ClosedRoom", "Preparazione registrazione", "La cattura non è ancora iniziata.")
+
+    def claim_meeting_start_intent(self, token: str) -> bool:
+        if not _check_server_health(self.app_port):
+            return False
+        if _get_server_status(self.app_port).get("status") == "recording":
+            return False
+        with self._meeting_intent_lock:
+            intent = self._meeting_intents.get(token)
+            if not intent or intent["phase"] != "issued":
+                return False
+            if time.monotonic() - intent["issued"] > 90:
+                self._meeting_intents.pop(token, None)
+                return False
+            intent["phase"] = "claimed"
+            return True
+
+    def meeting_start_feedback(self, token: str, phase: str) -> bool:
+        if phase not in {"preparing", "blocked", "failed", "recording_ready"}:
+            return False
+        with self._meeting_intent_lock:
+            intent = self._meeting_intents.get(token)
+            if intent is None or intent["phase"] == "issued":
+                return False
+            if time.monotonic() - intent["issued"] > 120:
+                self._meeting_intents.pop(token, None)
+                return False
+            if phase == "recording_ready" and _get_server_status(self.app_port).get("status") != "recording":
+                return False
+            intent["phase"] = phase
+        if phase in {"blocked", "failed"}:
+            from local_asr_server.window import run_on_main_thread
+            def show_recovery():
+                self.window_manager.show()
+                rumps.notification("ClosedRoom", "Registrazione non avviata",
+                                   "Controlla i permessi e le impostazioni audio.")
+            run_on_main_thread(show_recovery)
+        return True
+
     # ── Server lifecycle ───────────────────────────────────────────────────
 
     def _wait_for_server(self) -> None:
@@ -600,6 +755,7 @@ class ClosedRoomApp(rumps.App):
             self._set_status_icon("error")
             self._update_status_item("ClosedRoom non disponibile")
             self._set_recording_actions(recording=False, available=False)
+            self._clear_meeting_suggestion()
             return
 
         server_status = status.get("status", "idle")
@@ -623,6 +779,8 @@ class ClosedRoomApp(rumps.App):
             self._set_status_icon("idle")
             self._update_status_item("Pronto")
             self._set_recording_actions(recording=False, available=True)
+
+        self._refresh_meeting_detection(server_status)
 
     def _update_status_item(self, text: str) -> None:
         self._meeting_status_item.title = text
@@ -799,11 +957,9 @@ class ClosedRoomApp(rumps.App):
         status = _get_server_status(self.app_port)
         server_status = status.get("status", "idle")
         if server_status == "recording":
-            self.window_manager.evaluate_js("RecordingController.stop()")
-            rumps.notification("ClosedRoom", "Registrazione", "Salvataggio del meeting in corso…")
+            self._stop_recording(None)
         elif server_status == "idle":
-            self.window_manager.evaluate_js("RecordingController.start()")
-            rumps.notification("ClosedRoom", "Registrazione", "Avvio meeting…")
+            self._issue_meeting_start_intent()
         else:
             rumps.notification("ClosedRoom", "Meeting non disponibile", "ClosedRoom sta preparando il meeting.")
 
@@ -898,14 +1054,23 @@ class ClosedRoomApp(rumps.App):
         if not _check_server_health(self.app_port):
             self._update_status_item("ClosedRoom non disponibile")
             return
-        self.window_manager.evaluate_js("RecordingController.start()")
+        self._issue_meeting_start_intent()
 
     def _stop_recording(self, _) -> None:
         """Trigger recording stop in WKWebView."""
         if not _check_server_health(self.app_port):
             self._update_status_item("ClosedRoom non disponibile")
             return
-        self.window_manager.evaluate_js("RecordingController.stop()")
+        active = self._active_recording_payload()
+        recording_id = active.get("recording_id")
+        if not recording_id:
+            rumps.notification("ClosedRoom", "", "Nessuna registrazione attiva.")
+            return
+        try:
+            self._api_json(f"/v1/recordings/{recording_id}/control/stop", method="POST", timeout=20)
+        except Exception as exc:
+            logger.warning("Unable to stop recording via canonical API: %s", type(exc).__name__)
+            rumps.notification("ClosedRoom", "Impossibile fermare", "Apri i controlli di registrazione.")
 
     def _active_recording_payload(self) -> dict:
         try:
@@ -1039,6 +1204,9 @@ class ClosedRoomApp(rumps.App):
     def _quit(self, _) -> None:
         """Gracefully stop the server, close the window, and quit."""
         self._status_timer.stop()
+        self._clear_meeting_suggestion()
+        self._meeting_policy.reset()
+        self._meeting_notifications.stop()
         native_hotkeys = getattr(self, "_native_hotkeys", None)
         if native_hotkeys is not None:
             native_hotkeys.stop()
