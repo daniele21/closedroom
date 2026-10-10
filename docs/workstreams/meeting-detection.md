@@ -26,21 +26,20 @@ Baseline inspected: `dev@53662a1744632abf37d127cf253c1d70a667585d` on 2026-10-10
 
 `opted_out -> observing -> candidate -> suggestion -> {record|not_now|dismiss|expired} -> {preparing -> ready/recording | blocked | failed | cancelled} -> ended`.
 
-1. Require stable input-use evidence from allowlisted apps (initial trial: 3–5 s), identify app only with reliable bundle ID, and avoid browser false positives; notification: "Possible meeting in progress" plus app label only when confirmed.
-2. Actions: **Record** sends one explicit, deduplicated start intent; **Not now** / dismissal suppress this session; body-click opens contextual ClosedRoom but never starts; stale action after call ended fails closed.
-3. On accepted Record, keep call app foreground, surface small non-REC preparation/cancel status, and resolve actual readiness from existing capture events. If permission/storage/device fails, show actionable recovery, opening the full ClosedRoom window only when necessary.
-4. Once capturing, show compact overlay and menu-bar controls (timer, audio health, Note, Screenshot, Stop). Never show REC before native `ready`; do not auto-stop when meeting activity disappears.
-5. No repeated prompt within same session after dismiss, ignore, starting, recording or manual Stop; brief mute, helper PID change or reconnect must not reopen a prompt. Remove/expire outstanding notifications when source ends.
-6. If ClosedRoom is foreground, favor in-app contextual presentation; if native notifications are denied, menu bar remains usable. Ensure keyboard, VoiceOver and reduced-motion behavior.
+1. Stable mic-input use in a supported app (initial experiment: 3–5 s) -> generic "Possible meeting in progress" notification; app name only if confidently known; browser mic activity alone is insufficient.
+2. **Record** is one idempotent start intent; **Not now**/dismiss suppress this call, body-click opens ClosedRoom but never starts; expired notification action fails closed.
+3. **Preparing** stays in a small cancellable non-REC surface without stealing call focus. Once canonical native capture reports `ready`, display REC/timer/audio health/Note/Screenshot/Stop. Permission/storage/device failures open targeted recovery, not an implicit mic-only fallback.
+4. No second prompt for the same call after ignore, dismiss or manual Stop, even across brief mute/reconnect/helper PID changes. Loss of detection never auto-stops recording; notification denial retains menu-bar access.
+5. Foreground ClosedRoom uses contextual in-app presentation; keyboard, VoiceOver, status feedback and reduced-motion are mandatory.
 
-**Proposed internal contracts to freeze at MD-0** (not persisted/public API):
-- `ActivityObservation{bundle_id,pid?,monotonic_time,input_active,capability,reason}` — no media.
-- `MeetingCandidate{ephemeral_id,source_kind,label?,created_monotonic,expires_monotonic}` — rejoin-safe identity/epoch.
-- `SuggestionDecision{notify|suppress|close,reason,candidate_id?}` — includes opt-out, unsupported, ambiguous, previously dismissed, already active/pending, cooldown, denied notifications.
-- `NotificationAction{candidate_id,record|ignore|body_open}` — process once and revalidate epoch + active recording before starting.
-- `StartAcknowledgement{accepted|already_active|preparing|blocked|failed|cancelled|recording_ready}` — correlated to **existing** capture reservation/session, never inferred from fire-and-forget JavaScript.
+**Transient internal contracts to freeze in MD-0** (no persisted/public detection API):
+- `ActivityObservation{bundle_id,pid?,monotonic_time,input_active,capability,reason}`.
+- `MeetingCandidate{ephemeral_id,source_kind,label?,created_monotonic,expires_monotonic}` with call epoch distinct from PID.
+- `SuggestionDecision{notify|suppress|close,reason,candidate_id?}` covers opt-out/ambiguity/active/pending/prior dismissal/expiry/denied notification.
+- `NotificationAction{candidate_id,record|ignore|body_open}` processed once, with epoch + canonical active-state revalidation.
+- `StartAcknowledgement{accepted|already_active|preparing|blocked|failed|cancelled|recording_ready}` tied to existing capture reservation/session; JS dispatch alone is **not** acknowledgement.
 
-Initial *experimental*, not contractual, tuning: ~1 Hz or reliable events; 3–5 s activation debounce, 20–30 s inactivity hysteresis, one suggestion per inferred session; bounded expiration and low idle polling. Measure real devices before selecting final values.
+Experimental tuning, not product SLO: event-driven or ~1 Hz sample, 3–5 s activation debounce, 20–30 s inactivity hysteresis, bounded expiry and one prompt/session; calibrate on Mac.
 
 ## Dependency graph and parallel execution
 
@@ -75,14 +74,14 @@ W1 branches: `feat/meeting-detection-core`, `feat/meeting-detection-notification
 
 ## Acceptance and validation checklist
 
-**Deterministic:** stable/ambiguous/unsupported observation, activate/mute/rejoin/end, duplicate/noisy process events, opt-out, denied notifications, old callback, two rapid Record taps, existing pending/active ClosedRoom recording, hidden/route-switched WKWebView, AI-busy reservation, capture-ready timing, cancel/failed permissions/missing storage/missing source, stop -> persisted Meeting, notes/screenshot unchanged, restart/shutdown resource cleanup, no sensitive or remote telemetry, keyboard/focus/VoiceOver structure. Extend `test/test_recording_api.py`, `test/test_native_capture.py`, existing frontend recording/overlay tests and `test/test_macos_hotkeys.py` as actually affected; add behavior tests, not just source-string assertions.
+**Deterministic matrix:** supported/ambiguous/unsupported app; activation/mute/rejoin/end/PID changes; opt-out/deny/stale action/double-Record; active or AI-busy recording reservation; hidden window/non-recording route; permission/storage/device failures and cancellation cleanup; true capture-ready timing; preserved manual/browser fallback, Stop->saved Meeting, notes and screenshots; no sensitive logging/network or monitor leaks. Extend relevant `test/test_recording_api.py`, `test/test_native_capture.py`, `test/test_macos_hotkeys.py`, frontend recorder/overlay tests and new dedicated detector/notification tests. Require behavioral assertions.
 
-**Browser FULL_MEDIA:** opted-out -> opt-in -> simulated suggestion -> Record -> preparing -> native-ready fixture -> overlay -> Stop, plus ignore, blocked permission, stale/duplicate action and existing manual flow. Mocked fixtures **do not** prove macOS notification/CoreAudio delivery.
+**Browser FULL_MEDIA:** opt-in -> fixture suggestion -> Record -> preparing -> simulated native-ready -> overlay -> Stop; also ignore, retry/blocked permission and stale action. Browser fixtures **do not prove** macOS CoreAudio/notification delivery.
 
-**REAL_ENVIRONMENT on exact packaged Mac artifact:** Teams/Zoom call+mic tests on explicitly supported OS/app versions; browser/helper identity and false positives; notifications when app background/hidden/fullscreen/another Space; Record and Not now, stale action after call end, native TCC mic+system WAV persisted, truthful timers and overlay, notification denied and menu-bar recovery (incl macOS 26 allowance), idle CPU/RSS/wakeups and shutdown. Record source/OS/build identity and aggregate observations only; subjective interruption/VoiceOver needs human evaluation.
+**Mac REAL_ENVIRONMENT:** packaged app on supported OS with real Teams/Zoom mic tests, browser false positives, notification when hidden/other Space/fullscreen, Record/Not now/expired callback, TCC-backed nonempty mic+system tracks, true timer/overlay, notification denial and macOS 26 menu-bar allowance, idle CPU/RSS/wakeups, exit cleanup and VoiceOver/usability. Keep source/build/OS identity, no call content.
 
-**Axes:** PRODUCT_FEATURE. DELIVERY=ITERATION per lane -> INTEGRATION into `dev` -> RELEASE only `dev -> main`. VALIDATION=SCOPED for pure policy/settings, STRONG for native/recording/shared lifecycle/integration; selector can escalate to FULL for packaging or other risks, never downgrade. EXECUTION=AGENT_LOCAL for available deterministic gates, REMOTE_AUTOMATED for unavailable deterministic Mac/toolchain gates, REAL_ENVIRONMENT for actual app/TCC/notification tests. Run `python3 scripts/select_validation_profile.py --base <base> --head <head> --stage integration` plus selected gates and affected FULL_MEDIA; at release require FULL and applicable target-Mac proof. Avoid repeated redundant GitHub Actions: local lane checks first, reuse exact-head/tree-equivalent evidence when valid, one sufficient remote run after coherent integration when required.
+**Axes:** PRODUCT_FEATURE; DELIVERY=ITERATION per lane, INTEGRATION into `dev`, RELEASE only `dev -> main`; VALIDATION=SCOPED pure core/Settings, STRONG shared native/start integration, FULL if selector/release requires; EXECUTION=AGENT_LOCAL for available deterministic gates, REMOTE_AUTOMATED if unavailable, REAL_ENVIRONMENT for physical Mac/TCC. Select gates with `python3 scripts/select_validation_profile.py --base <base> --head <head> --stage integration`; affected UI requires FULL_MEDIA. Minimize Actions through local owner tests and exact-head/tree-equivalent evidence reuse; never downgrade or substitute simulation for device evidence.
 
-**Definition of done:** opt-in one-click recording from supported native call app, no silent recording or remote processing, duplicate-free prompts, reliable acknowledged start even when window hidden, true ready/REC transition, clean cancellation/recovery, manual/overlay regression gates green, docs aligned. Do not call target-Mac evidence complete on simulator/CI.
+**Done:** opt-in suggestion from supported call app, one-click confirmed background start, no repeated prompts/implicit cloud/auto-capture, true ready/REC, user-visible recoverable errors, manual and overlay regressions green, matching docs. Not release-ready until RELEASE/FULL + applicable real-Mac proof.
 
-**Resume checkpoint:** plan only; no feature code, no CoreAudio feasibility or macOS notification proof. Source baseline `dev@53662a1744632abf37d127cf253c1d70a667585d` is context, not passing gate evidence. On resume: refresh head/tree/base, inspect PR #105 and AC-1, complete MD-0 discriminating probes/contract, then unblock W1. After integration transfer durable truth to canonical docs and delete completed workstream per repository policy.
+**Resume checkpoint:** feature unimplemented; baseline `dev@53662a1744632abf37d127cf253c1d70a667585d` is context, not gate evidence; CoreAudio and notification Mac feasibility unverified; PR #105 and AC-1 are possible conflict owners. Refresh head/base, finish MD-0, then unblock four lanes. On integration transfer durable behavior/release obligations to canonical docs and delete completed workstream per policy.
