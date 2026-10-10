@@ -635,6 +635,10 @@ class ClosedRoomApp(rumps.App):
             busy or self._meeting_policy.active_candidate(self._meeting_suggested_id) is None
         ):
             self._clear_meeting_suggestion()
+        if pending and server_status != "recording":
+            self._detected_meeting_item.title = "Preparazione registrazione… (apri controlli)"
+            self._detected_meeting_item.set_callback(lambda _: self.window_manager.show())
+            return
         for candidate in candidates:
             if self._meeting_suggested_id is not None:
                 break
