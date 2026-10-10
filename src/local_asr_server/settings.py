@@ -67,6 +67,7 @@ DEFAULT_SETTINGS: dict[str, any] = {
     "local_llm_startup_timeout": None,
     "local_llm_llama_server_bin": "",
     "meeting_auto_analysis": False,
+    "meeting_detection_enabled": False,
     "meeting_default_pipeline": "meeting_default",
     "speaker_diarization_enabled": False,
     "speaker_diarization_minimum_overlap": 0.25,

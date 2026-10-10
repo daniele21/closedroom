@@ -7,6 +7,10 @@ import net from 'node:net';
 import path from 'node:path';
 
 const VIDEO_FPS = 4;
+// The existing recording E2E doubles as the notification-start E2E, avoiding
+// a second fixture/recording owner. All native signals are deterministic fakes.
+const NOTIFICATION_START = process.env.CLOSEDROOM_MEETING_DETECTION_E2E === '1';
+const NOTIFICATION_TOKEN = 'meeting-e2e-nonce-1234567890';
 const RECORDING_ID = 'record-while-ai-busy-e2e';
 const RESERVATION_ID = 'capture-reservation-e2e';
 const root = path.resolve(process.cwd());
@@ -26,6 +30,8 @@ const counts = {
   startCapture: 0,
   stopCapture: 0,
   detail: 0,
+  notificationClaims: 0,
+  notificationFeedback: [],
 };
 let frameIndex = 0;
 let aiBusy = true;
@@ -151,6 +157,30 @@ function fixtureServer(port) {
         aiResumed,
         counts,
       });
+    }
+    if (url.pathname === '/v1/system/meeting-detection/claim-intent' && req.method === 'POST') {
+      let payload = '';
+      req.on('data', (chunk) => { payload += chunk; });
+      req.on('end', () => {
+        let valid = false;
+        try { valid = JSON.parse(payload).token === NOTIFICATION_TOKEN; } catch {}
+        counts.notificationClaims += 1;
+        return json(res, valid && counts.notificationClaims === 1 ? 200 : 409,
+          { accepted: valid && counts.notificationClaims === 1 });
+      });
+      return;
+    }
+    if (url.pathname === '/v1/system/meeting-detection/start-feedback' && req.method === 'POST') {
+      let payload = '';
+      req.on('data', (chunk) => { payload += chunk; });
+      req.on('end', () => {
+        try {
+          const feedback = JSON.parse(payload);
+          if (feedback.token === NOTIFICATION_TOKEN) counts.notificationFeedback.push(feedback.phase);
+        } catch {}
+        return json(res, 200, { accepted: true });
+      });
+      return;
     }
     if (url.pathname === '/v1/session') {
       counts.session += 1;
@@ -475,7 +505,7 @@ async function waitText(browser, needles, timeoutMs = 8000, record = false) {
 }
 
 async function renderVideo() {
-  const videoPath = path.join(evidenceRoot, 'video', 'record-while-ai-busy.mp4');
+  const videoPath = path.join(evidenceRoot, 'video', NOTIFICATION_START ? 'meeting-detection-start.mp4' : 'record-while-ai-busy.mp4');
   await fsp.mkdir(path.dirname(videoPath), { recursive: true });
   const process = launch(
     'ffmpeg',
@@ -544,11 +574,22 @@ try {
 
   browser = new Browser(driverPort);
   await browser.start();
-  await browser.navigate(`http://127.0.0.1:${vitePort}/#recording`);
-  await waitText(browser, ['Pronto per registrare', 'Ready to record'], 30000, true);
-  await checkpoint(browser, '01-ready-before-start');
-
-  await browser.clickButton(['Avvia Registrazione', 'Start Recording']);
+  await browser.navigate(
+    `http://127.0.0.1:${vitePort}/#recording${NOTIFICATION_START ? `/auto/${NOTIFICATION_TOKEN}` : ''}`,
+  );
+  if (!NOTIFICATION_START) {
+    await waitText(browser, ['Pronto per registrare', 'Ready to record'], 30000, true);
+    await checkpoint(browser, '01-ready-before-start');
+    await browser.clickButton(['Avvia Registrazione', 'Start Recording']);
+  } else {
+    // The user already clicked Record in the mocked native notification.
+    // No second click on the New Meeting page is permitted.
+    await waitText(browser, ['Preparazione registrazione', 'Preparing recording'], 30000, true);
+    await checkpoint(browser, '01-notification-start-preparing');
+    if (counts.notificationClaims !== 1) {
+      throw new Error(`notification intent was not claimed exactly once: ${counts.notificationClaims}`);
+    }
+  }
   await waitText(browser, ['Preparazione registrazione', 'Preparing recording'], 8000, true);
   if (counts.reservationCreate !== 1 || counts.startCapture !== 0) {
     throw new Error(`capture was not held behind the AI reservation: ${JSON.stringify(counts)}`);
@@ -568,6 +609,9 @@ try {
     throw new Error(`recording did not start under the granted reservation: ${JSON.stringify({ counts, captureStarted, reservationActive })}`);
   }
   await checkpoint(browser, '03-recording-active');
+  if (NOTIFICATION_START && (!counts.notificationFeedback.includes('preparing') || !counts.notificationFeedback.includes('recording_ready'))) {
+    throw new Error(`notification start did not acknowledge true lifecycle: ${JSON.stringify(counts.notificationFeedback)}`);
+  }
 
   await browser.clickButton(['Termina e salva', 'Stop and Save']);
   const deadline = Date.now() + 10000;
@@ -601,7 +645,7 @@ try {
 
 const manifest = {
   schema_version: 1,
-  journey_id: 'record-while-ai-busy',
+  journey_id: NOTIFICATION_START ? 'meeting-detection-start' : 'record-while-ai-busy',
   execution_environment: 'browser-macos-arm64-ci',
   fidelity_class: 'simulated_or_emulated',
   source_revision: sourceRevision,
@@ -611,6 +655,9 @@ const manifest = {
   video,
   privacy_boundary: 'Synthetic workload, meeting and capture state only; captures are restricted to the headless Chrome viewport.',
   proven_outcomes: [
+    NOTIFICATION_START
+      ? 'Notification Record uses one authenticated one-time claim and the canonical native-only start, without a second start click.'
+      : 'Manual start uses the existing canonical recording path.',
     'Start meeting remains truthful while managed AI is active: the UI shows preparation rather than recording.',
     'Capture does not start until the reservation is granted.',
     'The user can cancel while waiting for the active AI phase.',

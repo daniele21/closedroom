@@ -16,7 +16,8 @@
       "prepare a recorded meeting into readable transcript and useful notes without technical setup",
       "review speaker-attributed meeting content",
       "extract useful meeting/project notes and insights",
-      "recover from permission, audio, model or processing failures without losing work"
+      "recover from permission, audio, model or processing failures without losing work",
+      "receive a timely opt-in reminder to record a call without disrupting its current application"
     ],
     "primary_surfaces": [
       "Today and meeting/project workspace",
@@ -134,7 +135,7 @@
     ],
     "desktop_pattern": "one stable left workspace rail",
     "compact_pattern": "the same destinations and action hierarchy reflow into one sticky top toolbar; compact width must not introduce a second navigation model",
-    "rule": "Today, Meeting and Projects share one workspace chrome. Meeting is opened from Today/search/project context but does not become a third peer destination. During recording, the macOS menu bar is a contextual companion for Add note, Screenshot, recording controls and Stop; it projects canonical state and never becomes a second state owner. Advanced transcription, analysis and diagnostics remain contextual or utility routes."
+    "rule": "Today, Meeting and Projects share one workspace chrome. Meeting is opened from Today/search/project context but does not become a third peer destination. During recording, the macOS menu bar is a contextual companion for Add note, Screenshot, recording controls and Stop; it projects canonical state and never becomes a second state owner. Advanced transcription, analysis and diagnostics remain contextual or utility routes. Optional meeting detection presents a native suggestion and menu-bar action only after opt-in; it never auto-starts recording and delegates to the canonical New Meeting start."
   },
   "golden_path": {
     "steps": [
@@ -295,6 +296,11 @@
       "id": "visual-on-demand",
       "name": "Explicitly analyze shared visual content without making visual capture part of normal recording",
       "e2e": "recommended"
+    },
+    {
+      "id": "meeting-detection-start",
+      "name": "Explicitly opt in to local native call detection, receive at most one suggestion per active supported call, choose Record or Not now, and only show REC/overlay after canonical recording readiness; recover permission failures without losing call focus",
+      "e2e": "required"
     }
   ],
   "reference_views": [

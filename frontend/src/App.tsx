@@ -259,9 +259,11 @@ function MainApp() {
         return <MeetingDetailPage recordingId={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'recording':
         if (isDemoActive) return <TourRecordingMock />;
-        return routeDetail
-          ? <RecordingPage detailId={routeDetail} navigateTo={navigateTo} />
-          : <NewRecordingPage navigateTo={navigateTo} />;
+        return routeDetail?.startsWith('auto/')
+          ? <NewRecordingPage navigateTo={navigateTo} autoStartToken={routeDetail.slice(5)} />
+          : routeDetail
+            ? <RecordingPage detailId={routeDetail} navigateTo={navigateTo} />
+            : <NewRecordingPage navigateTo={navigateTo} />;
       case 'transcription':
         return <TranscriptionPage detailPath={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'projects':
