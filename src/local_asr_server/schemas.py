@@ -161,6 +161,7 @@ class SettingsRequest(BaseModel):
     local_llm_startup_timeout: Optional[int] = None
     local_llm_llama_server_bin: Optional[str] = None
     meeting_auto_analysis: Optional[bool] = None
+    meeting_detection_enabled: Optional[bool] = None
     meeting_default_pipeline: Optional[str] = None
     speaker_diarization_enabled: Optional[bool] = None
     speaker_diarization_minimum_overlap: Optional[float] = None
