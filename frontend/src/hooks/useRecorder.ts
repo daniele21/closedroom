@@ -493,7 +493,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     requireNative = false,
   ) => {
     if (startInFlightRef.current || isRecordingRef.current) return;
-    if (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia) {
+    if (!requireNative && (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia)) {
       showToast(t('recording.unsupportedBrowser'), 'error');
       return;
     }
