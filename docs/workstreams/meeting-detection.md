@@ -70,9 +70,13 @@ W1 branches: `feat/meeting-detection-{core,notifications,start,preferences}`. Ow
 
 **MD-5 — ACTIVE (unverified source integration).** Wire only this lane into `menubar.py` and `window.py` (and necessary app lifecycle/packaging), start/stop detector, keep delegate retained and Cocoa calls on main thread, ensure one monitor per process and bounded shutdown, expose contextual menu-bar action, actionable-notification start and fallback when notifications denied, foreground preservation, truthful preparing/ready/recovery and native overlay after real capture. Coordinate PR #105 changes; no competing edits to these files.
 
-**MD-6 — BLOCKED.** Add affected FULL_MEDIA browser journey (synthetic detector/notification fixtures), focused integration tests and physical Mac matrix; update `design/ux-contract.json`, `docs/features.md`, `docs/current-state.md`, architecture docs only if ownership changed. Decide whether native-app v0 is useful enough to enable as an opt-in setting; no promises for browser Meet without evidence.
+**MD-6 — IN PROGRESS.** Add affected FULL_MEDIA browser journey (synthetic detector/notification fixtures), focused integration tests and physical Mac matrix; update `design/ux-contract.json`, `docs/features.md`, `docs/current-state.md`, architecture docs only if ownership changed. Decide whether native-app v0 is useful enough to enable as an opt-in setting; no promises for browser Meet without evidence.
 
 ## Acceptance and validation checklist
+
+**Implementation evidence checkpoint:** INTEGRATION/STRONG source, package and governance jobs PASS on `380a5121` before subsequent edits; new exact-head results pending. Browser FULL_MEDIA `meeting-detection-start` now exercises authenticated one-time claim -> AI-safe preparing -> ready -> Stop using shared fixture harness. `test_window_origin.py` covers the independent overlay route. A content-free target-Mac probe is provided: `python3 scripts/probe_meeting_detection.py --seconds 60 --expect-app Zoom --require-on-off --output dist/evidence/meeting-detection/zoom.json` (repeat for Microsoft Teams). Real notification callbacks, TCC, macOS 26 menu placement, foreground retention and CPU/RSS remain unproven until physical evidence.
+
+
 
 **SCOPED owner tests:** CoreAudio unsupported/unknown, debounce, mute/rejoin, PID/duplicate callback, opt-out, privacy-safe logs; Pydantic settings partial updates; authenticated nonce claimed once; native-only start prevents browser fallback; failed permission and cancellation. New tests: `test_meeting_detection.py`, `test_macos_meeting_notifications.py`, `test_meeting_detection_settings.py`, `test_meeting_detection_api.py`, `test_frontend_meeting_detection.py`; preserve existing recording/overlay regressions.
 
