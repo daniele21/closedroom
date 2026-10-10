@@ -6,7 +6,7 @@ Baseline inspected: `dev@53662a1744632abf37d127cf253c1d70a667585d` on 2026-10-10
 
 ## Outcome and product shape
 
-**User/job:** a person joining an online call wants ClosedRoom to offer recording before they forget, without interrupting the call.
+**User/job:** a person joining a call wants a discreet recording suggestion.
 **Outcome:** after explicit opt-in, the macOS menu-bar companion recognizes plausible active input use by a *supported* call app and offers a generic actionable macOS notification. **Record** requests the *existing* capture path; preparing is distinguished from actual recording, and the native overlay appears only on capture `ready`. **Not now** suppresses this call.
 **Non-goals v0:** calendar, browser-tab/meeting-title/participant extraction, automatic start/stop, audio listening/classification, screen-content capture, remote processing, a second recording service/queue. Browser microphone activity alone is not proof of Google Meet.
 **Defaults:** detection OFF; request notification authorization after opting in; recording `both` (mic + computer) as today; optional screen-context capture OFF; do not silently downgrade capture sources.
