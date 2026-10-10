@@ -1,109 +1,88 @@
-# Meeting Detection — one-click native meeting recording
+# Meeting Detection — one-click suggested recording
 
-Status: ACTIVE (planning complete; implementation not started)
-Target: `dev`; plan branch `plan/meeting-detection`
-Scope: v0 macOS native calling activity -> opt-in suggestion -> one-click reliable recording
-Last repository review: 2026-10-10, `dev@53662a1744632abf37d127cf253c1d70a667585d` (refresh on resume)
+Status: ACTIVE (plan only; implementation not started)
+Target: `dev`; planning branch `plan/meeting-detection`
+Baseline inspected: `dev@53662a1744632abf37d127cf253c1d70a667585d` on 2026-10-10. Refresh before implementation.
 
-## Product intent and decisions
+## Outcome and product shape
 
-**User / job:** someone joining an online call wants to remember to capture it, without interrupting the call or navigating the full ClosedRoom workspace. ClosedRoom may **suggest**, but never silently start a recording.
+**User/job:** a person joining an online call wants ClosedRoom to offer recording before they forget, without interrupting the call.
+**Outcome:** after explicit opt-in, the macOS menu-bar companion recognizes plausible active input use by a *supported* call app and offers a generic actionable macOS notification. **Record** requests the *existing* capture path; preparing is distinguished from actual recording, and the native overlay appears only on capture `ready`. **Not now** suppresses this call.
+**Non-goals v0:** calendar, browser-tab/meeting-title/participant extraction, automatic start/stop, audio listening/classification, screen-content capture, remote processing, a second recording service/queue. Browser microphone activity alone is not proof of Google Meet.
+**Defaults:** detection OFF; request notification authorization after opting in; recording `both` (mic + computer) as today; optional screen-context capture OFF; do not silently downgrade capture sources.
+**Product risks:** VALUE (does suggestion help people record?); USABILITY (annoyance, focus theft); FEASIBILITY (CoreAudio per-process activity, notification callbacks when hidden, background-start contract); VIABILITY (CPU/RSS/wakeups, compatibility). If feasibility fails, decide NARROW_SCOPE, CHOOSE_ALTERNATIVE or DO_NOT_BUILD rather than pretending every microphone event is a meeting.
+**Evidence:** local aggregate suggestion->record/ignore counters and false-positive scenarios, without meeting content. SHIPPED is not proof of usefulness.
 
-**Desired outcome:** when a *supported* meeting app is plausibly using microphone input, the already-running ClosedRoom menu-bar companion offers an unobtrusive, actionable macOS notification. On **Record**, it invokes the **same canonical recording start** as New Meeting and displays compact feedback while staying out of the foreground. REC/timer/overlay appear only after real native capture readiness. User can choose **Not now**, suppressing that call's further prompts.
+## Canonical ownership and invariants
 
-**Non-goals (v0):** calendar, meeting title/participant extraction, browser-tab inspection or extension, audio/content classification, auto-start, auto-stop, remote/cloud fallback, a new recording backend, new meeting catalog, screen-frame capture, analytics service, exact Zoom/Teams call semantics. Browser apps are not considered definitively in-call merely because their microphone is active.
+- Native shell: `src/local_asr_server/menubar.py`; main-thread Cocoa/window and native overlay: `window.py`; settings persisted by `settings.py` and exposed by existing Settings page/routes.
+- Today `NewRecordingPage.tsx` -> `useRecorder.ts` orchestrates start via the existing capture reservation, API and `NativeCaptureManager`/`RecordingStore`. `HeavyWorkloadArbiter` alone schedules heavy work. `menubar.py` currently calls `RecordingController.start()` in WKWebView: **audit its actual delivery/ack across routes and hidden windows** before relying on it.
+- Add only a lightweight shell-local detection/suggestion policy; canonical active/preparing/recording states must still come from the existing recording owner. Never create a parallel capture lifecycle, persisted meeting state or AI scheduler.
+- Local-only. No audio buffers, content-based detection, remote requests, app/tab inventories in telemetry, transcript/path/title logging. Volatile session token and bounded content-free diagnostic outcomes only. Separate opt-in from macOS notification and capture/TCC permissions.
+- No foreground focus on the happy path. `Preparing` is cancellable; only real capture `ready` starts REC/timer/overlay. Preserve manual New Meeting, browser-development recording fallback, notes, screenshots, Stop and recovery.
+- Capability `supported|unsupported|unknown` must distinguish inability to inspect CoreAudio from an inactive call. If notifications are unavailable, preserve menu-bar and manual access.
 
-**Defaults:** detection **off until explicit opt-in**; ask for system notification authorization only then; capture mode remains current default `both` (mic + computer), screen context remains **off**. User controls local microphone/screen-recording TCC authorization independently. Recording consent/notice to other participants remains user's responsibility.
+## UX contract and edge states
 
-**Risk and evidence (PRODUCT_FEATURE):**
-- VALUE: forget-to-record is important enough to justify optional prompting; measure suggestion -> explicit-start conversion on opt-in test calls, using aggregate *local* counters.
-- USABILITY: unnecessary prompts or focus theft outweigh recall; explicitly test dismiss/rejoin/overlay/VoiceOver and foreground app preservation.
-- FEASIBILITY: per-process CoreAudio input activity, notification action delivery in a packaged macOS app, browser helper identity, and hidden-WKWebView start are **unproven on representative Macs**. A readiness spike must resolve these before claiming v0 support.
-- VIABILITY: no perpetual expensive polling, no memory leak, no new always-running inference; all observation/diagnostic state is ephemeral and privacy-safe.
+`opted_out -> observing -> candidate -> suggestion -> {record|not_now|dismiss|expired} -> {preparing -> ready/recording | blocked | failed | cancelled} -> ended`.
 
-## Ownership and invariants
+1. Require stable input-use evidence from allowlisted apps (initial trial: 3–5 s), identify app only with reliable bundle ID, and avoid browser false positives; notification: "Possible meeting in progress" plus app label only when confirmed.
+2. Actions: **Record** sends one explicit, deduplicated start intent; **Not now** / dismissal suppress this session; body-click opens contextual ClosedRoom but never starts; stale action after call ended fails closed.
+3. On accepted Record, keep call app foreground, surface small non-REC preparation/cancel status, and resolve actual readiness from existing capture events. If permission/storage/device fails, show actionable recovery, opening the full ClosedRoom window only when necessary.
+4. Once capturing, show compact overlay and menu-bar controls (timer, audio health, Note, Screenshot, Stop). Never show REC before native `ready`; do not auto-stop when meeting activity disappears.
+5. No repeated prompt within same session after dismiss, ignore, starting, recording or manual Stop; brief mute, helper PID change or reconnect must not reopen a prompt. Remove/expire outstanding notifications when source ends.
+6. If ClosedRoom is foreground, favor in-app contextual presentation; if native notifications are denied, menu bar remains usable. Ensure keyboard, VoiceOver and reduced-motion behavior.
 
-- `src/local_asr_server/menubar.py` is the macOS shell integration owner; `window.py` owns Cocoa/WKWebView/window/overlay focus behavior. Native UI mutations happen on main thread.
-- `src/local_asr_server/settings.py` owns persisted opt-in and bounded preferences; Settings React page is only its UI. No additional persistence owner.
-- Current canonical recording path: `frontend/src/pages/NewRecordingPage.tsx` -> `frontend/src/hooks/useRecorder.ts` -> existing capture-admission/API/NativeCaptureManager/RecordingStore. `HeavyWorkloadArbiter` remains sole heavy-work scheduler and reservation owner. Audit the current `RecordingController.start()` shell bridge before relying on it: `menubar.py` invokes JavaScript, but this alone does not prove background-start delivery from every current WKWebView route.
-- Native app shell may own a **small, disposable detection/suggestion state machine**; it must never own a parallel recording state, recording catalog, job queue or audio capture path. Read the canonical active-recording/capture state before acting.
-- No remote event transfer; never record audio or meeting/tab/window titles for detection. Ordinary logs must not contain microphone samples, transcripts, local paths, meeting names, or raw process inventories; diagnostics limited to supported/unknown signal, outcome reason, elapsed times and bounded counters.
-- No forced focus to ClosedRoom on the golden path; permission/error recovery is the only reason to open the full app. Existing manual record, stop, notes, screenshots and browser-development behavior must remain valid.
-- Detection capability is **three-valued** (`supported`, `unsupported`, `unknown/error`), not fake `no meeting` on CoreAudio failures. Notifications absent/denied must leave menu-bar/manual control available.
+**Proposed internal contracts to freeze at MD-0** (not persisted/public API):
+- `ActivityObservation{bundle_id,pid?,monotonic_time,input_active,capability,reason}` — no media.
+- `MeetingCandidate{ephemeral_id,source_kind,label?,created_monotonic,expires_monotonic}` — rejoin-safe identity/epoch.
+- `SuggestionDecision{notify|suppress|close,reason,candidate_id?}` — includes opt-out, unsupported, ambiguous, previously dismissed, already active/pending, cooldown, denied notifications.
+- `NotificationAction{candidate_id,record|ignore|body_open}` — process once and revalidate epoch + active recording before starting.
+- `StartAcknowledgement{accepted|already_active|preparing|blocked|failed|cancelled|recording_ready}` — correlated to **existing** capture reservation/session, never inferred from fire-and-forget JavaScript.
 
-## User journey / states to implement
+Initial *experimental*, not contractual, tuning: ~1 Hz or reliable events; 3–5 s activation debounce, 20–30 s inactivity hysteresis, one suggestion per inferred session; bounded expiration and low idle polling. Measure real devices before selecting final values.
 
-`inactive/opt-out -> monitoring -> candidate -> eligible -> suggested -> {record_requested | dismissed | expired} -> {preparing -> recording | blocked/error | canceled} -> call_ended`
+## Dependency graph and parallel execution
 
-1. After opt-in, on a compatible system detect plausible input use by explicitly supported call apps; require a short stable signal (initial experiment: 3-5 s), no content capture.
-2. Before suggesting, check ClosedRoom not already recording or preparing, source call not already dismissed, and notification permission; keep title generic: "**Possible meeting in progress**". Show app label only if reliably identified.
-3. Notification category actions: **Record** and **Not now**. Body tap opens contextual ClosedRoom (never records). Dismiss/timeout do not trigger recording. Notification can be removed/invalidated when call ends; old callbacks revalidate current epoch/recording state.
-4. On Record, atomically accept one intent for the current candidate; provide `Preparing recording` with explicit cancel while reservation/permissions/capture are pending; keep the current conferencing app in focus.
-5. On actual native `ready`: project `recording` state; show native compact overlay with audio health, Note, Screenshot, Stop. Never show red REC or advance timer while only preparing.
-6. On blocked permission/storage/device: show clear actionable recovery and open ClosedRoom at relevant existing settings/New Meeting recovery; do **not** start only-mic capture silently if the user requested `both`. On start failure: visible recoverable error with Retry/Open ClosedRoom.
-7. If user ignores/dismisses/stops recording during the same call, do not prompt again until observed session has genuinely ended. Brief mute, app switching, disconnect/reconnect and browser helper changes must not create notification storms. Do not auto-stop on loss of detection signal.
+```
+MD-0  Boundary/feasibility decision   [serial]
+  ├── MD-1  Native CoreAudio + policy  [Lane A]
+  ├── MD-2  Actionable notification    [Lane B]   FOUR PARALLEL LANES
+  ├── MD-3  Canonical recording start  [Lane C]
+  └── MD-4  Opt-in + settings UI       [Lane D]
+               ↓ merge early into refreshed dev, independent owners
+MD-5  Shell/menu bar/overlay integration [single integration owner]
+               ↓
+MD-6  E2E, physical Mac, UX docs, rollout
+```
 
-### Suggested contract (freeze in MD-0)
+**MD-0 — READY (blocking contract gate).** Inspect `dev`, root/scoped guides, directly impacted consumers/tests and current PRs; in particular open PR #105 (macOS 26 menu bar and Settings) and `architectural-consolidation` AC-1 edits to `useRecorder`. Validate CoreAudio `kAudioHardwarePropertyProcessObjectList`/`kAudioProcessPropertyIsRunningInput` compatibility on candidate macOS and app IDs, per-process access constraints, and actionable UNUserNotificationCenter delivery in packaged app (feasibility probe, not product claims). Choose minimal reliable **shared** start owner/ack from any WKWebView route with hidden window. Freeze input/action/start interface, supported-app matrix and no-focus contract; if any assumption fails, explicitly narrow scope before W1.
 
-Observation (internal, volatile only): `{ source_bundle_id, process_id?, observed_at_monotonic, input_active, capability, evidence_kind }`; no audio data.
+**W1 parallel lanes** (separate short-lived worktrees from refreshed `dev`; no shared-file simultaneous edits; experimental paths remain unused/disabled until integration):
 
-Candidate: `{ ephemeral_session_id, source_kind, app_display_label?, created_at_monotonic, expires_at_monotonic, confidence_reason }`. Identity must withstand PID changes/rejoin hysteresis; never infer private meeting title.
-
-Policy result: `{ decision: notify|suppress|close, reason, candidate_id? }`; suppression reasons include opt-out, unsupported app, ambiguous browser activity, active/pending ClosedRoom recording, prior dismissal, stale candidate, notification denied, cooldown.
-
-Notification action: `{ candidate_id, action: record|ignore|body_open }`, processed once; **revalidate** candidate epoch and canonical active recording before any start. Ignore and duplicate actions are idempotent.
-
-Start result: `accepted / already_active / preparing / blocked / failed / canceled / recording_ready`, correlated by existing canonical reservation/session ID; never use a fire-and-forget JS command as evidence of success. Acknowledgement must survive hidden/route-switched WKWebView or use the proper backend application owner; choose the smallest reliable shared approach at MD-0, not a second lifecycle.
-
-Initial tunables for measurement, not asserted product SLOs: sample/observe at ~1 Hz or event-driven where reliable; 3-5 s activation debounce; 20-30 s inactive hysteresis; one prompt per inferred session; bounded expiration/cooldown and no busy-loop while idle. Tune from local observations, do not hard-code arbitrary confidence claims.
-
-## Execution graph: independent parallel work with early convergence
-
-**W0: one short serial decision gate** — MD-0 (READY). Freeze interfaces, baseline acceptance, test fixture schema and minimum supported macOS/call-app list. Check any open UI/menu-bar PR, particularly #105, and concurrent `architectural-consolidation` AC-1 `useRecorder` edits. Recheck latest `dev`. Do not spawn divergent start coordinators.
-
-**W1: four independent lanes started in parallel after MD-0:**
-- **Lane A / MD-1:** CoreAudio detector + pure suggestion policy; writes only new `src/local_asr_server/meeting_detection*.py` modules and their new unit tests (or one narrowly-scoped native bridge if MD-0 demonstrates PyObjC/ctypes inadequate); **no** `menubar.py`, `settings.py` or existing recorder edits.
-- **Lane B / MD-2:** macOS actionable notification adapter; writes only new `src/local_asr_server/macos_meeting_notifications.py` (or chosen single adapter) and tests; **no** shell integration. Stub/mock native framework boundary; no extra process/service.
-- **Lane C / MD-3:** shared start-path hardening, acknowledgement, cancellation and route-independent invocation; exclusive owner of `frontend/src/hooks/useRecorder.ts`, related recording controller/bridge and directly impacted API/service paths/tests. Do not touch `menubar.py`, Settings or policy. Coordinate with AC-1 before edits.
-- **Lane D / MD-4:** local opt-in settings, Settings UI and copy/accessibility; exclusive owner of `src/local_asr_server/settings.py`, `frontend/src/pages/SettingsPage.tsx`, related settings router/schema/i18n and tests. Do not touch `menubar.py`, `window.py` or recorder hook.
-
-Use four short-lived task branches/worktrees from refreshed `dev` (`feat/meeting-detection-core`, `feat/meeting-detection-notifications`, `feat/meeting-detection-start`, `feat/meeting-detection-preferences`). Each lane produces a focused green owner-local change behind **disabled-by-default** behavior; merge/rebase early onto `dev`, never let independently developed shared API contracts drift. No stacked long-lived PR chain.
-
-**W2: one integration owner** — MD-5 (BLOCKED on MD-1..4). Wire detector/policy/notification/opt-in/start to `menubar.py` and, only as necessary, `window.py`, app boot/shutdown and packaged identity. Add context-sensitive menu-bar affordance; no duplicate monitoring thread on restarts, no unnecessary foreground activation, and proper delegate lifecycle. This lane alone updates `menubar.py` and `window.py`; rebase around PR #105 if it lands. Add fallback to menu-bar entry if notifications unavailable.
-
-**W3: integrated evidence and rollout** — MD-6 (BLOCKED on MD-5). Add end-to-end journeys and representative Mac matrix, update `design/ux-contract.json`, `docs/features.md`, `docs/current-state.md` and any affected architecture/packaging docs; run repository-selected gates. Do not promote to stable `main` until required RELEASE/FULL and REAL_ENVIRONMENT obligations are satisfied.
-
-## Work items with observable acceptance
-
-| ID | Status | Deliverable / acceptance | Gate / depends |
+| ID / lane | State | Exclusive write boundary | Observable deliverable / test |
 | --- | --- | --- | --- |
-| MD-0 | READY | Decision note: supported min OS and app IDs, consent/notification copy, exact source of recording-start authority, foreground/focus contract; prototype process-input property and notification callbacks on packaged candidate where feasible. If stable per-process identification fails, NARROW_SCOPE to clearly supported apps or choose alternative menu-bar-only suggestion; never market generic browser activity as meeting detection. | First; source inspection + feasibility evidence |
-| MD-1 | BLOCKED | Detector exposes stable/unknown/inactive observation and pure policy with one-prompt-per-session, mute/rejoin hysteresis, supported-app filtering, deduplication, expiry, shutdown cleanup. All records volatile; unit tests cover false positives and unsupported macOS. | MD-0; SCOPED local tests, native packaging at integration |
-| MD-2 | BLOCKED | Opt-in-authorized UNUserNotificationCenter registration, category/actions, delegate lifecycle, background handling, genuine dismiss/body click, no leaking titles, idempotent stale callback rejection, disabled-notifications fallback signal. | MD-0; mocked contract + target-Mac delivery evidence |
-| MD-3 | BLOCKED | Notification-triggered Start shares manual start's reservation/permission/native-ready/stop behavior and cannot silently no-op when hidden or on another WKWebView route. One in-flight request, confirmed ACK, cancel, clean failure and no timer before native ready. Browser dev/manual path unchanged. | MD-0; STRONG lifecycle/API tests; AC-1 collision check |
-| MD-4 | BLOCKED | `meeting_detection_enabled=false` default; explain privacy, supported apps, notification authorization and start-at-login relation; opt-in/out persists; no prompt before opt-in; accessible UI/status/diagnostic; no initial modal. | MD-0; settings API/UI and no-permission tests |
-| MD-5 | BLOCKED | Native integration emits timely generic suggestion, no focus stealing, conditional menu item, click-to-start and mini preparation/recovery feedback, overlay only on ready; shutdown tears down monitor/delegate and pending prompts. | MD-1..4; integration tests, packaged smoke |
-| MD-6 | BLOCKED | Full golden path and refusal/recovery E2E, measured idle footprint, privacy/log checks, docs and explicit target-Mac evidence matrix; outcome metrics reported as observed, not assumed. | MD-5; INTEGRATION/STRONG selected gates + affected FULL_MEDIA |
+| MD-1 / A | BLOCKED on MD-0 | New `src/local_asr_server/meeting_detection*.py` and new focused tests; isolated CoreAudio bridge only if feasibility requires it | Input activity/capability + pure deduplicating suggestion policy; start/end hysteresis, unsupported app, false positive, PID change, concurrent sources, session expiration, thread cleanup. Never write `menubar.py`/settings/recorder. |
+| MD-2 / B | BLOCKED on MD-0 | New `macos_meeting_notifications.py` adapter and tests | UNUserNotificationCenter categories, Record/Not now/body/dismiss semantics, action IDs, callback completion, stale/duplicate handling, opt-in permission, no personal text; mockable native boundary. No `menubar.py` edits. |
+| MD-3 / C | BLOCKED on MD-0 | `frontend/src/hooks/useRecorder.ts`, directly consumed recording controller/bridge or service/API contract, focused tests | Exactly one start owner shared by manual/menu-bar/notification, acknowledged despite hidden or non-recording route, atomic reservation, wait-for-AI cancel, correct error/ready, no duplicate session; browser/manual flow unchanged. Coordinate exclusive `useRecorder` ownership with AC-1. |
+| MD-4 / D | BLOCKED on MD-0 | `settings.py`, Settings router/schema, `frontend/src/pages/SettingsPage.tsx`, related i18n/UI tests | `meeting_detection_enabled=false` default; user-readable privacy/capability and opt-in UI, clear status and diagnostics; permission request only after opt-in, opt-out persists; no modal/onboarding blocking recording. No `menubar.py` edits. |
 
-## Test/evidence matrix
+W1 branches: `feat/meeting-detection-core`, `feat/meeting-detection-notifications`, `feat/meeting-detection-start`, `feat/meeting-detection-preferences`. Validate owner-local work independently; publish short focused PRs to `dev` behind off-by-default behavior and converge early instead of building a long stacked PR tree. Resolve current base/PR #105 movement and API mismatches before each merge.
 
-Deterministic unit/contract:
-- supported/unsupported/unidentifiable process, denied permission/notification, timer rollover, rapid mute/unmute, helper-PID replacement, simultaneous apps, user ignored, rejoin, stale notification and duplicate-click race;
-- `Record` with window hidden / other route / already recording / already preparing / active AI / killed-restarted app; no duplicate `RecordingStore` session or reservation; cancellation releases owned state;
-- permission withheld, native capture failure, unavailable audio device, storage not configured, browser fallback, handoff to overlay and Stop -> saved Meeting with notes/screenshots still functional;
-- content-free local logs, no network calls by detector, throttled observation, bounded shutdown, accessible status and notifications disabled.
+**MD-5 — BLOCKED on MD-1..4; single integration owner.** Wire only this lane into `menubar.py` and `window.py` (and necessary app lifecycle/packaging), start/stop detector, keep delegate retained and Cocoa calls on main thread, ensure one monitor per process and bounded shutdown, expose contextual menu-bar action, actionable-notification start and fallback when notifications denied, foreground preservation, truthful preparing/ready/recovery and native overlay after real capture. Coordinate PR #105 changes; no competing edits to these files.
 
-Affected source owners include `test/test_recording_api.py`, `test/test_native_capture.py`, existing frontend recording tests, `test/test_macos_hotkeys.py`, and new dedicated meeting detection/notification/start tests; prefer behavior assertions over grep-only guards.
+**MD-6 — BLOCKED on MD-5.** Add affected FULL_MEDIA browser journey (synthetic detector/notification fixtures), focused integration tests and physical Mac matrix; update `design/ux-contract.json`, `docs/features.md`, `docs/current-state.md`, architecture docs only if ownership changed. Decide whether native-app v0 is useful enough to enable as an opt-in setting; no promises for browser Meet without evidence.
 
-Browser FULL_MEDIA (new `meeting-detection-start` journey or extension of `record-meeting`): simulate detector/notification decisions with deterministic fixtures; ensure pending -> ready -> overlay -> stop; errors, cleanup, keyboard/focus, opt-in. Do **not** label this as proof of native notification or CoreAudio behavior.
+## Acceptance and validation checklist
 
-Representative macOS REAL_ENVIRONMENT: packaged app icon/notification permission, source-app microphone toggles in Teams/Zoom and browser false-positive checks; notification action delivered while app hidden, in another Space, and after the call ended; microphone+computer audio persisted and elapsed timer true; menu-bar visibility on macOS 26 settings; CPU/RSS/wakeups idle-vs-enabled, TCC identity and shutdown. Record observations by OS/app version and exact artifact/source revision, no call content. Genuine user confirmation of perceived annoyance/VoiceOver remains human usability evidence.
+**Deterministic:** stable/ambiguous/unsupported observation, activate/mute/rejoin/end, duplicate/noisy process events, opt-out, denied notifications, old callback, two rapid Record taps, existing pending/active ClosedRoom recording, hidden/route-switched WKWebView, AI-busy reservation, capture-ready timing, cancel/failed permissions/missing storage/missing source, stop -> persisted Meeting, notes/screenshot unchanged, restart/shutdown resource cleanup, no sensitive or remote telemetry, keyboard/focus/VoiceOver structure. Extend `test/test_recording_api.py`, `test/test_native_capture.py`, existing frontend recording/overlay tests and `test/test_macos_hotkeys.py` as actually affected; add behavior tests, not just source-string assertions.
 
-Validation: PRODUCT_FEATURE / DELIVERY=ITERATION per lane then INTEGRATION to `dev`, RELEASE only at `dev -> main`; VALIDATION=SCOPED for isolated pure policy/UI slices, STRONG for lifecycle/native/notification integration (escalate via selector; packaging selector may require FULL); EXECUTION=AGENT_LOCAL when tools exist, REMOTE_AUTOMATED only for missing deterministic Mac/build/browser gates, REAL_ENVIRONMENT for physical app/TCC/notification observations. Use `python3 scripts/select_validation_profile.py --base <base> --head <head> --stage integration` and selected gates. Do not launch four redundant remote full pipelines during experimentation; reuse valid exact-head/tree-equivalent evidence where allowed. UI integration requires affected FULL_MEDIA; release requires FULL and applicable target-Mac proof.
+**Browser FULL_MEDIA:** opted-out -> opt-in -> simulated suggestion -> Record -> preparing -> native-ready fixture -> overlay -> Stop, plus ignore, blocked permission, stale/duplicate action and existing manual flow. Mocked fixtures **do not** prove macOS notification/CoreAudio delivery.
 
-## Completion, rollout and resume
+**REAL_ENVIRONMENT on exact packaged Mac artifact:** Teams/Zoom call+mic tests on explicitly supported OS/app versions; browser/helper identity and false positives; notifications when app background/hidden/fullscreen/another Space; Record and Not now, stale action after call end, native TCC mic+system WAV persisted, truthful timers and overlay, notification denied and menu-bar recovery (incl macOS 26 allowance), idle CPU/RSS/wakeups and shutdown. Record source/OS/build identity and aggregate observations only; subjective interruption/VoiceOver needs human evaluation.
 
-- First mergeable user outcome (v0): reliable call proposal on explicitly supported native app(s), confirmation from a macOS notification or menu bar, background start with true READY/REC transition, opt-in and anti-spam, preserved manual flows. Chrome/Google Meet detection is **not** promised until grounded browser-specific evidence exists.
-- On readiness evidence, choose `BUILD`, `NARROW_SCOPE`, `CHOOSE_ALTERNATIVE` or `DO_NOT_BUILD` transparently; product success requires measurement, not merely SHIPPED code.
-- Upon MD-6 integration, move stable behavior and release evidence obligations into canonical feature/UX/current-state owners. Delete this plan per repository policy only after knowledge is transferred.
-- **Resume checkpoint (planning):** source reference `dev@53662a1744632abf37d127cf253c1d70a667585d` (not execution proof); MD-0..6 unimplemented; PR #105 currently open touching menu bar + Settings; AC-1 may edit `useRecorder`; no CoreAudio or notification REAL_ENVIRONMENT evidence yet. Next action: refresh `dev`, inspect PR #105 / AC-1 current status, execute MD-0 feasibility + shared-start-contract decision, then start W1 lanes independently.
+**Axes:** PRODUCT_FEATURE. DELIVERY=ITERATION per lane -> INTEGRATION into `dev` -> RELEASE only `dev -> main`. VALIDATION=SCOPED for pure policy/settings, STRONG for native/recording/shared lifecycle/integration; selector can escalate to FULL for packaging or other risks, never downgrade. EXECUTION=AGENT_LOCAL for available deterministic gates, REMOTE_AUTOMATED for unavailable deterministic Mac/toolchain gates, REAL_ENVIRONMENT for actual app/TCC/notification tests. Run `python3 scripts/select_validation_profile.py --base <base> --head <head> --stage integration` plus selected gates and affected FULL_MEDIA; at release require FULL and applicable target-Mac proof. Avoid repeated redundant GitHub Actions: local lane checks first, reuse exact-head/tree-equivalent evidence when valid, one sufficient remote run after coherent integration when required.
+
+**Definition of done:** opt-in one-click recording from supported native call app, no silent recording or remote processing, duplicate-free prompts, reliable acknowledged start even when window hidden, true ready/REC transition, clean cancellation/recovery, manual/overlay regression gates green, docs aligned. Do not call target-Mac evidence complete on simulator/CI.
+
+**Resume checkpoint:** plan only; no feature code, no CoreAudio feasibility or macOS notification proof. Source baseline `dev@53662a1744632abf37d127cf253c1d70a667585d` is context, not passing gate evidence. On resume: refresh head/tree/base, inspect PR #105 and AC-1, complete MD-0 discriminating probes/contract, then unblock W1. After integration transfer durable truth to canonical docs and delete completed workstream per repository policy.
