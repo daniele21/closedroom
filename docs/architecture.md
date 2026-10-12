@@ -51,6 +51,8 @@ Il trust boundary ordinario coincide con il Mac dell'utente. Il server ascolta
 normalmente su `127.0.0.1`; Speechmatics e Gemini oltrepassano questo confine solo
 quando selezionati esplicitamente.
 
+L'adapter sperimentale Korgis Consumer SDK per **sola analisi testuale Nemotron** è dietro il port applicativo `runtime/local_ai.py` e richiede un opt-in esplicito. Il client SDK si collega al processo già gestito da ClosedRoom; non è un secondo owner di bootstrap, scheduling, residency o recovery. Il runtime `local-llm-server` pinned, l'audio Voxtral e la visual intelligence continuano ad avere i percorsi storici, finché compatibilità e packaging non saranno dimostrati. Vedi [contratto di anteprima](features/korgis-consumer-preview.md).
+
 ## 3. Vista a container
 
 | Container | Tecnologia | Responsabilità | Stato posseduto |

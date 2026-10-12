@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from local_asr_server.llm import DEFAULT_GEMINI_MODEL, LLMService
 from local_asr_server.env import get_env_var
 from local_asr_server.runtime.llm_sidecar import LocalLLMSidecarError
+from local_asr_server.runtime.local_ai import KorgisTextAdapter
 from local_asr_server.runtime.models import ANALYSIS_QUALITY_DEFAULTS, resolve_local_llm_model_path
 from local_asr_server.schemas import ANALYSIS_SETTING_OVERRIDE_FIELDS, AnalysisRequest
 from local_asr_server.recordings import RecordingError
@@ -67,6 +68,7 @@ class AnalysisService:
         local_llm_url = None
         local_llm_model = None
         temperature = self._resolve_temperature(settings)
+        local_ai = self._text_transport_for_provider(settings, provider_name)
 
         try:
             if local_phase:
@@ -89,7 +91,10 @@ class AnalysisService:
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
 
             effective_model = gemini_model if provider_name == "gemini" else local_llm_model
-            provider = LLMService.get_provider(provider_name, api_key, local_llm_url, local_llm_model, gemini_model)
+            provider = LLMService.get_provider(
+                provider_name, api_key, local_llm_url, local_llm_model, gemini_model,
+                **({"local_ai": local_ai} if local_ai is not None else {}),
+            )
 
             if provider_name == "voxtral_local" and body.recording_id and not structured_notes:
                 return self._analyze_audio(
@@ -103,6 +108,20 @@ class AnalysisService:
         finally:
             if local_phase:
                 self.services.runtime.release_llm_residency(overrides=settings)
+
+    @staticmethod
+    def _text_transport_for_provider(settings: dict[str, Any], provider_name: str) -> KorgisTextAdapter | None:
+        """Opt-in SDK attach mode; no new lifecycle owner or provider fallback."""
+        if provider_name not in {"nemotron_local", "voxtral_local"}:
+            return None
+        transport = settings.get("local_llm_client_transport") or "legacy"
+        if transport == "legacy":
+            return None
+        if transport != "korgis_sdk":
+            raise HTTPException(status_code=422, detail={"code": "unsupported_local_llm_client_transport"})
+        if provider_name != "nemotron_local":
+            raise HTTPException(status_code=422, detail={"code": "korgis_sdk_text_only"})
+        return KorgisTextAdapter()
 
     @staticmethod
     def request_setting_overrides(body: Any) -> dict[str, Any]:
