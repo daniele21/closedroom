@@ -407,7 +407,8 @@ def main() -> None:
             if args.recordings_dir:
                 os.environ["CLOSEDROOM_RECORDINGS_DIR"] = str(Path(args.recordings_dir).expanduser())
             uvicorn.run(
-                "local_asr_server.server:app",
+                "local_asr_server.server:create_app",
+                factory=True,
                 host=args.host,
                 port=port,
                 reload=True,

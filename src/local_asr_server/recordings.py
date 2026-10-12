@@ -1454,7 +1454,7 @@ class RecordingStore:
             metadata = self._ensure_tracks(metadata)
             if metadata["status"] in {"recorded", "transcribing", "completed", "failed"}:
                 return self.public_metadata(metadata), False
-            if metadata["status"] != "recording":
+            if metadata["status"] not in {"recording", "finalizing", "recoverable"}:
                 raise RecordingConflict(
                     f"Cannot stop recording in status {metadata['status']}"
                 )
@@ -1462,7 +1462,8 @@ class RecordingStore:
             # before the first chunk interval elapsed.
 
             metadata["status"] = "finalizing"
-            metadata["stopped_at"] = _utc_now()
+            metadata["stopped_at"] = metadata.get("stopped_at") or _utc_now()
+            metadata["error"] = None
             self._write_metadata(session_dir, metadata)
             self._upsert_catalog(metadata)
 
@@ -1490,6 +1491,7 @@ class RecordingStore:
 
             metadata["status"] = "recorded"
             metadata["capture_status"] = "stopped"
+            metadata["error"] = None
             self._sync_legacy_totals(metadata)
             self._write_timeline(session_dir, metadata)
             self._write_metadata(session_dir, metadata)
@@ -1516,10 +1518,20 @@ class RecordingStore:
                 part_path = self._track_part_path(session_dir, track)
                 audio_path = self._track_audio_path(session_dir, track)
                 if part_path.exists():
-                    part_path.replace(audio_path)
+                    part_size = part_path.stat().st_size
+                    if part_size > 0 or not audio_path.exists():
+                        part_path.replace(audio_path)
+                    else:
+                        part_path.unlink()
                 elif not audio_path.exists():
                     audio_path.touch()
                 track["audio_file"] = self._relative_track_audio_file(metadata, track)
+                try:
+                    track["bytes_written"] = audio_path.stat().st_size
+                    if track["bytes_written"] > 0 and track.get("chunk_count", 0) == 0:
+                        track["chunk_count"] = 1
+                except OSError:
+                    pass
             self._sync_legacy_totals(metadata)
             self._write_metadata(session_dir, metadata)
             self._upsert_catalog(metadata)

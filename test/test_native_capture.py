@@ -263,6 +263,39 @@ else:
         self.assertFalse(thread.is_alive())
         self.assertEqual(result["status"], "stopped")
 
+    def test_concurrent_stop_returns_same_result_safely(self) -> None:
+        manager = NativeCaptureManager(helper_path=self.helper)
+        manager.start("rec-concurrent-stop", self.root, "both")
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            session = manager.get_session("rec-concurrent-stop")
+            if session and session.ready_event:
+                break
+            time.sleep(0.005)
+
+        results = [None, None]
+
+        def stop_1():
+            results[0] = manager.stop("rec-concurrent-stop")
+
+        def stop_2():
+            results[1] = manager.stop("rec-concurrent-stop")
+
+        t1 = threading.Thread(target=stop_1)
+        t2 = threading.Thread(target=stop_2)
+        t1.start()
+        t2.start()
+        t1.join(timeout=3.0)
+        t2.join(timeout=3.0)
+
+        self.assertFalse(t1.is_alive())
+        self.assertFalse(t2.is_alive())
+        self.assertIsNotNone(results[0])
+        self.assertIsNotNone(results[1])
+        # Both must succeed and report stopped
+        self.assertEqual(results[0]["status"], "stopped")
+        self.assertEqual(results[1]["status"], "stopped")
+
     def test_validate_audio_file_behavior(self) -> None:
         from local_asr_server.native_capture import validate_audio_file
         

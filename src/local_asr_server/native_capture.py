@@ -78,6 +78,8 @@ class CaptureSession:
     screenshot_worker_displays: list[dict[str, Any]] = field(default_factory=list)
     screenshot_worker_pid: int | None = None
     screenshot_worker_restarts: int = 0
+    terminating_lock: threading.Lock = field(default_factory=threading.Lock)
+    termination_result: dict[str, Any] | None = None
     screenshot_worker_lock: threading.Lock = field(default_factory=threading.Lock)
     screenshot_command_lock: threading.Lock = field(default_factory=threading.Lock)
     screenshot_pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
@@ -978,184 +980,189 @@ class NativeCaptureManager:
         if session is None:
             return {"recording_id": recording_id, "backend": "native", "status": "not_active"}
 
-        with session.screenshot_condition:
-            session.accept_screenshots = False
-            deadline = time.monotonic() + 10.0
-            while session.screenshot_inflight > 0:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
+        with session.terminating_lock:
+            if session.termination_result is not None:
+                return session.termination_result
+
+            with session.screenshot_condition:
+                session.accept_screenshots = False
+                deadline = time.monotonic() + 10.0
+                while session.screenshot_inflight > 0:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    session.screenshot_condition.wait(timeout=remaining)
+
+            self._stop_screenshot_worker(session, graceful=True)
+
+            was_killed = False
+            if session.process.poll() is None:
+                session.process.terminate()
+                try:
+                    session.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    session.process.kill()
+                    was_killed = True
+                    
+            events = []
+            if session.reader_thread:
+                session.reader_thread.join(timeout=2)
+                if session.reader_thread.is_alive():
+                    events.append({
+                        "type": "warning",
+                        "source": "backend",
+                        "message": "Native helper stdout reader did not finish before post-processing."
+                    })
+            while True:
+                try:
+                    events.append(session.events.get_nowait())
+                except queue.Empty:
                     break
-                session.screenshot_condition.wait(timeout=remaining)
-
-        self._stop_screenshot_worker(session, graceful=True)
-
-        was_killed = False
-        if session.process.poll() is None:
-            session.process.terminate()
-            try:
-                session.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                session.process.kill()
-                was_killed = True
-                
-        events = []
-        if session.reader_thread:
-            session.reader_thread.join(timeout=2)
-            if session.reader_thread.is_alive():
+                    
+            if was_killed:
                 events.append({
-                    "type": "warning",
+                    "type": "error",
                     "source": "backend",
-                    "message": "Native helper stdout reader did not finish before post-processing."
+                    "message": "Native helper did not stop cleanly and was killed. Audio files may be incomplete or corrupted."
                 })
-        while True:
-            try:
-                events.append(session.events.get_nowait())
-            except queue.Empty:
-                break
                 
-        if was_killed:
-            events.append({
-                "type": "error",
-                "source": "backend",
-                "message": "Native helper did not stop cleanly and was killed. Audio files may be incomplete or corrupted."
-            })
-            
-        # Post-process mixing and validation
-        if not cancel and not was_killed:
-            output_dir = session.output_dir
-            mode = session.mode
-            mic_path = output_dir / "mic.wav"
-            system_path = output_dir / "system.wav"
-            recording_path = output_dir / "recording.wav"
-            
-            # Post-processing mixing
-            if mode == "both":
-                mic_exists = mic_path.exists() and mic_path.stat().st_size > 0
-                system_exists = system_path.exists() and system_path.stat().st_size > 0
+            # Post-process mixing and validation
+            if not cancel and not was_killed:
+                output_dir = session.output_dir
+                mode = session.mode
+                mic_path = output_dir / "mic.wav"
+                system_path = output_dir / "system.wav"
+                recording_path = output_dir / "recording.wav"
                 
-                if mic_exists and system_exists:
-                    try:
-                        # Get durations to calculate dynamic timeout
-                        mic_duration = 0.0
-                        system_duration = 0.0
-                        
-                        mic_report = validate_audio_file(mic_path)
-                        if mic_report["valid"]:
-                            mic_duration = mic_report["duration"]
-                        
-                        system_report = validate_audio_file(system_path)
-                        if system_report["valid"]:
-                            system_duration = system_report["duration"]
+                # Post-processing mixing
+                if mode == "both":
+                    mic_exists = mic_path.exists() and mic_path.stat().st_size > 0
+                    system_exists = system_path.exists() and system_path.stat().st_size > 0
+                    
+                    if mic_exists and system_exists:
+                        try:
+                            # Get durations to calculate dynamic timeout
+                            mic_duration = 0.0
+                            system_duration = 0.0
                             
-                        max_duration = max(mic_duration, system_duration)
-                        ffmpeg_timeout = max(120.0, min(3600.0, max_duration * 0.5))
+                            mic_report = validate_audio_file(mic_path)
+                            if mic_report["valid"]:
+                                mic_duration = mic_report["duration"]
+                            
+                            system_report = validate_audio_file(system_path)
+                            if system_report["valid"]:
+                                system_duration = system_report["duration"]
+                                
+                            max_duration = max(mic_duration, system_duration)
+                            ffmpeg_timeout = max(120.0, min(3600.0, max_duration * 0.5))
+                            
+                            ffmpeg_path = get_ffmpeg_path()
+                            cmd = [
+                                ffmpeg_path,
+                                "-y",
+                                "-i", str(mic_path),
+                                "-i", str(system_path),
+                                "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0",
+                                "-ar", "16000",
+                                "-ac", "1",
+                                str(recording_path)
+                            ]
+                            subprocess.run(cmd, capture_output=True, text=True, timeout=ffmpeg_timeout, check=True)
+                        except Exception as e:
+                            error_msg = f"Failed to mix audio tracks with ffmpeg: {e}"
+                            events.append({"type": "error", "source": "backend", "message": error_msg})
+                    elif mic_exists:
+                        try:
+                            shutil.copy2(mic_path, recording_path)
+                        except Exception as e:
+                            events.append({"type": "error", "source": "backend", "message": f"Failed to copy mic.wav to recording.wav: {e}"})
+                    elif system_exists:
+                        try:
+                            shutil.copy2(system_path, recording_path)
+                        except Exception as e:
+                            events.append({"type": "error", "source": "backend", "message": f"Failed to copy system.wav to recording.wav: {e}"})
+                    else:
+                        events.append({"type": "warning", "message": "Neither mic.wav nor system.wav contains valid audio data."})
+                
+                # Build and save timeline.json
+                timeline_data = {
+                    "recording_ready_at": None,
+                    "recording_ready_uptime": None,
+                    "tracks": {}
+                }
+                
+                if session.ready_event:
+                    timeline_data["recording_ready_at"] = session.ready_event.get("recording_ready_at")
+                    timeline_data["recording_ready_uptime"] = session.ready_event.get("recording_ready_uptime")
+                    
+                for src in ["mic", "system"]:
+                    track_info = {}
+                    
+                    # Track observed time
+                    if src in session.track_ready:
+                        evt = session.track_ready[src]
+                        track_info["first_observed_wall_time"] = evt.get("observed_wall_time")
+                        track_info["first_observed_uptime"] = evt.get("observed_uptime")
+                        track_info["first_observed_pts"] = evt.get("pts")
                         
-                        ffmpeg_path = get_ffmpeg_path()
-                        cmd = [
-                            ffmpeg_path,
-                            "-y",
-                            "-i", str(mic_path),
-                            "-i", str(system_path),
-                            "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0",
-                            "-ar", "16000",
-                            "-ac", "1",
-                            str(recording_path)
-                        ]
-                        subprocess.run(cmd, capture_output=True, text=True, timeout=ffmpeg_timeout, check=True)
-                    except Exception as e:
-                        error_msg = f"Failed to mix audio tracks with ffmpeg: {e}"
-                        events.append({"type": "error", "source": "backend", "message": error_msg})
-                elif mic_exists:
-                    try:
-                        shutil.copy2(mic_path, recording_path)
-                    except Exception as e:
-                        events.append({"type": "error", "source": "backend", "message": f"Failed to copy mic.wav to recording.wav: {e}"})
-                elif system_exists:
-                    try:
-                        shutil.copy2(system_path, recording_path)
-                    except Exception as e:
-                        events.append({"type": "error", "source": "backend", "message": f"Failed to copy system.wav to recording.wav: {e}"})
+                    # Track written time
+                    if src in session.track_written:
+                        evt = session.track_written[src]
+                        track_info["first_written_wall_time"] = evt.get("written_wall_time")
+                        track_info["first_written_uptime"] = evt.get("written_uptime")
+                        track_info["first_written_pts"] = evt.get("pts")
+                        
+                    if track_info:
+                        # Compute offset using uptime
+                        ready_uptime = timeline_data.get("recording_ready_uptime")
+                        written_uptime = track_info.get("first_written_uptime")
+                        if ready_uptime is not None and written_uptime is not None:
+                            offset_ms = int((written_uptime - ready_uptime) * 1000)
+                            track_info["offset_ms"] = offset_ms
+                        timeline_data["tracks"][src] = track_info
+                
+                timeline_path = output_dir / "timeline.json"
+                try:
+                    with open(timeline_path, "w", encoding="utf-8") as f:
+                        json.dump(timeline_data, f, indent=2)
+                except Exception as e:
+                    events.append({"type": "warning", "message": f"Failed to write timeline.json: {e}"})
+
+                # Run ffprobe validation
+                paths_to_validate = {}
+                if mode == "both":
+                    paths_to_validate = {"mic": mic_path, "system": system_path, "mixed": recording_path}
+                elif mode == "mic_only":
+                    paths_to_validate = {"mic": mic_path}
                 else:
-                    events.append({"type": "warning", "message": "Neither mic.wav nor system.wav contains valid audio data."})
-            
-            # Build and save timeline.json
-            timeline_data = {
-                "recording_ready_at": None,
-                "recording_ready_uptime": None,
-                "tracks": {}
+                    paths_to_validate = {"system": system_path}
+                    
+                for source, path in paths_to_validate.items():
+                    report = validate_audio_file(path)
+                    if not report["valid"]:
+                        events.append({
+                            "type": "warning",
+                            "message": f"Validation failed for track {source}: {report.get('error')} ({report.get('details', '')})"
+                        })
+                    elif report.get("duration", 0.0) < 1.0:
+                        events.append({
+                            "type": "warning",
+                            "message": f"Track {source} is extremely short (duration: {report['duration']}s)"
+                        })
+
+            result = {
+                "recording_id": recording_id,
+                "backend": "native",
+                "status": "cancelled" if cancel else ("interrupted" if was_killed else "stopped"),
+                "events": events,
+                "event_buffer": {
+                    "queue": session.events.stats(),
+                    "history": session.event_log.stats(),
+                    "retained_warnings": len(session.warnings),
+                    "warning_capacity": session.warnings.maxlen,
+                },
             }
-            
-            if session.ready_event:
-                timeline_data["recording_ready_at"] = session.ready_event.get("recording_ready_at")
-                timeline_data["recording_ready_uptime"] = session.ready_event.get("recording_ready_uptime")
-                
-            for src in ["mic", "system"]:
-                track_info = {}
-                
-                # Track observed time
-                if src in session.track_ready:
-                    evt = session.track_ready[src]
-                    track_info["first_observed_wall_time"] = evt.get("observed_wall_time")
-                    track_info["first_observed_uptime"] = evt.get("observed_uptime")
-                    track_info["first_observed_pts"] = evt.get("pts")
-                    
-                # Track written time
-                if src in session.track_written:
-                    evt = session.track_written[src]
-                    track_info["first_written_wall_time"] = evt.get("written_wall_time")
-                    track_info["first_written_uptime"] = evt.get("written_uptime")
-                    track_info["first_written_pts"] = evt.get("pts")
-                    
-                if track_info:
-                    # Compute offset using uptime
-                    ready_uptime = timeline_data.get("recording_ready_uptime")
-                    written_uptime = track_info.get("first_written_uptime")
-                    if ready_uptime is not None and written_uptime is not None:
-                        offset_ms = int((written_uptime - ready_uptime) * 1000)
-                        track_info["offset_ms"] = offset_ms
-                    timeline_data["tracks"][src] = track_info
-            
-            timeline_path = output_dir / "timeline.json"
-            try:
-                with open(timeline_path, "w", encoding="utf-8") as f:
-                    json.dump(timeline_data, f, indent=2)
-            except Exception as e:
-                events.append({"type": "warning", "message": f"Failed to write timeline.json: {e}"})
-
-            # Run ffprobe validation
-            paths_to_validate = {}
-            if mode == "both":
-                paths_to_validate = {"mic": mic_path, "system": system_path, "mixed": recording_path}
-            elif mode == "mic_only":
-                paths_to_validate = {"mic": mic_path}
-            else:
-                paths_to_validate = {"system": system_path}
-                
-            for source, path in paths_to_validate.items():
-                report = validate_audio_file(path)
-                if not report["valid"]:
-                    events.append({
-                        "type": "warning",
-                        "message": f"Validation failed for track {source}: {report.get('error')} ({report.get('details', '')})"
-                    })
-                elif report.get("duration", 0.0) < 1.0:
-                    events.append({
-                        "type": "warning",
-                        "message": f"Track {source} is extremely short (duration: {report['duration']}s)"
-                    })
-
-        with self._lock:
-            self._sessions.pop(recording_id, None)
-            
-        return {
-            "recording_id": recording_id,
-            "backend": "native",
-            "status": "cancelled" if cancel else ("interrupted" if was_killed else "stopped"),
-            "events": events,
-            "event_buffer": {
-                "queue": session.events.stats(),
-                "history": session.event_log.stats(),
-                "retained_warnings": len(session.warnings),
-                "warning_capacity": session.warnings.maxlen,
-            },
-        }
+            session.termination_result = result
+            with self._lock:
+                self._sessions.pop(recording_id, None)
+            return result
