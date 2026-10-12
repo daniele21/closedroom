@@ -475,6 +475,20 @@ class ClosedRoomApp(rumps.App):
             logger.warning("Failed to open macOS menu bar settings: %s", exc)
             return {"opened": False, "error": "system_settings_unavailable"}
 
+    def open_notification_settings(self) -> dict:
+        """Open OS Notification preferences without changing authorization."""
+        try:
+            subprocess.Popen(
+                ["/usr/bin/open", "x-apple.systempreferences:com.apple.Notifications-Settings.extension"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return {"opened": True}
+        except OSError as exc:
+            logger.warning("Failed to open macOS notification settings: %s", exc)
+            return {"opened": False, "error": "system_settings_unavailable"}
+
     # ── Menu construction ──────────────────────────────────────────────────
 
     def _build_menu(self) -> None:
@@ -611,6 +625,7 @@ class ClosedRoomApp(rumps.App):
 
     def meeting_detection_status(self) -> dict:
         from local_asr_server.settings import load_settings
+        self._meeting_notifications.refresh_authorization()
         return {
             "enabled": load_settings().get("meeting_detection_enabled") is True,
             "capability": self._meeting_capability,
