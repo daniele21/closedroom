@@ -400,7 +400,9 @@ log "  Installing wheel and dependencies into build_venv..."
 # The packaged app exposes Speechmatics ASR and diarization from the UI, so the
 # cloud SDK must be bundled together with the native app dependencies.
 WHEEL_FILE=$(ls dist/wheels/local_asr_server-*.whl)
-uv pip install --python build_venv "${WHEEL_FILE}[app,speechmatics]" "pyinstaller>=6.0"
+# The opt-in Korgis consumer must be present in the frozen Python runtime,
+# despite legacy remaining the default transport. Git-SHA pin lives in pyproject.
+uv pip install --python build_venv "${WHEEL_FILE}[app,speechmatics,korgis-sdk]" "pyinstaller>=6.0"
 
 log "  Running PyInstaller from build_venv..."
 CLOSEDROOM_APP_NAME="$APP_NAME" \

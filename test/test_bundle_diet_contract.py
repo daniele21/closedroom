@@ -44,6 +44,9 @@ class BundleDietContractTests(unittest.TestCase):
         self.assertIn('collect_submodules("mlx_vlm.server")', spec)
         self.assertIn('collect_submodules("mlx_vlm.models.qwen3_vl")', spec)
         self.assertIn('collect_submodules("local_llm_server")', spec)
+        self.assertIn('"korgis_sdk"', spec)
+        build = (ROOT / "build.sh").read_text(encoding="utf-8")
+        self.assertIn('[app,speechmatics,korgis-sdk]', build)
         for excluded in ("cv2", "datasets", "pyarrow", "pandas", "multiprocess", "torch"):
             self.assertIn(f'"{excluded}"', spec)
 
@@ -52,6 +55,7 @@ class BundleDietContractTests(unittest.TestCase):
         self.assertIn('"bundle-runtime-smoke"', hook)
         self.assertIn('"bundle-runtime-smoke"', smoke)
         self.assertIn('"runtime_imports_ok"', smoke)
+        self.assertIn('"korgis_sdk"', (ROOT / "src/local_asr_server/bundled_module_dispatch.py").read_text(encoding="utf-8"))
 
     def test_frozen_runtime_smoke_exercises_image_only_surface(self) -> None:
         source = (ROOT / "src" / "local_asr_server" / "bundled_module_dispatch.py").read_text(

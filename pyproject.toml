@@ -48,6 +48,11 @@ app = [
 build = [
     "pyinstaller>=6.0",
 ]
+# Optional standalone role-bound SDK. Bundled macOS builds select all extras,
+# but normal source installations and default transport do not require it.
+korgis-sdk = [
+    "korgis-client @ git+https://github.com/daniele21/korgis.git@99681516a4955ce40e919971b0820a48d840c356#subdirectory=sdk/python",
+]
 # Backward-compatible extra for existing setup commands. The SDK is now a core
 # dependency because Speechmatics diarization is selectable in the main UI.
 speechmatics = []

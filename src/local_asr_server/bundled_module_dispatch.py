@@ -22,6 +22,7 @@ SUPPORTED_CLI_COMMANDS = {"inspect-meeting", "transcribe", "serve"}
 BUNDLE_RUNTIME_SMOKE_COMMAND = "bundle-runtime-smoke"
 BUNDLE_RUNTIME_IMPORTS = (
     "local_llm_server.cli",
+    "korgis_sdk",  # verify optional consumer survives PyInstaller packaging
     "mlx_vlm.server",
     "mlx_vlm.models.qwen3_vl",
     "mlx_whisper.transcribe",
