@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.10, <3.14"
 resolution-markers = [
     "python_full_version >= '3.11' and sys_platform == 'win32'",
@@ -786,6 +786,11 @@ wheels = [
 ]
 
 [[package]]
+name = "korgis-client"
+version = "0.1.0a1"
+source = { git = "https://github.com/daniele21/korgis.git?subdirectory=sdk%2Fpython&rev=99681516a4955ce40e919971b0820a48d840c356#99681516a4955ce40e919971b0820a48d840c356" }
+
+[[package]]
 name = "llama-cpp-python"
 version = "0.3.31"
 source = { registry = "https://pypi.org/simple" }
@@ -866,10 +871,14 @@ app = [
 build = [
     { name = "pyinstaller" },
 ]
+korgis-sdk = [
+    { name = "korgis-client" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "korgis-client", marker = "extra == 'korgis-sdk'", git = "https://github.com/daniele21/korgis.git?subdirectory=sdk%2Fpython&rev=99681516a4955ce40e919971b0820a48d840c356" },
     { name = "local-llm-server", extras = ["vision"], git = "https://github.com/daniele21/local-llm-server.git?rev=53500af8c1e1df1c92937b18928790fded8b437f" },
     { name = "mlx", marker = "sys_platform == 'darwin'", specifier = "==0.31.2" },
     { name = "mlx-audio", extras = ["stt"] },
@@ -885,7 +894,7 @@ requires-dist = [
     { name = "speechmatics-batch", specifier = ">=0.5.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]
-provides-extras = ["app", "build", "speechmatics"]
+provides-extras = ["app", "build", "korgis-sdk", "speechmatics"]
 
 [[package]]
 name = "local-llm-server"

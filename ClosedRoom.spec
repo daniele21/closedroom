@@ -179,6 +179,7 @@ hidden_imports = [
     "local_asr_server.runtime.llm_sidecar",
     "local_asr_server.runtime.models",
     "local_asr_server.runtime.service_manager",
+    "korgis_sdk",  # opt-in SDK is bundled; legacy analysis remains the default
     "local_asr_server.bundled_module_dispatch",
     "local_asr_server.services",
     "local_asr_server.services.analysis_service",

@@ -12,7 +12,11 @@ The canonical Korgis server/runtime remains the current pinned local-llm-server 
 
 ## Developer setup
 
-The SDK is **not bundled** or a default ClosedRoom runtime dependency yet. In an isolated development environment, install the consumer wheel from the exact currently integrated Korgis revision, without changing ClosedRoom's pinned inference server:
+The SDK is pinned as the **optional** `korgis-sdk` extra in `pyproject.toml` and `uv.lock`, without changing the separately pinned inference runtime. Normal source installations can omit this extra; the macOS artifact builder installs the wheel with `[app,speechmatics,korgis-sdk]` explicitly and PyInstaller collects the SDK. Development CI can use `uv sync --all-extras --frozen`. The default transport remains `legacy`. Install the optional extra into your development environment with:
+
+    uv sync --extra korgis-sdk --locked
+
+The exact dependency refers to Korgis commit `99681516a4955ce40e919971b0820a48d840c356`. For isolated wheel testing, the equivalent direct installation is:
 
     python -m pip install "korgis-client @ git+https://github.com/daniele21/korgis.git@99681516a4955ce40e919971b0820a48d840c356#subdirectory=sdk/python"
 
@@ -35,4 +39,6 @@ The regression fixtures exercise exact role/model keys, prompt/temperature prese
 
 A separate CI workflow, `.github/workflows/korgis-consumer-contract.yml`, checks out exact Korgis commit `99681516a4955ce40e919971b0820a48d840c356` and installs its **actual standalone SDK package**, then exercises the ClosedRoom adapter over an actual loopback TCP HTTP server. The server supplies deterministic fake text completion payloads, so this verifies exact role/model binding, HTTP compatibility, prompts, output parsing, failure-to-attach and no unintended process launching **without proving the pinned inference server, real weights, Metal or packaged binary**. It is a targeted supplement to the canonical preflight, not a replacement.
 
-Before making the SDK the default and including it in ClosedRoom.app, pin the SDK artifact in the lockfile, verify installed SDK↔server contract and actual model residency, confirm packaged import/native signed artifact, ensure admin/health identity and resource guards work across restarts, and run representative Apple Silicon real-environment capture/LLM contention, cleanup and privacy tests. Korgis SDK managed-session security is a separate owner and does not replace ClosedRoom's existing process supervisor.
+Packaged builds explicitly collect `korgis_sdk` and check its import through the frozen `bundle-runtime-smoke` command. This proves bundle inclusion/import, not authenticated runtime ownership or working LLM inference.
+
+Before making the SDK the default or claiming release readiness, verify end-to-end SDK↔**actual pinned inference runtime with real weights**, resident-model identity, per-request privacy and admin/health behavior over restarts, and representative Apple Silicon TCC/capture/LLM contention, resource/thermal and cleanup evidence. Source-built ad-hoc app proof is not a Developer-ID-signed and notarized distribution artifact. Korgis SDK managed-session security is a separate owner and does not replace ClosedRoom's existing process supervisor.
