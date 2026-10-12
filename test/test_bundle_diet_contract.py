@@ -45,6 +45,8 @@ class BundleDietContractTests(unittest.TestCase):
         self.assertIn('collect_submodules("mlx_vlm.models.qwen3_vl")', spec)
         self.assertIn('collect_submodules("local_llm_server")', spec)
         self.assertIn('"korgis_sdk"', spec)
+        build = (ROOT / "build.sh").read_text(encoding="utf-8")
+        self.assertIn('[app,speechmatics,korgis-sdk]', build)
         for excluded in ("cv2", "datasets", "pyarrow", "pandas", "multiprocess", "torch"):
             self.assertIn(f'"{excluded}"', spec)
 

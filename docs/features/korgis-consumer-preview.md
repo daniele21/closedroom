@@ -12,7 +12,7 @@ The canonical Korgis server/runtime remains the current pinned local-llm-server 
 
 ## Developer setup
 
-The SDK is pinned as the **optional** `korgis-sdk` extra in `pyproject.toml` and `uv.lock`, without changing the separately pinned inference runtime. Normal source installations can omit this extra; macOS source-built bundles use `uv sync --all-extras` and therefore include it. The default transport remains `legacy`. Install the optional extra into your development environment with:
+The SDK is pinned as the **optional** `korgis-sdk` extra in `pyproject.toml` and `uv.lock`, without changing the separately pinned inference runtime. Normal source installations can omit this extra; the macOS artifact builder installs the wheel with `[app,speechmatics,korgis-sdk]` explicitly and PyInstaller collects the SDK. Development CI can use `uv sync --all-extras --frozen`. The default transport remains `legacy`. Install the optional extra into your development environment with:
 
     uv sync --extra korgis-sdk --locked
 
