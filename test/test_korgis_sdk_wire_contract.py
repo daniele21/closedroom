@@ -37,7 +37,7 @@ class _LoopbackInferenceHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._send(200, {"ok": True})
+            self._send(200, {"ok": True, "server": "local-llm-server", "backend": "synthetic-fixture"})
         elif self.path == "/v1/models":
             self._send(200, {"object": "list", "data": [
                 {"id": "org/demo-model", "key": "demo-text", "object": "model"},

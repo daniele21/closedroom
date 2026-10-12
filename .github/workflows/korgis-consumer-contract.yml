@@ -6,6 +6,8 @@ on:
     paths:
       - ".github/workflows/korgis-consumer-contract.yml"
       - "test/test_korgis_sdk_wire_contract.py"
+      - "test/test_korgis_live_inference_probe.py"
+      - "scripts/probe_korgis_live_inference.py"
       - "src/local_asr_server/runtime/local_ai.py"
       - "src/local_asr_server/llm.py"
       - "src/local_asr_server/services/analysis_service.py"
@@ -15,6 +17,8 @@ on:
     paths:
       - ".github/workflows/korgis-consumer-contract.yml"
       - "test/test_korgis_sdk_wire_contract.py"
+      - "test/test_korgis_live_inference_probe.py"
+      - "scripts/probe_korgis_live_inference.py"
       - "src/local_asr_server/runtime/local_ai.py"
       - "src/local_asr_server/llm.py"
       - "src/local_asr_server/services/analysis_service.py"
@@ -57,3 +61,8 @@ jobs:
           PYTHONPATH: src
           CLOSEDROOM_REQUIRE_KORGIS_SDK: "1"
         run: python -m unittest discover -s test -p 'test_korgis_sdk_wire_contract.py' -v
+      - name: Probe SDK via ClosedRoom against synthetic local endpoint
+        env:
+          PYTHONPATH: src
+          CLOSEDROOM_REQUIRE_KORGIS_SDK: "1"
+        run: python -m unittest discover -s test -p 'test_korgis_live_inference_probe.py' -v
