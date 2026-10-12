@@ -69,7 +69,7 @@ class CoreAudioBundleIdentityTests(unittest.TestCase):
         releases = []
         def convert(ptr, buf, nbytes, encoding):
             data = name_by_ptr.get(ptr.value, b"")
-            ctypes.memmove(buf, data + b"\\x00", len(data) + 1)
+            ctypes.memmove(buf, data + b"\x00", len(data) + 1)
             return True
         cf = SimpleNamespace(CFStringGetCString=Mock(side_effect=convert),
                              CFRelease=Mock(side_effect=lambda ptr: releases.append(ptr.value)))
