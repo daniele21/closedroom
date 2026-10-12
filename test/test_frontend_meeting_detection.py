@@ -21,6 +21,14 @@ class MeetingDetectionFrontendContractTests(unittest.TestCase):
         suite = (ROOT / "scripts/browser_meeting_ui_e2e.mjs").read_text()
         self.assertIn("CLOSEDROOM_MEETING_DETECTION_E2E: '1'", suite)
 
+    def test_live_diagnostics_and_recovery_are_visible_in_settings(self):
+        page = (ROOT / "frontend/src/pages/SettingsPage.tsx").read_text()
+        self.assertIn("data-meeting-detection-diagnostics", page)
+        self.assertIn("active_apps", page)
+        self.assertIn("active_input_processes", page)
+        self.assertIn("handleMeetingNotificationPermission", page)
+        self.assertIn("handleOpenMenuBarSettings", page)
+
     def test_auto_route_is_distinct_from_opening_saved_recording(self):
         app = (ROOT / "frontend/src/App.tsx").read_text()
         self.assertIn("routeDetail?.startsWith('auto/')", app)

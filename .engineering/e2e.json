@@ -415,6 +415,7 @@
       "residual_gaps": [
         "Headless browser fixtures cover the one-time intent and recording UI but cannot prove CoreAudio microphone-app identification or actual UNUserNotificationCenter callback delivery",
         "Packaged WKWebView hidden-window focus, real native microphone/system audio and TCC prompts require representative Mac evidence",
+      "Installed macOS 26 Teams calls must verify CoreAudio process bundle attribution, actionable notification permission and delivery, and OS menu-bar Allow toggle; headless source/browser tests cannot establish these",
         "Notification annoyance, VoiceOver output and subjective usability require real human confirmation"
       ],
       "automation_gap_reason": ""

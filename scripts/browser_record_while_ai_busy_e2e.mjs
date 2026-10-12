@@ -32,6 +32,8 @@ const counts = {
   detail: 0,
   notificationClaims: 0,
   notificationFeedback: [],
+  menuBarSettingsOpened: 0,
+  notificationSettingsOpened: 0,
 };
 let frameIndex = 0;
 let aiBusy = true;
@@ -182,6 +184,27 @@ function fixtureServer(port) {
       });
       return;
     }
+    if (url.pathname === '/v1/system/menubar' && req.method === 'GET') {
+      return json(res, 200, {
+        available: true, visible: true, icon_loaded: true, state: 'idle',
+        icon_asset: 'design/assets/brand/closedroom-microphone-mark.png',
+        repair_count: 0, last_error: null,
+        meeting_detection: {
+          enabled: true, capability: 'supported', notifications: 'unknown',
+          notification_available: true, notification_error: null,
+          active_apps: ['Microsoft Teams'],
+          active_input_processes: 2, unattributed_input_processes: 1,
+        },
+      });
+    }
+    if (url.pathname === '/v1/system/menubar/open-settings' && req.method === 'POST') {
+      counts.menuBarSettingsOpened += 1;
+      return json(res, 200, { opened: true });
+    }
+    if (url.pathname === '/v1/system/meeting-detection/open-notification-settings' && req.method === 'POST') {
+      counts.notificationSettingsOpened += 1;
+      return json(res, 200, { opened: true });
+    }
     if (url.pathname === '/v1/session') {
       counts.session += 1;
       return json(res, 200, { auth_enabled: false, token: null });
@@ -199,7 +222,9 @@ function fixtureServer(port) {
       });
     }
     if (url.pathname === '/v1/settings' && req.method === 'GET') {
-      return json(res, 200, { recordings_dir: '/tmp/closedroom-e2e' });
+      return json(res, 200, {
+        recordings_dir: '/tmp/closedroom-e2e', meeting_detection_enabled: NOTIFICATION_START,
+      });
     }
     if (url.pathname === '/v1/projects' && req.method === 'GET') {
       return json(res, 200, { items: [] });
@@ -627,6 +652,24 @@ try {
   }
   await waitText(browser, ['Busy AI capture proof'], 10000, true);
   await checkpoint(browser, '04-saved-and-ai-resumed');
+
+  if (NOTIFICATION_START) {
+    await browser.navigate(`http://127.0.0.1:${vitePort}/#settings`);
+    await waitText(browser, ['Microfono attivo: Microsoft Teams', 'Active microphone: Microsoft Teams'], 16000, true);
+    await waitText(browser, ['Notifiche: unknown', 'Notifications: unknown'], 8000, true);
+    await checkpoint(browser, '05-detection-diagnostics');
+    await browser.clickButton(['Apri Barra dei menu di macOS', 'Open macOS Menu Bar settings']);
+    await browser.clickButton(['Impostazioni notifiche macOS', 'macOS notification settings']);
+    const settingsDeadline = Date.now() + 5000;
+    while (Date.now() < settingsDeadline &&
+      (counts.menuBarSettingsOpened !== 1 || counts.notificationSettingsOpened !== 1)) {
+      await sleep(100);
+    }
+    if (counts.menuBarSettingsOpened !== 1 || counts.notificationSettingsOpened !== 1) {
+      throw new Error(`Native recovery actions missing: ${JSON.stringify(counts)}`);
+    }
+    await checkpoint(browser, '06-recovery-actions');
+  }
 
   video = await renderVideo();
 } catch (caught) {

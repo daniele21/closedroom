@@ -32,6 +32,18 @@ class ActionableMeetingNotificationContractTests(unittest.TestCase):
         self.assertIsNone(decode_notification_action("closedroom.meeting.", RECORD_ACTION))
         self.assertIsNone(decode_notification_action("closedroom.meeting.x", "unknown"))
 
+    def test_permission_state_and_delivery_failures_are_not_silent(self):
+        center = MeetingNotificationCenter(lambda *_: None)
+        center._set_authorization(0)
+        self.assertEqual(center.authorization, "not_determined")
+        center._set_authorization(2)
+        self.assertEqual(center.authorization, "authorized")
+        center._record_delivery_error(RuntimeError("synthetic"))
+        self.assertEqual(center.last_error, "notification_delivery_failed")
+        center._set_authorization(1)
+        self.assertEqual(center.authorization, "denied")
+        self.assertIsNone(center.last_error)
+
     def test_no_native_center_does_not_fake_delivery(self):
         center = MeetingNotificationCenter(lambda *_: None)
         self.assertFalse(center.available)
