@@ -58,6 +58,7 @@ import {
 import { useTranslation } from '../i18n/i18n';
 import { cn } from '../utils/cn';
 import { useToast } from '../context/ToastContext';
+import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
 
 interface DashboardPageProps {
   navigateTo: (page: string, detail?: string | null) => void;
@@ -493,6 +494,7 @@ export default function DashboardPage({
                     meeting={meeting}
                     lang={lang}
                     onOpen={() => navigateTo('meeting', meeting.id)}
+                    onTranscribe={() => navigateTo('transcription', recordingTranscriptionRoute(meeting.recording.id))}
                     isEditing={editingRecordingId === meeting.recording.id}
                     editTitleValue={editTitleValue}
                     setEditTitleValue={setEditTitleValue}

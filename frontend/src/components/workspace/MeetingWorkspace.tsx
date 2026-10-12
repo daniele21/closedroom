@@ -37,11 +37,6 @@ function limitText(value: string, max = 150): string {
   return `${value.slice(0, max - 1).trim()}...`;
 }
 
-function actionLabel(meeting: Meeting, t: (key: string) => string): string {
-  if (!meeting.transcription) return t('workspace.actionTranscribe');
-  if (Object.keys(meeting.latest_analysis || {}).length === 0) return t('workspace.actionAnalyze');
-  return t('workspace.actionOpenInsights');
-}
 
 export function ExplainTooltip({ content }: { content: string }) {
   return (
@@ -229,6 +224,7 @@ export function MeetingCard({
   meeting,
   lang,
   onOpen,
+  onTranscribe,
   isEditing = false,
   editTitleValue = '',
   setEditTitleValue = () => {},
@@ -240,6 +236,7 @@ export function MeetingCard({
   meeting: Meeting;
   lang: string;
   onOpen: () => void;
+  onTranscribe?: () => void;
   isEditing?: boolean;
   editTitleValue?: string;
   setEditTitleValue?: (value: string) => void;
@@ -265,9 +262,15 @@ export function MeetingCard({
     <article className="metric-card group rounded-xl border border-border-subtle px-4 py-3 transition-premium hover-lift hover:border-border-focus hover:bg-bg-hover">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-1 gap-3">
-          <span className="mt-0.5 hidden h-10 w-10 shrink-0 place-items-center rounded-xl border border-border-subtle bg-bg-glass text-accent shadow-[inset_0_1px_0_var(--surface-highlight)] sm:grid">
+          <button
+            type="button"
+            onClick={onOpen}
+            className="mt-0.5 hidden h-10 w-10 shrink-0 place-items-center rounded-xl border border-border-subtle bg-bg-glass text-accent shadow-[inset_0_1px_0_var(--surface-highlight)] transition-colors hover:border-border-focus hover:text-accent sm:grid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+            title={lang === 'it' ? 'Apri meeting' : 'Open meeting'}
+            aria-label={lang === 'it' ? 'Apri meeting' : 'Open meeting'}
+          >
             <FileAudio className="h-4 w-4" />
-          </span>
+          </button>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               {isEditing ? (
@@ -287,7 +290,14 @@ export function MeetingCard({
                 </div>
               ) : (
                 <div className="flex min-w-0 items-center gap-2 group/title">
-                  <h3 className="truncate text-sm font-semibold text-text-primary">{meetingTitle(meeting)}</h3>
+                  <button
+                    type="button"
+                    onClick={onOpen}
+                    className="truncate text-left text-sm font-semibold text-text-primary transition-colors hover:text-accent focus-visible:outline-none focus-visible:underline"
+                    title={lang === 'it' ? 'Apri meeting' : 'Open meeting'}
+                  >
+                    {meetingTitle(meeting)}
+                  </button>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -336,9 +346,16 @@ export function MeetingCard({
               </span>
             ))}
           </div>
-          <Button size="sm" className="w-full lg:w-auto lg:px-4" variant={meeting.transcription ? 'primary' : 'secondary'} onClick={onOpen}>
-            {actionLabel(meeting, t)}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto lg:justify-end">
+            <Button size="sm" className="flex-1 lg:flex-initial lg:px-4" onClick={onOpen}>
+              {lang === 'it' ? 'Apri' : 'Open'}
+            </Button>
+            {!meeting.transcription && onTranscribe && !demoMode && (
+              <Button size="sm" variant="secondary" className="flex-1 lg:flex-initial lg:px-3" onClick={onTranscribe}>
+                {lang === 'it' ? 'Trascrivi' : 'Transcribe'}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

@@ -116,6 +116,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const captureLeaseCommittedRef = useRef(false);
   const startInFlightRef = useRef(false);
   const cancelStartRequestedRef = useRef(false);
+  const stopInFlightRef = useRef(false);
   const broadcastIntervalRef = useRef<any>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const currentMicDbRef = useRef<number>(-120);
@@ -284,12 +285,14 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   }, [refreshAudioStatus]);
 
   const stopRecording = useCallback(async () => {
+    if (stopInFlightRef.current) return;
     const mediaRecorders = Array.from(mediaRecordersRef.current.values());
     if (
       captureBackendRef.current !== 'native'
       && (mediaRecorders.length === 0 || mediaRecorders.every((recorder) => recorder.state === 'inactive'))
     ) return;
 
+    stopInFlightRef.current = true;
     dispatchLifecycle({ type: 'stop_requested' });
     setStatusText(t('recording.finalizing'));
     setStatusState('working');
@@ -387,7 +390,12 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       setStatusText(t('common.error'));
       setStatusState('error');
       showToast(t('recording.finalizationFailed', { error: error.message }), 'error');
+      localStorage.removeItem('asr-active-recording-id');
+      sessionIdRef.current = null;
+      captureBackendRef.current = 'browser';
+      dispatchLifecycle({ type: 'reset' });
     } finally {
+      stopInFlightRef.current = false;
       browserUploadBacklogRef.current.reset();
       browserBackpressureTriggeredRef.current = false;
       captureLeaseCommittedRef.current = false;
