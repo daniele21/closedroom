@@ -18,7 +18,7 @@ class MacOSShellContractTests(unittest.TestCase):
         self.assertIn('MENU_BAR_ICON_ASSET = "closedroom-microphone-mark.png"', source)
         self.assertIn('MENU_BAR_ICON_SOURCE = "design/assets/brand/closedroom-microphone-mark.png"', source)
         self.assertIn("get_brand_asset_path(MENU_BAR_ICON_ASSET)", source)
-        self.assertIn("image.setTemplate_(True)", source)
+        self.assertIn("image.setTemplate_(False)", source)
         self.assertIn("status_item.setLength_(AppKit.NSSquareStatusItemLength)", source)
         self.assertIn("status_item.setVisible_(True)", source)
         self.assertIn("button.setImage_(image)", source)

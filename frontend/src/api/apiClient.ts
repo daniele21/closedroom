@@ -537,7 +537,16 @@ export interface MenuBarStatus {
   icon_asset: string;
   repair_count: number;
   last_error?: string | null;
-  meeting_detection?: { enabled: boolean; capability: string; notifications: string };
+  meeting_detection?: {
+    enabled: boolean;
+    capability: string;
+    notifications: string;
+    notification_available?: boolean;
+    notification_error?: string | null;
+    active_apps?: string[];
+    active_input_processes?: number;
+    unattributed_input_processes?: number;
+  };
 }
 
 export interface Settings {
@@ -679,6 +688,14 @@ export const ApiClient = {
 
   async refreshMenuBar(): Promise<MenuBarStatus> {
     return (await request('/v1/system/menubar/refresh', { method: 'POST' })).json();
+  },
+
+  async openMenuBarSettings(): Promise<{ opened: boolean }> {
+    return (await request('/v1/system/menubar/open-settings', { method: 'POST' })).json();
+  },
+
+  async openNotificationSettings(): Promise<{ opened: boolean }> {
+    return (await request('/v1/system/meeting-detection/open-notification-settings', { method: 'POST' })).json();
   },
 
   async claimMeetingStartIntent(token: string): Promise<{ accepted: boolean }> {

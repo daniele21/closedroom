@@ -20,6 +20,7 @@ import sys
 import logging
 import json
 import socket
+import subprocess
 import secrets
 import time
 import threading
@@ -83,6 +84,7 @@ except ImportError:
 
 MENU_BAR_ICON_ASSET = "closedroom-microphone-mark.png"
 MENU_BAR_ICON_SOURCE = "design/assets/brand/closedroom-microphone-mark.png"
+MENU_BAR_SETTINGS_URL = "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension"
 
 STATUS_ITEM_STATES = {
     "idle": "ClosedRoom — pronto",
@@ -306,7 +308,7 @@ class ClosedRoomApp(rumps.App):
             name="ClosedRoom",
             title=None if icon_path else "CR",
             icon=icon_path,
-            template=bool(icon_path),
+            template=False,
             quit_button=None,  # we provide our own Esci item
         )
         self._ensure_status_item_visible()
@@ -326,6 +328,7 @@ class ClosedRoomApp(rumps.App):
         self._meeting_notifications = MeetingNotificationCenter(self._on_meeting_notification)
         self._meeting_notifications.start()  # delegate installed at app launch
         self._meeting_capability = 'unknown'
+        self._meeting_observation = None
         self._meeting_suggested_id: str | None = None
         self._meeting_intents: dict[str, dict] = {}
         self._meeting_intent_lock = threading.Lock()
@@ -370,7 +373,7 @@ class ClosedRoomApp(rumps.App):
 
             # The source asset has transparent background. Template rendering is
             # the macOS-native treatment that keeps it legible in light/dark menu bars.
-            image.setTemplate_(True)
+            image.setTemplate_(False)
             image.setSize_((18.0, 18.0))
             self._status_item_image = image  # retain the NSImage for the item lifetime
 
@@ -457,6 +460,34 @@ class ClosedRoomApp(rumps.App):
         self._status_item_repair_count += 1
         run_on_main_thread(self._ensure_status_item_visible, wait=True)
         return self.menu_bar_status()
+
+    def open_menu_bar_settings(self) -> dict:
+        """Open macOS Menu Bar controls; item visibility may be OS-hidden."""
+        try:
+            subprocess.Popen(
+                ["/usr/bin/open", MENU_BAR_SETTINGS_URL],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return {"opened": True}
+        except OSError as exc:
+            logger.warning("Failed to open macOS menu bar settings: %s", exc)
+            return {"opened": False, "error": "system_settings_unavailable"}
+
+    def open_notification_settings(self) -> dict:
+        """Open OS Notification preferences without changing authorization."""
+        try:
+            subprocess.Popen(
+                ["/usr/bin/open", "x-apple.systempreferences:com.apple.Notifications-Settings.extension"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return {"opened": True}
+        except OSError as exc:
+            logger.warning("Failed to open macOS notification settings: %s", exc)
+            return {"opened": False, "error": "system_settings_unavailable"}
 
     # ── Menu construction ──────────────────────────────────────────────────
 
@@ -594,10 +625,23 @@ class ClosedRoomApp(rumps.App):
 
     def meeting_detection_status(self) -> dict:
         from local_asr_server.settings import load_settings
+        self._meeting_notifications.refresh_authorization()
         return {
             "enabled": load_settings().get("meeting_detection_enabled") is True,
             "capability": self._meeting_capability,
             "notifications": self._meeting_notifications.authorization,
+            "notification_available": self._meeting_notifications.available,
+            "notification_error": self._meeting_notifications.last_error,
+            "active_apps": sorted(
+                SUPPORTED_APPS[bundle]
+                for bundle in (self._meeting_observation.active_bundle_ids if self._meeting_observation else [])
+            ),
+            "active_input_processes": (
+                self._meeting_observation.active_input_processes if self._meeting_observation else 0
+            ),
+            "unattributed_input_processes": (
+                self._meeting_observation.unattributed_input_processes if self._meeting_observation else 0
+            ),
         }
 
     def authorize_meeting_detection(self) -> bool:
@@ -618,11 +662,13 @@ class ClosedRoomApp(rumps.App):
         if load_settings().get("meeting_detection_enabled") is not True:
             self._meeting_policy.reset()
             self._meeting_capability = "disabled"
+            self._meeting_observation = None
             self._clear_meeting_suggestion()
             return
 
         observation = self._meeting_observer.scan()
         self._meeting_capability = observation.capability
+        self._meeting_observation = observation
         with self._meeting_intent_lock:
             pending = any(
                 item["phase"] in {"issued", "claimed", "preparing"}

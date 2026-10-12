@@ -23,6 +23,12 @@ class _FakeMenuBarController:
             "last_error": None,
         }
 
+    def open_menu_bar_settings(self) -> dict:
+        return {"opened": True}
+
+    def open_notification_settings(self) -> dict:
+        return {"opened": True}
+
     def repair_menu_bar(self) -> dict:
         self.repair_calls += 1
         return self.menu_bar_status()
@@ -64,6 +70,11 @@ class MenuBarSystemApiTests(unittest.TestCase):
         self.assertEqual(controller.repair_calls, 1)
         self.assertEqual(payload["repair_count"], 1)
         self.assertTrue(payload["visible"])
+
+    def test_native_system_settings_actions_are_allowlisted(self) -> None:
+        controller = _FakeMenuBarController()
+        self.assertTrue(system.open_macos_menu_bar_settings(_request(controller))["opened"])
+        self.assertTrue(system.open_macos_notification_settings(_request(controller))["opened"])
 
     def test_refresh_rejects_non_menubar_runtime(self) -> None:
         with self.assertRaises(HTTPException) as caught:
