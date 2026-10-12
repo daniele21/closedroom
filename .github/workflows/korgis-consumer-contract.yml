@@ -1,0 +1,59 @@
+name: Korgis consumer wire contract
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - ".github/workflows/korgis-consumer-contract.yml"
+      - "test/test_korgis_sdk_wire_contract.py"
+      - "src/local_asr_server/runtime/local_ai.py"
+      - "src/local_asr_server/llm.py"
+      - "src/local_asr_server/services/analysis_service.py"
+      - "docs/features/korgis-consumer-preview.md"
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/korgis-consumer-contract.yml"
+      - "test/test_korgis_sdk_wire_contract.py"
+      - "src/local_asr_server/runtime/local_ai.py"
+      - "src/local_asr_server/llm.py"
+      - "src/local_asr_server/services/analysis_service.py"
+      - "docs/features/korgis-consumer-preview.md"
+
+permissions:
+  contents: read
+
+jobs:
+  sdk-wire:
+    name: ClosedRoom with exact Korgis consumer SDK
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out ClosedRoom exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Check out immutable SDK revision
+        uses: actions/checkout@v4
+        with:
+          repository: daniele21/korgis
+          ref: 99681516a4955ce40e919971b0820a48d840c356
+          path: .korgis-pinned
+          persist-credentials: false
+      - name: Verify both source identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$(git -C .korgis-pinned rev-parse HEAD)" = "99681516a4955ce40e919971b0820a48d840c356"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install exact standalone SDK (not the inference runtime)
+        run: python -m pip install --disable-pip-version-check --no-deps ./.korgis-pinned/sdk/python
+      - name: Exercise real SDK to ClosedRoom loopback wire contract
+        env:
+          PYTHONPATH: src
+          CLOSEDROOM_REQUIRE_KORGIS_SDK: "1"
+        run: python -m unittest test.test_korgis_sdk_wire_contract -v
