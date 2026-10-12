@@ -221,6 +221,22 @@ def refresh_system_menubar(request: Request):
     return controller.repair_menu_bar()
 
 
+@router.post("/v1/system/menubar/open-settings")
+def open_macos_menu_bar_settings(request: Request):
+    controller = _menubar_controller(request)
+    if controller is None:
+        raise HTTPException(status_code=409, detail="Native menu bar settings unavailable")
+    return controller.open_menu_bar_settings()
+
+
+@router.post("/v1/system/meeting-detection/open-notification-settings")
+def open_macos_notification_settings(request: Request):
+    controller = _menubar_controller(request)
+    if controller is None:
+        raise HTTPException(status_code=409, detail="Native notification settings unavailable")
+    return controller.open_notification_settings()
+
+
 class MeetingStartIntentRequest(BaseModel):
     token: str = Field(min_length=16, max_length=128)
 
