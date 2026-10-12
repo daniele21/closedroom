@@ -440,6 +440,37 @@ class RecordingStoreTests(unittest.TestCase):
         self.assertTrue(listed[0]["thumbnail_available"])
         self.assertEqual(restarted.get(recording["id"])["screenshot_count"], 1)
 
+    def test_finalize_recovers_and_finalizes_recoverable_recording(self) -> None:
+        recording = self.create_recording()
+        self.store.append_chunk(recording["id"], 0, b"audio-data")
+
+        # Simulate server restart marking it recoverable
+        restarted = RecordingStore(self.root, use_settings_dir=False)
+        self.assertEqual(restarted.get(recording["id"])["status"], "recoverable")
+
+        # finalize() must be able to stop and finalize a recoverable recording
+        finalized, _ = restarted.finalize(recording["id"])
+        self.assertEqual(finalized["status"], "recorded")
+        self.assertIsNone(finalized.get("error"))
+
+        # Subsequent finalize() call is idempotent
+        second_call, _ = restarted.finalize(recording["id"])
+        self.assertEqual(second_call["status"], "recorded")
+
+    def test_recover_populates_track_bytes_written(self) -> None:
+        recording = self.create_recording()
+        self.store.append_chunk(recording["id"], 0, b"track-bytes-here")
+
+        restarted = RecordingStore(self.root, use_settings_dir=False)
+        self.assertEqual(restarted.get(recording["id"])["status"], "recoverable")
+
+        recovered = restarted.recover(recording["id"])
+        self.assertEqual(recovered["status"], "recorded")
+        track = recovered["audio_tracks"][0]
+        self.assertGreater(track["bytes_written"], 0)
+        self.assertEqual(track["chunk_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+

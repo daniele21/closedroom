@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import hmac
+from typing import Any
 import secrets
 import tempfile
 from pathlib import Path
@@ -268,5 +269,15 @@ def create_app(
     return app
 
 
-# Exposed for uvicorn --reload import string loading
-app = create_app()
+# Exposed lazily for uvicorn import string loading (e.g. uvicorn local_asr_server.server:app)
+_app: FastAPI | None = None
+
+
+def __getattr__(name: str) -> Any:
+    if name == "app":
+        global _app
+        if _app is None:
+            _app = create_app()
+        return _app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
