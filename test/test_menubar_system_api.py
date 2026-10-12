@@ -23,6 +23,12 @@ class _FakeMenuBarController:
             "last_error": None,
         }
 
+    def open_menu_bar_settings(self) -> dict:
+        return {"opened": True}
+
+    def open_notification_settings(self) -> dict:
+        return {"opened": True}
+
     def repair_menu_bar(self) -> dict:
         self.repair_calls += 1
         return self.menu_bar_status()
