@@ -138,6 +138,43 @@ export default function SettingsPage() {
     }
   };
 
+  const handleOpenMenuBarSettings = async () => {
+    try {
+      const result = await ApiClient.openMenuBarSettings();
+      if (!result.opened) throw new Error('System Settings unavailable');
+      showToast(lang === 'it'
+        ? 'In Barra dei menu, abilita ClosedRoom in “Consenti nella barra dei menu”.'
+        : 'In Menu Bar, enable ClosedRoom under “Allow in the Menu Bar”.', 'info');
+    } catch (err: any) {
+      showToast(err?.message || t('common.error'), 'error');
+    }
+  };
+
+  const handleMeetingNotificationPermission = async () => {
+    if (!meetingDetectionWasEnabled) {
+      showToast(lang === 'it' ? 'Prima salva le impostazioni.' : 'Save settings first.', 'warning');
+      return;
+    }
+    try {
+      const result = await ApiClient.authorizeMeetingDetection();
+      if (!result.requested) {
+        showToast(lang === 'it' ? 'Le notifiche native non sono disponibili.' : 'Native notifications are unavailable.', 'warning');
+      }
+      await refreshMenuBarStatus();
+    } catch (err: any) {
+      showToast(err?.message || t('common.error'), 'error');
+    }
+  };
+
+  const handleOpenNotificationSettings = async () => {
+    try {
+      const result = await ApiClient.openNotificationSettings();
+      if (!result.opened) throw new Error('System Settings unavailable');
+    } catch (err: any) {
+      showToast(err?.message || t('common.error'), 'error');
+    }
+  };
+
   const loadSettings = async () => {
     try {
       setLoading(true);
@@ -427,10 +464,41 @@ export default function SettingsPage() {
               : 'Off by default. Save to enable and request notification permission; start ClosedRoom at login for background suggestions.'}
           </p>
           {meetingDetectionEnabled && menuBarStatus?.meeting_detection && (
-            <p className="text-xs text-text-muted">
-              {lang === 'it' ? 'Monitoraggio' : 'Monitor'}: {menuBarStatus.meeting_detection.capability}
-              {' · '}{lang === 'it' ? 'Notifiche' : 'Notifications'}: {menuBarStatus.meeting_detection.notifications}
-            </p>
+            <div className="space-y-2 text-xs text-text-secondary" data-meeting-detection-diagnostics="true">
+              <p role="status">
+                {menuBarStatus.meeting_detection.active_apps?.length
+                  ? (lang === 'it' ? 'Microfono attivo: ' : 'Active microphone: ') + menuBarStatus.meeting_detection.active_apps.join(', ')
+                  : menuBarStatus.meeting_detection.capability === 'supported'
+                    ? (lang === 'it'
+                      ? 'Monitor disponibile · Nessuna chiamata Zoom/Teams identificata'
+                      : 'Monitor available · No Zoom/Teams call identified')
+                    : (lang === 'it' ? 'Monitor non disponibile: ' : 'Monitor unavailable: ') + menuBarStatus.meeting_detection.capability}
+              </p>
+              <p>
+                {lang === 'it' ? 'Processi audio in input: ' : 'Active input processes: '}
+                {menuBarStatus.meeting_detection.active_input_processes ?? 0}
+                {' · '}{lang === 'it' ? 'Senza identità: ' : 'Unattributed: '}
+                {menuBarStatus.meeting_detection.unattributed_input_processes ?? 0}
+                {' · '}{lang === 'it' ? 'Notifiche: ' : 'Notifications: '}
+                {menuBarStatus.meeting_detection.notifications}
+              </p>
+              {menuBarStatus.meeting_detection.notifications !== 'authorized' && (
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" onClick={handleMeetingNotificationPermission}>
+                    {lang === 'it' ? 'Richiedi permesso notifiche' : 'Request notifications'}
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={handleOpenNotificationSettings}>
+                    {lang === 'it' ? 'Impostazioni notifiche macOS' : 'macOS notification settings'}
+                  </Button>
+                </div>
+              )}
+              {menuBarStatus.meeting_detection.notification_error && (
+                <p role="alert" className="text-warning">{menuBarStatus.meeting_detection.notification_error}</p>
+              )}
+              <Button type="button" variant="ghost" onClick={refreshMenuBarStatus}>
+                {lang === 'it' ? 'Aggiorna rilevamento' : 'Refresh detection status'}
+              </Button>
+            </div>
           )}
         </Card>
 
@@ -457,9 +525,9 @@ export default function SettingsPage() {
                 </p>
               </div>
             </div>
-            <Badge variant={menuBarStatus?.visible && menuBarStatus?.icon_loaded ? 'success' : 'warning'}>
-              {menuBarStatus?.visible && menuBarStatus?.icon_loaded
-                ? (lang === 'it' ? 'Attiva' : 'Active')
+            <Badge variant={menuBarStatus?.available && menuBarStatus?.icon_loaded ? 'info' : 'warning'}>
+              {menuBarStatus?.available && menuBarStatus?.icon_loaded
+                ? (lang === 'it' ? 'Item creato' : 'Item created')
                 : (lang === 'it' ? 'Da verificare' : 'Check needed')}
             </Badge>
           </div>
@@ -477,7 +545,15 @@ export default function SettingsPage() {
             {menuBarStatus?.last_error && menuBarStatus.last_error !== 'menubar_controller_unavailable' && (
               <p className="mt-2 break-all font-mono text-[11px] text-danger">{menuBarStatus.last_error}</p>
             )}
+            <p className="mt-2 text-xs text-text-muted">
+              {lang === 'it'
+                ? 'macOS 26 può nascondere l’item anche quando ClosedRoom lo segnala visibile.'
+                : 'macOS 26 may hide this item even when ClosedRoom reports it as visible.'}
+            </p>
             <div className="mt-3 flex flex-wrap gap-2">
+              <Button type="button" variant="primary" onClick={handleOpenMenuBarSettings}>
+                {lang === 'it' ? 'Apri Barra dei menu di macOS' : 'Open macOS Menu Bar settings'}
+              </Button>
               <Button
                 type="button"
                 variant="secondary"
@@ -500,8 +576,8 @@ export default function SettingsPage() {
             <div className="mt-3 space-y-2 text-xs leading-5 text-text-secondary">
               <p>
                 {lang === 'it'
-                  ? '• Sui MacBook con notch, macOS può nascondere gli item quando la barra è piena: chiudi temporaneamente qualche altra icona e controlla di nuovo.'
-                  : '• On MacBooks with a notch, macOS can hide items when the bar is crowded: temporarily close another menu bar item and check again.'}
+                  ? '• Prima apri Impostazioni di Sistema → Barra dei menu e abilita ClosedRoom sotto “Consenti nella barra dei menu”. Poi verifica l’eventuale spazio insufficiente sul MacBook con notch.'
+                  : '• First open System Settings → Menu Bar and enable ClosedRoom under “Allow in the Menu Bar”. Then check for insufficient space on MacBooks with a notch.'}
               </p>
               <p>
                 {lang === 'it'
