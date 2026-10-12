@@ -42,3 +42,19 @@ A separate CI workflow, `.github/workflows/korgis-consumer-contract.yml`, checks
 Packaged builds explicitly collect `korgis_sdk` and check its import through the frozen `bundle-runtime-smoke` command. This proves bundle inclusion/import, not authenticated runtime ownership or working LLM inference.
 
 Before making the SDK the default or claiming release readiness, verify end-to-end SDK↔**actual pinned inference runtime with real weights**, resident-model identity, per-request privacy and admin/health behavior over restarts, and representative Apple Silicon TCC/capture/LLM contention, resource/thermal and cleanup evidence. Source-built ad-hoc app proof is not a Developer-ID-signed and notarized distribution artifact. Korgis SDK managed-session security is a separate owner and does not replace ClosedRoom's existing process supervisor.
+
+
+## Target-Mac live inference observation (not a simulated-model CI claim)
+
+After separately starting the **existing** ClosedRoom-owned Korgis/local-llm-server sidecar and ensuring the exact Nemotron key appears resident in `GET /v1/models`, this optional probe exercises the installed SDK plus ClosedRoom's Nemotron adapter. It never loads/downloads a model, spawns a new server, evicts resident models, switches provider or processes an actual meeting.
+
+```bash
+UV_CACHE_DIR=.cache/uv uv run --extra korgis-sdk python scripts/probe_korgis_live_inference.py \
+  --endpoint http://127.0.0.1:1235 \
+  --model nemotron-nano-4b-q8 \
+  --output dist/evidence/korgis-consumer-local.json
+```
+
+The model key and port must match the **already running** locally owned runtime. A missing/mismatched model or non-loopback URL fails closed, before sending the synthetic transcript. The input transcript mentions fictional project Atlas; the report saves only statuses and elapsed time, never prompts, model-generated notes, model paths or untrusted error bodies. Report permissions are owner-only on POSIX. A PASS means the attached endpoint reported local-llm-server identity, the exact resident model key was present, one HTTP inference completed and ClosedRoom obtained nonempty title/summary and list fields. The report deliberately records `weights_identity=unverified`, `native_capture=not_tested`, `resource_and_thermal=not_measured` and `output_quality=shape_only_not_semantically_judged`. Header metadata is **self-reported**, not cryptographically attested. A synthetic HTTP fixture passing the same probe in CI does **not** establish real model execution; the operator must retain local target-Mac provenance separately.
+
+This single inference observation does not replace the existing `run_local_real_environment_suite.py` physical capture/AI contention owner, quality evaluation, process cleanup or thermal/resource release evidence. Keep the feature opt-in until representative Mac/Metal and packaged-app end-to-end testing is satisfactory.
