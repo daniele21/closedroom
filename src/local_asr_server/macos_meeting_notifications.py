@@ -174,16 +174,20 @@ class MeetingNotificationCenter:
         from local_asr_server.window import run_on_main_thread
 
         def request():
-            native = self._native or _native_framework()
-            options = int(native.UNAuthorizationOptionAlert) | int(native.UNAuthorizationOptionSound)
-            def completed(granted, error):
-                if error is not None:
-                    self._authorization = "unknown"
-                    self._last_error = "notification_permission_request_failed"
-                else:
-                    self._authorization = "authorized" if granted else "denied"
-                    self._last_error = None
-            self._center.requestAuthorizationWithOptions_completionHandler_(options, completed)
+            try:
+                native = self._native or _native_framework()
+                options = int(native.UNAuthorizationOptionAlert) | int(native.UNAuthorizationOptionSound)
+                def completed(granted, error):
+                    if error is not None:
+                        self._authorization = "unknown"
+                        self._last_error = "notification_permission_request_failed"
+                    else:
+                        self._authorization = "authorized" if granted else "denied"
+                        self._last_error = None
+                self._center.requestAuthorizationWithOptions_completionHandler_(options, completed)
+            except Exception:
+                self._authorization = "unknown"
+                self._last_error = "notification_permission_request_failed"
         run_on_main_thread(request)
         return True
 
@@ -203,10 +207,14 @@ class MeetingNotificationCenter:
                 NOTIFICATION_PREFIX + candidate_id, content, None
             )
             self._center.addNotificationRequest_withCompletionHandler_(
-                request, lambda error: None
+                request, lambda error: self._record_delivery_error(error)
             )
         run_on_main_thread(deliver)
         return True
+
+    def _record_delivery_error(self, error) -> None:
+        if error is not None:
+            self._last_error = "notification_delivery_failed"
 
     def dismiss(self, candidate_id: str) -> None:
         if self._center:
