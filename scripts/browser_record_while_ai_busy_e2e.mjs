@@ -660,6 +660,11 @@ try {
     await checkpoint(browser, '05-detection-diagnostics');
     await browser.clickButton(['Apri Barra dei menu di macOS', 'Open macOS Menu Bar settings']);
     await browser.clickButton(['Impostazioni notifiche macOS', 'macOS notification settings']);
+    const settingsDeadline = Date.now() + 5000;
+    while (Date.now() < settingsDeadline &&
+      (counts.menuBarSettingsOpened !== 1 || counts.notificationSettingsOpened !== 1)) {
+      await sleep(100);
+    }
     if (counts.menuBarSettingsOpened !== 1 || counts.notificationSettingsOpened !== 1) {
       throw new Error(`Native recovery actions missing: ${JSON.stringify(counts)}`);
     }
