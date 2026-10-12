@@ -52,6 +52,7 @@ DEFAULT_SETTINGS: dict[str, any] = {
     "default_word_timestamps": False,
     "default_condition_on_previous": False,
     "local_llm_mode": "auto",
+    "local_llm_client_transport": "legacy",  # developer-preview opt-in: korgis_sdk for Nemotron text only
     "local_llm_url": DEFAULT_LOCAL_LLM_URL,
     "local_llm_model": "nemotron-nano-4b-q8",
     "local_llm_quality_preset": DEFAULT_LLM_QUALITY_PRESET,

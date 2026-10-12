@@ -281,6 +281,9 @@ ClosedRoom is not a guarantee of perfect transcription, speaker identity or meet
 
 ## For developers
 
+**Experimental Korgis Consumer SDK transport:** ClosedRoom can opt into the role-bound Python SDK for Nemotron text analysis only, while continuing to own its existing runtime sidecar. The default stays on the pinned legacy client; SDK installation is explicit and the macOS app bundle is not yet qualified. See [developer setup and compatibility boundaries](docs/features/korgis-consumer-preview.md).
+
+
 ### Repository map
 
 | Area | Main paths | Responsibility |
