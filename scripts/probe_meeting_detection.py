@@ -31,11 +31,15 @@ def probe(seconds: float, sample_seconds: float, observer=None, clock=time.monot
     counts = Counter()
     observed = set()
     transitions = Counter()
+    peak_active_inputs = 0
+    peak_unattributed_inputs = 0
     previous: frozenset[str] = frozenset()
     while clock() < deadline:
         sample = scanner.scan()
         total += 1
         counts[sample.capability] += 1
+        peak_active_inputs = max(peak_active_inputs, sample.active_input_processes)
+        peak_unattributed_inputs = max(peak_unattributed_inputs, sample.unattributed_input_processes)
         for app_id in sample.active_bundle_ids:
             if app_id in SUPPORTED_APPS:
                 observed.add(app_id)
@@ -52,6 +56,8 @@ def probe(seconds: float, sample_seconds: float, observer=None, clock=time.monot
         "platform": platform.system(),
         "macos_version": platform.mac_ver()[0],
         "sample_count": total,
+        "peak_active_input_processes": peak_active_inputs,
+        "peak_unattributed_input_processes": peak_unattributed_inputs,
         "capability_counts": dict(counts),
         "observed_supported_apps": [SUPPORTED_APPS[app_id] for app_id in sorted(observed)],
         "transition_counts": {
