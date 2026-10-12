@@ -24,6 +24,8 @@ _GLOBAL_SCOPE = int.from_bytes(b"glob", "big")
 _SYSTEM_OBJECT = 1
 _PROCESS_LIST = int.from_bytes(b"prs#", "big")
 _PROCESS_PID = int.from_bytes(b"ppid", "big")
+_PROCESS_BUNDLE = int.from_bytes(b"pbid", "big")
+_CF_UTF8 = 0x08000100
 _PROCESS_INPUT = int.from_bytes(b"piri", "big")
 
 
@@ -40,6 +42,8 @@ class ActivityObservation:
     capability: str  # supported | unsupported | unknown
     active_bundle_ids: frozenset[str] = frozenset()
     reason: str = ""
+    active_input_processes: int = 0
+    unattributed_input_processes: int = 0
 
 
 class CoreAudioInputObserver:
@@ -67,10 +71,13 @@ class CoreAudioInputObserver:
                 "/System/Library/Frameworks/CoreAudio.framework/CoreAudio"
             )
             lookup = self._app_lookup or self._bundle_for_pid
-            active = self._active_process_ids(audio)
-            recognized = {bundle for pid in active
-                          if (bundle := lookup(pid)) in SUPPORTED_APPS}
-            return ActivityObservation("supported", frozenset(recognized))
+            active, unattributed = self._active_process_bundles(audio, lookup)
+            recognized = {bundle for bundle in active if bundle in SUPPORTED_APPS}
+            return ActivityObservation(
+                "supported", frozenset(recognized),
+                active_input_processes=len(active) + unattributed,
+                unattributed_input_processes=unattributed,
+            )
         except Exception:
             # OSStatus, dynamic PyObjC failures and races must fail closed.
             return ActivityObservation("unknown", reason="coreaudio_unavailable")
@@ -85,7 +92,14 @@ class CoreAudioInputObserver:
             return None
 
     @staticmethod
-    def _active_process_ids(audio) -> list[int]:
+    def _active_process_bundles(audio, lookup: Callable[[int], str | None] | None = None) -> tuple[list[str], int]:
+        """Use CoreAudio's *own* bundle ID; PID/NSRunningApplication is fallback.
+
+        Call media often runs in a helper process without a regular
+        NSRunningApplication entry. Only an active CoreAudio INPUT property
+        can nominate a supported app; no window, audio or process inventory
+        is collected. CoreAudio transfers ownership of the CFString.
+        """
         audio.AudioObjectGetPropertyDataSize.argtypes = [
             ctypes.c_uint32, ctypes.POINTER(AudioPropertyAddress),
             ctypes.c_uint32, ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32),
@@ -119,24 +133,65 @@ class CoreAudioInputObserver:
         if size.value % ctypes.sizeof(ctypes.c_uint32) or size.value > 262144:
             raise RuntimeError("Invalid CoreAudio process list size")
         if not size.value:
-            return []
+            return [], 0
         entries = (ctypes.c_uint32 * (size.value // 4))()
         if audio.AudioObjectGetPropertyData(
             _SYSTEM_OBJECT, ctypes.byref(address), 0, None,
             ctypes.byref(size), ctypes.byref(entries),
         ) != 0:
             raise RuntimeError("CoreAudio process list changed")
-        result: list[int] = []
-        for obj_id in entries[: size.value // 4]:
+
+        # Load lazily: test doubles and unsupported environments need no
+        # CoreFoundation. A CFStringRef returned by CoreAudio is owned by us.
+        core_foundation = None
+        def read_bundle(object_id: int) -> str | None:
+            nonlocal core_foundation
+            address = AudioPropertyAddress(_PROCESS_BUNDLE, _GLOBAL_SCOPE, 0)
+            value = ctypes.c_void_p()
+            size = ctypes.c_uint32(ctypes.sizeof(value))
+            status = audio.AudioObjectGetPropertyData(
+                object_id, ctypes.byref(address), 0, None,
+                ctypes.byref(size), ctypes.byref(value),
+            )
+            if status != 0 or size.value != ctypes.sizeof(value) or not value.value:
+                return None
+            if core_foundation is None:
+                core_foundation = ctypes.CDLL(
+                    "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+                )
+                core_foundation.CFStringGetCString.argtypes = [
+                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long, ctypes.c_uint32
+                ]
+                core_foundation.CFStringGetCString.restype = ctypes.c_bool
+                core_foundation.CFRelease.argtypes = [ctypes.c_void_p]
+                core_foundation.CFRelease.restype = None
             try:
-                if read(obj_id, _PROCESS_INPUT, ctypes.c_uint32):
-                    pid = read(obj_id, _PROCESS_PID, ctypes.c_int32)
-                    if pid > 0:
-                        result.append(pid)
-            except RuntimeError:
-                # A process can exit while the CoreAudio list is being read.
-                continue
-        return result
+                buf = ctypes.create_string_buffer(2048)
+                if not core_foundation.CFStringGetCString(value, buf, len(buf), _CF_UTF8):
+                    return None
+                return buf.value.decode("utf-8")
+            finally:
+                core_foundation.CFRelease(value)
+
+        bundles: list[str] = []
+        unattributed = 0
+        for object_id in entries[:size.value // 4]:
+            try:
+                if not read(object_id, _PROCESS_INPUT, ctypes.c_uint32):
+                    continue
+                bundle = read_bundle(object_id)
+                if not bundle and lookup is not None:
+                    pid = read(object_id, _PROCESS_PID, ctypes.c_int32)
+                    bundle = lookup(pid) if pid > 0 else None
+                if bundle:
+                    bundles.append(bundle)
+                else:
+                    unattributed += 1
+            except (RuntimeError, OSError):
+                # A process can exit between enumerating it and reading
+                # properties. Never promote such races to a meeting.
+                unattributed += 1
+        return bundles, unattributed
 
 
 @dataclass
