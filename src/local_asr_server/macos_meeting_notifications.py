@@ -65,6 +65,7 @@ class MeetingNotificationCenter:
         self._center = None
         self._delegate = None
         self._authorization = "unknown"
+        self._last_error: str | None = None
 
     @property
     def authorization(self) -> str:
@@ -73,6 +74,26 @@ class MeetingNotificationCenter:
     @property
     def available(self) -> bool:
         return self._center is not None
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
+
+    def refresh_authorization(self) -> None:
+        """Refresh the OS notification permission state, never infer success."""
+        if not self._center:
+            return
+        from local_asr_server.window import run_on_main_thread
+        def query():
+            try:
+                self._center.getNotificationSettingsWithCompletionHandler_(
+                    lambda state: self._set_authorization(int(state.authorizationStatus()))
+                )
+            except Exception:
+                self._last_error = "notification_settings_query_failed"
+                self._authorization = "unknown"
+        run_on_main_thread(query)
+
 
     def start(self) -> bool:
         if self._center is not None:
@@ -128,14 +149,14 @@ class MeetingNotificationCenter:
                 center.setDelegate_(delegate)
                 self._center = center
                 self._delegate = delegate  # keep alive
-                center.getNotificationSettingsWithCompletionHandler_(
-                    lambda s: self._set_authorization(int(s.authorizationStatus()))
-                )
+                self._authorization = "checking"
+                self.refresh_authorization()
 
             run_on_main_thread(configure, wait=True)
             return self._center is not None
-        except Exception:
+        except Exception as exc:
             # Missing framework/bridge must never crash the menu-bar app.
+            self._last_error = f"notification_center_setup_failed:{type(exc).__name__}"
             self._authorization = "unsupported"
             return False
 
@@ -143,6 +164,8 @@ class MeetingNotificationCenter:
         # UNAuthorizationStatus: notDetermined 0, denied 1, authorized 2, provisional 3.
         self._authorization = {0: "not_determined", 1: "denied",
                                2: "authorized", 3: "authorized", 4: "authorized"}.get(status, "unknown")
+        if self._authorization != "unknown":
+            self._last_error = None
 
     def request_authorization(self) -> bool:
         """Only call as the direct result of a deliberate user opt-in."""
@@ -154,7 +177,12 @@ class MeetingNotificationCenter:
             native = self._native or _native_framework()
             options = int(native.UNAuthorizationOptionAlert) | int(native.UNAuthorizationOptionSound)
             def completed(granted, error):
-                self._authorization = "authorized" if granted else "denied"
+                if error is not None:
+                    self._authorization = "unknown"
+                    self._last_error = "notification_permission_request_failed"
+                else:
+                    self._authorization = "authorized" if granted else "denied"
+                    self._last_error = None
             self._center.requestAuthorizationWithOptions_completionHandler_(options, completed)
         run_on_main_thread(request)
         return True
