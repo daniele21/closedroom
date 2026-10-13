@@ -41,7 +41,9 @@ jobs:
         env:
           UV_CACHE_DIR: .cache/uv
         run: |
-          uv run --frozen --python 3.12 python -m unittest test.test_transcription_application test.test_transcription_router_ablation test.test_recording_api -v
+          uv run --frozen --python 3.12 python -m unittest discover -s test -p 'test_transcription_application.py' -v
+          uv run --frozen --python 3.12 python -m unittest discover -s test -p 'test_transcription_router_ablation.py' -v
+          uv run --frozen --python 3.12 python -m unittest discover -s test -p 'test_recording_api.py' -v
       - name: Overlay TypeScript and lint
         run: |
           cd frontend
