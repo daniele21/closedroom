@@ -1,124 +1,75 @@
-# Complexity ablation — behavior-preserving reduction
+# Complexity ablation — minimum complexity, equivalent product behavior
 
-Status: ACTIVE — C3.1 IMPLEMENTED; integration evidence pending
-Target: `dev`; work branch: `work/complexity-ablation`
-Source identity at plan bootstrap: `dev` `15ec412ce10cb5e49438f6e09271f2883ea65973` (2026-10-13)
-Read root/scoped AGENTS and the repository-owned validation selector and workstream skills.
+Status: ACTIVE — ISOLATED EXPERIMENTS. No merge or PR to dev authorized.
+Experiment branch: `experiment/complexity-ablation`
+Read-only reference: `dev` at `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f` (2026-10-13). Refresh baseline identity on resume.
 
-## Desired outcome and non-goals
+## Outcome, scope, axes
 
-Reduce ClosedRoom complexity **without losing features, changing user journeys/contracts, or moving private data off-device**. Optimize ownership, states, dependencies and build/runtime costs, not line count alone.
+Reduce total owner/policy/state/dependency/build/runtime complexity **without dropping features, changing responses or data lifecycle, degrading quality, or crossing the local-first trust boundary**. Removing 100 lines by adding a second state owner is a regression.
 
-Non-goals: redesign, unverified provider/model removal, wholesale rewrite, off-device processing, renaming, dropping browser fallback, opt-in providers or packaged app support.
+- PRODUCT: PRODUCT_NONE for proven behavior-preserving experiments; escalate if behavior changes.
+- DELIVERY: ITERATION **only on the experiment branch**. Never push to `dev`, open integration PR, merge, or promote without explicit later authorization.
+- VALIDATION: selector-defined SCOPED or STRONG per isolated change; FULL for packaging/toolchain/release-impacting experiments. Overall program has shared-contract/privacy risk. A passing fake is not physical Mac/TCC/MLX evidence.
+- EXECUTION: AGENT_LOCAL if available; REMOTE_AUTOMATED for deterministic gates when necessary; REAL_ENVIRONMENT for representative Mac/capture/ASR/thermal only. Never run packaged builds or upload large media artifacts through Actions.
 
-Reuse `architectural-consolidation` and `selective-efficiency` evidence; do not duplicate their code or overlap PRs.
+Not in scope: redesign, framework rewrites, product renaming, removing providers/models without quality/compatibility proof, remote AI fallback, silent transfer of meeting data, replacing the existing owner boundaries.
 
-## Axes and boundaries
+Durable owners/invariants: `RecordingStore` facade, filesystem artifacts + SQLite catalog projection, single `HeavyWorkloadArbiter`, `RuntimeServiceManager` lifecycle, `frontend/src` as UI source, native Swift helper/JSON protocol, protected loopback auth/origin, bounded cancellable/recoverable jobs, idempotent chunks/screenshots, macOS TCC/main-thread and explicit cloud opt-in. Preserve error states, recovery, settings, UX and VoiceOver.
 
-- PRODUCT: **PRODUCT_NONE** per behavior-preserving experiment. Reclassify to PRODUCT_LOCAL/FEATURE if observable semantics actually change and stop treating that experiment as pure ablation.
-- DELIVERY: **ITERATION** per experiment; **INTEGRATION** PR -> `dev` only after exact-head/base proof. This plan alone is documentation.
-- VALIDATION: **STRONG** for the overall cross-boundary effort; selector chooses concrete gates per experiment (SCOPED/STRONG; FULL when packaging/toolchain or release rules require). A pure planning edit is LEAN.
-- EXECUTION: **AGENT_LOCAL** where equivalent tests can run; **REMOTE_AUTOMATED** for deterministic macOS/source/browser/build gates unavailable locally; **REAL_ENVIRONMENT** for physical TCC, audio, MLX/Metal/thermal and interactive macOS truth. Do not run packaged builds in GitHub Actions.
-- Preserve `RecordingStore` as aggregate facade, SQLite catalog projection, `HeavyWorkloadArbiter` as sole heavy-work scheduler, `RuntimeServiceManager` as local LLM lifecycle owner, `frontend/src` as UI source, and native process/JSON interface.
-- Preserve loopback auth/origin, no implicit cloud fallback, one owner per artifact/job/recording, bounded cancellation and cleanup, monotonic/idempotent chunk and screenshot contracts, finalized-artifact immutability, accessible keyboard/focus/VoiceOver paths, and Cocoa main-thread requirements.
+Reuse evidence from `architectural-consolidation.md` and `selective-efficiency.md`, not duplicate implementations. Open overlapping PRs at bootstrap: #86 DB migrations, #95 VAD evidence, #105 menu bar; avoid those files until stabilized.
 
-## Experimental method
+## Controlled experiment loop
 
-### AB-0: lock baseline and trace product coverage — READY
+1. **Pin baseline** from `dev`: exact commit/tree, dependencies, supported feature register `docs/features.md`, affected consumers and `.engineering/e2e.json` journeys. Treat known menu-bar/meeting-detection bugs as baseline bugs, not removable features.
+2. **Characterize** identical input/output, provider selection, cache keys, persisted JSON/SQLite, partial failure/retry/cancellation and API auth/origin. Preserve original fixtures. Capture representative hardware metrics separately from deterministic fakes.
+3. **Select one falsifiable ablation:** owner, removed mechanism, primary metric, secondary guardrails, expected impact, rollback, selected risks/gates and direct tests. No speculative abstraction or persistent feature flag.
+4. **Apply on this branch only** with reviewable small commits; measure before/after: production LOC, *number of duplicated policy owners*, state variables/transitions, interfaces/dependency cycles; as relevant bundle bytes, launch latency, RSS/CPU/thermal and cleanup. Do not treat file relocation as reduction.
+5. **Validate** owner tests first, differential E2E and selected gates on exact candidate; FULL_MEDIA for materially changed UI timing/flows, physical Mac/quality only where applicable. Failures get diagnosis, not weakened tests.
+6. **Decide** KEEP / REWORK / REVERT / BLOCKED_FOR_EVIDENCE. KEEP requires proven behavioral equivalence, meaningful complexity reduction and no adverse guardrail. Unknown cannot be marked PASS.
+7. **Stop** when remaining candidates lack proof, have marginal benefit or change user contracts. Record negative results. Do not integrate changes merely to finish the workstream.
 
-1. Pin `dev` commit/tree, environment and artifact; refresh for each candidate.
-2. Map `docs/features.md` and `.engineering/e2e.json` to owners, API/persistence consumers, flows and failure states: native/browser recording and permissions, visuals/screenshots/notes/overlay, detection/menu bar, transcription/diarization, analysis/edits, archive/projects, jobs, opt-in providers, settings and packaging.
-3. Separate known bugs and open PRs from ablation evidence; existing failures are not permission to remove features.
-4. Capture HTTP/auth, old/new/interrupted storage, cancellation/restart/fallback, UI and model/provider fixtures; normalize nondeterminism only where safe, never expose private content.
-5. On fixed hardware/scenarios, measure artifact/dependency bytes, startup, idle/recording/AI RSS, latency and cleanup; record samples/noise bands. Separate fake/CI and representative Mac/ASR evidence.
+## Feature coverage and guarded surfaces
 
-**Gate:** no destructive experiment without mapped behavior and a regression oracle. Baseline measurements: PENDING.
+| Surface | Canonical owners | Required equivalence oracle |
+| --- | --- | --- |
+| Native/browser recording, permissions, recovery, menu/detection | `useRecorder`, native helper, `RecordingStore`, `menubar.py` | recording API, native lifecycle, recording UI, meeting-detection-start; real Mac separately |
+| Note/screenshot/display overlay | `RecordingOverlayPage`, `RecordingStore` screenshot artifacts | call-overlay-screenshot-evidence, meeting-moments-notes + native capture recovery |
+| Upload/path/multi-track transcription + diarization | transcription router, application/service, jobs | transcription application, router ablation, recording API and transcription-workflow |
+| Analysis, edits, meeting/project search | analysis jobs, catalog, `MeetingDetailPage` | shared analysis pipeline, note edit revision, archive search, persistence |
+| Local/opt-in providers, inference lifecycle | `RuntimeServiceManager`, AI adapters | explicit selection, model readiness, resource arbitration, bounded cleanup |
+| Packaging, native app identity | `ClosedRoom.spec`, build scripts | immutable artifact smoke; source tests alone not enough |
 
-### AB-1: inventory candidates and value — READY
+## Candidate queue and independence
 
-For each candidate produce one experiment card:
-`ID | owner and direct consumers | current mechanism | hypothesized redundant mechanism | smallest reversible change | protected behavior | complexity metric | required gate | risk/blocked-by | evidence | decision`.
+- **C3 transcription (FIRST):** router adapter vs single-file use case. Do not collapse upload/path cache identities without differential evidence.
+- **C1/C2 UI (NEXT):** `RecordingOverlayPage` ~1,236 lines/34 hooks and `MeetingDetailPage` ~2,188 lines/33 hooks. Reduction should eliminate duplicated state/effects, not merely split files; avoid concurrent shared UI writes and current physical overlay bugs.
+- **C4 persistence (LATER):** `recordings.py` ~2,250 lines. Keep public facade, artifact recovery/idempotency and avoid SQLite migration PR #86 overlap.
+- **C5 shell / C7 native (BLOCKED):** `menubar.py` ~1,360 lines, `native_capture.py` ~1,168 lines. Stabilize real Mac detection/menu and protocol/TCC evidence before ablation.
+- **C6 packaged dependency diet (EVIDENCE-GATED):** use selective-efficiency SE-3/4/5/6; never drop ONNX/Silero/PyTorch-related paths on bundle size alone. Requires FULL packaged proof where relevant.
 
-Metrics are **a vector** (not a vanity LOC score):
-- Structural: reachable production SLOC, live modules, public interfaces, responsibilities/owner, duplicated policies, state variables/transitions, fan-in/fan-out, cyclic dependencies.
-- Packaging: direct/transitive dependencies actually bundled, bundle bytes, build time, boot/import cost.
-- Runtime: cold/warm start, idle/recording/ASR/LLM peak RSS/CPU, latency, thermal and I/O only where the lane touches them.
-- Reliability: lifecycle/cancel/restart paths, test pass and behavioral coverage, output compatibility.
-- Maintenance: deletion of a policy/owner/branch preferred over merely moving its lines into a new abstraction.
+Independent owners can be inspected in parallel; exclusive write boundaries for edits. Evaluate cumulative complexity **on this branch**; `dev` is never automatically synchronized with experiments.
 
-Choose one primary before/after metric, guardrails, and record negative results. Never trade protected behavior for an aggregate score.
+## Experiment ledger
 
-### AB-2: one controlled ablation at a time — READY after AB-0/1
+### C3.1 — forwarding wrappers / empty finalizers (historical baseline only)
 
-1. State one falsifiable hypothesis about redundant policy and preserved contract.
-2. Branch from refreshed `dev`; one reversible change, no permanent flags or second owners.
-3. Characterize the seam with identical-input differential tests, then remove/converge one mechanism.
-4. Compare API/UI/storage/errors, run selected gates + affected E2E; FULL_MEDIA for material UI timing/sequence. Fakes never prove physical Mac/MLX.
-5. Preserve model/provider/prompt/input/persistence; stochastic text need not be byte-equal. Obtain representative evidence if AI quality could change.
-6. Repeat before/after benchmarks with identical model/cache/hardware/settings. Regression beyond uncertainty/limits = reject; unknown = NOT PROVEN.
-7. Decide **KEEP/REWORK/REVERT/BLOCKED_FOR_EVIDENCE**. KEEP requires equivalence + meaningful reduction + no adverse tradeoff.
-8. Before integration inspect full diff and exact head/base; use selector/preflight, no Actions builds or unnecessary reruns. Rebase remaining lanes.
+PR #118 previously integrated into `dev` at `747a0e5`. Router 759 -> 721 lines, four trivial forwarding wrappers and three empty finalizers removed. Source preflight INTEGRATION/SCOPED + repository health PASS. This is prior history, **not authorization to merge further experiments into dev**. No physical Mac claim.
 
-### AB-3: convergence and stopping rule — READY after first KEEP
+### C3.2 — canonical initial diarization policy (ACTIVE, BLOCKED_FOR_EVIDENCE)
 
-- Integrate proven small changes, not a rewrite; update canonical docs when affected.
-- Keep a ledger: baseline, hypothesis, single change, risks/gates, metrics, result, exact evidence.
-- Stop when gain is marginal, unproven, or adds conceptual complexity. Preserve negative evidence, not dead code.
-- Target-Mac obligations remain RELEASE blockers; source tests do not prove release readiness.
+Hypothesis: router `_apply_initial_diarization` duplicates `SingleFileTranscriptionUseCase._apply_diarization`, including disabled/completed/provider switching semantics.
 
-## Initial, evidence-based candidate queue (not removal decisions)
+Change on `experiment/complexity-ablation`: one `SingleFileTranscriptionUseCase.apply_initial_diarization` now owns both; upload nonstreaming, upload streaming and path adapter call it, using unchanged provider/region/model arguments. No altered route definitions or runtime/model/provider choice.
 
-Observed sizes from `dev` at bootstrap are *screening signals*, not proof of dead code or duplications:
+**Static impact:** router 721 -> 698 lines (−23); application 192 -> 200 (+8); **net −15 production lines and one duplicated policy eliminated**. Expanded `test_transcription_application.py` and `test_transcription_router_ablation.py` to cover disabled, completed, switching, response/error and cache-stage behavior. Tests authored, **not executed yet against an exact runnable checkout**; correctness state PENDING, no performance/runtime claim.
 
-| Queue | Candidate / baseline observation | Hypothesis & relation to existing work | Default gating |
-| --- | --- | --- | --- |
-| C1 | `frontend/src/pages/RecordingOverlayPage.tsx` ~1,236 lines, ~34 hooks | AC-2 follow-up: isolate the screenshot/note/display interaction policies and remove overlapping page state only if external contract stays stable. Beware current target-Mac overlay bugs. | SCOPED during iteration; STRONG/FULL_MEDIA if integration changes interactive flows |
-| C2 | `frontend/src/pages/MeetingDetailPage.tsx` ~2,188 lines, ~33 hooks | AC-2: inspect remaining coordinator vs accessory lifecycle, remove redundant page orchestration after `useMeetingAccessories` extraction. | SCOPED -> affected UI E2E/FULL_MEDIA |
-| C3 | `src/local_asr_server/routers/transcriptions.py` ~759 lines | AC-3: replace duplicate upload/path/recording orchestration with one existing use case without changing streaming, cache identity, provider options or payloads. | STRONG, shared API/cache/job contract |
-| C4 | `src/local_asr_server/recordings.py` ~2,250 lines | AC-4: inventory legacy artifact/visual policy remaining after `ScreenshotArtifactStore`; eliminate only duplicative logic, preserve `RecordingStore` facade and recovery. Avoid open SQLite migration PR #86 overlap. | STRONG, persistence/recovery |
-| C5 | `src/local_asr_server/menubar.py` ~1,360 lines | Shell owns many concerns, but do **not** ablate while menu visibility/detection and open PR #105 are unsettled; first stabilize physical behavior and derive narrow tests. | BLOCKED for now; STRONG + REAL_ENVIRONMENT when material |
-| C6 | `ClosedRoom.spec` and pinned MLX/VLM/ASR dependencies | Reuse SE-3/4/5/6 evidence. Remove only runtime imports/deps conclusively unused in frozen image path. Never remove ONNX/Silero solely for size. | FULL packaged-app validation + representative quality when relevant |
-| C7 | `src/local_asr_server/native_capture.py` ~1,168 lines | AC-5 native capture complexity: convergence only after protocol-level characterization and when Mac lifecycle evidence can be obtained. | STRONG + physical Mac obligations |
-
-**Prioritization rule:** Start with contained, testable, low-overlap and reversible candidates; do not start C5/C6/C7 merely because of large file or bundle size. Favor **deletion/convergence** over decomposition-only changes where both preserve canonical ownership.
-
-## Work graph and parallelism
-
-```text
-AB-0 feature/behavior + baseline proof (serial)
-         |
-AB-1 candidate ledger, risk/benefit ranking (serial)
-         |
-         +-- Lane UI: C1/C2 (shared frontend owner; serialize within lane)
-         +-- Lane API: C3 (independent transcription boundary)
-         +-- Lane data: C4 (avoid catalog/migration overlap)
-         +-- Lane packaging: C6 (after representative SE evidence)
-         |
-AB-2 short reversible experiments + per-lane differential tests
-         |
-AB-3 integrate in small PRs -> refreshed dev; measure cumulative Pareto
-         |
-Release-only representative Mac validations where required
-```
-
-A lane has exclusive owning files. Native/menu bar lanes C5/C7 remain blocked until physical behavior/proofs and overlapping PRs settle. Do not run simultaneous changes against `useRecorder`, `RecordingStore`, database migrations, menu-bar shell or build selector from separate PRs.
-
-## C3.1 — first controlled experiment
-
-Hypothesis: four private route aliases of canonical `TranscriptionService` methods and three `finally: pass` blocks add no policy. Remove them while keeping route/API, cache, ASR, diarization and persistence behavior identical.
-
-- Measured: `routers/transcriptions.py` **759 -> 721 lines (-38 / -5.0%)**, four forwarders + three empty finalizers removed, same endpoint decorators. This is owner-local, not a product-wide improvement.
-- Characterization: new `test/test_transcription_router_ablation.py` covers path JSON/text response, provider option projection, persistence and 404/500; existing `test_transcription_application`, `test_recording_api` and transcription-workflow contracts remain required.
-- Gate: **INTEGRATION / STRONG candidate**, subject to repository selector; automated tests **PENDING**, so KEEP is not established yet. No material UI, packaging or target-Mac behavior intended.
-- Important boundary: upload uses final-result/diarization-aware caching while path uses ASR-result caching; unifying them is a **separate** C3.2 experiment that requires a differential oracle.
-
-**Next:** verify exact PR head/base and all selected tests; classify failures, fix or revert; then rank follow-up candidates from real evidence.
+**C3.3 rejected/deferred:** path uses ASR-only cache and re-applies diarization per request; upload uses final-result cache identity including diarization. Unifying them wholesale risks stale/wrong speaker results and altered persistence. Keep distinct until dedicated differential evidence supports a minimal unification.
 
 ## Resume checkpoint
 
-- Baseline branch/head observed: `dev` @ `15ec412ce10cb5e49438f6e09271f2883ea65973`; MUST refresh on resume.
-- Existing workstreams: `docs/workstreams/architectural-consolidation.md`, `docs/workstreams/selective-efficiency.md`.
-- Open overlapping PRs at inspection: #105 (menu bar), #95 (VAD benchmark), #86 (SQLite migrations).
-- Structural observations: C1–C7 sizes measured by fetching files on `dev`, not by local AST/test execution.
-- C3.1 source changed, but exact-head test equivalence is NOT YET VERIFIED; no app build or representative Mac measurement performed.
-- Next discriminating action: run selected C3.1 integration gates and classify failures; do not converge distinct path/upload cache behavior yet.
+- BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
+- TARGET: `experiment/complexity-ablation`; no PR created, no writes to `dev`.
+- Confirmed: C3.1 already merged before branch isolation; C3.2 is a contained policy de-duplication with added unexecuted test oracles.
+- Unresolved: exact-head selected deterministic tests, regression classification, cache-stage coverage sufficiency; physical Mac evidence remains release-specific.
+- Next discriminating action: execute C3.2 focused and selector-required checks against an equivalent repo checkout (automate where available); **REVERT** if behavior fails; then address isolated UI state duplication without changing user flows.
