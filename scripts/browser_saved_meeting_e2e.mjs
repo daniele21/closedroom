@@ -94,7 +94,12 @@ const diagnosticsFixture = {
   }],
 };
 
-const counts = { session: 0, health: 0, meeting: 0, alternate_meeting: 0, held_meeting: 0, diagnostics: 0, visual_frames: 0, screenshots: 0 };
+const counts = {
+  session: 0, health: 0, meeting: 0, alternate_meeting: 0, held_meeting: 0,
+  diagnostics: 0, visual_frames: 0, screenshots: 0, alternate_screenshots: 0, notes: 0, alternate_notes: 0,
+};
+let failNextAlternateScreenshots = false;
+let failNextAlternateNotes = false;
 let holdNextMeetingId = null;
 const heldMeetingResponses = [];
 const checkpoints = [];
@@ -195,10 +200,27 @@ function fixtureServer(port) {
       return json(res, 200, diagnosticsFixture);
     }
     if (pathname === `/v1/recordings/${ALTERNATE_MEETING_ID}/screenshots`) {
+      counts.alternate_screenshots += 1;
+      if (failNextAlternateScreenshots) {
+        failNextAlternateScreenshots = false;
+        return json(res, 503, { detail: 'synthetic screenshot failure' });
+      }
       return json(res, 200, { items: [], total: 0 });
     }
     if (pathname === `/v1/recordings/${MEETING_ID}/screenshots`) {
       counts.screenshots += 1;
+      return json(res, 200, { items: [], total: 0 });
+    }
+    if (pathname === `/v1/recordings/${MEETING_ID}/notes`) {
+      counts.notes += 1;
+      return json(res, 200, { items: [], total: 0 });
+    }
+    if (pathname === `/v1/recordings/${ALTERNATE_MEETING_ID}/notes`) {
+      counts.alternate_notes += 1;
+      if (failNextAlternateNotes) {
+        failNextAlternateNotes = false;
+        return json(res, 503, { detail: 'synthetic note failure' });
+      }
       return json(res, 200, { items: [], total: 0 });
     }
     if (pathname === `/v1/recordings/${MEETING_ID}/visual-frames`) {
@@ -593,6 +615,42 @@ try {
   `);
   if (staleErrorVisible) throw new Error('stale Meeting request error leaked into current view');
   await checkpoint(browser, '08-late-error-ignored');
+
+  // List requests have independent error and retry lifecycles even though
+  // screenshots and notes now share the list-loading implementation.
+  failNextAlternateScreenshots = true;
+  failNextAlternateNotes = true;
+  const screenshotsBeforeFailure = counts.alternate_screenshots;
+  const notesBeforeFailure = counts.alternate_notes;
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  await waitCount('alternate_screenshots', screenshotsBeforeFailure + 1);
+  await waitCount('alternate_notes', notesBeforeFailure + 1);
+  await waitText(browser, ['Screenshots unavailable', 'Screenshot non disponibili'], 5000, true);
+  await waitText(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili'], 5000, true);
+
+  const retryAccessory = async (message) => {
+    const clicked = await browser.execute(`
+      const message = ${JSON.stringify(message)};
+      const section = Array.from(document.querySelectorAll('section'))
+        .find((node) => (node.innerText || '').includes(message));
+      const button = section?.querySelector('button');
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    `);
+    if (!clicked) throw new Error('Could not retry ' + message);
+  };
+  await retryAccessory('Screenshots unavailable');
+  await waitCount('alternate_screenshots', screenshotsBeforeFailure + 2);
+  await waitAbsent(browser, ['Screenshots unavailable', 'Screenshot non disponibili'], 5000);
+  await waitText(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili']);
+
+  await retryAccessory('Meeting notes unavailable');
+  await waitCount('alternate_notes', notesBeforeFailure + 2);
+  await waitAbsent(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili'], 5000);
+  await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  await checkpoint(browser, '09-independent-list-recovery');
 
   video = await renderVideo();
 } catch (caught) {
