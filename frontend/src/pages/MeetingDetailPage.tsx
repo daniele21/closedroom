@@ -550,12 +550,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     () => (meeting?.jobs || []).filter((job) => activeJobStatuses.has(job.status)),
     [meeting],
   );
-  const preparationJobs = useMemo(
-    () => (meeting?.jobs || []).filter((job) => job.type === 'meeting_preparation'),
-    [meeting],
-  );
   const activePreparation = activeJobs.find((job) => job.type === 'meeting_preparation');
-  const latestPreparation = preparationJobs[0];
+  const latestPreparation = (meeting?.jobs || []).find((job) => job.type === 'meeting_preparation');
   const displayedActiveJobs = activePreparation
     ? [activePreparation]
     : activeJobs;
