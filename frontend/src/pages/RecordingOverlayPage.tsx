@@ -125,10 +125,7 @@ export default function RecordingOverlayPage() {
     return null;
   };
 
-  const loadDisplays = useCallback(async (
-    preferredDisplayId?: number | null,
-    _autoSelectSingle = true,
-  ) => {
+  const loadDisplays = useCallback(async (preferredDisplayId?: number | null) => {
     try {
       const payload = await ApiClient.captureDisplays();
       const available = payload.displays || [];
@@ -524,14 +521,11 @@ export default function RecordingOverlayPage() {
     } catch (err: any) {
       const message = String(err?.message || t('recording.screenshotFailed'));
       logOverlay('error', 'Screenshot capture failed with error', { error: message });
-      if (message.includes('selected_display_unavailable')) {
-        setErrorMsg(t('recording.screenshotDisplayUnavailable'));
-        await loadDisplays(undefined, false);
-        setIsDisplayPickerOpen(true);
-        void resizeOverlayForState(isExpanded, true);
-      } else if (message.includes('display_selection_required')) {
-        setErrorMsg(t('recording.screenshotChooseMonitorError'));
-        await loadDisplays(undefined, false);
+      const displayUnavailable = message.includes('selected_display_unavailable');
+      const selectionRequired = message.includes('display_selection_required');
+      if (displayUnavailable || selectionRequired) {
+        setErrorMsg(t(displayUnavailable ? 'recording.screenshotDisplayUnavailable' : 'recording.screenshotChooseMonitorError'));
+        await loadDisplays();
         setIsDisplayPickerOpen(true);
         void resizeOverlayForState(isExpanded, true);
       } else {
