@@ -78,10 +78,6 @@ def _transcribe_file(app: Any, **kwargs: Any) -> dict[str, Any]:
     return transcribe_file_sync(**kwargs)
 
 
-def _cache_key_for_audio_file(audio_path: Path, **options: Any) -> str:
-    return TranscriptionService.cache_key(audio_path, **options)
-
-
 def _transcribe_audio_file_with_cache(app: Any, audio_path: Path, **options: Any) -> dict[str, Any]:
     service = getattr(getattr(app, "state", None), "transcription_service", None)
     service = service or TranscriptionService()
@@ -90,33 +86,6 @@ def _transcribe_audio_file_with_cache(app: Any, audio_path: Path, **options: Any
         engine=lambda **kwargs: _transcribe_file(app, **kwargs),
         **options,
     )
-
-
-def _effective_backend(provider: str, model: str) -> str:
-    return TranscriptionService.backend(provider, model)
-
-
-def _effective_asr(
-    settings: dict[str, Any],
-    *,
-    provider: str | None = None,
-    model: str | None = None,
-    speechmatics_region: str | None = None,
-    speechmatics_model: str | None = None,
-    speechmatics_diarization: str | None = None,
-) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
-    return TranscriptionService.resolve_asr(
-        settings,
-        provider=provider,
-        model=model,
-        speechmatics_region=speechmatics_region,
-        speechmatics_model=speechmatics_model,
-        speechmatics_diarization=speechmatics_diarization,
-    )
-
-
-def _asr_payload_metadata(provider: str, model: str, public_options: dict[str, Any]) -> dict[str, Any]:
-    return TranscriptionService.payload_metadata(provider, model, public_options)
 
 
 def _normalize_diarization_provider(provider: str | None) -> str:
@@ -241,7 +210,7 @@ async def transcribe_upload(
     started_at = time.perf_counter()
     is_streaming = str_to_bool(stream)
     settings = load_settings()
-    provider, provider_model, provider_options, public_options = _effective_asr(
+    provider, provider_model, provider_options, public_options = TranscriptionService.resolve_asr(
         settings,
         provider=asr_provider,
         model=model or request.app.state.default_model,
@@ -369,7 +338,7 @@ async def transcribe_upload(
                             vad_guided=vad_guided,
                             vad_post_filter=vad_post_filter,
                             asr_provider=provider,
-                            backend=_effective_backend(provider, target_model),
+                            backend=TranscriptionService.backend(provider, target_model),
                             provider_options=public_options,
                             payload_postprocessor=(
                                 lambda source_path, payload: _apply_initial_diarization(
@@ -423,7 +392,7 @@ async def transcribe_upload(
 def transcribe_path(request: Request, body: TranscribePathRequest):
     started_at = time.perf_counter()
     settings = load_settings()
-    provider, provider_model, provider_options, public_options = _effective_asr(
+    provider, provider_model, provider_options, public_options = TranscriptionService.resolve_asr(
         settings,
         provider=body.asr_provider,
         model=body.model or request.app.state.default_model,
@@ -471,12 +440,12 @@ def transcribe_path(request: Request, body: TranscribePathRequest):
             "segments": result.get("segments", []),
             "metadata": result.get("metadata", {}),
             "model": result.get("model", target_model),
-            "backend": result.get("backend", _effective_backend(provider, target_model)),
+            "backend": result.get("backend", TranscriptionService.backend(provider, target_model)),
             "asr_provider": provider,
             "provider_options": public_options,
             "stats": {
                 "time_total_seconds": elapsed,
-                **_asr_payload_metadata(provider, target_model, public_options),
+                **TranscriptionService.payload_metadata(provider, target_model, public_options),
             },
         }
         payload = _apply_initial_diarization(
@@ -506,8 +475,6 @@ def transcribe_path(request: Request, body: TranscribePathRequest):
             status_code=500,
             detail=f"Transcription failed: {exc}",
         ) from exc
-    finally:
-        pass
 
 
 @router.post("/v1/recordings/{recording_id}/transcriptions")
@@ -527,8 +494,6 @@ def transcribe_recording(recording_id: str, request: Request, body: TranscribeRe
     except Exception as exc:
         logger.error(f"[/v1/recordings/{recording_id}/transcriptions] Transcription failed: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
-    finally:
-        pass
 
 
 @router.post("/v1/recordings/{recording_id}/transcription-jobs", status_code=202)
@@ -539,14 +504,11 @@ def create_transcription_job(recording_id: str, request: Request, body: Transcri
         raise HTTPException(status_code=404, detail="Recording not found") from exc
 
     def runner(job: TranscriptionJob) -> dict[str, Any]:
-        try:
-            payload = run_recording_transcription(request.app, recording_id, body, job)
-            pipeline = _maybe_start_meeting_pipeline(request.app, recording_id, payload.get("saved_id"))
-            if pipeline:
-                payload["analysis_pipeline"] = pipeline
-            return payload
-        finally:
-            pass
+        payload = run_recording_transcription(request.app, recording_id, body, job)
+        pipeline = _maybe_start_meeting_pipeline(request.app, recording_id, payload.get("saved_id"))
+        if pipeline:
+            payload["analysis_pipeline"] = pipeline
+        return payload
 
     return get_services(request.app).transcription_jobs.create(
         recording_id,
