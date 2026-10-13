@@ -619,6 +619,12 @@ try {
   if (!clickedShot) throw new Error('screenshot button unavailable');
   await waitText(browser, ['Saved', 'Screenshots 1'], 8000, true);
   await waitSelector(browser, 'button[data-screenshot-undo="true"]', 3000, true);
+  const screenshotFeedbackMatchesUndo = await browser.execute(`
+    const action = document.querySelector('button[data-screenshot-action="true"]');
+    const undo = document.querySelector('button[data-screenshot-undo="true"]');
+    return Boolean(action && undo && action.textContent.trim() === 'Saved');
+  `);
+  if (!screenshotFeedbackMatchesUndo) throw new Error('screenshot saved feedback and undo target diverged');
   if (counts.screenshots_post !== 1) throw new Error('unexpected screenshot POST count: ' + counts.screenshots_post);
   await checkpoint(browser, '03-screenshot-persisted');
 
@@ -660,6 +666,12 @@ try {
   }
   if (notes[0].timestamp !== 14) throw new Error('quick note did not preserve composer-open anchor');
   await waitText(browser, ['Notes 1', 'Saved'], 5000, true);
+  const noteFeedbackMatchesUndo = await browser.execute(`
+    const action = document.querySelector('button[data-note-action="true"]');
+    const undo = document.querySelector('button[data-note-undo="true"]');
+    return Boolean(action && undo && action.textContent.trim() === 'Saved');
+  `);
+  if (!noteFeedbackMatchesUndo) throw new Error('note saved feedback and undo target diverged');
   await checkpoint(browser, '03c-user-note-persisted');
 
   await browser.clickCss('button[aria-label="Stop recording"]');
