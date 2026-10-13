@@ -21,13 +21,12 @@ Reuse evidence from `architectural-consolidation.md` and `selective-efficiency.m
 
 ## Controlled experiment loop
 
-1. **Pin baseline** from `dev`: exact commit/tree, dependencies, supported feature register `docs/features.md`, affected consumers and `.engineering/e2e.json` journeys. Treat known menu-bar/meeting-detection bugs as baseline bugs, not removable features.
-2. **Characterize** identical input/output, provider selection, cache keys, persisted JSON/SQLite, partial failure/retry/cancellation and API auth/origin. Preserve original fixtures. Capture representative hardware metrics separately from deterministic fakes.
-3. **Select one falsifiable ablation:** owner, removed mechanism, primary metric, secondary guardrails, expected impact, rollback, selected risks/gates and direct tests. No speculative abstraction or persistent feature flag.
-4. **Apply on this branch only** with reviewable small commits; measure before/after: production LOC, *number of duplicated policy owners*, state variables/transitions, interfaces/dependency cycles; as relevant bundle bytes, launch latency, RSS/CPU/thermal and cleanup. Do not treat file relocation as reduction.
-5. **Validate** owner tests first, differential E2E and selected gates on exact candidate; FULL_MEDIA for materially changed UI timing/flows, physical Mac/quality only where applicable. Failures get diagnosis, not weakened tests.
-6. **Decide** KEEP / REWORK / REVERT / BLOCKED_FOR_EVIDENCE. KEEP requires proven behavioral equivalence, meaningful complexity reduction and no adverse guardrail. Unknown cannot be marked PASS.
-7. **Stop** when remaining candidates lack proof, have marginal benefit or change user contracts. Record negative results. Do not integrate changes merely to finish the workstream.
+1. Pin `dev`, direct consumers, feature contracts and E2E oracles; preserve known baseline bugs.
+2. Characterize cache/persistence/auth/retries/cancellation; separate Mac hardware from fake evidence.
+3. Choose reversible owner-level ablation with guardrails; measure state/policy/LOC deltas, not file movement.
+4. Change only this experiment branch; keep diff bounded, no silent cloud or privacy regressions.
+5. Run focused and selector-required tests/E2E; diagnose failures without weakening tests.
+6. KEEP / REWORK / REVERT / BLOCKED_FOR_EVIDENCE; no automatic merge to `dev`.
 
 ## Feature coverage and guarded surfaces
 
@@ -54,7 +53,7 @@ Independent owners can be inspected in parallel; exclusive write boundaries for 
 
 ### C3.1 — forwarding wrappers / empty finalizers (historical baseline only)
 
-PR #118 previously integrated into `dev` at `747a0e5`. Router 759 -> 721 lines, four trivial forwarding wrappers and three empty finalizers removed. Source preflight INTEGRATION/SCOPED + repository health PASS. This is prior history, **not authorization to merge further experiments into dev**. No physical Mac claim.
+Historical PR #118 merged to `dev` at `747a0e5`: router 759 → 721, forwarding wrappers and empty finalizers removed, source gates PASS; further merges not authorized.
 
 ### C3.2 — canonical initial diarization policy (KEEP, SCOPED SOURCE PASS)
 
@@ -90,10 +89,18 @@ Comparison against `dev` `747a0e5`: 13 static guards PASS, including unchanged 1
 - **Structural score:** overlay 1,216 → 1,217 lines this wave (+1) but one React state and one duplicated projection removed. Against `dev`, overlay 1,236 → 1,217; overall experimental production delta **−38 lines**, UI state owners **34 → 31**, one fewer Meeting memoized list. No performance or bundle-size claim.
 - **Evidence:** [38454243679](https://github.com/daniele21/closedroom/actions/runs/38454243679) lint, tsc, browser `call-overlay-screenshot-evidence` PASS. Added test for open → close without save → reopen with new anchor → save/close; existing screenshot/stop flow. Temporary [PR #120](https://github.com/daniele21/closedroom/pull/120) closed **unmerged**, temporary workflow deleted. No app build, media upload or representative Mac/TCC proof.
 
+### C2.2 — one Meeting request token (KEEP, scoped browser PASS)
+
+Three independent load refs (`loadGenerationRef`, `loadQueuedRef`, `loadInFlightRef`) → one request token containing key, queued flag and promise. Identity rejects stale completions, same-key calls queue one refresh, cleanup invalidates prior requests. Nine effects and `useMeetingJobEvents` unchanged. Meeting page 2,188 → 2,186 lines (+2 since C2.1), but −2 refs.
+
+[Run 38457647226](https://github.com/daniele21/closedroom/actions/runs/38457647226): lint, tsc, `meeting-preparation` reconnect/recovery and `saved-meeting-fast-open` browser E2Es **PASS**. [PR #121](https://github.com/daniele21/closedroom/pull/121) closed unmerged; workflow removed. Synthetic browser does not prove all cross-meeting races or real WKWebView/TCC.
+
+Cumulative experiment: **−36 production lines**, −3 overlay states, −2 Meeting load refs, −1 Meeting memoization. No RAM/CPU measurement.
+
 ## Resume checkpoint
 
 - BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
-- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Verification PRs #119/#120 closed without merge; disposable workflows removed.
-- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
+- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Validation PRs #119–#121 closed without merge; disposable workflows removed.
+- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4/C2.2 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
 - Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
 - Next: characterize further owner/state duplications before code changes; all subsequent ablations remain isolated until explicitly authorized.
