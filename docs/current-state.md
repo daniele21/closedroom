@@ -15,7 +15,7 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - PRS-18 target-Mac evidence remains active.
 - GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata; runtime/install identity stays stable as `ClosedRoom.app` / `ClosedRoom` / `com.closedroom.app`, while DMGs/finalized artifacts carry version + build/source identity.
 - GRP-3 stages immutable production artifacts with exact identity and checksums.
-- GRP-4/5 draft releases use trusted same-SHA artifacts; Apple authority remains required.
+- GRP-4/5 production builds and draft releases are now local-Mac operations against the same exact tagged SHA; the GitHub Actions release-build workflows have been retired. Apple signing/notarization authority remains required.
 
 ## Current integration state
 
@@ -59,5 +59,5 @@ PRS-18 owns product/runtime evidence; GitHub release productization owns version
 ## Next highest-value work
 
 1. Complete remaining PRS-18 target-Mac evidence on the exact stable candidate and promote stable source only when RELEASE/FULL evidence agrees.
-2. Configure the `production-release` GitHub environment with Apple authority when available and run GRP-5 on the exact tagged stable source.
+2. Configure Apple Developer signing/notarization locally, qualify GRP-5 on the exact tagged stable source with `release_build`, then create a local-prepared draft release using `release_draft`.
 3. Publish GRP-6 only after exact stable source and exact qualified artifact agree; add README download links only after a real GitHub Release exists.

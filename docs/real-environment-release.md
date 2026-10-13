@@ -77,3 +77,14 @@ A PASS proves only the automated REAL_ENVIRONMENT portion for that exact source/
 ## 5. Useful options
 
 Use `--output <path>` to choose the aggregate JSON path and `--keep-sandbox` only when diagnosing a failed run. Timing and benchmark repeat options are exposed by `--help`; release defaults should normally remain unchanged so evidence stays comparable.
+
+## 6. Prepare a GitHub Release draft locally (optional, after qualification)
+
+GitHub Actions does **not** build or upload ClosedRoom distributions. From a clean exact-tag checkout on the release Mac, after all required source and target-Mac evidence has passed, run:
+
+```bash
+bash scripts/publish_local_draft_release.sh \
+  vX.Y.Z <exact-tag-sha> <exact-production-artifact-dir> stable
+```
+
+The command revalidates tag/main ancestry, product version, signed/notarized artifact evidence and checksums; it uploads **only** the staged public DMG, changelog, manifest and checksums as a **draft GitHub Release**. It does not rebuild the app or publish the draft. Do not run this with unsigned/ad-hoc artifacts or before RELEASE/FULL and required target-Mac evidence.

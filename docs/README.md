@@ -13,7 +13,7 @@ Use documentation by ownership, not chronology.
   - [Korgis Consumer SDK preview](features/korgis-consumer-preview.md) — opt-in Nemotron text consumer, runtime ownership, packaging gates.
 - `adr/` — accepted durable decisions whose rationale remains useful.
 - `workstreams/` — active implementation plans only; completed plans are deleted by default after durable truth is transferred.
-- `assets/` — bounded reference/demo assets; generated test evidence should live in CI artifacts instead.
+- `assets/` — bounded reference/demo assets; generated FULL_MEDIA stays local or on the ephemeral CI runner; GitHub Actions retains only tiny source-validation metadata, never screenshots/videos or packaged apps.
 
 Older implementation/refactoring plans in this directory are historical inputs, not automatically current truth. Validate them against code, `architecture.md`, `features.md` and current tests before using them for implementation decisions.
 
