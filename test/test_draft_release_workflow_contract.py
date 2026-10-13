@@ -24,7 +24,9 @@ class LocalDraftReleaseContractTests(unittest.TestCase):
         for required in (
             "scripts/prepare_github_release.py", "release-plan.json", ".assets | length) == 4",
             "--draft", "--verify-tag", "Release already exists", "GITHUB_ACTIONS",
-            "gh", "release create",
+            "gh", "release create", "Draft release identity mismatch",
+            "GitHub Release asset name, byte count or SHA-256 digest mismatch",
+            "X-GitHub-Api-Version",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, self.script)
