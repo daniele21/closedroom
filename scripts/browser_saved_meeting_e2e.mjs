@@ -632,9 +632,10 @@ try {
   const retryAccessory = async (messages) => {
     const clicked = await browser.execute(`
       const messages = ${JSON.stringify(messages)};
-      const section = Array.from(document.querySelectorAll('section'))
-        .find((node) => messages.some((message) => (node.innerText || '').includes(message)));
-      const button = section?.querySelector('button');
+      const heading = Array.from(document.querySelectorAll('section p'))
+        .find((node) => messages.some((message) => (node.textContent || '').trim() === message));
+      const button = Array.from(heading?.closest('section')?.querySelectorAll('button') || [])
+        .find((node) => ['Retry', 'Riprova'].includes((node.textContent || '').trim()));
       if (!button || button.disabled) return false;
       button.click();
       return true;
