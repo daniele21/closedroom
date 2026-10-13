@@ -42,7 +42,7 @@ Follow the closest scoped `AGENTS.md`. Extend one canonical owner before introdu
 - **INTEGRATION** (`PR -> dev`): coherent observable outcome, exact head/base, complete diff, affected durable docs, required automated gates and affected automated E2E. Material UI/UX integration journeys require `FULL_MEDIA`. Genuine TCC, physical-audio, representative MLX/Metal or interactive target-Mac gaps are `DEFERRED_TO_RELEASE`.
 - **RELEASE** (`dev -> main`): `FULL` plus release-critical artifact/E2E and every applicable required target-Mac confirmation.
 
-The selector resolves risks -> concrete gates -> profile. Profiles are shorthand. `.github/workflows/preflight.yml` owns remote source validation only: **GitHub Actions must never build/package ClosedRoom or upload browser FULL_MEDIA**. Build, smoke and release qualification remain required on the release Mac. Missing deterministic tooling must not be silently treated as PASS; report local/REAL_ENVIRONMENT gates as pending until verified. Reuse evidence only when head/tree/base/gates/profile/material E2E identity remain equivalent.
+The selector resolves risks -> concrete gates -> profile. Profiles are shorthand. `.github/workflows/preflight.yml` runs source checks only. No app builds or FULL_MEDIA uploads in Actions; package proof is local and must not be assumed PASS. Reuse evidence only when head/tree/base/gates/profile/material E2E identity remain equivalent.
 
 ## Context, diagnosis and completion
 
