@@ -188,7 +188,9 @@ class PathTranscriptionAdapterContractTests(unittest.TestCase):
             }
             third = json.loads(transcribe_path(self.request, body).body)
             self.assertEqual(third["text"], "already diarized")
-            self.assertEqual(diarization.call_count, 2)
+            # Path rebuilding replaces ASR stats before diarization (current contract).
+            # An ASR-cache "completed" marker is therefore not authoritative here.
+            self.assertEqual(diarization.call_count, 3)
 
 
 if __name__ == "__main__":
