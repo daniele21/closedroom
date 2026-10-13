@@ -2,9 +2,9 @@ name: Temporary complexity-ablation source check
 
 # Experiment-branch-only one-shot validation. Remove after recording results.
 on:
-  push:
+  pull_request:
     branches: [experiment/complexity-ablation]
-    paths: [.github/workflows/ablation-one-shot.yml]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -29,7 +29,8 @@ jobs:
         run: |
           test "$(git branch --show-current)" = "" || test "$(git branch --show-current)" = "experiment/complexity-ablation"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$GITHUB_REF_NAME" = "experiment/complexity-ablation"
+          test "$GITHUB_EVENT_NAME" = "pull_request"
+          test "$GITHUB_BASE_REF" = "experiment/complexity-ablation"
       - name: Install source test dependencies (no app build)
         run: |
           brew list uv >/dev/null 2>&1 || brew install uv
