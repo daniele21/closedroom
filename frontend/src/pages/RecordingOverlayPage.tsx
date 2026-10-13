@@ -44,9 +44,9 @@ export default function RecordingOverlayPage() {
   const [lastSavedScreenshotId, setLastSavedScreenshotId] = useState<string | null>(null);
   const [isUndoingScreenshot, setIsUndoingScreenshot] = useState(false);
   const [noteCount, setNoteCount] = useState(0);
-  const [noteComposerOpen, setNoteComposerOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   const [noteAnchor, setNoteAnchor] = useState<number | null>(null);
+  const noteComposerOpen = noteAnchor !== null;
   const [isAnchoringNote, setIsAnchoringNote] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isUndoingNote, setIsUndoingNote] = useState(false);
@@ -189,7 +189,6 @@ export default function RecordingOverlayPage() {
           setRecordingId(null);
           setScreenshotCount(0);
           setNoteCount(0);
-          setNoteComposerOpen(false);
           setNoteDraft('');
           setNoteAnchor(null);
           setLastScreenshotAt(null);
@@ -568,7 +567,6 @@ export default function RecordingOverlayPage() {
   };
 
   const closeNoteComposer = useCallback(() => {
-    setNoteComposerOpen(false);
     setNoteDraft('');
     setNoteAnchor(null);
   }, []);
@@ -584,7 +582,6 @@ export default function RecordingOverlayPage() {
     try {
       const anchor = await ApiClient.recordingNoteAnchor(recordingId);
       setNoteAnchor(anchor.timestamp);
-      setNoteComposerOpen(true);
       setIsDisplayPickerOpen(false);
       window.requestAnimationFrame(() => noteInputRef.current?.focus());
     } catch (err: any) {
