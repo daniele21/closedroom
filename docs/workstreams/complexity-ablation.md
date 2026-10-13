@@ -1,6 +1,6 @@
 # Complexity ablation — minimum complexity, equivalent product behavior
 
-Status: ACTIVE — ISOLATED EXPERIMENTS. No merge or PR to dev authorized.
+Status: PAUSED AFTER SELECTIVE REVIEW — ISOLATED EXPERIMENTS. No merge or PR to dev authorized.
 Experiment branch: `experiment/complexity-ablation`
 Read-only reference: `dev` at `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f` (2026-10-13). Refresh baseline identity on resume.
 
@@ -49,65 +49,38 @@ Reuse evidence from `architectural-consolidation.md` and `selective-efficiency.m
 
 Disjoint writes only; `dev` read-only.
 
-## Experiment ledger
+## Experiment ledger — isolated branch only
 
-### C3.1 — forwarding wrappers / empty finalizers (historical baseline only)
+All checks below are **source/synthetic or scoped**; they do not prove representative WKWebView, native TCC/audio, Metal/MLX, package size or release readiness. Temporary PRs #119–#123 targeted the experiment branch and were closed **unmerged**; their validation workflows were deleted. No macOS app builds or GitHub media uploads.
 
-Historical PR #118 merged to `dev` at `747a0e5`: router 759 → 721, forwarding wrappers and empty finalizers removed, source gates PASS; further merges not authorized.
+| Slice | Source change and scope | Evidence |
+| --- | --- | --- |
+| C3.1 **historical dev** | PR #118 removed ASR forwarding wrappers/empty finalizers; router 759→721 before experiment isolation | prior source preflight PASS |
+| C3.2 | Upload/path/stream now use one `SingleFileTranscriptionUseCase.apply_initial_diarization` policy: router 721→698, use-case 192→200 (net −15 LOC) | [38438564685](https://github.com/daniele21/closedroom/actions/runs/38438564685), 33 Python tests + lint/tsc PASS |
+| C1.1 | One overlay display acknowledgement for HTTP and SSE, preserves optimistic selection and picker recovery; −12 LOC | [38439081168](https://github.com/daniele21/closedroom/actions/runs/38439081168), overlay E2E PASS |
+| C1.2 / C2.1 | Derive screenshot/note saved feedback from Undo IDs (−2 overlay states); remove one unused Meeting preparation memo (−1 `useMemo`) | [38450289252](https://github.com/daniele21/closedroom/actions/runs/38450289252), overlay and preparation browser PASS |
+| C1.3 / C1.4 | Derive open note from anchor (−1 overlay state); share HTTP/SSE persisted progress projection while retaining separate transport lifecycles | [38454243679](https://github.com/daniele21/closedroom/actions/runs/38454243679), lint/tsc + note re-anchor E2E PASS |
+| C2.2 | One load request identity replaces 3 Meeting request/queue/generation refs; preserves stale-response rejection and queued reload | [38457647226](https://github.com/daniele21/closedroom/actions/runs/38457647226), preparation and saved-Meeting browser PASS |
+| C2.3 | Two-Meeting fixture with held late success and late 503; no production edit | [38464277299](https://github.com/daniele21/closedroom/actions/runs/38464277299), both race checkpoints PASS |
+| C2.4 | One internal list-loader policy for note/screenshot instances; each retains separate data/status/generation; **+12 production LOC** | [38465528741](https://github.com/daniele21/closedroom/actions/runs/38465528741), separate failure/retry recovery and overlay E2E PASS |
 
-### C3.2 — canonical initial diarization policy (KEEP, SCOPED SOURCE PASS)
+**Negative / deferred:** C3.3 would incorrectly collapse path ASR-only cache (diarization per call) with upload final-result cache (diarization in key); do **not** unify without differential evidence. C4 storage migrations, C5/C7 native lifecycle and C6 dependency/package dieting remain evidence-gated.
 
-Hypothesis: router `_apply_initial_diarization` duplicates `SingleFileTranscriptionUseCase._apply_diarization`, including disabled/completed/provider switching semantics.
+## Selective architecture review — 2026-10-13
 
-One canonical `SingleFileTranscriptionUseCase.apply_initial_diarization` now serves upload, streaming and path, preserving provider options and endpoints.
+**Decision: KEEP existing ablations on this isolated branch, with a stop on speculative cuts.** The current diff contains 5 production files, 4 test files and this workstream; no dependency/build/CI workflow change remains. All **9 source/test Git blobs exactly match** the successfully validated merge source `88c0a617909878f3235cdf0734fafba7dfb9a282` (run 38465528741). The intervening commits changed docs/temporary workflows only, so no further Actions were needed for this documentation-only review.
 
-**Result:** router 721 → 698; application 192 → 200; net −15 production lines/one policy. Tests 5+3+25 PASS (**38438564685**), not representative ASR/package proof.
+| Area | Decision and reason |
+| --- | --- |
+| C3.2 | **KEEP:** one diarization policy, cache owners stay separate |
+| C1.1–C1.4 | **KEEP:** 3 overlay states and duplicated SSE/HTTP policies removed without losing observable Undo/note flows |
+| C2.1–C2.3 | **KEEP:** −2 load refs, −1 unnecessary memo; delayed-result/failed-result regressions covered |
+| C2.4 | **KEEP but NO GENERALIZATION:** +12 LOC buys one canonical list-loading policy with two independent state instances; diagnostics and visual frames intentionally remain separate |
+| C3.3/C4–C7 | **BLOCKED / NOT PROVEN:** correctness/migration, representative native/capture or packaged performance gates |
 
-**C3.3 rejected/deferred:** path uses ASR-only cache and re-applies diarization per request; upload uses final-result cache identity including diarization. Unifying them wholesale risks stale/wrong speaker results and altered persistence. Keep distinct until dedicated differential evidence supports a minimal unification.
+**Measured source change vs `dev`: −24 net production LOC; overlay React `useState` declarations 34→31; Meeting load refs 3→1; one Meeting memo removed.** The C2.4 helper has fewer syntactic `useState` *call sites*, not fewer runtime React states. No performance, memory, inference-quality or release claim follows from this experiment.
 
-### C1.1 — overlay monitor acknowledgement (KEEP, browser PASS)
-
-`RecordingOverlayPage.tsx` 1,236 → 1,224 (−12). One `reconcileBackendDisplaySelection` replaces SSE/HTTP duplicated acknowledgement; preserves optimistic in-flight selection. Removed unused `loadDisplays` argument and duplicate picker recovery, retaining distinct error messages. Lint/tsc PASS (**38438564685**), synthetic overlay E2E PASS (**38439081168**). No target-Mac proof.
-
-### Evidence snapshot (2026-10-13)
-
-Comparison against `dev` `747a0e5`: 13 static guards PASS, including unchanged 16 transcription routes, distinct ASR path cache and canonical diarization policy. Temporary validation PR #119 closed unmerged. **38438564685**: 33 Python tests + frontend lint/tsc PASS; video-stage ffmpeg missing (environment). **38439081168**: browser overlay PASS after installing ffmpeg. No artifacts uploaded, workflow removed.
-
-**Cache constraint:** path rebuilds stats before diarization from ASR cache; upload caches final diarization-aware results. Do not unify cache keys without new semantic evidence.
-
-### C1.2 + C2.1 — state-owner/selector ablation (KEEP, scoped browser PASS)
-
-- C1.2: overlay feedback now derives from persisted `lastSavedScreenshotId` / `lastSavedNoteId`, shared with Undo. Removes **2 React states and six setter calls**, preserves both 4.5-second timers. Overlay now **1,216 lines vs 1,236** at baseline; React states **34 → 32**.
-- C2.1: `latestPreparation` uses `find` rather than allocating/memoizing a `preparationJobs` array only for `[0]`. Meeting page **2,184 vs 2,188 lines**, `useMemo` **7 → 6**; first-match semantics preserved.
-- [38450289252](https://github.com/daniele21/closedroom/actions/runs/38450289252): lint/tsc, overlay Undo and Meeting-preparation E2Es PASS. PR #119 closed unmerged; workflow deleted. Browser simulated.
-- Subtotal through C2.1: −39 production lines; no measured RAM/CPU effect.
-
-### C1.3 + C1.4 — canonical note visibility / backend progress (KEEP, browser PASS)
-
-- **C1.3:** removed independent `noteComposerOpen` state; derive it from `noteAnchor !== null`. All original open, close and stop paths set both together. Preserve focus, note timestamp, resize, Escape/Close/Cancel and Save.
-- **C1.4:** HTTP status and SSE now use one `applyBackendProgress` for recording-active, bytes, warnings, screenshot/note counts and acknowledged monitor. Its type derives from `ApiClient.getActiveRecording`. SSE signal meters and HTTP title/backend/timer remain source-specific.
-- Overlay 1,216 → 1,217 lines this wave (+1), but one fewer state and duplicated policy; vs `dev` 1,236 → 1,217, states 34 → 31. No performance proof.
-- [38454243679](https://github.com/daniele21/closedroom/actions/runs/38454243679): lint/tsc, screenshot and note open/close/re-anchor E2E PASS. PR #120 closed unmerged, workflow removed; no real-Mac proof.
-
-### C2.2 — one Meeting request token (KEEP, scoped browser PASS)
-
-Three independent load refs (`loadGenerationRef`, `loadQueuedRef`, `loadInFlightRef`) → one request token containing key, queued flag and promise. Identity rejects stale completions, same-key calls queue one refresh, cleanup invalidates prior requests. Nine effects and `useMeetingJobEvents` unchanged. Meeting page 2,188 → 2,186 lines (+2 since C2.1), but −2 refs.
-
-[Run 38457647226](https://github.com/daniele21/closedroom/actions/runs/38457647226): lint, tsc, `meeting-preparation` reconnect/recovery and `saved-meeting-fast-open` browser E2Es **PASS**. [PR #121](https://github.com/daniele21/closedroom/pull/121) closed unmerged; workflow removed. Synthetic browser does not prove all cross-meeting races or real WKWebView/TCC.
-
-Cumulative experiment: **−36 production lines**, −3 overlay states, −2 Meeting load refs, −1 Meeting memoization. No RAM/CPU measurement.
-
-### C2.3 — rapid Meeting switching / out-of-order responses (KEEP, browser PASS)
-
-Added two-Meeting synthetic HTTP race cases to `scripts/browser_saved_meeting_e2e.mjs`. While A's GET is held, navigate to B, observe B's replacement GET, then release A's late success: B's title/transcript remain correct. Reverse the route and release a stale **503 error**: current Meeting remains intact, no old error leaks. Checkpoints `07-late-success-ignored`, `08-late-error-ignored`. C2.2's existing request identity passed, **no new production edit**.
-
-[38464277299](https://github.com/daniele21/closedroom/actions/runs/38464277299) PASS: browser script syntax, lint, TypeScript, both Meeting race checkpoints and preparation reconnect/recovery. PR #122 closed unmerged; temporary workflow removed, no app build/media upload. Simulated browser does not prove WKWebView/TCC/physical audio.
-
-### C2.4 — shared screenshot/note list policy (KEEP, scoped browser PASS)
-
-`useMeetingItemList<T>` replaces two duplicated list loaders; screenshot and note data/status/generations/retry/reset remain independent. Diagnostics and visual frames stay separate. Source delta **+12 production lines** this wave; cumulative **−24** vs `dev`, one fewer duplicated loading policy. No RAM/CPU/latency measurements.
-
-[38465528741](https://github.com/daniele21/closedroom/actions/runs/38465528741) **PASS**: lint/tsc, `saved-meeting-fast-open` with `09-independent-list-recovery` (dual failure → screenshot retry preserves note error → notes retry), and overlay screenshot/note E2E. Synthetic browser; no .app, TCC or physical audio proof. PR #123 closed unmerged; one-shot workflow removed.
+**STOP / HOLD:** No speculative general-purpose hook, monolith file split or cache merge. A new ablation needs a reproduced defect or measurable improvement. Integration to `dev` requires separate user authorization, exact HEAD/base and repository-selected validation.
 
 ## Resume checkpoint
 
@@ -115,4 +88,4 @@ Added two-Meeting synthetic HTTP race cases to `scripts/browser_saved_meeting_e2
 - TARGET: `experiment/complexity-ablation`; no changes to `dev`. Validation PRs #119–#123 closed without merge; disposable workflows removed.
 - Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4/C2.2/C2.3/C2.4 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
 - Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
-- Next: characterize further owner/state duplications before code changes; all subsequent ablations remain isolated until explicitly authorized.
+- Next: HOLD after selective review; resume only with measurable or user-visible motivation or explicit integration authorization.
