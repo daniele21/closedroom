@@ -54,7 +54,7 @@ class PathTranscriptionAdapterContractTests(unittest.TestCase):
                 return_value=raw,
             ) as engine,
             patch(
-                "local_asr_server.routers.transcriptions._apply_initial_diarization",
+                "local_asr_server.services.transcription_application.SingleFileTranscriptionUseCase.apply_initial_diarization",
                 side_effect=lambda app, audio, payload, **kwargs: payload,
             ) as diarize,
             patch(
@@ -95,7 +95,7 @@ class PathTranscriptionAdapterContractTests(unittest.TestCase):
                 return_value=("local", "resolved-model", {}, {}),
             ),
             patch(
-                "local_asr_server.routers.transcriptions._apply_initial_diarization",
+                "local_asr_server.services.transcription_application.SingleFileTranscriptionUseCase.apply_initial_diarization",
                 side_effect=lambda app, audio, payload, **kwargs: payload,
             ),
             patch(
