@@ -173,12 +173,10 @@ export default function RecordingOverlayPage() {
 
   // HTTP and SSE report the same persisted counters. Keep their event-specific
   // responsibilities separate (timer, stream lifetime, recording metadata).
-  const applyBackendProgress = useCallback((data: {
-    bytes_written?: number;
-    warnings?: string[];
-    screenshot_count?: number;
-    note_count?: number;
-  }, backendDisplayId: number | null) => {
+  const applyBackendProgress = useCallback((
+    data: Awaited<ReturnType<typeof ApiClient.getActiveRecording>>,
+    backendDisplayId: number | null,
+  ) => {
     setIsRecording(true);
     setBytesWritten(data.bytes_written || 0);
     setWarnings(data.warnings || []);
