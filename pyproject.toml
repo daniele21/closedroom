@@ -42,6 +42,7 @@ dependencies = [
 app = [
     "rumps>=0.4.0",
     "pyobjc-framework-Cocoa>=10.0",
+    "pyobjc-framework-UserNotifications>=10.0",
     "pynput>=1.7.6",
 ]
 # Build tooling — install with: uv pip install -e ".[build]"

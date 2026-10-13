@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.10, <3.14"
 resolution-markers = [
     "python_full_version >= '3.11' and sys_platform == 'win32'",
@@ -866,6 +866,7 @@ dependencies = [
 app = [
     { name = "pynput" },
     { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-usernotifications" },
     { name = "rumps" },
 ]
 build = [
@@ -888,6 +889,7 @@ requires-dist = [
     { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6.0" },
     { name = "pynput", marker = "extra == 'app'", specifier = ">=1.7.6" },
     { name = "pyobjc-framework-cocoa", marker = "extra == 'app'", specifier = ">=10.0" },
+    { name = "pyobjc-framework-usernotifications", marker = "extra == 'app'", specifier = ">=10.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "rumps", marker = "extra == 'app'", specifier = ">=0.4.0" },
     { name = "soundfile", specifier = ">=0.12.0" },
@@ -2285,6 +2287,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/96/98/3b1fa78ddb1cd10d0edd4d49a3d00301d941f535694ac444fbed53ec7504/pyobjc_framework_quartz-12.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:8b238979d62b6e0b90d466477eee968d8f2f6720e850af2472e01cef349293b4", size = 218969, upload-time = "2026-05-30T12:19:58.528Z" },
     { url = "https://files.pythonhosted.org/packages/96/56/670a847a3a8ee2799f405b876a2f20914f22b4865f1d8157169095c21d94/pyobjc_framework_quartz-12.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:214c19aadfd100d9202994a22fbced804f7d60f8473de6f292111cc1668f9373", size = 219383, upload-time = "2026-05-30T12:20:12.444Z" },
     { url = "https://files.pythonhosted.org/packages/35/ef/598bd4d1fb796305648c03667938f08bb59ed4e0bcdc1591fd2c6238abf2/pyobjc_framework_quartz-12.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:4e0634ee9782e480587a074d1d08867fa7ef0d845c2f6cbaef6a48b7d2c3899f", size = 224436, upload-time = "2026-05-30T12:20:26.608Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-usernotifications"
+version = "12.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/c3/f1d43ac73b5fce42a00bcb68ac53edd7180217df60a25985e2477c9c389b/pyobjc_framework_usernotifications-12.2.tar.gz", hash = "sha256:b7773e84fe40e746f706055267ba2b1dc9e0a34e6575719f1e515354f72583a0", size = 33908, upload-time = "2026-05-30T12:45:59.61Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/27/8f/fca8c66401c80c8ddf0423e605efca534ab34761c573b00fbd936288bd64/pyobjc_framework_usernotifications-12.2-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:b1dac8eaa52624a1d26f90b47f9d0eeea15cd4180c559e54d66bbfc29277191b", size = 10174, upload-time = "2026-05-30T12:26:57.685Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/20/86b2be8ebbd9cea3b916001677ecf983b79ee754cc1848c8e628d19e8225/pyobjc_framework_usernotifications-12.2-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:495cbeec617a5ad270c1fd88b689b0516912615a8c849614dddf0a6e6e63e25b", size = 10173, upload-time = "2026-05-30T12:26:59.388Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/39/d9dbc214cd2516c6ad0ff28f97c50c0e8178b8b293f61974bf2efc5b4e2c/pyobjc_framework_usernotifications-12.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:b5533378b934430f73bb0092df19e54d67ab9f3e61ac8116a0480916c8c4c0b9", size = 10185, upload-time = "2026-05-30T12:27:00.986Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/e3/a962cbd3739cbb01b2b5697e336babb15307fb473500524bd7e730446b7e/pyobjc_framework_usernotifications-12.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:dbc51fc214446f622b4670bca7efb8969ad84cdee21672da3c872fa3aff5aff5", size = 10198, upload-time = "2026-05-30T12:27:02.504Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/8e/2a44292fc4e96682054f74a1aab1c303fa5caf5820e5cd67b0d23b52750f/pyobjc_framework_usernotifications-12.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:e329301b42181a95c2ac5f71491529ac1260afa9b26b16a104db275bbafdcb18", size = 10357, upload-time = "2026-05-30T12:27:04.132Z" },
 ]
 
 [[package]]
