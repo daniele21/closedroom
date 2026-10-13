@@ -104,7 +104,7 @@ jobs:
           python3 -m unittest discover -s test -p 'test_build_artifact_metadata.py' -v
 
   reuse:
-    name: Reuse equivalent validation evidence
+    name: Reuse equivalent remote validation evidence
     needs: select
     if: needs.select.outputs.stage != 'iteration'
     runs-on: ubuntu-latest
@@ -180,63 +180,12 @@ jobs:
         run: |
           brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           node scripts/browser_meeting_ui_e2e.mjs
-      - name: Upload saved Meeting browser evidence
-        if: ${{ always() && contains(needs.select.outputs.required_gates, 'browser-e2e') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: closedroom-browser-meeting-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/evidence/browser-meeting-ui/**
-          if-no-files-found: error
-          retention-days: 7
-
-  packaged-app:
-    name: Packaged app / ${{ needs.select.outputs.stage }} / ${{ needs.select.outputs.profile }}
-    needs: [select, reuse, tests]
-    if: >-
-      ${{ always() && contains(needs.select.outputs.required_gates, 'packaged-app') && needs.reuse.outputs.reused != 'true' && (needs.tests.result == 'success' || needs.tests.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: macos-14
-    timeout-minutes: 60
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.select.outputs.head_sha }}
-          fetch-depth: 0
-      - run: test "$(git rev-parse HEAD)" = "${{ needs.select.outputs.head_sha }}" && test "$(uname -m)" = "arm64"
-      - name: Verify Swift 6 packaging toolchain
-        run: test -d "$DEVELOPER_DIR" && xcodebuild -version && swift --version | grep -Eq 'Swift version 6\.'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install packaging toolchain
-        run: |
-          brew list uv >/dev/null 2>&1 || brew install uv
-          npm install --global pnpm@9
-          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-          brew list librsvg >/dev/null 2>&1 || brew install librsvg
-      - name: Build unique finalized artifact
-        env:
-          CLOSEDROOM_BUILD_CHANNEL: ci
-          CLOSEDROOM_BUILD_PYTHON_VERSION: "3.12"
-        run: bash scripts/build_artifact.sh --no-dmg
-      - name: Smoke finalized .app lifecycle
-        run: python3 scripts/smoke_packaged_app.py
-      - name: Upload build + smoke evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: closedroom-packaged-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            dist/**/build-manifest.json
-            dist/**/BUILD_CHANGELOG.md
-            dist/**/SHA256SUMS
-            dist/**/packaged-app-smoke.json
-          if-no-files-found: error
-          retention-days: 7
+      # FULL_MEDIA is exercised on the runner; bulky screenshots/videos stay
+      # ephemeral. CI publishes only tiny validation identity records.
 
   validation:
-    name: Repository validation / ${{ needs.select.outputs.stage }} / ${{ needs.select.outputs.profile }}
-    needs: [select, reuse, tests, packaged-app]
+    name: Remote source validation / ${{ needs.select.outputs.stage }} / ${{ needs.select.outputs.profile }}
+    needs: [select, reuse, tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -245,14 +194,18 @@ jobs:
           REUSED: ${{ needs.reuse.outputs.reused }}
           GATES: ${{ needs.select.outputs.required_gates }}
           TESTS: ${{ needs.tests.result }}
-          PACKAGED: ${{ needs.packaged-app.result }}
         shell: bash
         run: |
           set -euo pipefail
           if [[ "$REUSED" == "true" ]]; then exit 0; fi
           if [[ "$GATES" == *source-tests* && "$TESTS" != "success" ]]; then echo "source-tests gate failed: $TESTS" >&2; exit 1; fi
           if [[ "$GATES" == *browser-e2e* && "$TESTS" != "success" ]]; then echo "browser-e2e gate failed: $TESTS" >&2; exit 1; fi
-          if [[ "$GATES" == *packaged-app* && "$PACKAGED" != "success" ]]; then echo "packaged-app gate failed: $PACKAGED" >&2; exit 1; fi
+          if [[ "$GATES" == *packaged-app* ]]; then
+            echo "::warning::Packaged-app gate remains REQUIRED locally; GitHub Actions does not build the macOS app or verify that gate."
+          fi
+          if [[ "$GATES" == *release-critical* ]]; then
+            echo "::warning::Release-critical and target-Mac gates remain REQUIRED outside this remote source check."
+          fi
 
   evidence:
     name: Publish reusable validation evidence
@@ -277,7 +230,18 @@ jobs:
           e2e_environment=none
           if [[ "$GATES" == *browser-e2e* ]]; then e2e_environment=browser-macos-arm64-ci; fi
           mkdir -p validation-evidence
-          printf '{"head":"%s","source_tree":"%s","target_base":"%s","stage":"%s","profile":"%s","risk_dimensions":"%s","required_gates":"%s","e2e_environment":"%s","run_id":"%s"}\n' "$HEAD_SHA" "$SOURCE_TREE" "$BASE_SHA" "$STAGE" "$PROFILE" "$RISKS" "$GATES" "$e2e_environment" "$GITHUB_RUN_ID" > validation-evidence/evidence.json
+          # This record is REMOTE evidence only. Required local/release gates are
+          # explicitly pending and must never be reused as a packaged-app PASS.
+          jq -n --arg head "$HEAD_SHA" --arg tree "$SOURCE_TREE" \
+            --arg base "$BASE_SHA" --arg stage "$STAGE" --arg profile "$PROFILE" \
+            --arg risks "$RISKS" --arg gates "$GATES" \
+            --arg e2e "$e2e_environment" --arg run "$GITHUB_RUN_ID" \
+            '{head:$head, source_tree:$tree, target_base:$base, stage:$stage,
+              profile:$profile, risk_dimensions:$risks, required_gates:$gates,
+              ci_validated_gates:($gates | split(",") | map(select(. != "packaged-app" and . != "release-critical"))),
+              pending_external_gates:($gates | split(",") | map(select(. == "packaged-app" or . == "release-critical"))),
+              e2e_environment:$e2e, run_id:$run, evidence_scope:"remote-source-only"}' \
+            > validation-evidence/evidence.json
           echo "exact=validation-evidence-${HEAD_SHA}-${BASE_SHA}-${PROFILE}-${gate_key}" >> "$GITHUB_OUTPUT"
           echo "tree=validation-tree-evidence-${SOURCE_TREE}-${BASE_SHA}-${PROFILE}-${gate_key}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
