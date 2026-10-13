@@ -3,15 +3,15 @@
 Status: ACTIVE — METHOD / BASELINE DESIGN (no runtime ablations applied)
 Target: `dev`; work branch: `work/complexity-ablation`
 Source identity at plan bootstrap: `dev` `15ec412ce10cb5e49438f6e09271f2883ea65973` (2026-10-13)
-Read with: root/scoped AGENTS, `.engineering/baseline.json`, `.engineering/commands.json`, `.engineering/e2e.json`, `skills/structured-change/SKILL.md`, `skills/validate-change/SKILL.md`.
+Read root/scoped AGENTS and the repository-owned validation selector and workstream skills.
 
 ## Desired outcome and non-goals
 
-Reduce the minimum necessary complexity of ClosedRoom **without reducing supported features, changing the default user journey, modifying public/serialization contracts, or moving private data off-device**. Optimize for total ownership, states, dependencies, build/runtime resources and maintenance cost, not line count alone.
+Reduce ClosedRoom complexity **without losing features, changing user journeys/contracts, or moving private data off-device**. Optimize ownership, states, dependencies and build/runtime costs, not line count alone.
 
-Non-goals: new features or UX redesign; unverified model/provider elimination; wholesale framework rewrite; externalizing inference/recordings/telemetry; package or product renaming; silently changing support for browser fallback, cloud providers explicitly selected by users, or macOS packaging.
+Non-goals: redesign, unverified provider/model removal, wholesale rewrite, off-device processing, renaming, dropping browser fallback, opt-in providers or packaged app support.
 
-This is distinct from `architectural-consolidation` (canonical owner boundaries) and `selective-efficiency` (measured runtime/bundle improvements): consume their evidence and avoid duplicate implementations or overlapping PRs.
+Reuse `architectural-consolidation` and `selective-efficiency` evidence; do not duplicate their code or overlap PRs.
 
 ## Axes and boundaries
 
@@ -26,13 +26,13 @@ This is distinct from `architectural-consolidation` (canonical owner boundaries)
 
 ### AB-0: lock baseline and trace product coverage — READY
 
-1. Pin `dev` commit + tree, target/base, environment, dependencies and artifact identity; refresh before each candidate, never measure a moving baseline.
-2. Map current feature registry (`docs/features.md`) and `.engineering/e2e.json` to owners, API consumers, persisted artifacts, user flows and failure/recovery states. Include recording (native/browser), native permissions, optional screen context, manual screenshots, timestamped notes, overlay, meeting detection/menu bar, transcription/diarization, analysis/structured edits, archive/project memory, jobs/SSE, explicit optional providers, settings and packaged app lifecycle.
-3. Record *known baseline bugs* separately (e.g. menu bar visibility/detection on target Mac) and the open PRs touching those owners. A baseline bug cannot be interpreted as permission to delete a feature; bug fixing needs a separate lane.
-4. Capture contract fixtures: HTTP requests/responses/errors and auth/origin, persisted file/SQLite fixtures (old + fresh + interrupted), state transitions including cancellation/restart/fallback, representative UI journeys, supported model/provider options. Normalize nondeterministic IDs/timestamps only when equivalence permits; do not snapshot private audio/transcripts into telemetry.
-5. Record performance baselines on fixed hardware/scenarios when applicable: app/DMG and dependency closure bytes, launch time, idle/recording/AI RSS, cancellation/cleanup time, latency and resource peak. Separate deterministic CI fixtures from representative Mac/ASR quality. Capture source/config/environment identity, sample count and noise bands.
+1. Pin `dev` commit/tree, environment and artifact; refresh for each candidate.
+2. Map `docs/features.md` and `.engineering/e2e.json` to owners, API/persistence consumers, flows and failure states: native/browser recording and permissions, visuals/screenshots/notes/overlay, detection/menu bar, transcription/diarization, analysis/edits, archive/projects, jobs, opt-in providers, settings and packaging.
+3. Separate known bugs and open PRs from ablation evidence; existing failures are not permission to remove features.
+4. Capture HTTP/auth, old/new/interrupted storage, cancellation/restart/fallback, UI and model/provider fixtures; normalize nondeterminism only where safe, never expose private content.
+5. On fixed hardware/scenarios, measure artifact/dependency bytes, startup, idle/recording/AI RSS, latency and cleanup; record samples/noise bands. Separate fake/CI and representative Mac/ASR evidence.
 
-**Gate:** no destructive experiment until the affected current behavior is mapped and a regression oracle exists. Baseline status: PENDING measurement/evidence; documentation and existing tests are not proof of runtime equivalence.
+**Gate:** no destructive experiment without mapped behavior and a regression oracle. Baseline measurements: PENDING.
 
 ### AB-1: inventory candidates and value — READY
 
@@ -46,25 +46,25 @@ Metrics are **a vector** (not a vanity LOC score):
 - Reliability: lifecycle/cancel/restart paths, test pass and behavioral coverage, output compatibility.
 - Maintenance: deletion of a policy/owner/branch preferred over merely moving its lines into a new abstraction.
 
-Give each metric a baseline and an expected direction. Choose a primary metric before implementation, add secondary guardrails and record negative results. Do **not** optimize a single total score by trading away protected behavior.
+Choose one primary before/after metric, guardrails, and record negative results. Never trade protected behavior for an aggregate score.
 
 ### AB-2: one controlled ablation at a time — READY after AB-0/1
 
-1. State falsifiable hypothesis: e.g. "this policy branch duplicates canonical owner X and can be removed, preserving contract Y".
-2. Start a short-lived branch from *refreshed* `dev`; keep the patch isolated and reversible. No permanent feature flags, duplicated owners or speculative scaffolding.
-3. First build a differential or characterization test for the changed seam using identical fixed inputs; then remove/converge **one** policy/branch/adapter/dependency.
-4. Run focused tests, compare API/UI/persistence/error semantics, then repository-selected gates. Expand to affected automated E2E, and FULL_MEDIA for material UI sequence/timing. Do not treat deterministic fake evidence as physical macOS/audio/model proof.
-5. For AI output, assert preserved model/provider configuration, prompts, inputs, persistence and quality thresholds; do not require byte-equal stochastic generation. If model/quality itself could change, stop and obtain representative quality evidence.
-6. Benchmark before/after with same source scenario, model/cache/hardware/settings, repeat enough to distinguish noise. Reject a regression outside recorded uncertainty or stated product limits; unknown = NOT PROVEN.
-7. Decide **KEEP**, **REWORK**, **REVERT**, or **BLOCKED_FOR_EVIDENCE**. KEEP requires equivalence + meaningful reduction in at least one complexity dimension + no material adverse tradeoff. "Tests passed" without improvement is not sufficient.
-8. Before PR/integration inspect the complete diff, target/base and evidence identity; use existing selector/preflight, avoid GitHub Actions builds/artifact uploads and redundant reruns. Rebase other lanes on new `dev` promptly.
+1. State one falsifiable hypothesis about redundant policy and preserved contract.
+2. Branch from refreshed `dev`; one reversible change, no permanent flags or second owners.
+3. Characterize the seam with identical-input differential tests, then remove/converge one mechanism.
+4. Compare API/UI/storage/errors, run selected gates + affected E2E; FULL_MEDIA for material UI timing/sequence. Fakes never prove physical Mac/MLX.
+5. Preserve model/provider/prompt/input/persistence; stochastic text need not be byte-equal. Obtain representative evidence if AI quality could change.
+6. Repeat before/after benchmarks with identical model/cache/hardware/settings. Regression beyond uncertainty/limits = reject; unknown = NOT PROVEN.
+7. Decide **KEEP/REWORK/REVERT/BLOCKED_FOR_EVIDENCE**. KEEP requires equivalence + meaningful reduction + no adverse tradeoff.
+8. Before integration inspect full diff and exact head/base; use selector/preflight, no Actions builds or unnecessary reruns. Rebase remaining lanes.
 
 ### AB-3: convergence and stopping rule — READY after first KEEP
 
-- Integrate independent, proven small changes; do not accumulate a large rewrite branch. Update canonical feature/architecture/current-state docs only when their truth is affected.
-- Maintain an **ablation ledger**: baseline, hypothesis, one changed mechanism, selected risks/gates, result vector, failure classification, retained/rejected decision and exact source/evidence reference.
-- Stop when remaining candidates are unproven, have small marginal benefit, increase conceptual ownership, or require a behavior contract change. Preserve failed/reverted experiments as decision evidence, not dead code.
-- Reconfirm target-Mac obligations at RELEASE for changes affecting physical capabilities. `dev` merge or passing source tests does not prove stable-source release readiness.
+- Integrate proven small changes, not a rewrite; update canonical docs when affected.
+- Keep a ledger: baseline, hypothesis, single change, risks/gates, metrics, result, exact evidence.
+- Stop when gain is marginal, unproven, or adds conceptual complexity. Preserve negative evidence, not dead code.
+- Target-Mac obligations remain RELEASE blockers; source tests do not prove release readiness.
 
 ## Initial, evidence-based candidate queue (not removal decisions)
 
