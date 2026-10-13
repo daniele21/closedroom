@@ -52,7 +52,7 @@ The public DMG is a byte-for-byte copy of the qualified production DMG. Staging 
 | GRP-5 | Production build/sign/notarize is local-only on the release Mac | LOCAL TOOLING DONE; APPLE AUTHORITY BLOCKED |
 | GRP-6 | First public GitHub Release from exact stable source | BLOCKED |
 
-GRP-5 execution is externally blocked until the `production-release` environment and Apple Developer distribution authority are configured. GRP-6 depends on GRP-1..5; never weaken signing/notarization truth to bypass that block.
+GRP-5 release qualification remains blocked pending local Apple Developer signing/notarization authority. GRP-6 depends on GRP-1..5; never weaken signing/notarization truth to bypass that block.
 
 ## GRP-1 — stable source vs distribution
 
