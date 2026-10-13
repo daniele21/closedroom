@@ -1,0 +1,35 @@
+name: Temporary Meeting accessories ablation check
+
+on:
+  pull_request:
+    branches: [experiment/complexity-ablation]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  scoped:
+    name: Frontend contracts and Meeting accessory journeys
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert experiment base, not dev
+        run: |
+          test "$GITHUB_EVENT_NAME" = "pull_request"
+          test "$GITHUB_BASE_REF" = "experiment/complexity-ablation"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Source-only test dependencies, no app build
+        run: |
+          npm install --global pnpm@9.15.9
+          cd frontend && pnpm install --frozen-lockfile
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+      - name: Syntax, lint and TypeScript
+        run: |
+          node --check scripts/browser_saved_meeting_e2e.mjs
+          cd frontend && pnpm run lint && pnpm exec tsc --noEmit
+      - name: Saved Meeting, races and independent accessory retries
+        run: E2E_SOURCE_REVISION="$GITHUB_SHA" node scripts/browser_saved_meeting_e2e.mjs
+      - name: Overlay screenshot and anchored note journey
+        run: E2E_SOURCE_REVISION="$GITHUB_SHA" node scripts/browser_call_overlay_screenshot_e2e.mjs
