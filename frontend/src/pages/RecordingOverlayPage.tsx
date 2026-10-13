@@ -161,6 +161,21 @@ export default function RecordingOverlayPage() {
     }
   }, []);
 
+  // One acknowledgement policy for both SSE updates and the HTTP status snapshot.
+  // Pending optimistic selection must not be overwritten by a stale backend display.
+  const reconcileBackendDisplaySelection = useCallback((backendDisplayId: number | null) => {
+    const pendingSelection = pendingDisplayIdRef.current;
+    if (backendDisplayId === null || (pendingSelection !== null && backendDisplayId !== pendingSelection)) {
+      return;
+    }
+    selectedDisplayIdRef.current = backendDisplayId;
+    setSelectedDisplayId(backendDisplayId);
+    if (pendingSelection === backendDisplayId) {
+      pendingDisplayIdRef.current = null;
+      setPendingDisplayId(null);
+    }
+  }, []);
+
   const connectSSE = useCallback((recId: string) => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -203,18 +218,7 @@ export default function RecordingOverlayPage() {
         setScreenshotCount(data.screenshot_count || 0);
         setNoteCount(data.note_count || 0);
         const backendDisplayId = data.screenshot_display_id ? Number(data.screenshot_display_id) : null;
-        const pendingSelection = pendingDisplayIdRef.current;
-        if (
-          backendDisplayId !== null
-          && (pendingSelection === null || backendDisplayId === pendingSelection)
-        ) {
-          selectedDisplayIdRef.current = backendDisplayId;
-          setSelectedDisplayId(backendDisplayId);
-          if (pendingSelection === backendDisplayId) {
-            pendingDisplayIdRef.current = null;
-            setPendingDisplayId(null);
-          }
-        }
+        reconcileBackendDisplaySelection(backendDisplayId);
 
         if (data.started_at && !startedAtRef.current) {
           startedAtRef.current = recordingStartedAtMs(data.started_at);
@@ -229,7 +233,7 @@ export default function RecordingOverlayPage() {
       sse.close();
       eventSourceRef.current = null;
     };
-  }, []);
+  }, [reconcileBackendDisplaySelection]);
 
   const checkActiveRecording = useCallback(async () => {
     try {
@@ -254,17 +258,7 @@ export default function RecordingOverlayPage() {
         setNoteCount(activeData.note_count || 0);
         const backendDisplayId = activeData.screenshot_display_id ?? null;
         const pendingSelection = pendingDisplayIdRef.current;
-        if (
-          backendDisplayId !== null
-          && (pendingSelection === null || backendDisplayId === pendingSelection)
-        ) {
-          selectedDisplayIdRef.current = backendDisplayId;
-          setSelectedDisplayId(backendDisplayId);
-          if (pendingSelection === backendDisplayId) {
-            pendingDisplayIdRef.current = null;
-            setPendingDisplayId(null);
-          }
-        }
+        reconcileBackendDisplaySelection(backendDisplayId);
         if ((activeData.capture_backend || 'browser') === 'native') {
           const preferredDisplayId = pendingSelection ?? backendDisplayId ?? selectedDisplayIdRef.current;
           void loadDisplays(preferredDisplayId ?? undefined);
@@ -306,7 +300,7 @@ export default function RecordingOverlayPage() {
       bc.postMessage({ type: 'request-status' });
       bc.close();
     }
-  }, [connectSSE, loadDisplays, logOverlay]);
+  }, [connectSSE, loadDisplays, logOverlay, reconcileBackendDisplaySelection]);
 
   // Poll/Check state on mount and connect SSE/BroadcastChannel
   useEffect(() => {
