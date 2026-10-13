@@ -52,4 +52,18 @@ args=(release create "$tag" --repo "$repo" --draft --verify-tag
 if [[ "$release_state" == "prerelease" ]]; then args+=(--prerelease); fi
 for name in "${files[@]}"; do args+=("$output_dir/assets/$name"); done
 gh "${args[@]}"
-echo "Created DRAFT GitHub Release $tag from local qualified artifact; publication remains manual."
+# Re-read GitHub's release record: uploaded bytes must match qualified staging.
+release_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' "repos/${repo}/releases/tags/${tag}")"
+expected_prerelease=false
+if [[ "$release_state" == "prerelease" ]]; then expected_prerelease=true; fi
+jq -e --arg tag "$tag" --arg title "ClosedRoom $tag" \
+  --argjson prerelease "$expected_prerelease" \
+  '.draft == true and .tag_name == $tag and .name == $title and .prerelease == $prerelease' \
+  <<<"$release_json" >/dev/null || { echo "Draft release identity mismatch" >&2; exit 1; }
+expected_assets="$(jq -r '.assets[] | [.name, (.bytes | tostring), ("sha256:" + .sha256)] | @tsv' "$plan" | sort)"
+actual_assets="$(jq -r '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' <<<"$release_json" | sort)"
+[[ "$expected_assets" == "$actual_assets" ]] || {
+  echo "GitHub Release asset name, byte count or SHA-256 digest mismatch" >&2
+  exit 1
+}
+echo "Created verified DRAFT GitHub Release $tag from local qualified artifact; publication remains manual."
