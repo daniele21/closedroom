@@ -41,7 +41,6 @@ export default function RecordingOverlayPage() {
   const [isDisplayPickerOpen, setIsDisplayPickerOpen] = useState(false);
   const [pendingDisplayId, setPendingDisplayId] = useState<number | null>(null);
   const [isSelectingDisplay, setIsSelectingDisplay] = useState(false);
-  const [screenshotFeedback, setScreenshotFeedback] = useState<'idle' | 'saved'>('idle');
   const [lastSavedScreenshotId, setLastSavedScreenshotId] = useState<string | null>(null);
   const [isUndoingScreenshot, setIsUndoingScreenshot] = useState(false);
   const [noteCount, setNoteCount] = useState(0);
@@ -51,7 +50,6 @@ export default function RecordingOverlayPage() {
   const [isAnchoringNote, setIsAnchoringNote] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isUndoingNote, setIsUndoingNote] = useState(false);
-  const [noteFeedback, setNoteFeedback] = useState<'idle' | 'saved'>('idle');
   const [lastSavedNoteId, setLastSavedNoteId] = useState<string | null>(null);
 
   const logOverlay = useCallback((level: 'info' | 'warn' | 'error', message: string, data?: any) => {
@@ -505,11 +503,9 @@ export default function RecordingOverlayPage() {
         selectedDisplayIdRef.current = saved.display_id;
         setSelectedDisplayId(saved.display_id);
       }
-      setScreenshotFeedback('saved');
       setLastSavedScreenshotId(saved.screenshot_id);
       if (screenshotFeedbackTimerRef.current) window.clearTimeout(screenshotFeedbackTimerRef.current);
       screenshotFeedbackTimerRef.current = window.setTimeout(() => {
-        setScreenshotFeedback('idle');
         setLastSavedScreenshotId(null);
       }, 4500);
       logOverlay('info', 'Screenshot captured and stored successfully', {
@@ -543,7 +539,6 @@ export default function RecordingOverlayPage() {
     try {
       await ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId);
       setLastSavedScreenshotId(null);
-      setScreenshotFeedback('idle');
       setScreenshotCount((current) => Math.max(0, current - 1));
       setLastScreenshotAt(null);
       if (screenshotFeedbackTimerRef.current) {
@@ -615,11 +610,9 @@ export default function RecordingOverlayPage() {
       });
       setNoteCount((current) => Math.max(current + 1, saved.sequence + 1));
       setLastSavedNoteId(saved.note_id);
-      setNoteFeedback('saved');
       closeNoteComposer();
       if (noteFeedbackTimerRef.current) window.clearTimeout(noteFeedbackTimerRef.current);
       noteFeedbackTimerRef.current = window.setTimeout(() => {
-        setNoteFeedback('idle');
         setLastSavedNoteId(null);
       }, 4500);
       logOverlay('info', 'User note committed', {
@@ -644,7 +637,6 @@ export default function RecordingOverlayPage() {
       await ApiClient.deleteRecordingNote(recordingId, lastSavedNoteId);
       setNoteCount((current) => Math.max(0, current - 1));
       setLastSavedNoteId(null);
-      setNoteFeedback('idle');
       if (noteFeedbackTimerRef.current) {
         window.clearTimeout(noteFeedbackTimerRef.current);
         noteFeedbackTimerRef.current = null;
@@ -1072,7 +1064,7 @@ export default function RecordingOverlayPage() {
         </div>
 
         <div className={`flex h-9 shrink-0 overflow-hidden rounded-lg border ${
-          noteFeedback === 'saved'
+          lastSavedNoteId !== null
             ? 'border-amber-200/30 bg-amber-200/10'
             : 'border-white/10 bg-white/[0.08]'
         }`}>
@@ -1088,12 +1080,12 @@ export default function RecordingOverlayPage() {
           >
             {isAnchoringNote || isSavingNote ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : noteFeedback === 'saved' ? (
+            ) : lastSavedNoteId !== null ? (
               <Check className="h-3.5 w-3.5 text-amber-100" aria-hidden="true" />
             ) : (
               <PencilLine className="h-3.5 w-3.5 text-amber-100/85" aria-hidden="true" />
             )}
-            <span>{noteFeedback === 'saved' ? 'Saved' : noteCount}</span>
+            <span>{lastSavedNoteId !== null ? 'Saved' : noteCount}</span>
           </button>
           {lastSavedNoteId && (
             <button
@@ -1109,7 +1101,7 @@ export default function RecordingOverlayPage() {
         </div>
 
         <div className={`flex h-9 shrink-0 overflow-hidden rounded-lg border ${
-          screenshotFeedback === 'saved'
+          lastSavedScreenshotId !== null
             ? 'border-emerald-300/30 bg-emerald-300/12'
             : 'border-white/10 bg-white/[0.08]'
         }`}>
@@ -1118,7 +1110,7 @@ export default function RecordingOverlayPage() {
             onClick={handleCaptureScreenshot}
             disabled={isStopping || isCapturingScreenshot || isUndoingScreenshot || !isRecording || captureBackend !== 'native' || selectedDisplayId === null}
             className={`flex h-full items-center gap-1.5 px-2.5 text-[10px] font-semibold transition active:scale-[0.97] ${
-              screenshotFeedback === 'saved'
+              lastSavedScreenshotId !== null
                 ? 'text-emerald-100'
                 : 'text-white/90 hover:bg-white/[0.05]'
             } disabled:cursor-not-allowed disabled:opacity-35`}
@@ -1128,12 +1120,12 @@ export default function RecordingOverlayPage() {
           >
             {isCapturingScreenshot ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : screenshotFeedback === 'saved' ? (
+            ) : lastSavedScreenshotId !== null ? (
               <Check className="h-3.5 w-3.5" aria-hidden="true" />
             ) : (
               <Camera className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            <span>{screenshotFeedback === 'saved' ? 'Saved' : screenshotCount}</span>
+            <span>{lastSavedScreenshotId !== null ? 'Saved' : screenshotCount}</span>
           </button>
 
           {lastSavedScreenshotId && (
