@@ -60,9 +60,9 @@ PR #118 previously integrated into `dev` at `747a0e5`. Router 759 -> 721 lines, 
 
 Hypothesis: router `_apply_initial_diarization` duplicates `SingleFileTranscriptionUseCase._apply_diarization`, including disabled/completed/provider switching semantics.
 
-Change on `experiment/complexity-ablation`: one `SingleFileTranscriptionUseCase.apply_initial_diarization` now owns both; upload nonstreaming, upload streaming and path adapter call it, using unchanged provider/region/model arguments. No altered route definitions or runtime/model/provider choice.
+One canonical `SingleFileTranscriptionUseCase.apply_initial_diarization` now serves upload, streaming and path, preserving provider options and endpoints.
 
-**Static impact:** router 721 -> 698 lines (−23); application 192 -> 200 (+8); **net −15 production lines and one duplicated policy eliminated**. Expanded `test_transcription_application.py` and `test_transcription_router_ablation.py` to cover disabled, completed, switching, response/error and cache-stage behavior. Tests validated in run **38438564685** (all 5 application + 3 router-ablation + 25 recording API tests PASS). No representative ASR quality, performance or packaged runtime claim.
+**Result:** router 721 → 698; application 192 → 200; net −15 production lines/one policy. Tests 5+3+25 PASS (**38438564685**), not representative ASR/package proof.
 
 **C3.3 rejected/deferred:** path uses ASR-only cache and re-applies diarization per request; upload uses final-result cache identity including diarization. Unifying them wholesale risks stale/wrong speaker results and altered persistence. Keep distinct until dedicated differential evidence supports a minimal unification.
 
@@ -70,11 +70,11 @@ Change on `experiment/complexity-ablation`: one `SingleFileTranscriptionUseCase.
 
 `RecordingOverlayPage.tsx` 1,236 -> 1,224 lines (−12); preserve all 20 `useState` declarations, eight effects, one SSE channel and all note/screenshot/Stop handlers. A single `reconcileBackendDisplaySelection` callback now mediates *both* the SSE event and the HTTP active-status snapshot, without allowing stale acknowledgements to overwrite an optimistic monitor selection. Also removed unused `loadDisplays(_autoSelectSingle)` parameter and deduplicated picker-recovery actions for two distinct backend error codes while preserving their distinct user-facing messages.
 
-Structural proof: identical count of SSE channels and state/effect hooks, both ingestion paths call the same callback, and untouched undo/note-handler source spans. No change to local capture, API, persisted artifacts or user flows intended. Frontend lint/TypeScript PASS in run **38438564685**; synthetic call-overlay screenshot/note browser E2E PASS in run **38439081168**. No physical WKWebView/TCC/ScreenCaptureKit proof; no UX redesign.
+Source proof: same SSE and hooks, unchanged note/undo handlers. Lint/tsc PASS (**38438564685**); browser overlay PASS (**38439081168**). Physical Mac proof separate.
 
 ### Validation snapshot — 2026-10-13
 
-Pinned source comparison against `dev` `747a0e5`: 13 static differential conditions PASS, including preservation of all 16 transcription route decorators, unchanged ASR path cache adapter, one canonical initial-diarization body (statement-for-statement identical to baseline router policy), one overlay monitor-acknowledgement rule and unchanged note/undo logic. Structural delta across modified production modules is **−27 lines** (C3.2 −15; C1.1 −12), not a performance or app-size claim.
+Static comparison to `dev` `747a0e5`: 13 checks PASS, including 16 unchanged transcription routes, ASR cache adapter, identical initial diarization body and note/undo handlers. C3.2+C1.1 net −27 lines; no performance claim.
 
 **Validation evidence:** temporary PR [#119](https://github.com/daniele21/closedroom/pull/119) targeting the experiment branch was **closed unmerged**. Run **38438564685** passed 33 Python tests plus frontend lint/tsc; browser run hit environment-only `spawn ffmpeg ENOENT` when assembling video after its checkpoints. Run **38439081168** installed the missing `ffmpeg` and passed the complete `call-overlay-screenshot-evidence` browser journey, including MP4 assembly; neither run uploaded artifacts. Workflow `.github/workflows/ablation-one-shot.yml` was deleted afterward. The application source was unchanged across validation runs; remaining commits affect only experimental documentation/validation workflow. These scoped results do not qualify packaged macOS app, native TCC/audio, or model quality.
 
@@ -91,6 +91,6 @@ Pinned source comparison against `dev` `747a0e5`: 13 static differential conditi
 
 - BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
 - TARGET: `experiment/complexity-ablation`; no changes to `dev`. Verification-only PR #119 was closed without merge and its temporary workflow removed.
-- Confirmed: C3.1 merged before branch isolation; C3.2 and C1.1 are KEEP on experiment branch with 33 Python tests + frontend lint/tsc + synthetic browser journey PASS from #119 evidence.
+- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1 KEEP on experiment branch; 33 Python tests, lint/tsc and both UI journeys PASS.
 - Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
 - Next: characterize further owner/state duplications before code changes; all subsequent ablations remain isolated until explicitly authorized.
