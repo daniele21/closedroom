@@ -48,11 +48,11 @@ The public DMG is a byte-for-byte copy of the qualified production DMG. Staging 
 | GRP-1 | Stable source promotion separated from binary distribution | DONE |
 | GRP-2 | Canonical product version drives bundle/build/release identity | DONE |
 | GRP-3 | Release notes/categories and public asset naming are contracts | DONE |
-| GRP-4 | Tag/main-bound workflow creates draft Release from qualified artifacts | DONE |
-| GRP-5 | Production workflow is ready; protected Apple authority can qualify its output | AUTOMATION DONE; AUTHORITY BLOCKED |
+| GRP-4 | Tag/main-bound local command creates a draft Release from locally qualified artifacts | LOCAL COMMAND IMPLEMENTED |
+| GRP-5 | Production build/sign/notarize is local-only on the release Mac | LOCAL TOOLING DONE; APPLE AUTHORITY BLOCKED |
 | GRP-6 | First public GitHub Release from exact stable source | BLOCKED |
 
-GRP-5 execution is externally blocked until the `production-release` environment and Apple Developer distribution authority are configured. GRP-6 depends on GRP-1..5; never weaken signing/notarization truth to bypass that block.
+GRP-5 release qualification remains blocked pending local Apple Developer signing/notarization authority. GRP-6 depends on GRP-1..5; never weaken signing/notarization truth to bypass that block.
 
 ## GRP-1 — stable source vs distribution
 
@@ -68,19 +68,15 @@ Root `VERSION` is the sole product-version owner (`0.2.0`). `scripts/product_ver
 
 It copies unchanged DMG bytes to the public name, copies manifest/changelog, regenerates public checksums and emits `RELEASE_NOTES.md` + `release-plan.json`. `release_prepare` is canonical; fixture tests prove same-byte staging and fail closed. README download links remain unchanged until a release exists.
 
-## GRP-4 — draft GitHub Release automation
+## GRP-4 — local draft GitHub Release publication
 
-`.github/workflows/draft-release.yml` is manual-only and has `actions: read` + `contents: write`. It is dispatched from `main`, requires an existing `vX.Y.Z` tag whose commit is in `main` history, matches the supplied source SHA and canonical `VERSION`, and delegates all artifact validation/staging to GRP-3.
+GitHub Actions intentionally does not run release builds, signing, notarization or asset uploads. Run `scripts/publish_local_draft_release.sh` **on the release Mac**, after GRP-3 has locally qualified the same immutable artifact. The script requires a clean exact tagged checkout in `main` history, matching `VERSION` and curated release notes. `scripts/prepare_github_release.py` checks the Developer-ID/notarization/stapling/Gatekeeper evidence and checksums, and stages unchanged DMG bytes.
 
-Artifact trust is not user-selectable: `artifact_run_id` must identify a successful `workflow_dispatch` run of `.github/workflows/production-release-artifact.yml` from `main` at the same SHA; the artifact name is derived as `closedroom-production-release-<SHA>`. GRP-5 owns creation of that trusted artifact.
+The local command creates a **draft only**, refuses an existing release instead of overwriting it, and verifies staged inventory; publication remains an explicit separate action. Only public release assets are intentionally uploaded to GitHub Releases, never private meeting data or GitHub Actions artifacts.
 
-The workflow creates/updates **draft only**, refuses to modify published releases or unexpected existing assets, uploads GRP-3 assets and verifies GitHub's resulting asset name, byte count and SHA-256 digest. It never calls a build command. Final publication remains explicit.
+## GRP-5 — local-only Apple distribution authority
 
-## GRP-5 — Apple distribution authority
-
-`.github/workflows/production-release-artifact.yml` is manual-only, read-only and targets `production-release`. It accepts an exact tagged SHA in `main` history, delegates production build/sign/notarize/staple/Gatekeeper work to the existing canonical builder, validates the resulting release lineage and uploads only the trusted same-SHA artifact consumed by GRP-4. Run-scoped authority is kept ephemeral and cleaned after execution.
-
-`release_production_artifact` is the canonical dispatch command. The repository environment protection/secrets and actual Apple authority are external configuration: until present and proven by a successful run, GRP-5 distribution qualification remains `BLOCKED`.
+`release_build` invokes the canonical `scripts/build_production_artifact.py` locally with the release Mac's Developer ID and notarytool profile. The retired `.github/workflows/production-release-artifact.yml` and `draft-release.yml` are not alternate build owners or distribution paths. Real Apple authority and representative target-Mac confirmation remain required for a public stable release; absence of that evidence is BLOCKED, not PASS.
 
 ## GRP-6 — first public release
 
@@ -96,7 +92,7 @@ Version/build/workflow changes are FULL because they touch release/build/CI iden
 
 ## Resume checkpoint
 
-- GRP-1..4 are integrated on `dev@685aad5e6040097631f0c9bb4562ae57c2dc72fa`; GRP-5 automation is implemented on `chore/production-release-artifact` and needs exact-head integration validation;
-- real GRP-5 success remains blocked by `production-release` environment configuration plus Apple Developer authority; automation tests are not distribution qualification;
+- GRP-1..3 remain integrated; GRP-4/5 now use only local Mac build/staging and explicit draft upload rather than retired GitHub-hosted release workflows;
+- real GRP-5 success remains blocked by local Apple Developer signing/notarization authority; source/contract tests are not distribution qualification;
 - historical `v0.1.0` exists; no GitHub Release exists; next product line is `0.2.0` / `v0.2.0`;
 - stable-source work is independent: complete PRS-18 exact-candidate target-Mac evidence, then promote `dev -> main` before any `v0.2.0` distribution run.

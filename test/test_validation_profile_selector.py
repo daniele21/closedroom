@@ -66,6 +66,13 @@ class ValidationProfileSelectorTests(unittest.TestCase):
         result = selector.select_profile(["src/local_asr_server/runtime/service_manager.py"])
         self.assertEqual(result["profile"], "strong")
 
+    def test_packaged_gate_is_preserved_for_local_validation(self):
+        result = selector.select_profile(["src/local_asr_server/runtime/service_manager.py"])
+        self.assertIn("packaged-app", result["required_gates"])
+        release = selector.select_profile(["README.md"], stage="release")
+        self.assertIn("packaged-app", release["required_gates"])
+        self.assertIn("release-critical", release["required_gates"])
+
     def test_e2e_contract_dot_path_is_strong(self):
         result = selector.select_profile([".engineering/e2e.json"])
         self.assertEqual(result["profile"], "strong")
