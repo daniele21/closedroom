@@ -1,6 +1,6 @@
 # Complexity ablation — behavior-preserving reduction
 
-Status: ACTIVE — METHOD / BASELINE DESIGN (no runtime ablations applied)
+Status: ACTIVE — C3.1 IMPLEMENTED; integration evidence pending
 Target: `dev`; work branch: `work/complexity-ablation`
 Source identity at plan bootstrap: `dev` `15ec412ce10cb5e49438f6e09271f2883ea65973` (2026-10-13)
 Read root/scoped AGENTS and the repository-owned validation selector and workstream skills.
@@ -103,16 +103,16 @@ Release-only representative Mac validations where required
 
 A lane has exclusive owning files. Native/menu bar lanes C5/C7 remain blocked until physical behavior/proofs and overlapping PRs settle. Do not run simultaneous changes against `useRecorder`, `RecordingStore`, database migrations, menu-bar shell or build selector from separate PRs.
 
-## First executable slice and acceptance
+## C3.1 — first controlled experiment
 
-**Slice 0 (no behavior change):**
-- Produce the feature-to-contract matrix and a reproducible complexity measurement/scoreboard referencing a pinned `dev` baseline.
-- Link existing tests and E2E owners rather than duplicating suites.
-- Mark coverage gaps and unavailable host/target-Mac measurements truthfully.
-- Identify one C3 or C1 small reversible hypothesis with direct consumers, before/after metric, differential test and selected gates; prefer C3 if UI/overlay target-Mac bugs are still active.
-- Capture a checkpoint with exact refreshed source/tree/base, what was measured, unresolved gaps and one next falsification action.
+Hypothesis: four private route aliases of canonical `TranscriptionService` methods and three `finally: pass` blocks add no policy. Remove them while keeping route/API, cache, ASR, diarization and persistence behavior identical.
 
-**Success:** a replicable experiment methodology and at least one future independently verifiable ablation candidate, not a numerical lines-deleted target. No runtime code has been changed by creating this plan.
+- Measured: `routers/transcriptions.py` **759 -> 721 lines (-38 / -5.0%)**, four forwarders + three empty finalizers removed, same endpoint decorators. This is owner-local, not a product-wide improvement.
+- Characterization: new `test/test_transcription_router_ablation.py` covers path JSON/text response, provider option projection, persistence and 404/500; existing `test_transcription_application`, `test_recording_api` and transcription-workflow contracts remain required.
+- Gate: **INTEGRATION / STRONG candidate**, subject to repository selector; automated tests **PENDING**, so KEEP is not established yet. No material UI, packaging or target-Mac behavior intended.
+- Important boundary: upload uses final-result/diarization-aware caching while path uses ASR-result caching; unifying them is a **separate** C3.2 experiment that requires a differential oracle.
+
+**Next:** verify exact PR head/base and all selected tests; classify failures, fix or revert; then rank follow-up candidates from real evidence.
 
 ## Resume checkpoint
 
@@ -120,5 +120,5 @@ A lane has exclusive owning files. Native/menu bar lanes C5/C7 remain blocked un
 - Existing workstreams: `docs/workstreams/architectural-consolidation.md`, `docs/workstreams/selective-efficiency.md`.
 - Open overlapping PRs at inspection: #105 (menu bar), #95 (VAD benchmark), #86 (SQLite migrations).
 - Structural observations: C1–C7 sizes measured by fetching files on `dev`, not by local AST/test execution.
-- Deterministic/physical equivalence: NOT YET VERIFIED; no app build, runtime benchmark or actual source ablation performed here.
-- Next discriminating action: pin refreshed head + establish C3 upload/path/recording route-contract baseline and direct tests, while separately auditing UI C1 state dependencies; choose first ablation only after coverage is sufficient.
+- C3.1 source changed, but exact-head test equivalence is NOT YET VERIFIED; no app build or representative Mac measurement performed.
+- Next discriminating action: run selected C3.1 integration gates and classify failures; do not converge distinct path/upload cache behavior yet.
