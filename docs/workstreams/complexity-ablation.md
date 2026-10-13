@@ -41,13 +41,13 @@ Reuse evidence from `architectural-consolidation.md` and `selective-efficiency.m
 
 ## Candidate queue and independence
 
-- **C3 transcription (FIRST):** router adapter vs single-file use case. Do not collapse upload/path cache identities without differential evidence.
-- **C1/C2 UI (NEXT):** `RecordingOverlayPage` ~1,236 lines/34 hooks and `MeetingDetailPage` ~2,188 lines/33 hooks. Reduction should eliminate duplicated state/effects, not merely split files; avoid concurrent shared UI writes and current physical overlay bugs.
-- **C4 persistence (LATER):** `recordings.py` ~2,250 lines. Keep public facade, artifact recovery/idempotency and avoid SQLite migration PR #86 overlap.
-- **C5 shell / C7 native (BLOCKED):** `menubar.py` ~1,360 lines, `native_capture.py` ~1,168 lines. Stabilize real Mac detection/menu and protocol/TCC evidence before ablation.
-- **C6 packaged dependency diet (EVIDENCE-GATED):** use selective-efficiency SE-3/4/5/6; never drop ONNX/Silero/PyTorch-related paths on bundle size alone. Requires FULL packaged proof where relevant.
+- **C1/C2 UI:** remove duplicated state/policy; preserve UX and existing overlay bug evidence.
+- **C3 transcription:** keep semantically distinct path/upload caches.
+- **C4 storage:** defer until SQLite migration PR #86; preserve recovery/idempotency.
+- **C5/C7 native:** defer until physical Mac menubar/TCC/audio evidence.
+- **C6 bundle:** defer to FULL package testing; no speculative model-dependency removal.
 
-Independent owners can be inspected in parallel; exclusive write boundaries for edits. Evaluate cumulative complexity **on this branch**; `dev` is never automatically synchronized with experiments.
+Disjoint writes only; `dev` read-only.
 
 ## Experiment ledger
 
@@ -103,10 +103,16 @@ Added two-Meeting synthetic HTTP race cases to `scripts/browser_saved_meeting_e2
 
 [38464277299](https://github.com/daniele21/closedroom/actions/runs/38464277299) PASS: browser script syntax, lint, TypeScript, both Meeting race checkpoints and preparation reconnect/recovery. PR #122 closed unmerged; temporary workflow removed, no app build/media upload. Simulated browser does not prove WKWebView/TCC/physical audio.
 
+### C2.4 — shared screenshot/note list policy (KEEP, scoped browser PASS)
+
+`useMeetingItemList<T>` replaces two duplicated list loaders; screenshot and note data/status/generations/retry/reset remain independent. Diagnostics and visual frames stay separate. Source delta **+12 production lines** this wave; cumulative **−24** vs `dev`, one fewer duplicated loading policy. No RAM/CPU/latency measurements.
+
+[38465528741](https://github.com/daniele21/closedroom/actions/runs/38465528741) **PASS**: lint/tsc, `saved-meeting-fast-open` with `09-independent-list-recovery` (dual failure → screenshot retry preserves note error → notes retry), and overlay screenshot/note E2E. Synthetic browser; no .app, TCC or physical audio proof. PR #123 closed unmerged; one-shot workflow removed.
+
 ## Resume checkpoint
 
 - BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
-- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Validation PRs #119–#122 closed without merge; disposable workflows removed.
-- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4/C2.2/C2.3 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
+- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Validation PRs #119–#123 closed without merge; disposable workflows removed.
+- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4/C2.2/C2.3/C2.4 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
 - Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
 - Next: characterize further owner/state duplications before code changes; all subsequent ablations remain isolated until explicitly authorized.
