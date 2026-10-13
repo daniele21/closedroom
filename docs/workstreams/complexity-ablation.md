@@ -79,15 +79,15 @@ Comparison against `dev` `747a0e5`: 13 static guards PASS, including unchanged 1
 
 - C1.2: overlay feedback now derives from persisted `lastSavedScreenshotId` / `lastSavedNoteId`, shared with Undo. Removes **2 React states and six setter calls**, preserves both 4.5-second timers. Overlay now **1,216 lines vs 1,236** at baseline; React states **34 → 32**.
 - C2.1: `latestPreparation` uses `find` rather than allocating/memoizing a `preparationJobs` array only for `[0]`. Meeting page **2,184 vs 2,188 lines**, `useMemo` **7 → 6**; first-match semantics preserved.
-- Evidence: temporary branch-only PR #119, run [38450289252](https://github.com/daniele21/closedroom/actions/runs/38450289252) **PASS**: lint, TypeScript, overlay screenshot/note E2E (new checks `Saved` agrees with Undo), meeting-preparation recovery E2E. PR **closed unmerged**, temporary workflow **deleted**. Browser fixture is synthetic; no packaged Mac/TCC/MLX claim.
-- Cumulative C3.2 + C1.1 + C1.2 + C2.1: **−39 production lines**; 2 fewer policy duplications, 2 fewer UI state owners, 1 fewer memoized intermediate list. Not a measured RAM/CPU benefit.
+- [38450289252](https://github.com/daniele21/closedroom/actions/runs/38450289252): lint/tsc, overlay Undo and Meeting-preparation E2Es PASS. PR #119 closed unmerged; workflow deleted. Browser simulated.
+- Subtotal through C2.1: −39 production lines; no measured RAM/CPU effect.
 
 ### C1.3 + C1.4 — canonical note visibility / backend progress (KEEP, browser PASS)
 
 - **C1.3:** removed independent `noteComposerOpen` state; derive it from `noteAnchor !== null`. All original open, close and stop paths set both together. Preserve focus, note timestamp, resize, Escape/Close/Cancel and Save.
 - **C1.4:** HTTP status and SSE now use one `applyBackendProgress` for recording-active, bytes, warnings, screenshot/note counts and acknowledged monitor. Its type derives from `ApiClient.getActiveRecording`. SSE signal meters and HTTP title/backend/timer remain source-specific.
-- **Structural score:** overlay 1,216 → 1,217 lines this wave (+1) but one React state and one duplicated projection removed. Against `dev`, overlay 1,236 → 1,217; overall experimental production delta **−38 lines**, UI state owners **34 → 31**, one fewer Meeting memoized list. No performance or bundle-size claim.
-- **Evidence:** [38454243679](https://github.com/daniele21/closedroom/actions/runs/38454243679) lint, tsc, browser `call-overlay-screenshot-evidence` PASS. Added test for open → close without save → reopen with new anchor → save/close; existing screenshot/stop flow. Temporary [PR #120](https://github.com/daniele21/closedroom/pull/120) closed **unmerged**, temporary workflow deleted. No app build, media upload or representative Mac/TCC proof.
+- Overlay 1,216 → 1,217 lines this wave (+1), but one fewer state and duplicated policy; vs `dev` 1,236 → 1,217, states 34 → 31. No performance proof.
+- [38454243679](https://github.com/daniele21/closedroom/actions/runs/38454243679): lint/tsc, screenshot and note open/close/re-anchor E2E PASS. PR #120 closed unmerged, workflow removed; no real-Mac proof.
 
 ### C2.2 — one Meeting request token (KEEP, scoped browser PASS)
 
@@ -97,10 +97,16 @@ Three independent load refs (`loadGenerationRef`, `loadQueuedRef`, `loadInFlight
 
 Cumulative experiment: **−36 production lines**, −3 overlay states, −2 Meeting load refs, −1 Meeting memoization. No RAM/CPU measurement.
 
+### C2.3 — rapid Meeting switching / out-of-order responses (KEEP, browser PASS)
+
+Added two-Meeting synthetic HTTP race cases to `scripts/browser_saved_meeting_e2e.mjs`. While A's GET is held, navigate to B, observe B's replacement GET, then release A's late success: B's title/transcript remain correct. Reverse the route and release a stale **503 error**: current Meeting remains intact, no old error leaks. Checkpoints `07-late-success-ignored`, `08-late-error-ignored`. C2.2's existing request identity passed, **no new production edit**.
+
+[38464277299](https://github.com/daniele21/closedroom/actions/runs/38464277299) PASS: browser script syntax, lint, TypeScript, both Meeting race checkpoints and preparation reconnect/recovery. PR #122 closed unmerged; temporary workflow removed, no app build/media upload. Simulated browser does not prove WKWebView/TCC/physical audio.
+
 ## Resume checkpoint
 
 - BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
-- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Validation PRs #119–#121 closed without merge; disposable workflows removed.
-- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4/C2.2 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
+- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Validation PRs #119–#122 closed without merge; disposable workflows removed.
+- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4/C2.2/C2.3 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
 - Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
 - Next: characterize further owner/state duplications before code changes; all subsequent ablations remain isolated until explicitly authorized.
