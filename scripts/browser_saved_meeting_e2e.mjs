@@ -629,24 +629,24 @@ try {
   await waitText(browser, ['Screenshots unavailable', 'Screenshot non disponibili'], 5000, true);
   await waitText(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili'], 5000, true);
 
-  const retryAccessory = async (message) => {
+  const retryAccessory = async (messages) => {
     const clicked = await browser.execute(`
-      const message = ${JSON.stringify(message)};
+      const messages = ${JSON.stringify(messages)};
       const section = Array.from(document.querySelectorAll('section'))
-        .find((node) => (node.innerText || '').includes(message));
+        .find((node) => messages.some((message) => (node.innerText || '').includes(message)));
       const button = section?.querySelector('button');
       if (!button || button.disabled) return false;
       button.click();
       return true;
     `);
-    if (!clicked) throw new Error('Could not retry ' + message);
+    if (!clicked) throw new Error('Could not retry ' + messages.join(' / '));
   };
-  await retryAccessory('Screenshots unavailable');
+  await retryAccessory(['Screenshots unavailable', 'Screenshot non disponibili']);
   await waitCount('alternate_screenshots', screenshotsBeforeFailure + 2);
   await waitAbsent(browser, ['Screenshots unavailable', 'Screenshot non disponibili'], 5000);
   await waitText(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili']);
 
-  await retryAccessory('Meeting notes unavailable');
+  await retryAccessory(['Meeting notes unavailable', 'Note del meeting non disponibili']);
   await waitCount('alternate_notes', notesBeforeFailure + 2);
   await waitAbsent(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili'], 5000);
   await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
