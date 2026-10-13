@@ -210,7 +210,16 @@ class SingleFileTranscriptionUseCaseTests(unittest.TestCase):
             )
             self.assertIs(already_done, completed)
 
-            processor = _FakeDiarization()
+            def diarize(_audio_path, payload, *, provider, **_kwargs):
+                return {
+                    **payload,
+                    "stats": {
+                        **payload.get("stats", {}),
+                        "speaker_diarization": {"status": "completed", "provider": provider},
+                    },
+                }
+
+            processor = SimpleNamespace(process_audio_payload=unittest.mock.Mock(side_effect=diarize))
             with patch(
                 "local_asr_server.services.transcription_application.get_services",
                 return_value=SimpleNamespace(diarization=processor),
@@ -225,6 +234,7 @@ class SingleFileTranscriptionUseCaseTests(unittest.TestCase):
                 )
             self.assertEqual(newly_processed["stats"]["speaker_diarization"]["provider"], "speechmatics")
             self.assertIs(again, newly_processed)
+            self.assertEqual(processor.process_audio_payload.call_count, 1)
             self.assertEqual(completed["stats"]["speaker_diarization"]["provider"], "local")
 
 
