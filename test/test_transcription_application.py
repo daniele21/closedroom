@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from local_asr_server.services.transcription_application import (
     SingleFileTranscriptionRequest,
@@ -219,7 +219,7 @@ class SingleFileTranscriptionUseCaseTests(unittest.TestCase):
                     },
                 }
 
-            processor = SimpleNamespace(process_audio_payload=unittest.mock.Mock(side_effect=diarize))
+            processor = SimpleNamespace(process_audio_payload=Mock(side_effect=diarize))
             with patch(
                 "local_asr_server.services.transcription_application.get_services",
                 return_value=SimpleNamespace(diarization=processor),
