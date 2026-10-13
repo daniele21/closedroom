@@ -66,19 +66,15 @@ One canonical `SingleFileTranscriptionUseCase.apply_initial_diarization` now ser
 
 **C3.3 rejected/deferred:** path uses ASR-only cache and re-applies diarization per request; upload uses final-result cache identity including diarization. Unifying them wholesale risks stale/wrong speaker results and altered persistence. Keep distinct until dedicated differential evidence supports a minimal unification.
 
-### C1.1 — overlay monitor policy and recovery (KEEP, SCOPED BROWSER PASS)
+### C1.1 — overlay monitor acknowledgement (KEEP, browser PASS)
 
-`RecordingOverlayPage.tsx` 1,236 -> 1,224 lines (−12); preserve all 20 `useState` declarations, eight effects, one SSE channel and all note/screenshot/Stop handlers. A single `reconcileBackendDisplaySelection` callback now mediates *both* the SSE event and the HTTP active-status snapshot, without allowing stale acknowledgements to overwrite an optimistic monitor selection. Also removed unused `loadDisplays(_autoSelectSingle)` parameter and deduplicated picker-recovery actions for two distinct backend error codes while preserving their distinct user-facing messages.
+`RecordingOverlayPage.tsx` 1,236 → 1,224 (−12). One `reconcileBackendDisplaySelection` replaces SSE/HTTP duplicated acknowledgement; preserves optimistic in-flight selection. Removed unused `loadDisplays` argument and duplicate picker recovery, retaining distinct error messages. Lint/tsc PASS (**38438564685**), synthetic overlay E2E PASS (**38439081168**). No target-Mac proof.
 
-Source proof: same SSE and hooks, unchanged note/undo handlers. Lint/tsc PASS (**38438564685**); browser overlay PASS (**38439081168**). Physical Mac proof separate.
+### Evidence snapshot (2026-10-13)
 
-### Validation snapshot — 2026-10-13
+Comparison against `dev` `747a0e5`: 13 static guards PASS, including unchanged 16 transcription routes, distinct ASR path cache and canonical diarization policy. Temporary validation PR #119 closed unmerged. **38438564685**: 33 Python tests + frontend lint/tsc PASS; video-stage ffmpeg missing (environment). **38439081168**: browser overlay PASS after installing ffmpeg. No artifacts uploaded, workflow removed.
 
-Static comparison to `dev` `747a0e5`: 13 checks PASS, including 16 unchanged transcription routes, ASR cache adapter, identical initial diarization body and note/undo handlers. C3.2+C1.1 net −27 lines; no performance claim.
-
-**Validation evidence:** temporary PR [#119](https://github.com/daniele21/closedroom/pull/119) targeting the experiment branch was **closed unmerged**. Run **38438564685** passed 33 Python tests plus frontend lint/tsc; browser run hit environment-only `spawn ffmpeg ENOENT` when assembling video after its checkpoints. Run **38439081168** installed the missing `ffmpeg` and passed the complete `call-overlay-screenshot-evidence` browser journey, including MP4 assembly; neither run uploaded artifacts. Workflow `.github/workflows/ablation-one-shot.yml` was deleted afterward. The application source was unchanged across validation runs; remaining commits affect only experimental documentation/validation workflow. These scoped results do not qualify packaged macOS app, native TCC/audio, or model quality.
-
-**Baseline fact:** path HTTP projection reconstructs ASR stats before initial diarization. A cached ASR payload's diarization status is not itself authoritative for the path adapter. Tests now pin this existing behavior; do not inadvertently collapse path's ASR-stage cache into upload's final-result cache.
+**Cache constraint:** path rebuilds stats before diarization from ASR cache; upload caches final diarization-aware results. Do not unify cache keys without new semantic evidence.
 
 ### C1.2 + C2.1 — state-owner/selector ablation (KEEP, scoped browser PASS)
 
@@ -87,10 +83,17 @@ Static comparison to `dev` `747a0e5`: 13 checks PASS, including 16 unchanged tra
 - Evidence: temporary branch-only PR #119, run [38450289252](https://github.com/daniele21/closedroom/actions/runs/38450289252) **PASS**: lint, TypeScript, overlay screenshot/note E2E (new checks `Saved` agrees with Undo), meeting-preparation recovery E2E. PR **closed unmerged**, temporary workflow **deleted**. Browser fixture is synthetic; no packaged Mac/TCC/MLX claim.
 - Cumulative C3.2 + C1.1 + C1.2 + C2.1: **−39 production lines**; 2 fewer policy duplications, 2 fewer UI state owners, 1 fewer memoized intermediate list. Not a measured RAM/CPU benefit.
 
+### C1.3 + C1.4 — canonical note visibility / backend progress (KEEP, browser PASS)
+
+- **C1.3:** removed independent `noteComposerOpen` state; derive it from `noteAnchor !== null`. All original open, close and stop paths set both together. Preserve focus, note timestamp, resize, Escape/Close/Cancel and Save.
+- **C1.4:** HTTP status and SSE now use one `applyBackendProgress` for recording-active, bytes, warnings, screenshot/note counts and acknowledged monitor. Its type derives from `ApiClient.getActiveRecording`. SSE signal meters and HTTP title/backend/timer remain source-specific.
+- **Structural score:** overlay 1,216 → 1,217 lines this wave (+1) but one React state and one duplicated projection removed. Against `dev`, overlay 1,236 → 1,217; overall experimental production delta **−38 lines**, UI state owners **34 → 31**, one fewer Meeting memoized list. No performance or bundle-size claim.
+- **Evidence:** [38454243679](https://github.com/daniele21/closedroom/actions/runs/38454243679) lint, tsc, browser `call-overlay-screenshot-evidence` PASS. Added test for open → close without save → reopen with new anchor → save/close; existing screenshot/stop flow. Temporary [PR #120](https://github.com/daniele21/closedroom/pull/120) closed **unmerged**, temporary workflow deleted. No app build, media upload or representative Mac/TCC proof.
+
 ## Resume checkpoint
 
 - BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
-- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Verification-only PR #119 was closed without merge and its temporary workflow removed.
-- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1 KEEP on experiment branch; 33 Python tests, lint/tsc and both UI journeys PASS.
+- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Verification PRs #119/#120 closed without merge; disposable workflows removed.
+- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
 - Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
 - Next: characterize further owner/state duplications before code changes; all subsequent ablations remain isolated until explicitly authorized.
