@@ -311,8 +311,6 @@ class ClosedRoomApp(rumps.App):
             template=False,
             quit_button=None,  # we provide our own Esci item
         )
-        self._ensure_status_item_visible()
-
         # Build the menu
         self._build_menu()
 
@@ -437,6 +435,8 @@ class ClosedRoomApp(rumps.App):
                     "icon_asset": MENU_BAR_ICON_SOURCE,
                     "repair_count": self._status_item_repair_count,
                     "last_error": self._status_item_last_error,
+                    "autosave_name": str(status_item.autosaveName()) if status_item.autosaveName() else None,
+                    "native_window": self._status_item_window_status(button),
                     "meeting_detection": self.meeting_detection_status(),
                 })
             except Exception as exc:
@@ -453,12 +453,64 @@ class ClosedRoomApp(rumps.App):
         run_on_main_thread(capture, wait=True)
         return snapshot
 
+    @staticmethod
+    def _status_item_window_status(button) -> dict:
+        """Report native geometry without treating isVisible as display proof."""
+        window = button.window()
+        if window is None:
+            return {"attached": False}
+        frame = window.frame()
+        screen = window.screen()
+        result = {
+            "attached": True,
+            "visible": bool(window.isVisible()),
+            "button_hidden": bool(button.isHiddenOrHasHiddenAncestor()),
+            "frame": {"x": frame.origin.x, "y": frame.origin.y,
+                      "width": frame.size.width, "height": frame.size.height},
+        }
+        if screen is not None:
+            bounds = screen.frame()
+            result["screen_frame"] = {
+                "x": bounds.origin.x, "y": bounds.origin.y,
+                "width": bounds.size.width, "height": bounds.size.height,
+            }
+        return result
+
+    def _recreate_status_item(self) -> None:
+        """Replace rumps' native item while retaining its canonical menu owner."""
+        import AppKit
+
+        status_bar = AppKit.NSStatusBar.systemStatusBar()
+        old_item = self._nsapp.nsstatusitem
+        old_ready = self._status_item_ready
+        replacement = None
+        try:
+            replacement = status_bar.statusItemWithLength_(AppKit.NSSquareStatusItemLength)
+            if replacement is None:
+                raise RuntimeError("Unable to create replacement NSStatusItem")
+            replacement.setMenu_(old_item.menu())
+            self._nsapp.nsstatusitem = replacement
+            self._status_item_ready = False
+            self._ensure_status_item_visible()
+            if not self._status_item_ready:
+                raise RuntimeError(self._status_item_last_error or "Replacement icon setup failed")
+            status_bar.removeStatusItem_(old_item)
+        except Exception as exc:
+            self._nsapp.nsstatusitem = old_item
+            self._status_item_ready = old_ready
+            self._status_item_last_error = f"menu_bar_recreation_failed:{exc}"
+            if replacement is not None:
+                status_bar.removeStatusItem_(replacement)
+            logger.exception("Failed to recreate ClosedRoom menu-bar item")
+
     def repair_menu_bar(self) -> dict:
-        """Re-assert visibility and the canonical icon, then report the result."""
+        """Recreate the native item on the main thread, then report its state."""
         from local_asr_server.window import run_on_main_thread
 
-        self._status_item_repair_count += 1
-        run_on_main_thread(self._ensure_status_item_visible, wait=True)
+        def repair() -> None:
+            self._status_item_repair_count += 1
+            self._recreate_status_item()
+        run_on_main_thread(repair, wait=True)
         return self.menu_bar_status()
 
     def open_menu_bar_settings(self) -> dict:

@@ -20,32 +20,14 @@ ACTION_NAMES = {RECORD_ACTION: "record", IGNORE_ACTION: "ignore",
 
 
 def _native_framework():
-    """Use installed PyObjC wrapper when present; otherwise bridge the system framework.
+    """Load the wrapper with block signatures and delegate protocol metadata.
 
-    Core notification classes are Objective-C runtime classes. We deliberately
-    avoid adding a new ML/runtime dependency to the packaged application.
+    Loading Objective-C classes alone loses completion-handler signatures,
+    breaking both authorization queries and permission requests in frozen apps.
+    The app extra and bundle spec must include this native bridge.
     """
-    try:
-        import UserNotifications
-        return UserNotifications
-    except ImportError:
-        import objc
-        from types import SimpleNamespace
-        objc.loadBundle(
-            "UserNotifications", globals(),
-            bundle_path="/System/Library/Frameworks/UserNotifications.framework",
-        )
-        names = (
-            "UNUserNotificationCenter", "UNNotificationAction",
-            "UNNotificationCategory", "UNMutableNotificationContent",
-            "UNNotificationRequest",
-        )
-        classes = {name: objc.lookUpClass(name) for name in names}
-        return SimpleNamespace(
-            **classes, UNAuthorizationOptionAlert=4, UNAuthorizationOptionSound=2,
-            UNNotificationPresentationOptionBanner=16,
-            UNNotificationCategoryOptionCustomDismissAction=1,
-        )
+    import UserNotifications
+    return UserNotifications
 
 def decode_notification_action(identifier: str, action_identifier: str) -> tuple[str, str] | None:
     if not identifier.startswith(NOTIFICATION_PREFIX) or not identifier[len(NOTIFICATION_PREFIX):]:

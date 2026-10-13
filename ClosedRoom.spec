@@ -143,6 +143,7 @@ hidden_imports = [
     "AppKit",
     "Foundation",
     "Cocoa",
+    "UserNotifications",
 
     # Standard library used at runtime
     "multiprocessing.pool",
