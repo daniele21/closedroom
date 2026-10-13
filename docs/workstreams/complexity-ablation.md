@@ -80,10 +80,17 @@ Pinned source comparison against `dev` `747a0e5`: 13 static differential conditi
 
 **Baseline fact:** path HTTP projection reconstructs ASR stats before initial diarization. A cached ASR payload's diarization status is not itself authoritative for the path adapter. Tests now pin this existing behavior; do not inadvertently collapse path's ASR-stage cache into upload's final-result cache.
 
+### C1.2 + C2.1 — state-owner/selector ablation (KEEP, scoped browser PASS)
+
+- C1.2: overlay feedback now derives from persisted `lastSavedScreenshotId` / `lastSavedNoteId`, shared with Undo. Removes **2 React states and six setter calls**, preserves both 4.5-second timers. Overlay now **1,216 lines vs 1,236** at baseline; React states **34 → 32**.
+- C2.1: `latestPreparation` uses `find` rather than allocating/memoizing a `preparationJobs` array only for `[0]`. Meeting page **2,184 vs 2,188 lines**, `useMemo` **7 → 6**; first-match semantics preserved.
+- Evidence: temporary branch-only PR #119, run [38450289252](https://github.com/daniele21/closedroom/actions/runs/38450289252) **PASS**: lint, TypeScript, overlay screenshot/note E2E (new checks `Saved` agrees with Undo), meeting-preparation recovery E2E. PR **closed unmerged**, temporary workflow **deleted**. Browser fixture is synthetic; no packaged Mac/TCC/MLX claim.
+- Cumulative C3.2 + C1.1 + C1.2 + C2.1: **−39 production lines**; 2 fewer policy duplications, 2 fewer UI state owners, 1 fewer memoized intermediate list. Not a measured RAM/CPU benefit.
+
 ## Resume checkpoint
 
 - BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
 - TARGET: `experiment/complexity-ablation`; no changes to `dev`. Verification-only PR #119 was closed without merge and its temporary workflow removed.
 - Confirmed: C3.1 merged before branch isolation; C3.2 and C1.1 are KEEP on experiment branch with 33 Python tests + frontend lint/tsc + synthetic browser journey PASS from #119 evidence.
 - Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
-- Next discriminating action: rank the next disjoint small ablation by duplicated owner/state, first mapping direct consumers and tests; keep all subsequent changes isolated until explicit integration authorization.
+- Next: characterize further owner/state duplications before code changes; all subsequent ablations remain isolated until explicitly authorized.
