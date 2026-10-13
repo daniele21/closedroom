@@ -56,34 +56,34 @@ Independent owners can be inspected in parallel; exclusive write boundaries for 
 
 PR #118 previously integrated into `dev` at `747a0e5`. Router 759 -> 721 lines, four trivial forwarding wrappers and three empty finalizers removed. Source preflight INTEGRATION/SCOPED + repository health PASS. This is prior history, **not authorization to merge further experiments into dev**. No physical Mac claim.
 
-### C3.2 — canonical initial diarization policy (ACTIVE, BLOCKED_FOR_EVIDENCE)
+### C3.2 — canonical initial diarization policy (KEEP, SCOPED SOURCE PASS)
 
 Hypothesis: router `_apply_initial_diarization` duplicates `SingleFileTranscriptionUseCase._apply_diarization`, including disabled/completed/provider switching semantics.
 
 Change on `experiment/complexity-ablation`: one `SingleFileTranscriptionUseCase.apply_initial_diarization` now owns both; upload nonstreaming, upload streaming and path adapter call it, using unchanged provider/region/model arguments. No altered route definitions or runtime/model/provider choice.
 
-**Static impact:** router 721 -> 698 lines (−23); application 192 -> 200 (+8); **net −15 production lines and one duplicated policy eliminated**. Expanded `test_transcription_application.py` and `test_transcription_router_ablation.py` to cover disabled, completed, switching, response/error and cache-stage behavior. Tests authored, **not executed yet against an exact runnable checkout**; correctness state PENDING, no performance/runtime claim.
+**Static impact:** router 721 -> 698 lines (−23); application 192 -> 200 (+8); **net −15 production lines and one duplicated policy eliminated**. Expanded `test_transcription_application.py` and `test_transcription_router_ablation.py` to cover disabled, completed, switching, response/error and cache-stage behavior. Tests validated in run **38438564685** (all 5 application + 3 router-ablation + 25 recording API tests PASS). No representative ASR quality, performance or packaged runtime claim.
 
 **C3.3 rejected/deferred:** path uses ASR-only cache and re-applies diarization per request; upload uses final-result cache identity including diarization. Unifying them wholesale risks stale/wrong speaker results and altered persistence. Keep distinct until dedicated differential evidence supports a minimal unification.
 
-### C1.1 — overlay monitor policy and recovery (ACTIVE, STATIC PASS)
+### C1.1 — overlay monitor policy and recovery (KEEP, SCOPED BROWSER PASS)
 
 `RecordingOverlayPage.tsx` 1,236 -> 1,224 lines (−12); preserve all 20 `useState` declarations, eight effects, one SSE channel and all note/screenshot/Stop handlers. A single `reconcileBackendDisplaySelection` callback now mediates *both* the SSE event and the HTTP active-status snapshot, without allowing stale acknowledgements to overwrite an optimistic monitor selection. Also removed unused `loadDisplays(_autoSelectSingle)` parameter and deduplicated picker-recovery actions for two distinct backend error codes while preserving their distinct user-facing messages.
 
-Structural proof: identical count of SSE channels and state/effect hooks, both ingestion paths call the same callback, and untouched undo/note-handler source spans. No change to local capture, API, persisted artifacts or user flows intended. Interactive correctness **PENDING runtime/browser evidence**; changes are not a UI redesign.
+Structural proof: identical count of SSE channels and state/effect hooks, both ingestion paths call the same callback, and untouched undo/note-handler source spans. No change to local capture, API, persisted artifacts or user flows intended. Frontend lint/TypeScript PASS in run **38438564685**; synthetic call-overlay screenshot/note browser E2E PASS in run **38439081168**. No physical WKWebView/TCC/ScreenCaptureKit proof; no UX redesign.
 
 ### Validation snapshot — 2026-10-13
 
 Pinned source comparison against `dev` `747a0e5`: 13 static differential conditions PASS, including preservation of all 16 transcription route decorators, unchanged ASR path cache adapter, one canonical initial-diarization body (statement-for-statement identical to baseline router policy), one overlay monitor-acknowledgement rule and unchanged note/undo logic. Structural delta across modified production modules is **−27 lines** (C3.2 −15; C1.1 −12), not a performance or app-size claim.
 
-A single source-only, no-artifact GitHub Actions check was requested via **temporary PR #119** targeting `experiment/complexity-ablation` (never `dev`), using `.github/workflows/ablation-one-shot.yml`. Checks: transcription/use-case/recording API tests, frontend lint/typecheck and call-overlay browser journey. **Execution evidence PENDING; do not claim PASS**. Remove workflow and close test-only PR after evidence is recorded; any unavailable runner/capacity is ENVIRONMENT, not a passing gate.
+**Validation evidence:** temporary PR [#119](https://github.com/daniele21/closedroom/pull/119) targeting the experiment branch was **closed unmerged**. Run **38438564685** passed 33 Python tests plus frontend lint/tsc; browser run hit environment-only `spawn ffmpeg ENOENT` when assembling video after its checkpoints. Run **38439081168** installed the missing `ffmpeg` and passed the complete `call-overlay-screenshot-evidence` browser journey, including MP4 assembly; neither run uploaded artifacts. Workflow `.github/workflows/ablation-one-shot.yml` was deleted afterward. The application source was unchanged across validation runs; remaining commits affect only experimental documentation/validation workflow. These scoped results do not qualify packaged macOS app, native TCC/audio, or model quality.
 
 **Baseline fact:** path HTTP projection reconstructs ASR stats before initial diarization. A cached ASR payload's diarization status is not itself authoritative for the path adapter. Tests now pin this existing behavior; do not inadvertently collapse path's ASR-stage cache into upload's final-result cache.
 
 ## Resume checkpoint
 
 - BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
-- TARGET: `experiment/complexity-ablation`; no PR created, no writes to `dev`.
-- Confirmed: C3.1 already merged before branch isolation; C3.2 is a contained policy de-duplication with added unexecuted test oracles.
-- Unresolved: branch-only validation PR #119 runner completion and any failures, browser fidelity, cache-stage sufficiency; physical Mac evidence remains release-specific.
-- Next discriminating action: inspect PR #119 checks; classify any failure by owner, correct/revert on the experimental branch only, close the temporary PR without merge, and remove the one-off workflow when evidence is captured.
+- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Verification-only PR #119 was closed without merge and its temporary workflow removed.
+- Confirmed: C3.1 merged before branch isolation; C3.2 and C1.1 are KEEP on experiment branch with 33 Python tests + frontend lint/tsc + synthetic browser journey PASS from #119 evidence.
+- Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
+- Next discriminating action: rank the next disjoint small ablation by duplicated owner/state, first mapping direct consumers and tests; keep all subsequent changes isolated until explicit integration authorization.
