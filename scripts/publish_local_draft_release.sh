@@ -42,7 +42,8 @@ plan="$output_dir/release-plan.json"
 jq -e --arg tag "$tag" --arg source "$revision" \
   '.draft == true and .tag == $tag and .source_revision == $source and (.assets | length) == 4' \
   "$plan" >/dev/null
-mapfile -t files < <(jq -r '.assets[].name' "$plan")
+files=()
+while IFS= read -r name; do files+=("$name"); done < <(jq -r '.assets[].name' "$plan")
 for name in "${files[@]}"; do
   [[ -f "$output_dir/assets/$name" ]] || { echo "Missing staged asset: $name" >&2; exit 1; }
 done
