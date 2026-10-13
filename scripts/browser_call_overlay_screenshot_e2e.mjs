@@ -646,6 +646,28 @@ try {
   if (!noteOpened) throw new Error('quick-note action unavailable');
   await waitSelector(browser, '[data-note-composer="true"] textarea', 5000, true);
   if (counts.note_anchor !== 1) throw new Error('note anchor was not captured exactly once: ' + counts.note_anchor);
+  const expandedNote = await browser.execute(`
+    return document.querySelector('button[data-note-action="true"]')?.getAttribute('aria-expanded') === 'true';
+  `);
+  if (!expandedNote) throw new Error('note composer is open but trigger is not expanded');
+
+  // Closing and reopening must discard the old anchor, without persisting a note.
+  await browser.clickCss('button[data-note-close="true"]');
+  const closeDeadline = Date.now() + 3000;
+  let noteClosed = false;
+  while (Date.now() < closeDeadline) {
+    noteClosed = await browser.execute(`
+      return !document.querySelector('[data-note-composer="true"]')
+        && document.querySelector('button[data-note-action="true"]')?.getAttribute('aria-expanded') === 'false';
+    `);
+    if (noteClosed) break;
+    await sleep(50);
+  }
+  if (!noteClosed) throw new Error('closing the composer left its anchor/expanded state behind');
+  if (counts.notes_post !== 0) throw new Error('closing an unsaved note persisted content');
+  await browser.clickCss('button[data-note-action="true"]');
+  await waitSelector(browser, '[data-note-composer="true"] textarea', 5000, true);
+  if (counts.note_anchor !== 2) throw new Error('reopening the composer did not request a new anchor: ' + counts.note_anchor);
   const noteEntered = await browser.execute(`
     const textarea = document.querySelector('[data-note-composer="true"] textarea');
     if (!textarea) return false;
@@ -672,6 +694,11 @@ try {
     return Boolean(action && undo && action.textContent.trim() === 'Saved');
   `);
   if (!noteFeedbackMatchesUndo) throw new Error('note saved feedback and undo target diverged');
+  const composerClosedAfterSave = await browser.execute(`
+    return !document.querySelector('[data-note-composer="true"]')
+      && document.querySelector('button[data-note-action="true"]')?.getAttribute('aria-expanded') === 'false';
+  `);
+  if (!composerClosedAfterSave) throw new Error('saved note retained a visible composer or stale anchor');
   await checkpoint(browser, '03c-user-note-persisted');
 
   await browser.clickCss('button[aria-label="Stop recording"]');
