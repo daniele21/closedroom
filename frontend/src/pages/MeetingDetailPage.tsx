@@ -238,9 +238,12 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const tabListRef = useRef<HTMLDivElement | null>(null);
   const analysisMenuRef = useRef<HTMLDivElement | null>(null);
   const analysisMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const loadGenerationRef = useRef(0);
-  const loadInFlightRef = useRef<{ key: string; generation: number; promise: Promise<void> } | null>(null);
-  const loadQueuedRef = useRef(false);
+  // One request identity owns stale-response protection, coalescing and queued reloads.
+  const loadInFlightRef = useRef<{
+    key: string;
+    queued: boolean;
+    promise: Promise<void>;
+  } | null>(null);
   const userSelectedTabRef = useRef(false);
 
   const openKeyMoment = (shot: RecordingScreenshot) => {
@@ -456,13 +459,15 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     const key = `${recordingId}:${demoMode ? 'demo' : 'live'}:${lang}`;
     const activeLoad = loadInFlightRef.current;
     if (activeLoad?.key === key) {
-      loadQueuedRef.current = true;
+      activeLoad.queued = true;
       return activeLoad.promise;
     }
 
-    const generation = ++loadGenerationRef.current;
-    loadQueuedRef.current = false;
-    const promise = (async () => {
+    // Assign identity before starting the request so stale completions cannot
+    // publish state for another meeting or an unmounted view.
+    const request = { key, queued: false, promise: Promise.resolve() };
+    loadInFlightRef.current = request;
+    request.promise = (async () => {
       try {
         setError(null);
         let data: Meeting;
@@ -476,7 +481,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         } else {
           data = await ApiClient.getMeeting(recordingId);
         }
-        if (generation !== loadGenerationRef.current) return;
+        if (loadInFlightRef.current !== request) return;
         setMeeting(data);
         const availableTypes = Object.keys(data.latest_analysis || {});
         if (availableTypes.length > 0) {
@@ -488,23 +493,19 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           }
         }
       } catch (err: any) {
-        if (generation !== loadGenerationRef.current) return;
+        if (loadInFlightRef.current !== request) return;
         setError(err?.message || t('meeting.errorNotAvailable'));
       } finally {
-        if (generation === loadGenerationRef.current) {
+        if (loadInFlightRef.current === request) {
           setLoading(false);
         }
       }
     })().finally(() => {
-      if (loadInFlightRef.current?.generation !== generation) return;
+      if (loadInFlightRef.current !== request) return;
       loadInFlightRef.current = null;
-      if (loadQueuedRef.current) {
-        loadQueuedRef.current = false;
-        void load();
-      }
+      if (request.queued) void load();
     });
-    loadInFlightRef.current = { key, generation, promise };
-    return promise;
+    return request.promise;
   };
 
   useEffect(() => {
@@ -515,7 +516,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     userSelectedTabRef.current = false;
     void load();
     return () => {
-      loadGenerationRef.current += 1;
+      // Invalidates the previous request and any queued same-key refresh.
+      loadInFlightRef.current = null;
     };
   }, [recordingId, demoMode, lang]);
 
