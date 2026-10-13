@@ -544,7 +544,7 @@ try {
   // earlier Meeting must not overwrite the currently selected Meeting.
   const setMeetingHash = async (id) => {
     const changed = await browser.execute(`
-      window.location.hash = ${JSON.stringify('#meeting/') } + ${JSON.stringify(id)};
+      window.location.hash = ${JSON.stringify('#meeting/')} + ${JSON.stringify(id)};
       return true;
     `);
     if (!changed) throw new Error('could not update the Meeting route');
@@ -565,7 +565,9 @@ try {
   holdNextMeetingId = MEETING_ID;
   await setMeetingHash(MEETING_ID);
   await waitCount('held_meeting', 1);
+  const alternateRequestsBeforeReturn = counts.alternate_meeting;
   await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitCount('alternate_meeting', alternateRequestsBeforeReturn + 1);
   await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
   if (heldMeetingResponses.length !== 1) throw new Error('expected one delayed original Meeting response');
   heldMeetingResponses.shift()('success');
@@ -578,7 +580,9 @@ try {
   holdNextMeetingId = ALTERNATE_MEETING_ID;
   await setMeetingHash(ALTERNATE_MEETING_ID);
   await waitCount('held_meeting', 2);
+  const originalRequestsBeforeReturn = counts.meeting;
   await setMeetingHash(MEETING_ID);
+  await waitCount('meeting', originalRequestsBeforeReturn + 1);
   await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
   if (heldMeetingResponses.length !== 1) throw new Error('expected one delayed alternate Meeting response');
   heldMeetingResponses.shift()('error');
