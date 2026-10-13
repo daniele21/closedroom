@@ -1,0 +1,51 @@
+name: Temporary complexity-ablation source check
+
+# Experiment-branch-only one-shot validation. Remove after recording results.
+on:
+  push:
+    branches: [experiment/complexity-ablation]
+    paths: [.github/workflows/ablation-one-shot.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: complexity-ablation-once
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    name: Contract tests and overlay UI
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify isolated branch identity
+        run: |
+          test "$(git branch --show-current)" = "" || test "$(git branch --show-current)" = "experiment/complexity-ablation"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_REF_NAME" = "experiment/complexity-ablation"
+      - name: Install source test dependencies (no app build)
+        run: |
+          brew list uv >/dev/null 2>&1 || brew install uv
+          npm install --global pnpm@9
+          uv sync --all-extras --frozen --python 3.12
+          cd frontend && pnpm install --frozen-lockfile
+      - name: Transcription and recording contract tests
+        env:
+          UV_CACHE_DIR: .cache/uv
+        run: |
+          uv run --frozen --python 3.12 python -m unittest test.test_transcription_application test.test_transcription_router_ablation test.test_recording_api -v
+      - name: Overlay TypeScript and lint
+        run: |
+          cd frontend
+          pnpm run lint
+          pnpm exec tsc --noEmit
+      - name: Call overlay screenshot and notes browser E2E
+        run: |
+          node scripts/browser_call_overlay_screenshot_e2e.mjs
