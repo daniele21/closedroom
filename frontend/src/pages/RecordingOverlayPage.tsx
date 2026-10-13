@@ -171,6 +171,22 @@ export default function RecordingOverlayPage() {
     }
   }, []);
 
+  // HTTP and SSE report the same persisted counters. Keep their event-specific
+  // responsibilities separate (timer, stream lifetime, recording metadata).
+  const applyBackendProgress = useCallback((data: {
+    bytes_written?: number;
+    warnings?: string[];
+    screenshot_count?: number;
+    note_count?: number;
+  }, backendDisplayId: number | null) => {
+    setIsRecording(true);
+    setBytesWritten(data.bytes_written || 0);
+    setWarnings(data.warnings || []);
+    setScreenshotCount(data.screenshot_count || 0);
+    setNoteCount(data.note_count || 0);
+    reconcileBackendDisplaySelection(backendDisplayId);
+  }, [reconcileBackendDisplaySelection]);
+
   const connectSSE = useCallback((recId: string) => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -204,15 +220,10 @@ export default function RecordingOverlayPage() {
           return;
         }
 
-        setIsRecording(true);
-        setBytesWritten(data.bytes_written || 0);
         setSignalLevelMic(formatDb(data.mic_db));
         setSignalLevelSystem(formatDb(data.system_db));
-        setWarnings(data.warnings || []);
-        setScreenshotCount(data.screenshot_count || 0);
-        setNoteCount(data.note_count || 0);
         const backendDisplayId = data.screenshot_display_id ? Number(data.screenshot_display_id) : null;
-        reconcileBackendDisplaySelection(backendDisplayId);
+        applyBackendProgress(data, backendDisplayId);
 
         if (data.started_at && !startedAtRef.current) {
           startedAtRef.current = recordingStartedAtMs(data.started_at);
@@ -227,7 +238,7 @@ export default function RecordingOverlayPage() {
       sse.close();
       eventSourceRef.current = null;
     };
-  }, [reconcileBackendDisplaySelection]);
+  }, [applyBackendProgress]);
 
   const checkActiveRecording = useCallback(async () => {
     try {
@@ -242,17 +253,12 @@ export default function RecordingOverlayPage() {
       });
       if (activeData.active && activeData.recording_id) {
         setRecordingId(activeData.recording_id);
-        setIsRecording(true);
         setTitle(activeData.title || 'Registrazione');
         setCaptureBackend(activeData.capture_backend || 'browser');
         setCaptureMode(activeData.capture_mode || 'both');
-        setBytesWritten(activeData.bytes_written || 0);
-        setWarnings(activeData.warnings || []);
-        setScreenshotCount(activeData.screenshot_count || 0);
-        setNoteCount(activeData.note_count || 0);
         const backendDisplayId = activeData.screenshot_display_id ?? null;
         const pendingSelection = pendingDisplayIdRef.current;
-        reconcileBackendDisplaySelection(backendDisplayId);
+        applyBackendProgress(activeData, backendDisplayId);
         if ((activeData.capture_backend || 'browser') === 'native') {
           const preferredDisplayId = pendingSelection ?? backendDisplayId ?? selectedDisplayIdRef.current;
           void loadDisplays(preferredDisplayId ?? undefined);
@@ -294,7 +300,7 @@ export default function RecordingOverlayPage() {
       bc.postMessage({ type: 'request-status' });
       bc.close();
     }
-  }, [connectSSE, loadDisplays, logOverlay, reconcileBackendDisplaySelection]);
+  }, [applyBackendProgress, connectSSE, loadDisplays, logOverlay]);
 
   // Poll/Check state on mount and connect SSE/BroadcastChannel
   useEffect(() => {
