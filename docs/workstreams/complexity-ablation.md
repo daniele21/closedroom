@@ -66,10 +66,24 @@ Change on `experiment/complexity-ablation`: one `SingleFileTranscriptionUseCase.
 
 **C3.3 rejected/deferred:** path uses ASR-only cache and re-applies diarization per request; upload uses final-result cache identity including diarization. Unifying them wholesale risks stale/wrong speaker results and altered persistence. Keep distinct until dedicated differential evidence supports a minimal unification.
 
+### C1.1 — overlay monitor policy and recovery (ACTIVE, STATIC PASS)
+
+`RecordingOverlayPage.tsx` 1,236 -> 1,224 lines (−12); preserve all 20 `useState` declarations, eight effects, one SSE channel and all note/screenshot/Stop handlers. A single `reconcileBackendDisplaySelection` callback now mediates *both* the SSE event and the HTTP active-status snapshot, without allowing stale acknowledgements to overwrite an optimistic monitor selection. Also removed unused `loadDisplays(_autoSelectSingle)` parameter and deduplicated picker-recovery actions for two distinct backend error codes while preserving their distinct user-facing messages.
+
+Structural proof: identical count of SSE channels and state/effect hooks, both ingestion paths call the same callback, and untouched undo/note-handler source spans. No change to local capture, API, persisted artifacts or user flows intended. Interactive correctness **PENDING runtime/browser evidence**; changes are not a UI redesign.
+
+### Validation snapshot — 2026-10-13
+
+Pinned source comparison against `dev` `747a0e5`: 13 static differential conditions PASS, including preservation of all 16 transcription route decorators, unchanged ASR path cache adapter, one canonical initial-diarization body (statement-for-statement identical to baseline router policy), one overlay monitor-acknowledgement rule and unchanged note/undo logic. Structural delta across modified production modules is **−27 lines** (C3.2 −15; C1.1 −12), not a performance or app-size claim.
+
+A single source-only, no-artifact GitHub Actions check was requested via **temporary PR #119** targeting `experiment/complexity-ablation` (never `dev`), using `.github/workflows/ablation-one-shot.yml`. Checks: transcription/use-case/recording API tests, frontend lint/typecheck and call-overlay browser journey. **Execution evidence PENDING; do not claim PASS**. Remove workflow and close test-only PR after evidence is recorded; any unavailable runner/capacity is ENVIRONMENT, not a passing gate.
+
+**Baseline fact:** path HTTP projection reconstructs ASR stats before initial diarization. A cached ASR payload's diarization status is not itself authoritative for the path adapter. Tests now pin this existing behavior; do not inadvertently collapse path's ASR-stage cache into upload's final-result cache.
+
 ## Resume checkpoint
 
 - BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
 - TARGET: `experiment/complexity-ablation`; no PR created, no writes to `dev`.
 - Confirmed: C3.1 already merged before branch isolation; C3.2 is a contained policy de-duplication with added unexecuted test oracles.
-- Unresolved: exact-head selected deterministic tests, regression classification, cache-stage coverage sufficiency; physical Mac evidence remains release-specific.
-- Next discriminating action: execute C3.2 focused and selector-required checks against an equivalent repo checkout (automate where available); **REVERT** if behavior fails; then address isolated UI state duplication without changing user flows.
+- Unresolved: branch-only validation PR #119 runner completion and any failures, browser fidelity, cache-stage sufficiency; physical Mac evidence remains release-specific.
+- Next discriminating action: inspect PR #119 checks; classify any failure by owner, correct/revert on the experimental branch only, close the temporary PR without merge, and remove the one-off workflow when evidence is captured.
