@@ -1,0 +1,36 @@
+name: Temporary E4 key-moment visual demand validation
+
+on:
+  pull_request:
+    branches: [experiment/complexity-ablation]
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  scoped:
+    runs-on: macos-14
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert isolated experiment target
+        env:
+          BASE: ${{ github.base_ref }}
+        run: test "$BASE" = "experiment/complexity-ablation"
+      - name: Scoped screenshot source contracts
+        run: |
+          python3 -m unittest discover -s test -p 'test_frontend_call_screenshot_evidence.py' -v
+          node --check scripts/browser_saved_meeting_e2e.mjs
+      - name: Frontend lint and TypeScript (no native app build)
+        run: |
+          npm install --global pnpm@9.15.9
+          cd frontend && pnpm install --frozen-lockfile
+          pnpm run lint
+          pnpm exec tsc --noEmit
+      - name: Meeting browser race and visual-context demand oracle
+        run: |
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          E2E_SOURCE_REVISION="$GITHUB_SHA" node scripts/browser_saved_meeting_e2e.mjs
+      - name: Source hygiene
+        run: git diff --check
