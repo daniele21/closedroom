@@ -3,10 +3,20 @@ import { ApiClient, type TranscriptionJob } from './apiClient';
 export const TERMINAL_JOB_STATUSES = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 const RECOVERY_RECONNECT_DELAY_MS = 5000;
 
-export interface JobEventSnapshot extends TranscriptionJob {
+export interface JobEventSnapshot extends Partial<TranscriptionJob> {
+  id: string;
+  status: string;
+  current_step: string;
+  progress: number;
+  updated_at: number;
   sequence?: number;
-  event_id?: number;
-  message?: string | null;
+}
+
+interface JobEventWire extends Partial<TranscriptionJob> {
+  // The persisted SSE event uses job_id, and its id is an event id.
+  job_id?: string;
+  sequence?: number;
+  payload?: Record<string, unknown> | null;
   event_payload?: Record<string, unknown> | null;
   event_created_at?: number;
 }
@@ -48,15 +58,22 @@ function runJobEventStream(jobId: string, options: JobEventFollowerOptions): () 
     closeSource();
   };
 
-  const publish = (job: JobEventSnapshot) => {
+  const publish = (wire: JobEventWire) => {
     if (stopped) return;
-    const sequence = Number(job.sequence || 0);
+    const sequence = Number(wire.sequence || 0);
     if (sequence > 0 && sequence <= lastSequence) return;
     if (sequence > 0) lastSequence = sequence;
 
+    // SSE event rows and GET job snapshots are different wire contracts.
+    // Never replace the canonical job ID with the SQLite event-row ID.
     const normalized: JobEventSnapshot = {
-      ...job,
-      progress_detail: job.event_payload ?? job.progress_detail,
+      id: jobId,
+      status: wire.status || 'running',
+      current_step: wire.current_step || wire.status || 'running',
+      progress: Number(wire.progress || 0),
+      updated_at: wire.updated_at ?? wire.event_created_at ?? wire.created_at ?? 0,
+      progress_detail: wire.event_payload ?? wire.payload ?? wire.progress_detail,
+      sequence: wire.sequence,
     };
     options.onUpdate(normalized);
     if (TERMINAL_JOB_STATUSES.has(normalized.status)) {
@@ -92,7 +109,7 @@ function runJobEventStream(jobId: string, options: JobEventFollowerOptions): () 
     source = new EventSource(`/v1/jobs/${encodeURIComponent(jobId)}/events`);
     source.onmessage = (message) => {
       try {
-        publish(JSON.parse(message.data) as JobEventSnapshot);
+        publish(JSON.parse(message.data) as JobEventWire);
       } catch (error) {
         options.onRecoveryError?.(error);
       }
