@@ -87,6 +87,15 @@ def import_recording_audio(
         raise HTTPException(status_code=507, detail="Could not store imported audio") from exc
 
 
+@router.post("/v1/recordings/import-audio/{request_id}/cancel")
+def cancel_recording_audio_import(request_id: str, request: Request):
+    try:
+        cancelled = get_services(request.app).recordings.cancel_audio_import(request_id)
+        return {"cancel_requested": cancelled, "already_published": not cancelled}
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/v1/recordings/{recording_id}/chunks")
 async def append_recording_chunk(
     recording_id: str,
