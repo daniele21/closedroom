@@ -107,7 +107,7 @@ def _file_role(path: str) -> str:
     parts = Path(path).parts
     name = parts[-1].lower()
     suffix = Path(name).suffix
-    if "static" in parts or "web" in parts and suffix in {".js", ".css", ".html"}:
+    if "static" in parts or ("web" in parts and suffix in {".js", ".css", ".html"}):
         return "bundled_web_ui"
     if suffix in {".gguf", ".onnx", ".safetensors", ".mlmodel", ".mlmodelc"}:
         return "model_or_ml_artifact"
@@ -209,12 +209,16 @@ def bundle_audit(app: Path) -> dict:
         "symlinks_not_followed": symlinks,
         "total_bytes": total_bytes,
         "groups": _size_groups(files, classify),
-        "component_groups": dict(sorted(components.items(), key=lambda item: (-item[1]["bytes"], item[0]))[:30]),
+        "component_groups": components,
+        "largest_component_groups": [
+            {"path": name, **counts}
+            for name, counts in sorted(components.items(), key=lambda item: (-item[1]["bytes"], item[0]))[:25]
+        ],
         "file_roles": roles,
         "unattributed_opaque_archive_bytes": roles.get("opaque_archives", {}).get("bytes", 0),
         "artifact_identity": manifest,
         "largest_files": _largest(files, 25),
-        "measurement": "file logical sizes within .app, excluding symlink targets; not disk allocation, DMG, memory or startup",
+        "measurement": "logical file sizes within .app, excluding symlinks; not disk allocation, DMG, memory or startup",
         "caution": "Groups count physically bundled files only. PyInstaller executable/PYZ/zip contents may hide modules; no per-dependency size or safety-to-remove claim.",
     }
 
