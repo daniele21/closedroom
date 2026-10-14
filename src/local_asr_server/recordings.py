@@ -145,6 +145,9 @@ class RecordingStore:
             raise PermissionError(f"Recording directory is not writable: {curr_root}")
         self._locks_guard = threading.Lock()
         self._locks: dict[str, threading.Lock] = {}
+        self._import_guard = threading.Lock()
+        self._inflight_imports: dict[str, set[threading.Event]] = {}
+        self._cancelled_imports: dict[str, float] = {}
         self._screenshot_artifacts = ScreenshotArtifactStore(
             conflict_error=RecordingConflict,
             not_found_error=RecordingNotFound,
@@ -253,6 +256,32 @@ class RecordingStore:
                 except OSError:
                     logger.warning("Could not clean interrupted audio import staging")
 
+    def cancel_audio_import(self, request_id: str) -> bool:
+        """Request cancellation of a staged import, never of published audio."""
+        if not request_id or len(request_id) > 128:
+            raise RecordingConflict("Invalid import request identity")
+        recording_id = str(uuid.uuid5(
+            uuid.NAMESPACE_URL, f"closedroom/audio-import/v1/{request_id}",
+        ))
+        try:
+            self._load(recording_id)
+            return False
+        except RecordingNotFound:
+            pass
+        with self._import_guard:
+            now = time.monotonic()
+            self._cancelled_imports = {
+                key: expiry for key, expiry in self._cancelled_imports.items()
+                if expiry > now
+            }
+            if len(self._cancelled_imports) >= 128:
+                oldest = min(self._cancelled_imports, key=self._cancelled_imports.get)
+                del self._cancelled_imports[oldest]
+            self._cancelled_imports[request_id] = now + 300
+            for cancellation in self._inflight_imports.get(request_id, ()):
+                cancellation.set()
+        return True
+
     def import_audio(
         self,
         source: BinaryIO,
@@ -290,6 +319,12 @@ class RecordingStore:
         stage_parent.mkdir(parents=True, exist_ok=True)
         stage = stage_parent / f".import-{uuid.uuid4().hex}"
         stage.mkdir()
+        cancellation = threading.Event()
+        if request_id is not None:
+            with self._import_guard:
+                if self._cancelled_imports.get(request_id, 0) > time.monotonic():
+                    cancellation.set()
+                self._inflight_imports.setdefault(request_id, set()).add(cancellation)
         audio_file = stage / f"recording{extension}"
         digest = hashlib.sha256()
         size = 0
@@ -297,6 +332,8 @@ class RecordingStore:
         try:
             with audio_file.open("xb") as output:
                 while True:
+                    if cancellation.is_set():
+                        raise RecordingConflict("Audio import cancelled")
                     chunk = source.read(IMPORT_READ_CHUNK_BYTES)
                     if not chunk:
                         break
@@ -325,6 +362,8 @@ class RecordingStore:
                     except RecordingNotFound:
                         existing = None
                     if existing is not None:
+                        if cancellation.is_set():
+                            raise RecordingConflict("Audio import cancelled")
                         if existing.get("import_fingerprint") != fingerprint:
                             raise RecordingConflict("Import request identity reused with different audio or options")
                         self._upsert_catalog(existing)
@@ -369,8 +408,11 @@ class RecordingStore:
                 # Metadata points to the final directory, which becomes visible
                 # to readers only when all bytes and metadata are on disk.
                 self._write_metadata(stage, metadata)
-                stage.rename(final)
-                published = True
+                with self._import_guard:
+                    if cancellation.is_set():
+                        raise RecordingConflict("Audio import cancelled")
+                    stage.rename(final)
+                    published = True
                 # Best-effort durable directory entry. The committed source is
                 # kept even if the filesystem does not support directory fsync.
                 try:
@@ -386,6 +428,13 @@ class RecordingStore:
                 self._upsert_catalog(metadata)
                 return self.public_metadata(metadata)
         finally:
+            if request_id is not None:
+                with self._import_guard:
+                    tokens = self._inflight_imports.get(request_id)
+                    if tokens is not None:
+                        tokens.discard(cancellation)
+                        if not tokens:
+                            self._inflight_imports.pop(request_id, None)
             if not published:
                 shutil.rmtree(stage, ignore_errors=True)
 
