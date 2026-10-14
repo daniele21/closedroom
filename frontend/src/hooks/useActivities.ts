@@ -56,8 +56,14 @@ export function useActivities(enabled = true) {
   // Discovery stays bounded and handles newly created jobs, but progress
   // follows the same SSE connection already used by Meeting. A route change
   // does not close the stream while the shell still observes this job.
+  // WKWebView/Chrome may limit EventSource connections per origin. Observe
+  // running stages first; queued entries remain discoverable via the bounded
+  // canonical snapshot refresh. Meeting shares these followers when opened.
   const activeIdsKey = snapshot.items
     .filter((job) => !TERMINAL_JOB_STATUSES.has(job.status))
+    .sort((a, b) => Number(a.status === 'queued') - Number(b.status === 'queued')
+      || b.updated_at - a.updated_at)
+    .slice(0, 3)
     .map((job) => job.id).sort().join('|');
 
   useEffect(() => {
