@@ -156,7 +156,6 @@ export default function TranscriptionPage({ detailPath, navigateTo, audioImports
   const [progressStatus, setProgressStatus] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressStep, setProgressStep] = useState('queued');
-  const [audioDuration, setAudioDuration] = useState<number>(0);
   const [liveConsoleLines, setLiveConsoleLines] = useState<string[]>([]);
   const [livePreviewText, setLivePreviewText] = useState('');
   const [elapsedTime, setElapsedTime] = useState('0.0s');
@@ -304,14 +303,6 @@ export default function TranscriptionPage({ detailPath, navigateTo, audioImports
     const objectUrl = URL.createObjectURL(file);
     setSelectedObjectUrl(objectUrl);
     
-    // Load duration dynamically using a temporary Audio element
-    const tempAudio = new Audio(objectUrl);
-    tempAudio.addEventListener('loadedmetadata', () => {
-      if (!isNaN(tempAudio.duration) && isFinite(tempAudio.duration)) {
-        setAudioDuration(tempAudio.duration);
-      }
-    });
-
     if (audioRef.current) {
       audioRef.current.src = objectUrl;
     }
@@ -380,7 +371,6 @@ export default function TranscriptionPage({ detailPath, navigateTo, audioImports
     setSelectedFile(null);
     setSelectedRecordingId(null);
     setTranscriptionResult(null);
-    setAudioDuration(0);
     if (selectedObjectUrl) {
       URL.revokeObjectURL(selectedObjectUrl);
       setSelectedObjectUrl(null);

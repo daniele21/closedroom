@@ -246,7 +246,7 @@ export default function RecordingOverlayPage() {
         setRecordingId(activeData.recording_id);
         setIsRecording(true);
         setTitle(activeData.title || 'Registrazione');
-        setCaptureBackend(activeData.capture_backend || 'browser');
+        setCaptureBackend(activeData.capture_backend === 'native' ? 'native' : 'browser');
         setCaptureMode(activeData.capture_mode || 'both');
         setBytesWritten(activeData.bytes_written || 0);
         setWarnings(activeData.warnings || []);

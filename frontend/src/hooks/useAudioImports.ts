@@ -37,7 +37,7 @@ export function useAudioImports(enabled = true) {
   ): string => {
     if (!enabled) throw new Error('Audio import is unavailable');
     const id = crypto.randomUUID();
-    setItems((current) => [{ id, name: file.name, phase: 'uploading' }, ...current].slice(0, 20));
+    setItems((current) => [{ id, name: file.name, phase: 'uploading' as const }, ...current].slice(0, 20));
 
     const run = async () => {
       let source: Recording | undefined;
