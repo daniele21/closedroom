@@ -1266,7 +1266,7 @@ export const ApiClient = {
     active: boolean;
     recording_id?: string;
     title?: string;
-    capture_backend?: 'browser' | 'native';
+    capture_backend?: 'browser' | 'native' | 'import';
     capture_mode?: 'both' | 'mic_only' | 'pc_only';
     started_at?: number | string;
     bytes_written?: number;
