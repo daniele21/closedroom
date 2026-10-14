@@ -3,7 +3,7 @@ name: Temporary demo video fidelity audit (no app build)
 on:
   pull_request:
     branches: [experiment/complexity-ablation]
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
