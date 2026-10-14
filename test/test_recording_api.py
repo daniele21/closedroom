@@ -102,6 +102,32 @@ class RecordingApiTests(unittest.TestCase):
         ).status_code, 422)
         self.assertIn("result", self.client.get("/v1/jobs").json()["items"][0])
 
+    def test_global_cancel_dispatches_to_analysis_and_preparation_owners(self) -> None:
+        services = get_services(self.app)
+        services.jobs.create(
+            job_id="analysis-job", job_type="analysis",
+            scope_type="recording", scope_id="rec-1",
+        )
+        response = self.client.post("/v1/jobs/analysis-job/cancel")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(services.jobs.get("analysis-job")["cancel_requested"])
+
+        services.jobs.create(
+            job_id="prepare-job", job_type="meeting_preparation",
+            scope_type="recording", scope_id="rec-1",
+        )
+        services.jobs.create(
+            job_id="child-job", job_type="analysis",
+            scope_type="recording", scope_id="rec-1",
+        )
+        services.jobs.link_child("prepare-job", "child-job", stage="analysis")
+        cancelled = self.client.post("/v1/jobs/prepare-job/cancel")
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertTrue(services.jobs.get("child-job")["cancel_requested"])
+        self.assertTrue(services.jobs.get("prepare-job")["cancel_requested"])
+        # Cooperative child cancellation does not fake a terminal parent.
+        self.assertEqual(services.jobs.get("prepare-job")["status"], "cancelling")
+
     def test_visual_frame_upload_is_staged_only_while_recording(self) -> None:
         created = self.client.post(
             "/v1/recordings",
