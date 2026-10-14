@@ -682,6 +682,39 @@ async function request(url: string, options: RequestInit = {}, retrying = false)
   throw new Error(detail);
 }
 
+export type TranscriptionJobOptions = {
+  model?: string;
+  language?: string;
+  task?: string;
+  response_format?: string;
+  word_timestamps?: boolean;
+  initial_prompt?: string;
+  temperature?: number | null;
+  condition_on_previous_text?: boolean;
+  vad_guided?: boolean;
+  vad_post_filter?: boolean;
+  asr_provider?: string;
+  speechmatics_region?: string;
+  speechmatics_model?: string;
+  speechmatics_diarization?: string;
+  diarization_provider?: string;
+  visual_intelligence_enabled?: boolean;
+};
+
+export type AnalysisJobOptions = AnalysisSetupPayload & {
+  transcription_id?: string;
+  recording_id?: string;
+  text?: string;
+  audio_task?: string;
+  question?: string;
+  prompt?: string;
+  analysis_type?: string;
+  template_id?: string;
+  pipeline_id?: string;
+  pipeline_run_id?: string;
+  source_ids?: string[];
+};
+
 export const ApiClient = {
   async health(): Promise<HealthResponse> {
     return (await request('/health')).json();
@@ -771,8 +804,8 @@ export const ApiClient = {
 
   async createAudioAnalysisPreparation(
     recordingId: string,
-    transcription: Parameters<typeof ApiClient.createTranscriptionJob>[1],
-    analysis: Parameters<typeof ApiClient.createAnalysisJob>[0],
+    transcription: TranscriptionJobOptions,
+    analysis: AnalysisJobOptions,
   ): Promise<TranscriptionJob> {
     return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/audio-analysis-jobs`, {
       method: 'POST',
@@ -942,24 +975,7 @@ export const ApiClient = {
     }).then((res) => res.json());
   },
 
-  async createTranscriptionJob(recordingId: string, payload: {
-    model?: string;
-    language?: string;
-    task?: string;
-    response_format?: string;
-    word_timestamps?: boolean;
-    initial_prompt?: string;
-    temperature?: number | null;
-    condition_on_previous_text?: boolean;
-    vad_guided?: boolean;
-    vad_post_filter?: boolean;
-    asr_provider?: string;
-    speechmatics_region?: string;
-    speechmatics_model?: string;
-    speechmatics_diarization?: string;
-    diarization_provider?: string;
-    visual_intelligence_enabled?: boolean;
-  }, requestId?: string): Promise<TranscriptionJob> {
+  async createTranscriptionJob(recordingId: string, payload: TranscriptionJobOptions, requestId?: string): Promise<TranscriptionJob> {
     return (await request(`/v1/recordings/${recordingId}/transcription-jobs`, {
       method: 'POST',
       headers: {
@@ -1084,7 +1100,7 @@ export const ApiClient = {
     })).json();
   },
 
-  async createAnalysisJob(payload: AnalysisSetupPayload & { transcription_id?: string; recording_id?: string; text?: string; audio_task?: string; question?: string; prompt?: string; analysis_type?: string; template_id?: string; pipeline_id?: string; pipeline_run_id?: string; source_ids?: string[] }, requestId?: string): Promise<AnalysisJobCreated> {
+  async createAnalysisJob(payload: AnalysisJobOptions, requestId?: string): Promise<AnalysisJobCreated> {
     return (await request('/v1/analysis-jobs', {
       method: 'POST',
       headers: {
