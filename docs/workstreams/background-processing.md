@@ -175,28 +175,31 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
 
 ## Checkpoint unico di ripresa
 
-- Data: 2026-10-14. Implementazione parziale, BG-1 ACTIVE; BG-2..5 BLOCKED.
-- Sorgente: `dev` HEAD `a30e69e99c03c7b4ec52da7155e6645dbf9d1a27`,
-  tree `8ebfb66be7b028e0cbd2a6c6d3b608c8a80556e2` (verificati sul remoto).
-  Branch `feature/background-processing-bg1`, HEAD al checkpoint
-  `3b8c1ac547b298cae769b689e5253aa4a6965b8f`; rivalutare al resume.
-- Sviluppato su branch dedicato, nessun merge: `JobStore` recupera tutte le
-  righe attive dopo restart, non soltanto 500 recenti; discovery SQL a
-  proiezione compatta con `view=active|history|recent`, cursor stabile
-  `created_at,id` e parent link; endpoint `/v1/jobs` compatibile
-  (default snapshot completo), `summary=true` esplicito, risposta paginata.
-  Manager/client frontend espongono il nuovo contratto; `interrupted` chiude
-  il ciclo della pagina Trascrizione; cancel globale delega a manager di
-  transcription/visual, analysis e meeting preparation.
-- Test aggiunti a `test/test_job_store.py` e `test/test_recording_api.py`:
-  storico/attivi >500, keyset ties, proiezione priva di payload, relazioni
-  parent, recupero restart e propagazione cancellazione. **Non eseguiti**:
-  l'ambiente corrente non ha checkout o accesso al runner macOS; non dichiarare PASS.
-- Rischi aperti BG-1: idempotenza submit attraverso risposte di rete ambigue,
-  correlazione retry esplicito, verifica di stream/reconnect e race
-  pending/running/cancel. Non estendere BG-2 finché il contratto non è provato.
-- Prossima azione: validare le suite mirate in esecuzione automatica conforme
-  al selector senza build/package Actions, fare audit delle API POST e
-  chiudere idempotenza; solo allora sbloccare BG-2 import atomico.
-- REAL_ENVIRONMENT: TCC/audio fisico/WKWebView e runtime MLX/Metal restano
-  `DEFERRED_TO_RELEASE` quando applicabili; nessuna evidenza reclamata.
+- 2026-10-14: BG-1 ACTIVE; BG-2..5 BLOCKED (dipendenza non ancora validata).
+- Branch `feature/background-processing-bg1`, basato su `dev`
+  `a30e69e99c03c7b4ec52da7155e6645dbf9d1a27` / tree
+  `8ebfb66be7b028e0cbd2a6c6d3b608c8a80556e2`.
+  Aggiornare HEAD/tree live al resume; nessun merge su `dev`.
+- Codice scritto: discovery attivi/storico keyset (nessun payload nelle summary),
+  parent metadata, `interrupted` oltre 500 al riavvio, cancel globale delegato,
+  terminali UI uniformi. Submit con `Idempotency-Key` per recording ASR,
+  diarizzazione e analisi diretta: ammissione SQLite atomica, replay terminale
+  e 409 su collisione; retry esplicito crea una nuova chiave. La pagina
+  Trascrizione conserva la chiave di POST ambiguo finché non riceve conferma.
+- Test aggiunti: `test_job_store` (concorrenza e storico >500), `test_recording_api`
+  (discovery, cancel e duplicate ASR) e `test_analysis_api` (replay analisi).
+  **Ancora non eseguiti**; il runner container non possiede un checkout git
+  e il network pubblico non risolve GitHub. Gate source test, lint, TS,
+  documentazione e API end-to-end PENDING, non PASS.
+- Rischi residui: la deduplica del parent preparation segue l'attuale identità
+  del risultato, non una request-id isolata; le pipeline multiple senza
+  coordinatore di submit non hanno ancora retry idempotente; SSE/reconnect e
+  race cancel/avvio richiedono verifica assemblata; route unmount non conserva
+  ancora la chiave client (BG-3).
+- Prossimo passo: selezionare gate STRONG da diff/head/base, usare solo
+  preflight remoto source-only strettamente necessario, diagnosticare
+  eventuali regressioni; poi sbloccare BG-2 secondo acceptance e aggiungere
+  l'owner di upload atomico in `RecordingStore`. Evitare GitHub Actions
+  build e upload FULL_MEDIA.
+- REAL_ENVIRONMENT: TCC/audio fisico/WKWebView e MLX/Metal rappresentativi
+  restano `DEFERRED_TO_RELEASE` quando applicabili.

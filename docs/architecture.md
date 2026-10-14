@@ -646,6 +646,17 @@ introduce un secondo mutex/scheduler.
 - richiesta di cancellazione;
 - timestamp di avvio e completamento.
 
+La discovery `GET /v1/jobs` è backward-compatible (default snapshot completo,
+`view=recent`); il consumer Attività può selezionare `summary=true` e
+`view=active|history` con paginazione keyset `before_created_at,before_id`.
+La proiezione SQL non carica prompt, payload, progress_detail o risultati.
+`parent_job_id` espone la relazione persistita per evitare doppi conteggi.
+Gli avvii diretti ASR, diarizzazione e analisi possono inviare una chiave
+`Idempotency-Key`, serializzata in SQLite dal `JobStore` con fingerprint
+delle opzioni; replay di un run completato non provoca una nuova inferenza.
+Una chiave diversa rappresenta invece una richiesta nuova. La correlazione
+`meeting_preparation` resta governata dal suo owner esistente.
+
 Il transcription job pubblica esplicitamente anche `diarizing`,
 `visual_processing` e `audio_intelligence` per i workflow tecnici compatibili.
 Il job `visual_intelligence` on-demand usa lo stesso store e pubblica progress
