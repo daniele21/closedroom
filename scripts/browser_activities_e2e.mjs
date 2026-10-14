@@ -19,6 +19,7 @@ let captureBlocked = false;
 let cancelCount = 0;
 let importCount = 0;
 let importedJobCount = 0;
+let retryCount = 0;
 const activeSse = new Map();
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -42,6 +43,14 @@ const server = http.createServer((req, res) => {
     const job = { ...fixture('imported-job', 'queued'), scope_id: 'imported-source', source_label: 'local-clip' };
     jobs.push(job);
     return json(job, 202);
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/jobs/failed-asr/retry') {
+    if (!req.headers['idempotency-key']) return json({ detail: 'Missing retry identity' }, 422);
+    retryCount++;
+    if (!jobs.some((job) => job.id === 'retried-asr')) {
+      jobs.push({ ...fixture('retried-asr', 'queued'), scope_id: 'first', source_label: 'Synthetic retry' });
+    }
+    return json({ job_id: 'retried-asr', retry_of: 'failed-asr', status: 'queued' }, 202);
   }
   if (url.pathname === '/v1/transcription/source-data') return json({ recordings: [], projects: [], settings: {} });
   if (url.pathname === '/v1/analysis-runs/analysis-run-1') return json({
@@ -253,6 +262,16 @@ try {
   await assert(`location.hash === '#analysis/run/analysis-run-1' && document.body.innerText.includes('Verified standalone analysis')`,
     'open result resolves durable inline analysis run and renders its result');
   await checkpoint('11-standalone-analysis-result');
+  await evaluate(`location.hash = '#activities'`);
+  jobs.push({ ...fixture('failed-asr', 'failed'), scope_id: 'first' });
+  await refresh();
+  await assert(`!!document.querySelector('[data-activity-id="failed-asr"] button')`,
+    'failed ASR visible for explicit retry');
+  await evaluate(`Array.from(document.querySelectorAll('[data-activity-id="failed-asr"] button')).at(-1).click()`);
+  await assert(`!!document.querySelector('[data-activity-id="retried-asr"]')`,
+    'retry creates a separate persistent job in Activities');
+  if (retryCount !== 1) throw new Error('explicit retry unexpectedly submitted multiple times');
+  await checkpoint('12-explicit-retry-created-new-job');
 
 } catch (error) { failed = String(error.stack || error); }
 finally {
