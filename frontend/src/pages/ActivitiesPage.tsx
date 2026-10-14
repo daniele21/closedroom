@@ -2,17 +2,20 @@ import { ListTodo } from 'lucide-react';
 import { ApiClient, type ActivityJob } from '../api/apiClient';
 import { TERMINAL_JOB_STATUSES } from '../api/jobEvents';
 import type { ActivitiesState } from '../hooks/useActivities';
+import type { AudioImportsState } from '../hooks/useAudioImports';
 import { useTranslation } from '../i18n/i18n';
 import { JobProgress } from '../components/meeting/MeetingProcessingStatus';
 import { Button } from '../components/ui/Button';
 
-export default function ActivitiesPage({ activities, navigateTo }: {
+export default function ActivitiesPage({ activities, audioImports, navigateTo }: {
   activities: ActivitiesState;
+  audioImports: AudioImportsState;
   navigateTo: (page: string, detail?: string | null) => void;
 }) {
   const { t } = useTranslation();
   const active = activities.items.filter((job) => !TERMINAL_JOB_STATUSES.has(job.status));
   const recent = activities.items.filter((job) => TERMINAL_JOB_STATUSES.has(job.status));
+  const uploads = audioImports.items.filter((item) => !['submitted', 'cancelled'].includes(item.phase));
   const open = (job: ActivityJob) => {
     if (job.scope_type === 'recording' && job.scope_id) navigateTo('meeting', job.scope_id);
     else if (job.scope_type === 'inline_text' && job.scope_id) navigateTo('analysis', job.scope_id);
@@ -51,6 +54,29 @@ export default function ActivitiesPage({ activities, navigateTo }: {
     <section aria-labelledby="active-activities"><h2 id="active-activities" className="text-sm font-semibold text-text-primary">{t('activities.active')} · {active.length}</h2>
       {activities.loading ? <p className="py-5 text-sm text-text-secondary" role="status">{t('common.loading')}</p> : active.length ? <ul className="divide-y divide-border-subtle">{active.map((job) => row(job, true))}</ul> : <p className="py-5 text-sm text-text-secondary">{t('activities.empty')}</p>}
     </section>
+    {uploads.length > 0 && <section aria-labelledby="import-activities">
+      <h2 id="import-activities" className="text-sm font-semibold text-text-primary">{t('activities.imports')}</h2>
+      <ul className="divide-y divide-border-subtle">
+        {uploads.map((upload) => <li key={upload.id} className="py-4" data-audio-import={upload.id}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-medium text-text-primary">{upload.name}</p>
+              <p className="text-sm text-text-secondary" role="status">
+                {upload.phase === 'uploading' ? t('activities.importing')
+                  : upload.phase === 'submitting' ? t('activities.importSubmitting')
+                  : upload.phase === 'cancelling' ? t('activities.importCancelling')
+                  : t('activities.importFailed')}
+              </p>
+              {upload.error && <p className="text-sm text-danger" role="alert">{upload.error}</p>}
+            </div>
+            {upload.phase === 'uploading' && <Button variant="secondary" size="sm"
+              onClick={() => void audioImports.cancel(upload.id)}>{t('activities.cancel')}</Button>}
+            {upload.recordingId && <Button variant="ghost" size="sm"
+              onClick={() => navigateTo('meeting', upload.recordingId)}>{t('activities.open')}</Button>}
+          </div>
+        </li>)}
+      </ul>
+    </section>}
     {recent.length > 0 && <section aria-labelledby="recent-activities"><h2 id="recent-activities" className="text-sm font-semibold text-text-primary">{t('activities.recent')}</h2><ul className="divide-y divide-border-subtle">{recent.map((job) => row(job, false))}</ul></section>}
   </div>;
 }
