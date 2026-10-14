@@ -66,6 +66,72 @@ class RecordingApiTests(unittest.TestCase):
         self.client.close()
         self.temp_dir.cleanup()
 
+    def test_imported_audio_api_is_recorded_and_idempotent(self) -> None:
+        audio = _wav_bytes()
+        headers = {"Idempotency-Key": "import-test-1"}
+        endpoint = "/v1/recordings/import-audio"
+        def submit(data=audio, request_headers=headers):
+            return self.client.post(
+                endpoint,
+                files={"file": ("imported.wav", data, "audio/wav")},
+                data={"title": "Imported call", "language": "it"},
+                headers=request_headers,
+            )
+        first = submit()
+        self.assertEqual(first.status_code, 201)
+        item = first.json()
+        self.assertEqual(item["status"], "recorded")
+        self.assertEqual(item["capture_backend"], "import")
+        self.assertEqual(item["capture_mode"], "legacy_mixed")
+        self.assertFalse(self.client.get("/v1/recordings/active").json()["active"])
+        self.assertEqual(
+            get_services(self.app).recordings.audio_path(item["id"]).read_bytes(),
+            audio,
+        )
+        replay = submit()
+        self.assertEqual(replay.status_code, 201)
+        self.assertEqual(replay.json()["id"], item["id"])
+        self.assertEqual(len(get_services(self.app).recordings.list()), 1)
+        collision = submit(b"another upload")
+        self.assertEqual(collision.status_code, 409)
+        invalid = self.client.post(
+            endpoint, files={"file": ("not-audio.exe", b"payload", "application/octet-stream")},
+        )
+        self.assertEqual(invalid.status_code, 409)
+        self.assertEqual(len(get_services(self.app).recordings.list()), 1)
+
+    @patch("local_asr_server.server.transcribe_file_sync")
+    def test_imported_audio_uses_existing_transcription_job(self, transcribe) -> None:
+        transcribe.return_value = {
+            "text": "Ciao",
+            "language": "it",
+            "segments": [{"id": 0, "start": 0.0, "end": 1.0, "text": "Ciao"}],
+        }
+        audio = self.client.post(
+            "/v1/recordings/import-audio",
+            files={"file": ("meeting.wav", _wav_bytes(), "audio/wav")},
+        )
+        self.assertEqual(audio.status_code, 201)
+        recording_id = audio.json()["id"]
+        self.assertEqual(
+            get_services(self.app).recordings.transcribable_tracks(recording_id)[0][0]["source"],
+            "mixed",
+        )
+        response = self.client.post(
+            f"/v1/recordings/{recording_id}/transcription-jobs",
+            json={"language": "it", "visual_intelligence_enabled": False},
+        )
+        self.assertEqual(response.status_code, 202)
+        job_id = response.json()["id"]
+        import time
+        for _ in range(60):
+            status = self.client.get(f"/v1/jobs/{job_id}").json()
+            if status["status"] in {"completed", "failed", "cancelled"}:
+                break
+            time.sleep(0.03)
+        self.assertEqual(status["status"], "completed", status.get("error"))
+        self.assertIsNone(get_services(self.app).recordings.active_recording())
+
     def test_activities_exposes_all_active_jobs_without_content(self) -> None:
         jobs = get_services(self.app).jobs
         for job_id in ("job-1", "job-2", "job-3"):
