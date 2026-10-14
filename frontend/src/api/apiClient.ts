@@ -925,10 +925,13 @@ export const ApiClient = {
     speechmatics_diarization?: string;
     diarization_provider?: string;
     visual_intelligence_enabled?: boolean;
-  }): Promise<TranscriptionJob> {
+  }, requestId?: string): Promise<TranscriptionJob> {
     return (await request(`/v1/recordings/${recordingId}/transcription-jobs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(requestId ? { 'Idempotency-Key': requestId } : {}),
+      },
       body: JSON.stringify(payload),
     })).json();
   },
@@ -937,10 +940,13 @@ export const ApiClient = {
     provider: 'local' | 'speechmatics' | string;
     speechmatics_region?: string;
     speechmatics_model?: string;
-  }): Promise<TranscriptionJob> {
+  }, requestId?: string): Promise<TranscriptionJob> {
     return (await request(`/v1/transcriptions/${transcriptionId}/diarization-jobs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(requestId ? { 'Idempotency-Key': requestId } : {}),
+      },
       body: JSON.stringify(payload),
     })).json();
   },
@@ -1045,10 +1051,13 @@ export const ApiClient = {
     })).json();
   },
 
-  async createAnalysisJob(payload: AnalysisSetupPayload & { transcription_id?: string; recording_id?: string; text?: string; audio_task?: string; question?: string; prompt?: string; analysis_type?: string; template_id?: string; pipeline_id?: string; pipeline_run_id?: string; source_ids?: string[] }): Promise<AnalysisJobCreated> {
+  async createAnalysisJob(payload: AnalysisSetupPayload & { transcription_id?: string; recording_id?: string; text?: string; audio_task?: string; question?: string; prompt?: string; analysis_type?: string; template_id?: string; pipeline_id?: string; pipeline_run_id?: string; source_ids?: string[] }, requestId?: string): Promise<AnalysisJobCreated> {
     return (await request('/v1/analysis-jobs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(requestId ? { 'Idempotency-Key': requestId } : {}),
+      },
       body: JSON.stringify(payload),
     })).json();
   },
