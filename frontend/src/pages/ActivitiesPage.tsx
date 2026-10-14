@@ -15,7 +15,10 @@ export default function ActivitiesPage({ activities, audioImports, navigateTo }:
   const { t } = useTranslation();
   const active = activities.items.filter((job) => !TERMINAL_JOB_STATUSES.has(job.status));
   const recent = activities.items.filter((job) => TERMINAL_JOB_STATUSES.has(job.status));
-  const uploads = audioImports.items.filter((item) => !['submitted', 'cancelled'].includes(item.phase));
+  const uploads = audioImports.items.filter((item) =>
+    item.phase !== 'cancelled'
+    && (item.phase !== 'submitted' || !activities.items.some((job) => job.id === item.jobId)),
+  );
   const open = (job: ActivityJob) => {
     if (job.scope_type === 'recording' && job.scope_id) navigateTo('meeting', job.scope_id);
     else if (job.scope_type === 'inline_text' && job.scope_id) navigateTo('analysis', job.scope_id);
@@ -65,6 +68,7 @@ export default function ActivitiesPage({ activities, audioImports, navigateTo }:
                 {upload.phase === 'uploading' ? t('activities.importing')
                   : upload.phase === 'submitting' ? t('activities.importSubmitting')
                   : upload.phase === 'cancelling' ? t('activities.importCancelling')
+                  : upload.phase === 'submitted' ? t('activities.importSubmitted')
                   : t('activities.importFailed')}
               </p>
               {upload.error && <p className="text-sm text-danger" role="alert">{upload.error}</p>}
