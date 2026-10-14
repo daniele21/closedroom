@@ -41,7 +41,10 @@ for arg in "$@"; do
     [[ "$arg" != "--test" ]] || BUILD_VARIANT="test"
 done
 # One canonical build identity for both direct builds and finalized artifacts.
-IFS=
+IFS=$'\t' read -r APP_NAME APP_BUNDLE_NAME APP_DISPLAY_NAME BUNDLE_ID < <(
+    python3 "$SCRIPT_DIR/scripts/build_identity.py" --variant "$BUILD_VARIANT" --identity-tsv
+)
+APP_VERSION="$(python3 "$SCRIPT_DIR/scripts/product_version.py" --root "$SCRIPT_DIR")"
 BUILD_PYTHON_VERSION="${CLOSEDROOM_BUILD_PYTHON_VERSION:-3.10}"
 BUILD_ASSETS="$SCRIPT_DIR/build_assets"
 # uv refuses to build a source tree when its cache lives inside that same tree.

@@ -23,7 +23,10 @@ done
 [[ "$(uname -m)" == "arm64" ]] || { echo "Canonical artifact build requires Apple Silicon arm64" >&2; exit 1; }
 command -v uv >/dev/null 2>&1 || { echo "uv is required" >&2; exit 1; }
 
-IFS=
+IFS=$'\t' read -r APP_NAME APP_BUNDLE_NAME APP_DISPLAY_NAME APP_BUNDLE_ID < <(
+  python3 scripts/build_identity.py --variant "$BUILD_VARIANT" --identity-tsv
+)
+export CLOSEDROOM_BUILD_VARIANT="$BUILD_VARIANT"
 APP_VERSION="$(python3 scripts/product_version.py --root "$ROOT")"
 SOURCE_REVISION="${CLOSEDROOM_SOURCE_REVISION:-$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)}"
 if [[ -n "$(git status --porcelain 2>/dev/null || true)" ]]; then DIRTY=true; else DIRTY=false; fi
