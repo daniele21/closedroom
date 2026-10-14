@@ -15,8 +15,11 @@ from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from local_asr_server.recordings import RecordingConflict, RecordingNotFound
+from local_asr_server.analysis_jobs import ANALYSIS_JOB_TYPE
+from local_asr_server.meeting_preparation import MeetingPreparationManager, MEETING_PREPARATION_JOB_TYPE
 from local_asr_server.transcription_jobs import (
     DIARIZATION_JOB_TYPE,
+    VISUAL_INTELLIGENCE_JOB_TYPE,
     TRANSCRIPTION_JOB_TYPE,
     TranscriptionJob,
 )
@@ -653,11 +656,19 @@ def cancel_job(job_id: str, request: Request):
     existing = get_services(request.app).jobs.get(job_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    job = (
-        get_services(request.app).transcription_jobs.cancel(job_id)
-        if existing["type"] in {TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE}
-        else get_services(request.app).jobs.request_cancel(job_id)
-    )
+    services = get_services(request.app)
+    if existing["type"] == MEETING_PREPARATION_JOB_TYPE:
+        job = MeetingPreparationManager(
+            services, default_model=request.app.state.default_model,
+        ).cancel(job_id)
+    elif existing["type"] == ANALYSIS_JOB_TYPE:
+        job = services.analysis_jobs.cancel(job_id)
+    elif existing["type"] in {
+        TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE, VISUAL_INTELLIGENCE_JOB_TYPE,
+    }:
+        job = services.transcription_jobs.cancel(job_id)
+    else:
+        job = services.jobs.request_cancel(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
