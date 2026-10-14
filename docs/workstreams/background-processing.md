@@ -182,8 +182,8 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
   limite 2 GiB, replay con `Idempotency-Key`, recupero dopo crash,
   metadata `recorded` e nessuna prenotazione capture. Source tests
   scritti, esecuzione e integrazione ancora PENDING.
-- Riusa `RecordingStore`, normale ASR e `MeetingPreparationManager`;
-  nessun nuovo scheduler. Restano BG-2 upload cancelabile durante
-  trasferimento, orchestrazione audio→analisi dal wizard e UI import.
-  BG-3..5 BLOCKED. No build su GitHub Actions.
+- Riusa `RecordingStore`, ASR e `MeetingPreparationManager`;
+  senza scheduler extra. Cancel esplicito server-side con token in
+  memoria, guard atomico e cleanup; resta il collegamento alla shell
+  e import→analisi dal wizard. BG-3..5 BLOCKED; niente build Actions.
 - Evidenza target-Mac TCC/WKWebView/MLX differita a RELEASE.
