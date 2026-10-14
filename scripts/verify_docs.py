@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 import sys
 
@@ -59,10 +60,17 @@ def main() -> int:
     check_budget(root / "docs/current-state.md", "current state", budgets["current_state"], chars_per_token, errors)
     check_budget(root / "docs/architecture.md", "architecture", budgets["architecture"], chars_per_token, errors)
 
-    for path in root.rglob("AGENTS.md"):
-        if path == root / "AGENTS.md" or ".git" in path.parts:
-            continue
-        check_budget(path, "scoped AGENTS", budgets["scoped_agents"], chars_per_token, errors)
+    # Use the canonical context scope and prune before entering generated trees.
+    # Single names match directories anywhere; paths match relative to --root.
+    excluded = set(policy.get("context_exclude_directories", [])) | {".git"}
+    for directory, children, files in os.walk(root):
+        parent = Path(directory)
+        children[:] = [
+            name for name in children
+            if name not in excluded and (parent / name).relative_to(root).as_posix() not in excluded
+        ]
+        if parent != root and "AGENTS.md" in files:
+            check_budget(parent / "AGENTS.md", "scoped AGENTS", budgets["scoped_agents"], chars_per_token, errors)
 
     feature_root = root / "docs/features"
     if feature_root.is_dir():

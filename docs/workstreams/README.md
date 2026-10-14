@@ -7,3 +7,4 @@ Use `skills/plan-workstream/SKILL.md`. Keep one goal, non-goals, durable invaria
 Do not move historical plans here merely to preserve them.
 
 - [Overlay chiamata e screenshot come fonti del meeting](call-overlay-screenshot-evidence.md): piano READY per scatti manuali, citazioni temporali nella trascrizione e analisi locale con fonti.
+- [Elaborazioni in background e Attività globali](background-processing.md): piano READY per importazione audio tramite job, recupero tra schermate e monitoraggio globale.

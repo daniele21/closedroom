@@ -81,6 +81,7 @@ const counts = {
   health: 0,
   meeting: 0,
   prepare: 0,
+  transcript_only: 0,
   parent_events_first: 0,
   parent_events_resume: 0,
   asr_runs: 0,
@@ -229,6 +230,25 @@ function fixtureServer(port) {
     if (pathname === `/v1/meetings/${MEETING_ID}` && req.method === 'GET') {
       counts.meeting += 1;
       return json(res, 200, meetingFixture());
+    }
+    if (req.method === 'GET' && [
+      `/v1/recordings/${MEETING_ID}/notes`,
+      `/v1/recordings/${MEETING_ID}/screenshots`,
+    ].includes(pathname)) {
+      return json(res, 200, { items: [], total: 0 });
+    }
+    if (pathname === `/v1/recordings/${MEETING_ID}/transcription-jobs` && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const payload = JSON.parse(body);
+      if (payload.visual_intelligence_enabled !== false) {
+        return json(res, 400, { detail: 'Transcript-only action must not enable visual analysis' });
+      }
+      counts.transcript_only += 1;
+      counts.asr_runs += 1;
+      state.transcription = transcriptFixture;
+      state.status = 'transcribed';
+      return json(res, 202, { id: 'transcript-only-job', status: 'completed' });
     }
     if (pathname === `/v1/meetings/${MEETING_ID}/prepare` && req.method === 'POST') {
       counts.prepare += 1;
@@ -542,11 +562,99 @@ try {
   const meetingUrl = `http://127.0.0.1:${vitePort}/#meeting/${MEETING_ID}`;
   await browser.navigate(meetingUrl);
   await waitText(browser, ['Prepare notes reconnect review'], 30000, true);
-  await waitText(browser, ['Prepare notes', 'Prepara note']);
-  await waitText(browser, ['Transcript only', 'Solo trascrizione']);
+  await waitText(browser, ['Transcribe and summarize', 'Trascrivi e riassumi']);
+  await waitText(browser, ['Transcribe call', 'Trascrivi chiamata']);
+  const actionHierarchy = await browser.execute(`
+    const section = document.querySelector('[data-meeting-preparation]');
+    const buttons = section ? Array.from(section.querySelectorAll('button')) : [];
+    return buttons.length === 2
+      && buttons[0].classList.contains('button-primary')
+      && /Transcribe call|Trascrivi chiamata/.test(buttons[0].innerText)
+      && buttons[1].classList.contains('button-ghost')
+      && document.querySelectorAll('#meeting-panel-transcript button').length === 0
+      && !!section.querySelector('#meeting-preparation-description');
+  `);
+  if (!actionHierarchy) throw new Error('recorded Meeting must expose one primary action and a secondary transcript action without duplicate empty-state buttons');
   await checkpoint(browser, '01-primary-action');
+  await webdriver(driverPort, 'POST', browser.p('/window/rect'), { width: 680, height: 900 });
+  const narrowLayout = await browser.execute(`
+    const button = document.querySelector('[data-meeting-preparation] .button-primary');
+    const rect = button?.getBoundingClientRect();
+    button?.focus();
+    return !!rect && rect.left >= 0 && rect.right <= innerWidth
+      && document.documentElement.scrollWidth <= innerWidth
+      && document.activeElement === button
+      && !!document.getElementById(button.getAttribute('aria-describedby'));
+  `);
+  if (!narrowLayout) throw new Error('primary action must fit a narrow window, support keyboard focus and describe its result');
+  await checkpoint(browser, '01b-narrow-window-keyboard-focus');
+  await webdriver(driverPort, 'POST', browser.p('/window/rect'), { width: 1440, height: 1000 });
 
-  await browser.clickButton(['Prepare notes', 'Prepara note']);
+  // Exercise progress semantics using persisted state, including stale nonzero
+  // percentages while queued and analysis start markers that are not real progress.
+  const progressCases = [
+    ['queued', 35, 'meeting_preparation', null],
+    ['waiting_for_service', 45, 'meeting_preparation', null],
+    ['retrying', 0, 'meeting_preparation', null],
+    ['running', 0, 'transcription', null],
+    ['running', 60, 'meeting_preparation', '60'],
+    ['running', 10, 'analysis', null],
+    ['cancelling', 60, 'meeting_preparation', null],
+  ];
+  await webdriver(driverPort, 'POST', browser.p('/window/rect'), { width: 680, height: 900 });
+  for (const [status, progress, type, expectedValue] of progressCases) {
+    const fixture = { ...parentJob('progress-fixture', status, 'preparing_transcript', progress), type };
+    state.jobs = [fixture];
+    state.analysis_runs = type === 'analysis'
+      ? [{ ...completedRuns[0], job_id: fixture.id, status: 'running' }] : [];
+    await browser.refresh();
+    await waitText(browser, ['Details', 'Dettagli']);
+    const result = await browser.execute(`
+      const rows = [...document.querySelectorAll('[data-meeting-job-progress]')];
+      const row = rows[0];
+      const bar = row?.querySelector('[role="progressbar"]');
+      const cancel = row?.querySelector('button');
+      return {
+        count: rows.length, state: row?.dataset.progressState,
+        bar: !!bar, value: bar?.getAttribute('aria-valuenow') ?? null,
+        disabled: cancel?.disabled,
+        fits: document.documentElement.scrollWidth <= innerWidth,
+      };
+    `);
+    const active = status === 'running';
+    if (result.count !== 1 || result.state !== status || result.bar !== active
+      || result.value !== expectedValue || result.disabled !== (status === 'cancelling') || !result.fits) {
+      throw new Error(`invalid progress state ${status}/${type}: ${JSON.stringify(result)}`);
+    }
+    await checkpoint(browser, `progress-${status}-${type}`);
+    if (status === 'running' && type === 'transcription') {
+      await webdriver(driverPort, 'POST', browser.p('/goog/cdp/execute'), {
+        cmd: 'Emulation.setEmulatedMedia',
+        params: { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] },
+      });
+      const reduced = await browser.execute(`
+        const fill = document.querySelector('.meeting-progress-indeterminate');
+        return fill && getComputedStyle(fill).animationName === 'none';
+      `);
+      if (!reduced) throw new Error('indeterminate progress must respect reduced motion');
+      await checkpoint(browser, 'progress-reduced-motion');
+      await webdriver(driverPort, 'POST', browser.p('/goog/cdp/execute'), {
+        cmd: 'Emulation.setEmulatedMedia', params: { features: [] },
+      });
+    }
+    if (expectedValue !== null) {
+      await browser.execute(`document.documentElement.setAttribute('data-theme', 'light');`);
+      await checkpoint(browser, 'progress-light-theme');
+      await browser.execute(`document.documentElement.setAttribute('data-theme', 'dark');`);
+    }
+  }
+  state.jobs = [];
+  state.analysis_runs = [];
+  await webdriver(driverPort, 'POST', browser.p('/window/rect'), { width: 1440, height: 1000 });
+  await browser.refresh();
+  await waitText(browser, ['Transcribe and summarize', 'Trascrivi e riassumi']);
+
+  await browser.clickButton(['Transcribe and summarize', 'Trascrivi e riassumi']);
   await waitCount('prepare', 1);
   await waitText(
     browser,
@@ -588,7 +696,7 @@ try {
   await waitText(browser, ['Transcript ready before notes.']);
   await checkpoint(browser, '05-notes-failed-transcript-preserved');
 
-  await browser.clickButton(['Resume', 'Riprendi']);
+  await browser.clickButton(['Resume processing', 'Riprendi elaborazione']);
   await waitCount('prepare', 2);
   await waitText(browser, ['Transcript ready · preparing notes', 'Trascrizione pronta · preparazione note'], 5000, true);
   if (counts.asr_runs !== 1 || counts.analysis_attempts !== 2) {
@@ -605,6 +713,19 @@ try {
     throw new Error(`unexpected final work counts: ${JSON.stringify(counts)}`);
   }
   await checkpoint(browser, '07-notes-ready-default-view');
+  // The primary path creates readable text without starting notes; its next
+  // primary action must describe the remaining work rather than repeat ASR.
+  Object.assign(state, { transcription: null, analysis_runs: [], latest_analysis: {}, jobs: [], status: 'recorded' });
+  await browser.refresh();
+  await waitText(browser, ['Transcribe call', 'Trascrivi chiamata'], 5000, true);
+  await browser.clickButton(['Transcribe call', 'Trascrivi chiamata']);
+  await waitCount('transcript_only', 1);
+  await waitText(browser, ['Create summary and actions', 'Crea sintesi e azioni'], 5000, true);
+  await waitText(browser, ['Transcript ready before notes.']);
+  if (counts.prepare !== 2 || counts.analysis_attempts !== 2 || counts.transcript_only !== 1) {
+    throw new Error(`transcript-only choice unexpectedly started notes: ${JSON.stringify(counts)}`);
+  }
+  await checkpoint(browser, '08-transcript-only-summary-next-step');
   video = await renderVideo();
 } catch (caught) {
   error = `${caught?.name || 'Error'}: ${caught?.message || caught}`;

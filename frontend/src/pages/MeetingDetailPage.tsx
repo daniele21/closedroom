@@ -37,7 +37,7 @@ import { AnalysisSetupModal, AnalysisSetupSelection } from '../components/ui/Ana
 import { Sheet, SheetContent, SheetHeader, SheetBody } from '../components/ui/Sheet';
 import { Dialog, DialogContent, DialogHeader, DialogBody } from '../components/ui/Dialog';
 import { cn } from '../utils/cn';
-import { localizeJobStep } from '../utils/jobs';
+import { MeetingProcessingStatus } from '../components/meeting/MeetingProcessingStatus';
 import { VisualIntelligencePanel } from '../components/meeting/VisualIntelligencePanel';
 import { VisualDebugPanel } from '../components/meeting/VisualDebugPanel';
 import { StructuredNotesEditor } from '../components/meeting/StructuredNotesEditor';
@@ -178,19 +178,6 @@ function keyMomentContext(
     start: selected.length ? Math.min(...selected.map((segment) => segment.start)) : null,
     end: selected.length ? Math.max(...selected.map((segment) => segment.end)) : null,
   };
-}
-
-function preparationProgressLabel(step: string, lang: string): string {
-  if (step === 'preparing_transcript') {
-    return lang === 'it' ? 'Preparazione trascrizione' : 'Preparing transcript';
-  }
-  if (step === 'preparing_notes') {
-    return lang === 'it' ? 'Trascrizione pronta · preparazione note' : 'Transcript ready · preparing notes';
-  }
-  if (step === 'cancelling') {
-    return lang === 'it' ? 'Interruzione in corso' : 'Stopping preparation';
-  }
-  return lang === 'it' ? 'Preparazione meeting' : 'Preparing meeting';
 }
 
 export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = false }: MeetingDetailPageProps) {
@@ -803,6 +790,13 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const canResumePreparation = Boolean(
     latestPreparation && recoverablePreparationStatuses.has(latestPreparation.status),
   );
+  const preparationActionLabel = canResumePreparation
+    ? (lang === 'it' ? 'Riprendi elaborazione' : 'Resume processing')
+    : meeting.transcription
+      ? (lang === 'it' ? 'Crea sintesi e azioni' : 'Create summary and actions')
+      : (lang === 'it' ? 'Trascrivi e riassumi' : 'Transcribe and summarize');
+  const transcriptActionLabel = lang === 'it' ? 'Trascrivi chiamata' : 'Transcribe call';
+  const primaryIsTranscription = !meeting.transcription && !canResumePreparation;
 
   const enrichmentBadge = (status?: string) => {
     if (status === 'completed') return <Badge variant="success">{t('meeting.enrichmentCompleted')}</Badge>;
@@ -939,96 +933,49 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         </section>
       )}
 
-      {(activeJobs.length > 0 || meeting.analysis_runs.some((run) => activeJobStatuses.has(run.status))) && (
-        <section
-          className="border border-warning/30 bg-warning/5 rounded-xl px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs animate-in fade-in duration-200"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-sm font-semibold text-text-primary shrink-0">
-              <Loader2 className="w-4 h-4 animate-spin text-warning" aria-hidden="true" />
-              <span>{activePreparation
-                ? (lang === 'it' ? 'Preparazione note' : 'Preparing notes')
-                : t('meeting.processingTitle')}</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-text-secondary">
-              {displayedActiveJobs.map((job) => (
-                <div key={job.id} className="flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-48" data-meeting-job-progress={job.type}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-text-primary">
-                      {job.type === 'meeting_preparation'
-                        ? preparationProgressLabel(job.current_step, lang)
-                        : localizeJobStep(job.current_step || job.status, t)}
-                    </span>
-                    <span className="shrink-0 font-mono tabular-nums text-text-secondary">
-                      {job.progress > 0 ? `${Math.min(job.progress, 100)}%` : (lang === 'it' ? 'In corso' : 'Working')}
-                    </span>
-                  </div>
-                  {job.progress > 0 ? (
-                    <progress
-                      className="h-1.5 w-full accent-accent"
-                      max={100}
-                      value={Math.min(job.progress, 100)}
-                      aria-label={lang === 'it' ? 'Avanzamento elaborazione' : 'Processing progress'}
-                    />
-                  ) : (
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-warning/15" role="status" aria-label={lang === 'it' ? 'Elaborazione in corso' : 'Processing in progress'}>
-                      <div className="h-full w-1/3 animate-pulse rounded-full bg-warning" />
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleCancelJob(job.id, job.type)}
-                    className="self-start text-danger hover:text-danger-hover transition-colors font-semibold text-[11px] flex items-center gap-1 cursor-pointer bg-danger/10 hover:bg-danger/20 px-2 py-0.5 rounded"
-                  >
-                    <XCircle className="w-3 h-3" aria-hidden="true" />
-                    {t('common.cancel')}
-                  </button>
-                </div>
-              ))}
-              {!activePreparation && meeting.analysis_runs.filter((run) => activeJobStatuses.has(run.status)).map((run) => (
-                <div key={run.id} className="flex items-center gap-2">
-                  <span className="font-medium text-text-primary">{analysisLabel(run.analysis_type)}: {run.status}</span>
-                  {run.job_id && (
-                    <button
-                      type="button"
-                      onClick={() => handleCancelJob(run.job_id!)}
-                      className="text-danger hover:text-danger-hover transition-colors font-semibold text-[11px] flex items-center gap-1 cursor-pointer bg-danger/10 hover:bg-danger/20 px-2 py-0.5 rounded"
-                    >
-                      <XCircle className="w-3 h-3" aria-hidden="true" />
-                      {t('common.cancel')}
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => setDetailsOpen(true)} className="shrink-0">
-            {lang === 'it' ? 'Dettagli' : 'Details'}
-          </Button>
-        </section>
-      )}
+      <MeetingProcessingStatus
+        jobs={[
+          ...displayedActiveJobs,
+          ...(!activePreparation ? meeting.analysis_runs
+            .filter((run, index, runs) => activeJobStatuses.has(run.status)
+              && !activeJobs.some((job) => job.id === run.job_id)
+              && runs.findIndex((candidate) => activeJobStatuses.has(candidate.status)
+                && (candidate.job_id || candidate.id) === (run.job_id || run.id)) === index)
+            .map((run) => ({
+              id: run.job_id || run.id,
+              type: 'analysis',
+              status: run.status,
+              current_step: 'analysis',
+              progress: 0,
+              label: analysisLabel(run.analysis_type),
+              cancellable: Boolean(run.job_id),
+            })) : []),
+        ]}
+        onCancel={handleCancelJob}
+        onDetails={() => setDetailsOpen(true)}
+      />
 
       <div className="flex flex-col gap-5 w-full">
         {!isBusy && !hasCurrentNotes && (
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3.5 rounded-xl border border-accent/25 bg-accent-soft">
+          <section aria-labelledby="meeting-next-step" className="flex flex-col md:flex-row items-start md:items-center justify-between gap-5 py-5 border-y border-border-subtle" data-meeting-preparation="true">
             <div className="flex items-start gap-2.5 min-w-0">
               <Sparkles className="h-5 w-5 text-accent shrink-0 mt-0.5" aria-hidden="true" />
               <div>
-                <h4 className="text-xs font-semibold text-text-primary">
+                <h2 id="meeting-next-step" className="text-sm font-semibold text-text-primary">
                   {canResumePreparation
                     ? (lang === 'it' ? 'Riprendi la preparazione' : 'Resume preparation')
-                    : (lang === 'it' ? 'Prepara le note del meeting' : 'Prepare meeting notes')}
-                </h4>
-                <p className="text-[11px] text-text-secondary leading-relaxed mt-0.5">
+                    : meeting.transcription
+                      ? (lang === 'it' ? 'La trascrizione è pronta' : 'Your transcript is ready')
+                      : (lang === 'it' ? 'La registrazione è pronta' : 'Your recording is ready')}
+                </h2>
+                <p id="meeting-preparation-description" className="text-xs text-text-secondary leading-relaxed mt-1 max-w-lg">
                   {meeting.transcription
                     ? (lang === 'it'
-                      ? 'La trascrizione è pronta. ClosedRoom prepara sintesi, azioni, decisioni e rischi.'
-                      : 'The transcript is ready. ClosedRoom will prepare summary, actions, decisions and risks.')
+                      ? 'Leggi il testo qui sotto. Se ti serve, puoi aggiungere una sintesi con decisioni e azioni.'
+                      : 'Read the text below. If you need it, add a summary with decisions and actions.')
                     : (lang === 'it'
-                      ? 'Un’unica azione prepara prima la trascrizione e poi le note, usando le impostazioni correnti.'
-                      : 'One action prepares the transcript first and then the notes using your current settings.')}
+                      ? 'Trasforma l’audio in testo da leggere. Potrai aggiungere una sintesi in seguito.'
+                      : 'Turn the audio into text you can read. You can add a summary later.')}
                 </p>
                 {latestPreparation?.error && canResumePreparation && (
                   <p className="text-[10px] text-warning mt-1 line-clamp-2">{latestPreparation.error}</p>
@@ -1058,34 +1005,39 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 )}
               </div>
             </div>
-            <div className="flex w-full sm:w-auto items-center gap-2">
+            <div className="flex w-full md:w-auto shrink-0 flex-col items-stretch gap-1.5">
+              <Button
+                size="md"
+                disabled={demoMode}
+                onClick={primaryIsTranscription ? startDefaultTranscription : startPreparation}
+                isLoading={busyAction === (primaryIsTranscription ? 'transcription' : 'meeting_preparation')}
+                aria-describedby="meeting-preparation-description"
+                className="shadow-cta"
+              >
+                {primaryIsTranscription
+                  ? <FileText className="h-4 w-4" aria-hidden="true" />
+                  : <Sparkles className="h-4 w-4" aria-hidden="true" />}
+                {primaryIsTranscription ? transcriptActionLabel : preparationActionLabel}
+              </Button>
               {!meeting.transcription && (
                 <Button
                   size="sm"
-                  variant="secondary"
+                  variant="ghost"
                   disabled={demoMode}
-                  onClick={startDefaultTranscription}
-                  isLoading={busyAction === 'transcription'}
-                  className="flex-1 sm:flex-none"
+                  onClick={primaryIsTranscription ? startPreparation : startDefaultTranscription}
+                  isLoading={busyAction === (primaryIsTranscription ? 'meeting_preparation' : 'transcription')}
+                  title={primaryIsTranscription
+                    ? (lang === 'it' ? 'Crea il testo e una sintesi con decisioni e azioni in un unico passaggio.' : 'Create the transcript and a summary with decisions and actions in one step.')
+                    : (lang === 'it' ? 'Crea il testo senza riprendere la sintesi.' : 'Create the transcript without resuming the summary.')}
                 >
-                  <FileText className="h-4 w-4" aria-hidden="true" />
-                  {lang === 'it' ? 'Solo trascrizione' : 'Transcript only'}
+                  {primaryIsTranscription
+                    ? <Sparkles className="h-4 w-4" aria-hidden="true" />
+                    : <FileText className="h-4 w-4" aria-hidden="true" />}
+                  {primaryIsTranscription ? preparationActionLabel : transcriptActionLabel}
                 </Button>
               )}
-              <Button
-                size="sm"
-                disabled={demoMode}
-                onClick={startPreparation}
-                isLoading={busyAction === 'meeting_preparation'}
-                className="flex-1 sm:flex-none shadow-cta"
-              >
-                <Sparkles className="h-4 w-4" aria-hidden="true" />
-                {canResumePreparation
-                  ? (lang === 'it' ? 'Riprendi' : 'Resume')
-                  : (lang === 'it' ? 'Prepara note' : 'Prepare notes')}
-              </Button>
             </div>
-          </div>
+          </section>
         )}
 
         {!demoMode && notesState === 'error' && (
@@ -1099,8 +1051,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                   </p>
                   <p className="mt-0.5 text-[11px] text-text-muted">
                     {lang === 'it'
-                      ? 'La trascrizione resta disponibile; puoi riprovare a caricare le note che hai segnato.'
-                      : 'The transcript is still available; you can retry loading the notes you marked.'}
+                      ? 'Puoi riprovare a caricare le note che hai segnato durante la chiamata.'
+                      : 'You can retry loading the notes you marked during the call.'}
                   </p>
                 </div>
               </div>
@@ -1473,8 +1425,17 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 ) : (
                   <div className="text-center py-16 bg-bg-elevated">
                     <FileText className="w-8 h-8 mx-auto text-text-muted mb-3" aria-hidden="true" />
-                    <p className="text-sm text-text-secondary">{t('meeting.transcriptNotAvailable')}</p>
-                    {!isBusy && !demoMode && (
+                    <p className="text-sm font-medium text-text-secondary">
+                      {isBusy
+                        ? (lang === 'it' ? 'Il testo comparirà qui appena pronto' : 'The transcript will appear here when ready')
+                        : (lang === 'it' ? 'Qui troverai il testo della chiamata' : 'Your call transcript will appear here')}
+                    </p>
+                    {!isBusy && !hasCurrentNotes && (
+                      <p className="mt-1 text-xs text-text-muted">
+                        {lang === 'it' ? 'Avvia l’elaborazione con i pulsanti sopra.' : 'Start processing with the buttons above.'}
+                      </p>
+                    )}
+                    {!isBusy && !demoMode && hasCurrentNotes && (
                       <Button
                         size="sm"
                         variant="secondary"
@@ -1482,7 +1443,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                         isLoading={busyAction === 'transcription'}
                         className="mt-4"
                       >
-                        {lang === 'it' ? 'Solo trascrizione' : 'Transcript only'}
+                        {transcriptActionLabel}
                       </Button>
                     )}
                   </div>
@@ -1759,7 +1720,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     className="w-full justify-start text-left text-xs"
                   >
                     <Sparkles className="h-3.5 w-3.5 mr-2 text-accent" aria-hidden="true" />
-                    {lang === 'it' ? 'Prepara note' : 'Prepare notes'}
+                    {preparationActionLabel}
                   </Button>
                 )}
                 {!meeting.transcription && (
@@ -1771,7 +1732,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     className="w-full justify-start text-left text-xs"
                   >
                     <FileText className="h-3.5 w-3.5 mr-2 text-text-muted" aria-hidden="true" />
-                    {lang === 'it' ? 'Solo trascrizione' : 'Transcript only'}
+                    {transcriptActionLabel}
                   </Button>
                 )}
                 <Button

@@ -41,7 +41,8 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertIn("await prepareMeetingNotes(meeting.id, requestedIncludeScreenshots)", page)
         self.assertIn("latestPreparation?.result?.include_screenshots", page)
         self.assertIn("onClick={startPreparation}", page)
-        self.assertIn("'Prepara note' : 'Prepare notes'", page)
+        self.assertIn("'Trascrivi e riassumi' : 'Transcribe and summarize'", page)
+        self.assertIn("'Crea sintesi e azioni' : 'Create summary and actions'", page)
 
         default_action = page.split("const startPreparation = async () =>", 1)[1].split(
             "const startVisualContextAnalysis", 1
