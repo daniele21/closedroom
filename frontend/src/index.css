@@ -891,6 +891,32 @@ body::before {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
+/* Meeting job progress: moving activity is never a percentage. */
+.meeting-progress-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-hover);
+}
+.meeting-progress-fill,
+.meeting-progress-indeterminate {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.meeting-progress-fill { transition: width 200ms ease; }
+.meeting-progress-indeterminate {
+  width: 35%;
+  animation: meeting-progress-sweep 1.6s ease-in-out infinite;
+}
+@keyframes meeting-progress-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(286%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .meeting-progress-indeterminate { animation: none; width: 100%; opacity: 0.35; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

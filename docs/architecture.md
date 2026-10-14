@@ -796,7 +796,7 @@ Il runtime MLX Whisper non include PyTorch: conversione/compatibilità restano f
 - chunk duplicati sono accettati solo se identici;
 - ogni stop o errore di cattura deve ripristinare il routing audio;
 - file nativi vengono verificati con `ffprobe` prima di essere dichiarati validi;
-- job attivi al restart diventano `interrupted`;
+- job al restart diventano `interrupted`; il bundle chiama `multiprocessing.freeze_support()` prima di Cocoa per isolare i subprocess;
 - un workload pesante non ammesso durante capture termina prima dell'esecuzione con reason `capture_active`;
 - cambio configurazione LLM provoca restart controllato del sidecar;
 - diarizzazione, Qwen e audio intelligence salvano errore/stato ma non invalidano un transcript già valido;

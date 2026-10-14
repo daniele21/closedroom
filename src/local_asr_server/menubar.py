@@ -15,6 +15,14 @@ Usage (bundle):
 
 from __future__ import annotations
 
+# Frozen multiprocessing children re-enter this script. Divert workers and
+# resource trackers before importing Cocoa or starting the single-instance API,
+# otherwise an auxiliary process launches the app and replaces its parent.
+if __name__ == "__main__":
+    import multiprocessing
+
+    multiprocessing.freeze_support()
+
 import os
 import sys
 import logging
