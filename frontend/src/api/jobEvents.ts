@@ -24,7 +24,7 @@ export interface JobEventFollowerOptions {
  * failure so reconnect/recovery can reconcile terminal state without turning
  * normal progress back into polling.
  */
-export function followJobEvents(jobId: string, options: JobEventFollowerOptions): () => void {
+function runJobEventStream(jobId: string, options: JobEventFollowerOptions): () => void {
   let source: EventSource | null = null;
   let reconnectTimer: number | null = null;
   let stopped = false;
@@ -106,4 +106,50 @@ export function followJobEvents(jobId: string, options: JobEventFollowerOptions)
 
   connect();
   return stop;
+}
+
+/**
+ * Multiplex one SSE stream per persisted job across Activities and Meeting.
+ * A page only removes its own listener; another subscriber keeps the same
+ * stream alive. No polling worker, job state or payload is persisted here.
+ */
+interface SharedJobStream {
+  listeners: Set<JobEventFollowerOptions>;
+  stop: () => void;
+}
+const sharedJobStreams = new Map<string, SharedJobStream>();
+
+export function followJobEvents(jobId: string, options: JobEventFollowerOptions): () => void {
+  let shared = sharedJobStreams.get(jobId);
+  if (!shared) {
+    const entry: SharedJobStream = { listeners: new Set(), stop: () => {} };
+    sharedJobStreams.set(jobId, entry);
+    entry.listeners.add(options);
+    entry.stop = runJobEventStream(jobId, {
+      onUpdate: (job) => {
+        for (const listener of Array.from(entry.listeners)) listener.onUpdate(job);
+      },
+      onTerminal: (job) => {
+        // A newly started retry/follower must get a new stream, not the
+        // already-terminated connection.
+        if (sharedJobStreams.get(jobId) === entry) sharedJobStreams.delete(jobId);
+        for (const listener of Array.from(entry.listeners)) listener.onTerminal?.(job);
+      },
+      onRecoveryError: (error) => {
+        for (const listener of Array.from(entry.listeners)) listener.onRecoveryError?.(error);
+      },
+    });
+    shared = entry;
+  } else {
+    shared.listeners.add(options);
+  }
+
+  const instance = shared;
+  return () => {
+    instance.listeners.delete(options);
+    if (instance.listeners.size === 0) {
+      instance.stop();
+      if (sharedJobStreams.get(jobId) === instance) sharedJobStreams.delete(jobId);
+    }
+  };
 }
