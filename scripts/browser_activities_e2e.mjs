@@ -19,6 +19,7 @@ let captureBlocked = false;
 let cancelCount = 0;
 let importCount = 0;
 let importedJobCount = 0;
+let analysisParentCount = 0;
 let retryCount = 0;
 const activeSse = new Map();
 const server = http.createServer((req, res) => {
@@ -43,6 +44,17 @@ const server = http.createServer((req, res) => {
     const job = { ...fixture('imported-job', 'queued'), scope_id: 'imported-source', source_label: 'local-clip' };
     jobs.push(job);
     return json(job, 202);
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/recordings/imported-source/audio-analysis-jobs') {
+    analysisParentCount++;
+    if (!req.headers['idempotency-key']) return json({ detail: 'Missing submission identity' }, 422);
+    if (!jobs.some((job) => job.id === 'audio-analysis-parent')) {
+      jobs.push({ ...fixture('audio-analysis-parent', 'running', 'meeting_preparation'),
+        scope_id: 'imported-source', current_step: 'preparing_transcript',
+        source_label: 'Imported audio analysis',
+      });
+    }
+    return json({ ...jobs.find((job) => job.id === 'audio-analysis-parent') }, 202);
   }
   if (req.method === 'POST' && url.pathname === '/v1/jobs/failed-asr/retry') {
     if (!req.headers['idempotency-key']) return json({ detail: 'Missing retry identity' }, 422);
@@ -276,6 +288,33 @@ try {
     'retry creates a separate persistent job in Activities');
   if (retryCount !== 1) throw new Error('explicit retry unexpectedly submitted multiple times');
   await checkpoint('12-explicit-retry-created-new-job');
+  await evaluate(`location.hash = '#analysis'`);
+  await assert(`Array.from(document.querySelectorAll('button')).some((b) => /Import file|Importa file/i.test(b.textContent || ''))`,
+    'analysis import tab available');
+  await evaluate(`Array.from(document.querySelectorAll('button')).find((b) => /Import file|Importa file/i.test(b.textContent || ''))?.click()`);
+  await assert(`!!document.querySelector('input[type=file]')`, 'analysis file input visible');
+  const analysisDoc = await call('DOM.getDocument');
+  const analysisInput = await call('DOM.querySelector', {
+    nodeId: analysisDoc.root.nodeId, selector: 'input[type=file]',
+  });
+  if (!analysisInput.nodeId) throw new Error('Analysis audio file input not discoverable');
+  await call('DOM.setFileInputFiles', { files: [localFixture], nodeId: analysisInput.nodeId });
+  await assert(`document.body.innerText.includes('local-clip.wav')`, 'analysis audio file selected');
+  await evaluate(`Array.from(document.querySelectorAll('button')).find((b) =>
+    /Start Analysis|Avvia Analisi/i.test(b.textContent || ''))?.click()`);
+  await assert(`location.hash === '#activities' && !!document.querySelector('[data-audio-import]')`,
+    'analysis import in progress after routing away');
+  await sleep(1700);
+  await assert(`!!document.querySelector('[data-activity-id="audio-analysis-parent"]')`,
+    'server-owned audio analysis parent discovered');
+  if (analysisParentCount !== 1 || importCount !== 2) {
+    throw new Error('audio analysis was not admitted exactly once');
+  }
+  await checkpoint('13-custom-analysis-parent');
+  await call('Page.reload', { ignoreCache: true });
+  await assert(`!!document.querySelector('[data-activity-id="audio-analysis-parent"]')`,
+    'audio analysis parent survives reload');
+  await checkpoint('14-custom-analysis-after-reload');
 
 } catch (error) { failed = String(error.stack || error); }
 finally {
