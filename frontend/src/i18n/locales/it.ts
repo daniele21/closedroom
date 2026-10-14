@@ -8,6 +8,7 @@ const it = {
     imports: "Importazione audio",
     importing: "Salvataggio audio in locale…",
     importSubmitting: "Audio salvato · avvio trascrizione…",
+    importSubmitted: "Trascrizione avviata · sincronizzazione Attività…",
     importCancelling: "Annullamento importazione…",
     importFailed: "Importazione non riuscita",
     cancel: "Annulla",
