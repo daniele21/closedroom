@@ -1,6 +1,6 @@
 # Elaborazioni in background e Attività globali
 
-Status: READY
+Status: ACTIVE
 Owner: job/persistence, importazione audio e frontend workspace
 Read when: completare i job tra schermate.
 
@@ -79,7 +79,7 @@ Fasi sequenziali; `BLOCKED` indica una dipendenza non completata.
 
 | ID | Esito osservabile e confine di scrittura | Dipende da | Stato |
 | --- | --- | --- | --- |
-| BG-1 | Contratto recuperabile: lista attivi/storico, snapshot/eventi, identità sorgente/risultato e terminali uniformi. Owner: jobs, router/schemas, manager, test/API client. | — | READY |
+| BG-1 | Contratto recuperabile: lista attivi/storico, snapshot/eventi, identità sorgente/risultato e terminali uniformi. Owner: jobs, router/schemas, manager, test/API client. | — | ACTIVE |
 | BG-2 | Audio importato elaborabile come le registrazioni, senza cattura fittizia; composizione audio→analisi persistita. Owner: RecordingStore/router, manager preparation/analysis, client e test. | BG-1 | BLOCKED |
 | BG-3 | Cambiare schermata conserva osservazione e contesto; ritorno o reload recupera i job dal server. Owner: shell/provider frontend, jobEvents, pagine e consumer Meeting. | BG-2 | BLOCKED |
 | BG-4 | Attività globali con cancel, risultato, retry e feedback accessibili. Owner: App/componenti/i18n/design, test UI. | BG-3 | BLOCKED |
@@ -175,16 +175,28 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
 
 ## Checkpoint unico di ripresa
 
-- Data: 2026-10-14. Pianificazione soltanto; nessuna implementazione eseguita.
-- Branch `dev`; HEAD/base locale osservata
-  `15ec412ce10cb5e49438f6e09271f2883ea65973`; base PR/remota non verificata.
-  Tree HEAD `d9f16ca4f16a9df4821aac5d02a3b50a182c5aa3`; tree locale già dirty.
-- Modifiche preesistenti: docs/design/policy, MeetingDetailPage, browser
-  preparation, verifier docs, menubar, test e static generati. Non attribuirle
-  al workstream né sovrascriverle; rivalutare overlap prima delle modifiche.
-- Fatti confermati: owner e percorsi elencati nella base, verificati nel codice.
-  Esclusa l'ipotesi “manca uno scheduler”: arbiter cablato in `server.py` per
-  entrambi i manager. Nessun test di esecuzione background svolto in questa chat.
-- Da verificare: correlazione retry, import senza capture, run senza recording.
-- Prossima azione: aggiornare head/tree/base e overlap; riprodurre avvio→route→
-  ritorno con runtime isolato, poi definire il contratto BG-1 con test failing.
+- Data: 2026-10-14. Implementazione parziale, BG-1 ACTIVE; BG-2..5 BLOCKED.
+- Sorgente: `dev` HEAD `a30e69e99c03c7b4ec52da7155e6645dbf9d1a27`,
+  tree `8ebfb66be7b028e0cbd2a6c6d3b608c8a80556e2` (verificati sul remoto).
+  Branch `feature/background-processing-bg1`, HEAD al checkpoint
+  `3b8c1ac547b298cae769b689e5253aa4a6965b8f`; rivalutare al resume.
+- Sviluppato su branch dedicato, nessun merge: `JobStore` recupera tutte le
+  righe attive dopo restart, non soltanto 500 recenti; discovery SQL a
+  proiezione compatta con `view=active|history|recent`, cursor stabile
+  `created_at,id` e parent link; endpoint `/v1/jobs` compatibile
+  (default snapshot completo), `summary=true` esplicito, risposta paginata.
+  Manager/client frontend espongono il nuovo contratto; `interrupted` chiude
+  il ciclo della pagina Trascrizione; cancel globale delega a manager di
+  transcription/visual, analysis e meeting preparation.
+- Test aggiunti a `test/test_job_store.py` e `test/test_recording_api.py`:
+  storico/attivi >500, keyset ties, proiezione priva di payload, relazioni
+  parent, recupero restart e propagazione cancellazione. **Non eseguiti**:
+  l'ambiente corrente non ha checkout o accesso al runner macOS; non dichiarare PASS.
+- Rischi aperti BG-1: idempotenza submit attraverso risposte di rete ambigue,
+  correlazione retry esplicito, verifica di stream/reconnect e race
+  pending/running/cancel. Non estendere BG-2 finché il contratto non è provato.
+- Prossima azione: validare le suite mirate in esecuzione automatica conforme
+  al selector senza build/package Actions, fare audit delle API POST e
+  chiudere idempotenza; solo allora sbloccare BG-2 import atomico.
+- REAL_ENVIRONMENT: TCC/audio fisico/WKWebView e runtime MLX/Metal restano
+  `DEFERRED_TO_RELEASE` quando applicabili; nessuna evidenza reclamata.
