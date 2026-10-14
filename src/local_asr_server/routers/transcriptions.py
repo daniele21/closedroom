@@ -47,6 +47,7 @@ from local_asr_server.schemas import (
     DiarizationJobRequest,
     MergeTranscriptionsRequest,
     AnalysisPipelineRequest,
+    AnalysisRequest,
 )
 from local_asr_server.routers.helpers import _build_projects
 from local_asr_server.asr_provider import ASR_PROVIDER_LOCAL
@@ -507,6 +508,45 @@ def _submission_fingerprint(body: BaseModel) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _submit_recording_transcription_job(
+    request: Request,
+    recording_id: str,
+    body: TranscriptionJobRequest,
+    *,
+    request_id: str | None,
+    retry_of: str | None = None,
+) -> dict[str, Any]:
+    services = get_services(request.app)
+    try:
+        services.recordings.get(recording_id, include_result=False)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+
+    def runner(job: TranscriptionJob) -> dict[str, Any]:
+        result = run_recording_transcription(request.app, recording_id, body, job)
+        pipeline = _maybe_start_meeting_pipeline(request.app, recording_id, result.get("saved_id"))
+        if pipeline:
+            result["analysis_pipeline"] = pipeline
+        return result
+
+    try:
+        return services.transcription_jobs.create(
+            recording_id,
+            runner,
+            payload={
+                "recording_id": recording_id,
+                # Preserve *all* effective submit options for explicit retry,
+                # not only the visual toggle. No implicit settings migration.
+                "transcription_options": body.model_dump(mode="json"),
+                **({"retry_of": retry_of} if retry_of is not None else {}),
+            },
+            request_id=request_id,
+            request_hash=_submission_fingerprint(body) if request_id else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/v1/recordings/{recording_id}/transcription-jobs", status_code=202)
 def create_transcription_job(
     recording_id: str,
@@ -516,32 +556,9 @@ def create_transcription_job(
         default=None, alias="Idempotency-Key", min_length=1, max_length=128,
     ),
 ):
-    try:
-        get_services(request.app).recordings.get(recording_id, include_result=False)
-    except RecordingNotFound as exc:
-        raise HTTPException(status_code=404, detail="Recording not found") from exc
-
-    def runner(job: TranscriptionJob) -> dict[str, Any]:
-        payload = run_recording_transcription(request.app, recording_id, body, job)
-        pipeline = _maybe_start_meeting_pipeline(request.app, recording_id, payload.get("saved_id"))
-        if pipeline:
-            payload["analysis_pipeline"] = pipeline
-        return payload
-
-    try:
-        return get_services(request.app).transcription_jobs.create(
-            recording_id,
-            runner,
-            payload={
-                "recording_id": recording_id,
-                "visual_intelligence_enabled": body.visual_intelligence_enabled,
-            },
-            request_id=idempotency_key,
-            request_hash=_submission_fingerprint(body) if idempotency_key else None,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
+    return _submit_recording_transcription_job(
+        request, recording_id, body, request_id=idempotency_key,
+    )
 
 @router.get("/v1/activities")
 def list_activities(request: Request, recent_limit: int = Query(default=30, ge=1, le=100)):
@@ -688,6 +705,59 @@ def cancel_job(job_id: str, request: Request):
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@router.post("/v1/jobs/{job_id}/retry", status_code=202)
+def retry_job(
+    job_id: str,
+    request: Request,
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
+):
+    """Explicit one-shot retry through the original execution owner.
+
+    No automatic retry on reconnect, and no changed provider/defaults.
+    Parent-owned stages must be retried via their parent workflow.
+    """
+    services = get_services(request.app)
+    previous = services.jobs.get(job_id)
+    if previous is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if previous["status"] not in {"failed", "interrupted"}:
+        raise HTTPException(status_code=409, detail="Only failed or interrupted jobs can be retried")
+    if services.jobs.parent_of(job_id):
+        raise HTTPException(status_code=409, detail="Retry this job from its parent workflow")
+
+    payload = previous.get("payload") or {}
+    if previous["type"] == TRANSCRIPTION_JOB_TYPE:
+        recording_id = previous.get("scope_id")
+        options = payload.get("transcription_options")
+        if not isinstance(options, dict) or not recording_id or payload.get("trigger"):
+            raise HTTPException(status_code=409, detail="Original transcription options unavailable")
+        body = TranscriptionJobRequest.model_validate(options)
+        created = _submit_recording_transcription_job(
+            request, recording_id, body, request_id=idempotency_key, retry_of=job_id,
+        )
+        return {"job_id": created["id"], "retry_of": job_id, "status": created["status"]}
+
+    if previous["type"] == ANALYSIS_JOB_TYPE:
+        if payload.get("pipeline_run_id"):
+            raise HTTPException(status_code=409, detail="Retry analysis from its pipeline")
+        options = {key: value for key, value in payload.items()
+                   if key in AnalysisRequest.model_fields}
+        if not (options.get("text") or options.get("transcription_id") or options.get("recording_id")):
+            raise HTTPException(status_code=409, detail="Original analysis source unavailable")
+        body = AnalysisRequest.model_validate(options)
+        try:
+            created = services.analysis_jobs.create(
+                body, request_id=idempotency_key, retry_of=job_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"job_id": created["job_id"], "retry_of": job_id, "status": created["status"]}
+
+    raise HTTPException(status_code=409, detail="Use the owning workflow to retry this job")
 
 
 @router.post("/v1/transcriptions/merge")

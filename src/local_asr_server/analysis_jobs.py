@@ -68,6 +68,7 @@ class AnalysisJobManager:
         *,
         on_terminal: AnalysisTerminalCallback | None = None,
         request_id: str | None = None,
+        retry_of: str | None = None,
     ) -> dict[str, Any]:
         request_hash = (
             hashlib.sha256(json.dumps(
@@ -90,6 +91,7 @@ class AnalysisJobManager:
         stored_payload = {
             **payload,
             "analysis_run_id": run_id,
+            **({"retry_of": retry_of} if retry_of is not None else {}),
             "llm_options": llm_options,
             "input_hash": input_hash,
         }

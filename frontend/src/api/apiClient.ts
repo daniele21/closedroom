@@ -989,6 +989,13 @@ export const ApiClient = {
     return (await request(`/v1/jobs/${jobId}/cancel`, { method: 'POST' })).json();
   },
 
+  async retryJob(jobId: string, requestId: string): Promise<{ job_id: string; retry_of: string; status: string }> {
+    return (await request(`/v1/jobs/${encodeURIComponent(jobId)}/retry`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': requestId },
+    })).json();
+  },
+
   async updateRecording(recordingId: string, payload: { title?: string; project_name?: string }): Promise<Recording> {
     return (await request(`/v1/recordings/${recordingId}`, {
       method: 'PATCH',

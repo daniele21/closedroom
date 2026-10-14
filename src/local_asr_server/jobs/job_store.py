@@ -534,6 +534,15 @@ class JobStore:
                 (parent_job_id, child_job_id, stage, ordinal, time.time()),
             )
 
+    def parent_of(self, job_id: str) -> str | None:
+        """Return canonical parent link without materializing job payloads."""
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT parent_job_id FROM job_links WHERE child_job_id = ? LIMIT 1",
+                (job_id,),
+            ).fetchone()
+        return str(row["parent_job_id"]) if row is not None else None
+
     def list_children(
         self,
         parent_job_id: str,
