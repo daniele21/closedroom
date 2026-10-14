@@ -134,6 +134,7 @@ export interface CaptureDiagnostics {
 }
 
 export interface TranscriptionJob {
+  parent_job_id?: string | null;
   id: string;
   type?: string;
   scope_type?: string | null;
@@ -147,6 +148,18 @@ export interface TranscriptionJob {
   result?: any;
   created_at: number;
   updated_at: number;
+}
+
+export interface ActivityJob extends TranscriptionJob {
+  source_label?: string | null;
+  parent_job_id?: string | null;
+}
+
+export interface ActivitySnapshot {
+  items: ActivityJob[];
+  capture_blocked: boolean;
+  active_count: number;
+  queue_depth: number;
 }
 
 export interface VisualProcessingProgress {
@@ -784,11 +797,11 @@ export const ApiClient = {
     return (await request(`/v1/recordings/${recordingId}/stop`, { method: 'POST' })).json();
   },
 
-  async startNativeCapture(recordingId: string, mode: 'both' | 'mic_only' | 'pc_only', visualWindowId?: number, visualFps = 0.5): Promise<any> {
+  async startNativeCapture(recordingId: string, mode: 'both' | 'mic_only' | 'pc_only', visualWindowId?: number, visualFps = 0.5, reservationId?: string): Promise<any> {
     return (await request(`/v1/recordings/${recordingId}/capture/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode, visual_window_id: visualWindowId, visual_fps: visualFps }),
+      body: JSON.stringify({ mode, visual_window_id: visualWindowId, visual_fps: visualFps, reservation_id: reservationId }),
     })).json();
   },
 
@@ -925,6 +938,14 @@ export const ApiClient = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })).json();
+  },
+
+  async cancelMeetingPreparation(recordingId: string, jobId: string): Promise<TranscriptionJob> {
+    return (await request(`/v1/meetings/${recordingId}/preparation-jobs/${jobId}/cancel`, { method: 'POST' })).json();
+  },
+
+  async listActivities(signal?: AbortSignal): Promise<ActivitySnapshot> {
+    return (await request('/v1/activities', { signal })).json();
   },
 
   async getJob(jobId: string): Promise<TranscriptionJob> {

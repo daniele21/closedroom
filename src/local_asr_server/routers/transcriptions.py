@@ -18,6 +18,7 @@ from local_asr_server.recordings import RecordingConflict, RecordingNotFound
 from local_asr_server.transcription_jobs import (
     DIARIZATION_JOB_TYPE,
     TRANSCRIPTION_JOB_TYPE,
+    VISUAL_INTELLIGENCE_JOB_TYPE,
     TranscriptionJob,
 )
 from local_asr_server.settings import load_settings
@@ -520,6 +521,17 @@ def create_transcription_job(recording_id: str, request: Request, body: Transcri
     )
 
 
+@router.get("/v1/activities")
+def list_activities(request: Request, recent_limit: int = Query(default=30, ge=1, le=100)):
+    arbiter = request.app.state.heavy_workload_arbiter.snapshot()
+    return {
+        "items": get_services(request.app).jobs.activity_summaries(recent_limit=recent_limit),
+        "capture_blocked": bool(arbiter["capture_reservation"]["active"]),
+        "active_count": arbiter["active_count"],
+        "queue_depth": arbiter["queue_depth"],
+    }
+
+
 @router.get("/v1/jobs")
 def list_jobs(
     request: Request,
@@ -632,7 +644,9 @@ def cancel_job(job_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Job not found")
     job = (
         get_services(request.app).transcription_jobs.cancel(job_id)
-        if existing["type"] in {TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE}
+        if existing["type"] in {TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE, VISUAL_INTELLIGENCE_JOB_TYPE}
+        else get_services(request.app).analysis_jobs.cancel(job_id)
+        if existing["type"] == "analysis"
         else get_services(request.app).jobs.request_cancel(job_id)
     )
     if job is None:

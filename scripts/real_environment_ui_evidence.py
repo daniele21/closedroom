@@ -21,7 +21,7 @@ CHECKPOINTS = [
     ("02-recording", ("Stop and Save", "Termina e salva")),
     (
         "03-meeting-persisted",
-        ("Prepare notes", "Prepara note", "Transcript only", "Solo trascrizione"),
+        ("Prepare notes", "Prepara note", "Transcribe call", "Trascrivi chiamata"),
     ),
 ]
 

@@ -206,6 +206,7 @@ class OverlayResizeRequest(BaseModel):
 
 
 class CaptureStartRequest(BaseModel):
+    reservation_id: Optional[str] = None
     mode: str = "both"
     visual_window_id: Optional[int] = None
     visual_fps: float = 0.5

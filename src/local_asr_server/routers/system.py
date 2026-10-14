@@ -27,6 +27,7 @@ from local_asr_server.schemas import (
 from local_asr_server.asr_provider import asr_catalog
 from local_asr_server.macos_permissions import accessibility_status
 from local_asr_server.runtime.resource_metrics import ResourceMetricsCollector
+from local_asr_server.runtime.workload_arbiter import CaptureReservationConflict, CaptureReservationNotFound
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -282,10 +283,14 @@ def capture_displays(request: Request):
 @router.post("/v1/recordings/{recording_id}/capture/start", status_code=202)
 def start_capture(recording_id: str, request: Request, body: CaptureStartRequest):
     store = get_services(request.app).recordings
+    bound = False
     try:
         session_dir = store.session_dir(recording_id)
         if body.visual_window_id is not None and not 0.1 <= body.visual_fps <= 2.0:
             raise ValueError("visual_fps must be between 0.1 and 2.0")
+        if body.reservation_id:
+            request.app.state.heavy_workload_arbiter.bind_capture(body.reservation_id, recording_id)
+            bound = True
         result = get_services(request.app).capture.start(
             recording_id, session_dir, body.mode,
             visual_window_id=body.visual_window_id, visual_fps=body.visual_fps,
@@ -294,7 +299,10 @@ def start_capture(recording_id: str, request: Request, body: CaptureStartRequest
         return result
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
-    except (RuntimeError, ValueError, RecordingConflict) as exc:
+    except (RuntimeError, ValueError, RecordingConflict, CaptureReservationConflict, CaptureReservationNotFound) as exc:
+        session = get_services(request.app).capture.get_session(recording_id)
+        if bound and (session is None or session.stopped):
+            request.app.state.heavy_workload_arbiter.release_recording_capture(recording_id)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -333,7 +341,10 @@ def stop_capture(recording_id: str, request: Request):
             except Exception:
                 logger.warning("Failed to persist capture event", exc_info=True)
         from local_asr_server.audio_diagnostics import build_quality_report
-        metadata, _ = store.finalize(recording_id)
+        try:
+            metadata, _ = store.finalize(recording_id)
+        finally:
+            request.app.state.heavy_workload_arbiter.release_recording_capture(recording_id)
         try:
             report = build_quality_report(store.transcribable_tracks(recording_id))
             metadata = store.save_quality_report(recording_id, report)
@@ -350,7 +361,10 @@ def stop_capture(recording_id: str, request: Request):
 def cancel_capture(recording_id: str, request: Request):
     try:
         result = get_services(request.app).capture.cancel(recording_id)
-        get_services(request.app).recordings.discard(recording_id)
+        try:
+            get_services(request.app).recordings.discard(recording_id)
+        finally:
+            request.app.state.heavy_workload_arbiter.release_recording_capture(recording_id)
         return result
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc

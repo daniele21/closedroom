@@ -1,3 +1,4 @@
+import { ACTIVE_JOB_STATUSES } from '../utils/jobs';
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState, useRef } from 'react';
 import {
   Archive,
@@ -55,7 +56,7 @@ interface MeetingDetailPageProps {
 }
 
 type MeetingTab = 'transcript' | 'analysis' | 'speakers';
-const activeJobStatuses = new Set(['queued', 'running', 'waiting_for_service', 'retrying', 'cancelling']);
+const activeJobStatuses = ACTIVE_JOB_STATUSES;
 const recoverablePreparationStatuses = new Set(['failed', 'interrupted']);
 const meetingTabs: MeetingTab[] = ['transcript', 'analysis', 'speakers'];
 
@@ -544,7 +545,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const activePreparation = activeJobs.find((job) => job.type === 'meeting_preparation');
   const latestPreparation = preparationJobs[0];
   const displayedActiveJobs = activePreparation
-    ? [activePreparation]
+    ? [{ ...activePreparation, progress_detail: activeJobs.find((job) => job.parent_job_id === activePreparation.id
+      && job.progress_detail && job.status !== 'queued')?.progress_detail || activePreparation.progress_detail }]
     : activeJobs;
 
   const isBusy = busyAction !== null

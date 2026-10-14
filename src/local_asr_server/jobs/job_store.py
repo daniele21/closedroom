@@ -11,14 +11,7 @@ from local_asr_server.catalog import CatalogStore
 
 
 DEFAULT_JOB_EVENT_CAPACITY = 512
-ACTIVE_JOB_STATUSES = (
-    "queued",
-    "running",
-    "waiting_for_service",
-    "retrying",
-    "cancel_requested",
-    "cancelling",
-)
+from local_asr_server.jobs.models import ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES
 
 
 def _json_dump(value: Any) -> str | None:
@@ -415,6 +408,44 @@ class JobStore:
                 params,
             ).fetchall()
         return [self._row_to_job(row) for row in rows]
+
+    def activity_summaries(self, *, recent_limit: int = 30) -> list[dict[str, Any]]:
+        """All unfinished work plus bounded history, without meeting content."""
+        terminal = sorted(TERMINAL_JOB_STATUSES)
+        placeholders = ", ".join("?" for _ in terminal)
+        columns = "id, type, scope_type, scope_id, status, current_step, progress, progress_detail_json, created_at, updated_at"
+        with self.connection() as conn:
+            active = conn.execute(
+                f"SELECT {columns} FROM jobs WHERE status NOT IN ({placeholders}) ORDER BY created_at",
+                terminal,
+            ).fetchall()
+            recent = conn.execute(
+                f"SELECT {columns} FROM jobs WHERE status IN ({placeholders}) ORDER BY updated_at DESC LIMIT ?",
+                [*terminal, max(1, min(recent_limit, 100))],
+            ).fetchall()
+            ids = [row["id"] for row in [*active, *recent]]
+            id_placeholders = ", ".join("?" for _ in ids)
+            links = {row["child_job_id"]: row["parent_job_id"] for row in conn.execute(
+                f"SELECT child_job_id, parent_job_id FROM job_links WHERE child_job_id IN ({id_placeholders})", ids
+            )}
+            has_recordings = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'recordings'").fetchone()
+            scopes = list({row["scope_id"] for row in [*active, *recent] if row["scope_type"] == "recording"})
+            scope_placeholders = ", ".join("?" for _ in scopes)
+            titles = dict(conn.execute(
+                f"SELECT id, title FROM recordings WHERE id IN ({scope_placeholders})", scopes
+            )) if has_recordings and scopes else {}
+        items = []
+        for row in [*active, *recent]:
+            item = dict(row)
+            detail = _json_load(item.pop("progress_detail_json"), None)
+            # Only measured progress metadata belongs in this lightweight view.
+            item["progress_detail"] = detail if isinstance(detail, dict) and detail.get("kind") in {
+                "asr_track_progress", "visual_processing_progress"
+            } else None
+            item["parent_job_id"] = links.get(item["id"])
+            item["source_label"] = titles.get(item["scope_id"]) if item["scope_type"] == "recording" else None
+            items.append(item)
+        return items
 
     def link_child(
         self,

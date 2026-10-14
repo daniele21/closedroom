@@ -14,8 +14,8 @@ MEETING_PAGE = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
 EXPECTED_WORKSPACE_LABELS = (
     "Prepare notes",
     "Prepara note",
-    "Transcript only",
-    "Solo trascrizione",
+    "Transcribe call",
+    "Trascrivi chiamata",
 )
 
 

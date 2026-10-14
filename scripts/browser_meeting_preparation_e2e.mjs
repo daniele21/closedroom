@@ -597,7 +597,7 @@ try {
     ['waiting_for_service', 45, 'meeting_preparation', null],
     ['retrying', 0, 'meeting_preparation', null],
     ['running', 0, 'transcription', null],
-    ['running', 60, 'meeting_preparation', '60'],
+    ['running', 60, 'meeting_preparation', null],
     ['running', 10, 'analysis', null],
     ['cancelling', 60, 'meeting_preparation', null],
   ];

@@ -209,5 +209,24 @@ class JobStoreTests(unittest.TestCase):
             self.assertEqual(recovered["result"], {"text": "Ciao"})
 
 
+    def test_activities_discover_old_active_phases_without_loading_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / 'jobs.db')
+            store.create(job_id='old-active', job_type='transcription', scope_type='recording', scope_id='rec')
+            store.update('old-active', status='transcribing_system', current_step='transcribing_system',
+                         progress=50, progress_detail={'kind': 'asr_track_progress', 'track_percent': 40},
+                         result={'text': 'PRIVATE RESULT'})
+            with store.connection() as conn:
+                for index in range(510):
+                    store._insert_job(conn, job_id=f'done-{index}', job_type='analysis', scope_type='inline_text',
+                                      scope_id='run', payload={'text': 'PRIVATE PROMPT'}, status='completed',
+                                      current_step='completed', progress=100, dedupe_key=None, now=9999999999 + index)
+            self.assertTrue(store.has_active_job(job_type='transcription'))
+            items = store.activity_summaries(recent_limit=3)
+            self.assertEqual(len(items), 4)
+            self.assertEqual(items[0]['id'], 'old-active')
+            self.assertEqual(items[0]['progress_detail']['track_percent'], 40)
+            self.assertTrue(all('payload' not in item and 'result' not in item for item in items))
+
 if __name__ == "__main__":
     unittest.main()
