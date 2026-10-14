@@ -41,7 +41,7 @@ export default function ActivitiesPage({ activities, audioImports, navigateTo }:
   );
   const open = (job: ActivityJob) => {
     if (job.scope_type === 'recording' && job.scope_id) navigateTo('meeting', job.scope_id);
-    else if (job.scope_type === 'inline_text' && job.scope_id) navigateTo('analysis', job.scope_id);
+    else if (job.scope_type === 'inline_text' && job.scope_id) navigateTo('analysis', `run/${job.scope_id}`);
     else if (job.scope_type === 'transcription' && job.scope_id) navigateTo('transcription', job.scope_id);
   };
   const canOpen = (job: ActivityJob) => Boolean(job.scope_id && ['recording', 'inline_text', 'transcription'].includes(job.scope_type || ''));
