@@ -20,12 +20,17 @@ class MeetingLifecycleFrontendContracts(unittest.TestCase):
         self.assertIn('className="w-full select-text resize-none', overlay)
 
     def test_meeting_progress_displays_running_and_measured_state(self) -> None:
-        meeting = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
-        self.assertIn('data-meeting-job-progress={job.type}', meeting)
-        self.assertIn("max={100}", meeting)
-        self.assertIn("value={Math.min(job.progress, 100)}", meeting)
-        self.assertIn("animate-pulse", meeting)
-        self.assertIn('role="status"', meeting)
+        meeting = (ROOT / 'frontend/src/pages/MeetingDetailPage.tsx').read_text(encoding='utf-8')
+        progress = (ROOT / 'frontend/src/components/meeting/MeetingProcessingStatus.tsx').read_text(encoding='utf-8')
+        self.assertIn('<MeetingProcessingStatus', meeting)
+        self.assertIn('...displayedActiveJobs', meeting)
+        self.assertIn('data-meeting-job-progress={job.type}', progress)
+        self.assertIn('role="progressbar"', progress)
+        self.assertIn('aria-valuemax={100}', progress)
+        self.assertIn('aria-valuenow={percent ?? undefined}', progress)
+        self.assertIn('meeting-progress-indeterminate', progress)
+        self.assertIn("job.type !== 'analysis'", progress)
+        self.assertIn('role="status"', progress)
 
     def test_archive_and_permanent_delete_are_distinct_explicit_actions(self) -> None:
         detail = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
