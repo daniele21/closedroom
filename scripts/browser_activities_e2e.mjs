@@ -17,10 +17,32 @@ let jobs = [fixture('first', 'transcribing_mic'), fixture('second', 'queued')];
 let offline = false;
 let captureBlocked = false;
 let cancelCount = 0;
+let importCount = 0;
+let importedJobCount = 0;
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const json = (value, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)); };
   if (url.pathname === '/health') return json({ ok: true, default_model: 'synthetic', status: 'idle' });
+  if (req.method === 'POST' && url.pathname === '/v1/recordings/import-audio') {
+    importCount++;
+    // Keep the request open so navigation happens while the server is
+    // receiving/publishing a local source. No imported audio is logged.
+    req.resume();
+    req.on('end', () => setTimeout(() => json({
+      id: 'imported-source', title: 'local-clip', status: 'recorded',
+      capture_backend: 'import', capture_status: 'stopped',
+      mime_type: 'audio/wav', audio_file: 'recording.wav',
+      bytes_written: 48, created_at: '2026-10-14T12:00:00Z',
+    }, 201), 1200));
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/v1/recordings/imported-source/transcription-jobs') {
+    importedJobCount++;
+    const job = { ...fixture('imported-job', 'queued'), scope_id: 'imported-source', source_label: 'local-clip' };
+    jobs.push(job);
+    return json(job, 202);
+  }
+  if (url.pathname === '/v1/transcription/source-data') return json({ recordings: [], projects: [], settings: {} });
   if (url.pathname === '/v1/activities') return offline ? json({ detail: 'offline' }, 503) : json({ items: jobs, capture_blocked: captureBlocked, active_count: jobs.some((j) => j.status === 'transcribing_mic') ? 1 : 0, queue_depth: jobs.filter((j) => j.status === 'queued').length });
   if (url.pathname === '/v1/meetings/first') return json({
     id: 'first', recording: { id: 'first', title: 'Synthetic Meeting progress', project_name: 'E2E', status: 'recorded', mime_type: 'audio/wav', audio_file: 'synthetic.wav', bytes_written: 100, created_at: '2026-10-14T10:00:00Z', stopped_at: '2026-10-14T10:05:00Z', duration_seconds: 300 },
@@ -129,6 +151,31 @@ try {
   jobs[1].progress_detail = { ...detail, track_percent: 70, processed_audio_seconds: 210 };
   await assert(`document.querySelector('[data-meeting-job-progress] [role="progressbar"]')?.getAttribute('aria-valuenow') === '70'`, 'Preparation follows measured child SSE');
   await checkpoint('08-parent-child-progress');
+
+  // A file import belongs to MainApp, so routing away cannot lose the
+  // upload->job handoff. This is a deterministic simulated local backend.
+  await evaluate(`location.hash = '#transcription'`);
+  await assert(`document.querySelectorAll('button').length > 5 && document.body.innerText.includes('Sorgente')`, 'transcription source view ready');
+  await evaluate(`Array.from(document.querySelectorAll('button')).find((b) => /^(File audio|Audio file|File)$/i.test(b.innerText.trim()))?.click()`);
+  await assert(`!!document.querySelector('input[type=file]')`, 'audio import source input present');
+  await evaluate(`(() => {
+    const input = document.querySelector('input[type=file]');
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array(48)], 'local-clip.wav', { type: 'audio/wav' }));
+    Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await assert(`document.querySelector('audio[controls]') && document.querySelector('button.w-full.mt-4')`, 'file config view ready');
+  await evaluate(`document.querySelector('button.w-full.mt-4').click()`);
+  await assert(`location.hash === '#activities' && !!document.querySelector('[data-audio-import]')`, 'upload visible globally while in progress');
+  await checkpoint('09-importing-audio');
+  await evaluate(`location.hash = '#projects'`);
+  await assert(`!document.querySelector('[data-audio-import]')`, 'navigating away unmounts only the import view');
+  await sleep(1600);
+  await evaluate(`location.hash = '#activities'`);
+  await assert(`!!document.querySelector('[data-activity-id="imported-job"]')`, 'job survives navigation and follows persisted discovery');
+  if (importCount !== 1 || importedJobCount !== 1) throw new Error('upload or ASR job admitted more than once');
+  await checkpoint('10-imported-job-after-navigation');
 
 } catch (error) { failed = String(error.stack || error); }
 finally {
