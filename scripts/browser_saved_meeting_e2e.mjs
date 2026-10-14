@@ -115,6 +115,7 @@ const diagnosticsFixture = {
 const counts = {
   session: 0, health: 0, meeting: 0, alternate_meeting: 0, held_meeting: 0,
   diagnostics: 0, visual_frames: 0, screenshots: 0, alternate_screenshots: 0, notes: 0, alternate_notes: 0,
+  alternate_visual_context: 0,
 };
 let failNextAlternateScreenshots = false;
 let failNextAlternateNotes = false;
@@ -244,6 +245,20 @@ function fixtureServer(port) {
         return json(res, 503, { detail: 'synthetic note failure' });
       }
       return json(res, 200, { items: [], total: 0 });
+    }
+    if (pathname === `/v2/recordings/${ALTERNATE_MEETING_ID}/visual-intelligence`) {
+      counts.alternate_visual_context += 1;
+      return json(res, 200, {
+        schema_version: 2,
+        summary: {},
+        source_validity: { status: 'current', manual_screenshot_count: 1,
+          missing_screenshot_ids: [], unavailable_screenshot_ids: [], changed_screenshot_ids: [] },
+        document: {
+          schema_version: 2, observations: [], manual_screenshot_groups: [], speaker_intervals: [],
+          meeting_state_events: [], share_sessions: [], unassigned_share_keyframes: [],
+          semantic_links: [], routing_summary: {}, model: 'fixture-only', prompt_version: 1,
+        },
+      });
     }
     if (pathname === `/v1/recordings/${MEETING_ID}/visual-frames`) {
       counts.visual_frames += 1;
@@ -691,6 +706,33 @@ try {
   await waitAbsent(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili'], 5000);
   await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
   await checkpoint(browser, '09-independent-list-recovery');
+
+  // E4: visual context fetch belongs to a visible key-moment dialog, not a
+  // sticky boolean that survives closing it. Switch the existing synthetic
+  // meeting to visual V2 only after the previous recovery assertions.
+  await browser.clickCss('#meeting-tab-transcript');
+  alternateMeetingFixture.transcription.stats = {
+    ...alternateMeetingFixture.transcription.stats,
+    visual_intelligence: { version: 2 },
+  };
+  await setMeetingHash(MEETING_ID);
+  await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
+  const alternateLoadsBeforeVisual = counts.alternate_meeting;
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitCount('alternate_meeting', alternateLoadsBeforeVisual + 1);
+  await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  await waitCount('alternate_screenshots', screenshotsBeforeFailure + 3);
+  await sleep(300);
+  if (counts.alternate_visual_context !== 0) {
+    throw new Error('closed key-moment dialog preloaded visual context');
+  }
+  await browser.clickCss('[data-key-moment-id="synthetic-shared-key"]');
+  await waitCount('alternate_visual_context', 1);
+  await browser.clickCss('button[aria-label="Chiudi screenshot"], button[aria-label="Close screenshot"]');
+  await waitAbsent(browser, ['Pricing screenshot B'], 1500);
+  await browser.clickCss('[data-key-moment-id="synthetic-shared-key"]');
+  await waitCount('alternate_visual_context', 2);
+  await checkpoint(browser, '10-visual-context-demand-not-sticky');
 
   video = await renderVideo();
 } catch (caught) {
