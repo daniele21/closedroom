@@ -20,7 +20,7 @@ class ReferenceVideoTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "HDR"):
             video.check_source({"streams": [{
                 "codec_type": "video", "width": 500, "height": 400,
-                "pix_fmt": "yuv420p", "color_transfer": "smpte2084"
+                "codec_name": "hevc", "pix_fmt": "yuv420p10le", "color_transfer": "smpte2084"
             }]})
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg absent")
