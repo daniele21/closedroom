@@ -76,7 +76,7 @@ export function useAudioImports(enabled = true) {
         }
         update(id, { phase: 'submitting' });
         const job: TranscriptionJob = analysis
-          ? await ApiClient.createAudioAnalysisPreparation(source.id, options, analysis)
+          ? await ApiClient.createAudioAnalysisPreparation(source.id, options, analysis, id)
           : await ApiClient.createTranscriptionJob(source.id, options, id);
         if (cancels.current.has(id)) {
           // A cancellation may race with publication and job admission.

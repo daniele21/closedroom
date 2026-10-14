@@ -67,6 +67,7 @@ class MeetingPreparationManager:
         include_screenshots: bool = True,
         transcription_request: TranscriptionJobRequest | None = None,
         custom_analysis: AnalysisRequest | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         # Resolve the recording before creating durable work so a bad id cannot
         # leave an orphan parent job.
@@ -138,6 +139,17 @@ class MeetingPreparationManager:
             }
         )
 
+        # A given submit identity must resolve to its original job even if
+        # it already failed. A *different* identity is a deliberate retry.
+        if request_id is not None:
+            admitted = self.services.jobs.find_submission(
+                job_type=MEETING_PREPARATION_JOB_TYPE, scope_type="recording",
+                scope_id=recording_id, request_id=request_id,
+                request_hash=preparation_key,
+            )
+            if admitted is not None:
+                return {**admitted, "deduplicated": True, "reused_completed": False}
+
         completed = self.services.jobs.find_latest(
             job_type=MEETING_PREPARATION_JOB_TYPE,
             scope_type="recording",
@@ -155,13 +167,7 @@ class MeetingPreparationManager:
             dedupe_key=preparation_key,
             statuses=["failed", "interrupted", "cancelled"],
         )
-        parent, created = self.services.jobs.create_or_get_active(
-            job_id=str(uuid.uuid4()),
-            job_type=MEETING_PREPARATION_JOB_TYPE,
-            scope_type="recording",
-            scope_id=recording_id,
-            dedupe_key=preparation_key,
-            payload={
+        parent_payload = {
                 "recording_id": recording_id,
                 "pipeline_id": pipeline_id,
                 "preparation_key": preparation_key,
@@ -171,10 +177,21 @@ class MeetingPreparationManager:
                 "include_screenshots": include_screenshots,
                 "screenshot_count": len(selected_screenshots),
                 "user_note_count": len(user_notes),
-            },
-            current_step="preparing_transcript",
-            progress=5,
-        )
+        }
+        if request_id is None:
+            parent, created = self.services.jobs.create_or_get_active(
+                job_id=str(uuid.uuid4()), job_type=MEETING_PREPARATION_JOB_TYPE,
+                scope_type="recording", scope_id=recording_id,
+                dedupe_key=preparation_key, payload=parent_payload,
+                current_step="preparing_transcript", progress=5,
+            )
+        else:
+            parent, created = self.services.jobs.create_or_get_submission(
+                job_id=str(uuid.uuid4()), job_type=MEETING_PREPARATION_JOB_TYPE,
+                scope_type="recording", scope_id=recording_id,
+                request_id=request_id, request_hash=preparation_key,
+                payload=parent_payload,
+            )
         if not created:
             return {**parent, "deduplicated": True, "reused_completed": False}
 

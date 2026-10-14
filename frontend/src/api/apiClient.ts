@@ -806,11 +806,13 @@ export const ApiClient = {
     recordingId: string,
     transcription: TranscriptionJobOptions,
     analysis: AnalysisJobOptions,
+    requestId?: string,
   ): Promise<TranscriptionJob> {
     return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/audio-analysis-jobs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transcription, analysis }),
+      ...(requestId ? { headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId } } : {}),
     })).json();
   },
 

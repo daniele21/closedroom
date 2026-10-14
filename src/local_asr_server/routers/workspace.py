@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 
 from local_asr_server.app_services import get_services
 from local_asr_server.jobs.models import ACTIVE_JOB_STATUSES
@@ -147,6 +147,7 @@ def prepare_meeting(
     recording_id: str,
     request: Request,
     body: MeetingPreparationRequest | None = None,
+    request_id: str | None = None,
 ):
     services = get_services(request.app)
     preparation = body or MeetingPreparationRequest()
@@ -212,6 +213,7 @@ def prepare_meeting(
             start_pipeline=start_pipeline,
             start_visual=start_visual,
             include_screenshots=preparation.include_screenshots,
+            request_id=request_id,
         )
     except RecordingConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -224,6 +226,10 @@ def create_audio_analysis_preparation(
     recording_id: str,
     request: Request,
     body: ImportedAudioAnalysisRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
+    request_id: str | None = None,
 ):
     """Start one durable ASR→chosen-analysis chain using existing job owners.
 
@@ -276,6 +282,7 @@ def create_audio_analysis_preparation(
             include_screenshots=False,
             transcription_request=asr,
             custom_analysis=selected_analysis,
+            request_id=request_id or idempotency_key,
         )
     except RecordingConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

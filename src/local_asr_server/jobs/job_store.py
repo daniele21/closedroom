@@ -207,6 +207,33 @@ class JobStore:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             return self._row_to_job(row), True
 
+    def find_submission(
+        self,
+        *,
+        job_type: str,
+        scope_type: str,
+        scope_id: str,
+        request_id: str,
+        request_hash: str,
+    ) -> dict[str, Any] | None:
+        """Resolve a previous explicit submit across terminal failures/restart."""
+        if not request_id or len(request_id) > 128:
+            raise ValueError("Invalid submission identity")
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE type = ? AND dedupe_key = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (job_type, f"submit:{request_id}"),
+            ).fetchone()
+        if row is None:
+            return None
+        existing = self._row_to_job(row)
+        if existing["scope_type"] != scope_type or existing["scope_id"] != scope_id:
+            raise ValueError("Submission ID reused for a different source")
+        if (existing.get("payload") or {}).get("request_hash") != request_hash:
+            raise ValueError("Submission ID reused with different options")
+        return existing
+
     def create_or_get_submission(
         self,
         *,

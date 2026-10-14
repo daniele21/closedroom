@@ -59,7 +59,7 @@ export default function ActivitiesPage({ activities, audioImports, navigateTo }:
         </div>
         <div className="flex items-center gap-2">
           {canOpen(job) && <Button variant="secondary" size="sm" onClick={() => open(job)}>{t(job.status === 'completed' ? 'activities.openResult' : 'activities.open')}</Button>}
-          {!running && ['failed', 'interrupted'].includes(job.status) && ['analysis', 'transcription'].includes(job.type || '') && (
+          {!running && ['failed', 'interrupted'].includes(job.status) && ['analysis', 'transcription', 'meeting_preparation'].includes(job.type || '') && (
             <Button variant="secondary" size="sm" disabled={Boolean(retrying) || activities.stale}
               onClick={() => void retry(job)}>{retrying === job.id ? t('activities.retrying') : t('activities.retry')}</Button>
           )}

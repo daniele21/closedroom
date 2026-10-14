@@ -732,6 +732,35 @@ def retry_job(
         raise HTTPException(status_code=409, detail="Retry this job from its parent workflow")
 
     payload = previous.get("payload") or {}
+    if previous["type"] == MEETING_PREPARATION_JOB_TYPE:
+        # Reenter the parent owner: never retry a child in isolation.
+        from local_asr_server.routers.workspace import (
+            create_audio_analysis_preparation, prepare_meeting,
+        )
+        recording_id = str(previous.get("scope_id") or "")
+        if payload.get("analysis_options"):
+            if not isinstance(payload.get("transcription_options"), dict):
+                raise HTTPException(status_code=409, detail="Original ASR options unavailable")
+            from local_asr_server.schemas import ImportedAudioAnalysisRequest, MeetingPreparationRequest
+            resumed = create_audio_analysis_preparation(
+                recording_id, request,
+                ImportedAudioAnalysisRequest(
+                    transcription=TranscriptionJobRequest.model_validate(
+                        payload["transcription_options"]
+                    ),
+                    analysis=AnalysisRequest.model_validate(payload["analysis_options"]),
+                ), request_id=idempotency_key,
+            )
+        else:
+            from local_asr_server.schemas import MeetingPreparationRequest
+            resumed = prepare_meeting(
+                recording_id, request,
+                MeetingPreparationRequest(include_screenshots=bool(
+                    payload.get("include_screenshots", True)
+                )), request_id=idempotency_key,
+            )
+        return {"job_id": resumed["id"], "retry_of": job_id, "status": resumed["status"]}
+
     if previous["type"] == TRANSCRIPTION_JOB_TYPE:
         recording_id = previous.get("scope_id")
         options = payload.get("transcription_options")
