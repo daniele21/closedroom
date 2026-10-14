@@ -27,7 +27,7 @@ One-off [PR #125](https://github.com/daniele21/closedroom/pull/125) targeted exp
 
 Revisit only with a dedicated HDR-preserving HEVC Main10 trial that explicitly proves `color_primaries`, `color_transfer`, `color_space`, mastering/side data metadata as applicable, timing, exact audio and readable small text using representative visual playback. Without this, **KEEP the video as-is**.
 
-## E2 — finalized .app footprint attribution (synthetic gates PASS; real Mac pending)
+## E2 — finalized .app and optional PyInstaller COLLECT-TOC attribution (synthetic PASS; real Mac pending)
 
 `ClosedRoom.spec` already excludes `torch`, `cv2`, `datasets`, `pyarrow`, `pandas`, `multiprocess`; packaging still collects local MLX and opt-in provider components. In `selective-efficiency.md`, SE-3 ONNX/VAD quality is BLOCKED, and SE-6 PyTorch frozen proof is ACTIVE. **Do not claim savings** from speculative dependency removal.
 
@@ -39,11 +39,17 @@ python3 scripts/audit_footprint.py repository > dist/evidence/footprint/git-tree
 python3 scripts/audit_footprint.py bundle --latest-finalized --root . > dist/evidence/footprint/finalized-app.json
 # If measuring an installed app rather than a locally finalized artifact:
 python3 scripts/audit_footprint.py bundle --app /Applications/ClosedRoom.app > dist/evidence/footprint/installed-app.json
+# Optional: ONLY if this TOC was produced by the relevant local PyInstaller build.
+python3 scripts/audit_footprint.py bundle --latest-finalized --root . \
+  --pyinstaller-toc build/ClosedRoom/COLLECT-00.toc \
+  > dist/evidence/footprint/collect-breakdown.json
 # For a later comparable build:
 python3 scripts/audit_footprint.py bundle --latest-finalized --compare dist/evidence/footprint/finalized-app.json
 ```
 
 Report fields include: full logical file-byte totals, `Contents` groups, complete `component_groups`, 25 largest file/directory groups, non-overlapping physical `file_roles`, opaque archive bytes and top individual files. Adjacent finalized manifest is checked against app filename, file count (including symlinks), and total logical bytes. Only then are source revision, build ID, version, channel, signing and optional DMG byte count reported. **This is size/count identity, not a cryptographic manifest checksum check.** When no manifest is adjacent, identity is `absent` rather than inferred. `--compare` emits deltas by section/role/component.
+
+**Optional TOC evidence:** `--pyinstaller-toc` parses a literal `COLLECT-00.toc` (max 32 MiB) using Python's safe literal parser, never evaluating it. It maps only unambiguous relative destination paths to actual bundle files. It aggregates counted bytes by destination-directory prefix and PyInstaller entry type (`DATA`, `BINARY`, `EXTENSION`, `ZIPFILE`); missing, duplicate, or multi-root matches remain unattributed. Absolute original source paths in the TOC are **never emitted or accessed**. A TOC can be stale or belong to a different build: **the audit does not verify TOC-to-bundle revision**, and destination directory prefixes are not authoritative Python package names. Pure Python modules in EXE/PYZ remain opaque; no dependency is safe to remove based on this alone.
 
 Privacy: data outside the selected `.app` and the repository Git tree is not scanned; no meeting data, arbitrary absolute local paths, binary content, model weights or private user recordings appear in the JSON report. File paths within the bundle are reported because they are necessary for attribution.
 
@@ -51,6 +57,6 @@ Privacy: data outside the selected `.app` and the repository Git tree is not sca
 
 ## Evidence and decisions
 
-`scripts/audit_footprint.py` and `test/test_audit_footprint.py`: **6 synthetic standard-library tests PASS** in source-only [38542371392](https://github.com/daniele21/closedroom/actions/runs/38542371392) (syntax/py_compile PASS too). Covers immutable Git inventory, symlink-safe bundle sizes, physical component/archive accounting, privacy of unrelated paths, latest finalized selection, manifest mismatch, comparison deltas and manifest path traversal. Temporary PR #126 closed **unmerged**, workflow deleted. Earlier image compression tests PASS in [38531940499](https://github.com/daniele21/closedroom/actions/runs/38531940499). **Not** a real bundled-app smoke, Python package TOC measurement or target-Mac evidence. No app build or media artifacts uploaded, no production/dependency/build-spec changes.
+`scripts/audit_footprint.py` and `test/test_audit_footprint.py`: **10 synthetic standard-library tests PASS** in source-only [38543632241](https://github.com/daniele21/closedroom/actions/runs/38543632241) (previous 6-case baseline: [38542371392](https://github.com/daniele21/closedroom/actions/runs/38542371392)) (syntax/py_compile PASS too). Covers immutable Git inventory, symlink-safe bundle sizes, physical component/archive accounting, privacy of unrelated paths, latest finalized selection, manifest mismatch, comparison deltas and manifest path traversal. Temporary PRs #126 and #127 closed **unmerged**, both one-shot workflows deleted. Earlier image compression tests PASS in [38531940499](https://github.com/daniele21/closedroom/actions/runs/38531940499). New cases prove unambiguous TOC physical matching, ambiguity rejection, traversal/literal safety and private-source-path non-disclosure. **Not** a real packaged-app/TOC measurement or target-Mac evidence. No app build or media artifacts uploaded, no production/dependency/build-spec changes.
 
-**HOLD dependency removal until real bundle report.** Next E2 decision is based on measured largest physical components plus explicitly unattributed PyInstaller archives, then source-owned dependency evidence and FULL package/import/MLX/Qwen smoke. Video stays unchanged pending HDR-grade evidence. Maintain `dev` unchanged.
+**HOLD dependency removal until real bundle report.** Next E2 decision is based on measured largest physical components, matched/unmatched COLLECT destinations and explicitly unattributed PyInstaller archives, then source-owned dependency evidence and FULL package/import/MLX/Qwen smoke. Video stays unchanged pending HDR-grade evidence. Maintain `dev` unchanged.
