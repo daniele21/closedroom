@@ -197,7 +197,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const { t, lang } = useTranslation();
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
-  const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
+  // The screenshot list owns current content; selection retains only its meeting-scoped identity.
+  const [selectedScreenshotKey, setSelectedScreenshotKey] = useState<{ meetingId: string; id: string } | null>(null);
   const [keyMomentVisualRequested, setKeyMomentVisualRequested] = useState(false);
   const [showAllScreenshots, setShowAllScreenshots] = useState(false);
   const [momentQuestion, setMomentQuestion] = useState('');
@@ -247,8 +248,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const userSelectedTabRef = useRef(false);
 
   const openKeyMoment = (shot: RecordingScreenshot) => {
+    if (!recordingId) return;
     setKeyMomentVisualRequested(true);
-    setSelectedScreenshot(shot);
+    setSelectedScreenshotKey({ meetingId: recordingId, id: shot.screenshot_id });
   };
 
   const handleTimestampClick = (time: number) => {
@@ -287,6 +289,13 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     ),
     [screenshots, meeting?.transcription?.segments],
   );
+  const screenshotById = useMemo(
+    () => new Map(screenshots.map((shot) => [shot.screenshot_id, shot])),
+    [screenshots],
+  );
+  const selectedScreenshot = selectedScreenshotKey?.meetingId === recordingId
+    ? screenshotById.get(selectedScreenshotKey.id) || null
+    : null;
   const selectedKeyMomentContext = selectedScreenshot
     ? keyMomentContexts.get(selectedScreenshot.screenshot_id)
     : null;
@@ -306,10 +315,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const screenshotGroups = useMemo(
     () => visualSourcesStale ? [] : (visualData?.document.manual_screenshot_groups || []),
     [visualData?.document.manual_screenshot_groups, visualSourcesStale],
-  );
-  const screenshotById = useMemo(
-    () => new Map(screenshots.map((shot) => [shot.screenshot_id, shot])),
-    [screenshots],
   );
   const groupByScreenshotId = useMemo(() => {
     const groups = new Map<string, VisualManualScreenshotGroup>();
@@ -350,6 +355,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
 
   useEffect(() => {
     setKeyMomentVisualRequested(false);
+    setSelectedScreenshotKey(null);
   }, [recordingId]);
 
   useEffect(() => {
@@ -1921,7 +1927,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           role="dialog"
           aria-modal="true"
           aria-label={lang === 'it' ? 'Screenshot della riunione' : 'Meeting screenshot'}
-          onClick={() => setSelectedScreenshot(null)}
+          onClick={() => setSelectedScreenshotKey(null)}
         >
           <div
             className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle bg-bg-elevated shadow-2xl"
@@ -1947,7 +1953,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 </Button>
                 <button
                   type="button"
-                  onClick={() => setSelectedScreenshot(null)}
+                  onClick={() => setSelectedScreenshotKey(null)}
                   className="rounded-lg p-2 text-text-muted hover:bg-bg-surface hover:text-text-primary"
                   aria-label={lang === 'it' ? 'Chiudi screenshot' : 'Close screenshot'}
                 >
