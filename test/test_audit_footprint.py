@@ -153,6 +153,103 @@ class FootprintAuditTests(unittest.TestCase):
 
 
 
+    def test_pyinstaller_collect_attributes_only_unique_physical_entries_without_source_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = root / "ClosedRoom.app"
+            for sub, payload in (
+                ("Contents/Frameworks/mlx/libmlx.dylib", b"A" * 23),
+                ("Contents/Resources/static/assets/index.js", b"B" * 17),
+                ("Contents/MacOS/ClosedRoom", b"C" * 61),
+            ):
+                target = app / sub
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(payload)
+            source_secret = "/Users/private/secret-acme-work-directory/original.dylib"
+            toc = root / "COLLECT-00.toc"
+            toc.write_text(repr([
+                ("mlx/libmlx.dylib", source_secret, "BINARY"),
+                ("static/assets/index.js", "/tmp/builder-private/frontend.js", "DATA"),
+                ("no-such-extension.so", "/tmp/missing.so", "EXTENSION"),
+                ("ClosedRoom", "/tmp/builder-private/ClosedRoom", "EXECUTABLE"),
+            ]), encoding="utf-8")
+            report = audit_footprint.bundle_audit(app, pyinstaller_toc=toc)
+            toc_report = report["pyinstaller_collect"]
+            self.assertEqual(toc_report["matched_file_count"], 2)
+            self.assertEqual(toc_report["matched_bytes"], 40)
+            self.assertEqual(toc_report["unmatched_entry_count"], 1)
+            self.assertEqual(toc_report["ignored_non_physical_entry_count"], 1)
+            self.assertEqual(toc_report["unattributed_bundle_bytes"], 61)
+            self.assertEqual(toc_report["entry_types"]["BINARY"]["bytes"], 23)
+            self.assertEqual(toc_report["entry_types"]["DATA"]["bytes"], 17)
+            self.assertEqual(toc_report["destination_groups"][0]["destination_prefix"], "mlx")
+            self.assertEqual(toc_report["provenance"], "toc_to_app_revision_not_verified")
+            serialized = json.dumps(report)
+            self.assertNotIn(source_secret, serialized)
+            self.assertNotIn("/tmp/builder-private", serialized)
+            self.assertNotIn(str(root), serialized)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                status = audit_footprint.main([
+                    "bundle", "--app", str(app), "--pyinstaller-toc", str(toc)
+                ])
+            self.assertEqual(status, 0)
+            self.assertEqual(json.loads(stdout.getvalue())["pyinstaller_collect"]["matched_bytes"], 40)
+
+    def test_pyinstaller_collect_ambiguous_or_duplicate_destinations_are_not_charged(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = root / "ClosedRoom.app"
+            for name in (
+                "Contents/Frameworks/mylib/module.so",
+                "Contents/Resources/mylib/module.so",
+                "Contents/Frameworks/other/shared.so",
+            ):
+                p = app / name
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(b"abcd")
+            toc = root / "COLLECT-00.toc"
+            toc.write_text(repr([
+                ("mylib/module.so", "/home/build/a", "EXTENSION"),
+                ("other/shared.so", "/home/build/b", "BINARY"),
+                ("other/shared.so", "/home/build/b", "BINARY"),
+            ]))
+            result = audit_footprint.bundle_audit(app, pyinstaller_toc=toc)["pyinstaller_collect"]
+            self.assertEqual(result["matched_file_count"], 0)
+            self.assertEqual(result["matched_bytes"], 0)
+            self.assertEqual(result["ambiguous_entry_count"], 3)
+            self.assertEqual(result["unattributed_bundle_bytes"], 12)
+
+    def test_pyinstaller_collect_rejects_unsafe_and_executable_toc_without_running_code(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = root / "ClosedRoom.app"
+            (app / "Contents/Resources").mkdir(parents=True)
+            toc = root / "COLLECT-00.toc"
+            toc.write_text(repr([("../secret", "/home/build/source", "DATA")]))
+            with self.assertRaisesRegex(ValueError, "Unsafe"):
+                audit_footprint.bundle_audit(app, pyinstaller_toc=toc)
+            toc.write_text("__import__('os').system('touch /tmp/never-run')", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Malformed"):
+                audit_footprint.bundle_audit(app, pyinstaller_toc=toc)
+            self.assertNotIn("/home/build/source", repr(
+                audit_footprint.pyinstaller_collect_audit.__doc__
+            ))
+
+    def test_pyinstaller_collect_rejects_non_toc_name_and_non_list_payload(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bad = root / "Analysis-00.toc"
+            bad.write_text("[]")
+            with self.assertRaisesRegex(ValueError, "Expected a COLLECT"):
+                audit_footprint.pyinstaller_collect_audit(bad, [])
+            good = root / "COLLECT-00.toc"
+            good.write_text("{'wrong': 'kind'}")
+            with self.assertRaisesRegex(ValueError, "Invalid COLLECT"):
+                audit_footprint.pyinstaller_collect_audit(good, [])
+
+
+
 
 if __name__ == "__main__":
     unittest.main()
