@@ -1,4 +1,5 @@
 import { useActivities } from './hooks/useActivities';
+import { useAudioImports } from './hooks/useAudioImports';
 import { lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
 import {
   AudioWaveform,
@@ -59,6 +60,7 @@ function MainApp() {
   });
   const isDemoActive = demoMode || Boolean(tourStep);
   const activities = useActivities(!isDemoActive && activePage !== 'overlay');
+  const audioImports = useAudioImports(!isDemoActive);
 
   const navigateTo = (page: string, detail: string | null = null) => {
     const pageRouteMap: Record<string, string> = {
@@ -261,7 +263,7 @@ function MainApp() {
           />
         );
       case 'activities':
-        return <ActivitiesPage activities={activities} navigateTo={navigateTo} />;
+        return <ActivitiesPage activities={activities} audioImports={audioImports} navigateTo={navigateTo} />;
       case 'meeting':
         return <MeetingDetailPage recordingId={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'recording':
@@ -272,7 +274,7 @@ function MainApp() {
             ? <RecordingPage detailId={routeDetail} navigateTo={navigateTo} />
             : <NewRecordingPage navigateTo={navigateTo} />;
       case 'transcription':
-        return <TranscriptionPage detailPath={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
+        return <TranscriptionPage detailPath={routeDetail} navigateTo={navigateTo} audioImports={audioImports} demoMode={isDemoActive} />;
       case 'projects':
         return <ProjectsPage navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'analysis':
