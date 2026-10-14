@@ -321,13 +321,13 @@ class RecordingStore:
             with self._lock_for(recording_id):
                 if request_id is not None:
                     try:
-                        existing = self.get(recording_id, include_result=False)
+                        _, existing = self._load(recording_id)
                     except RecordingNotFound:
                         existing = None
                     if existing is not None:
                         if existing.get("import_fingerprint") != fingerprint:
                             raise RecordingConflict("Import request identity reused with different audio or options")
-                        return existing
+                        return self.public_metadata(existing)
 
                 final = stage_parent / recording_id
                 if final.exists():
@@ -2105,7 +2105,10 @@ class RecordingStore:
         public = {
             key: value
             for key, value in metadata.items()
-            if key not in {"extension", "relative_dir", "audio_tracks"}
+            if key not in {
+                "extension", "relative_dir", "audio_tracks",
+                "import_source_sha256", "import_fingerprint",
+            }
         } | {
             "audio_tracks": public_tracks,
             "audio_file": (
