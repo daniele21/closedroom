@@ -704,6 +704,32 @@ class RecordingApiTests(unittest.TestCase):
         saved = self.app.state.transcription_store.get(data["saved_id"])
         self.assertIsNone(saved.get("analysis"))
 
+    @patch("local_asr_server.transcription_jobs.TranscriptionJobManager._run", return_value=None)
+    def test_transcription_submit_idempotency_does_not_duplicate_jobs(self, _run) -> None:
+        created = self.client.post(
+            "/v1/recordings",
+            json={"title": "Recording", "mime_type": "audio/wav", "capture_mode": "mic_only"},
+        )
+        recording_id = created.json()["id"]
+        url = f"/v1/recordings/{recording_id}/transcription-jobs"
+        options = {"language": "it", "visual_intelligence_enabled": False}
+        headers = {"Idempotency-Key": "once-1"}
+        first = self.client.post(url, json=options, headers=headers)
+        second = self.client.post(url, json=options, headers=headers)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(first.json()["id"], second.json()["id"])
+        self.assertEqual(len(get_services(self.app).jobs.list_jobs(job_type="transcription")), 1)
+        collision = self.client.post(
+            url, json={"language": "en", "visual_intelligence_enabled": False},
+            headers=headers,
+        )
+        self.assertEqual(collision.status_code, 409)
+        retry = self.client.post(
+            url, json=options, headers={"Idempotency-Key": "new-2"},
+        )
+        self.assertEqual(retry.status_code, 202)
+        self.assertNotEqual(first.json()["id"], retry.json()["id"])
+
     @patch("local_asr_server.server.transcribe_file_sync")
     def test_transcription_job_for_recording(self, transcribe) -> None:
         self.mock_load_settings.return_value["visual_intelligence_enabled"] = True
