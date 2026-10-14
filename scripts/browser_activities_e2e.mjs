@@ -105,7 +105,7 @@ try {
   const evaluate = async (expression) => {
     // The journeys only assert primitives. Do not ask CDP to serialize a
     // returned DOM node, browser object or a cyclic React/DevTools structure.
-    const primitiveExpression = `(() => { const value = eval(${JSON.stringify(expression)}); return value === null || ['boolean', 'string', 'number'].includes(typeof value) ? value : null; })()`;
+    const primitiveExpression = `(() => { const value = (${expression}); return value === null || ['boolean', 'string', 'number'].includes(typeof value) ? value : null; })()`;
     const value = await call('Runtime.evaluate', { expression: primitiveExpression, returnByValue: true, awaitPromise: true });
     if (value.exceptionDetails) throw new Error(`UI expression failed (${expression.slice(0, 120)}): ${JSON.stringify(value.exceptionDetails)}`);
     return value.result.value;
