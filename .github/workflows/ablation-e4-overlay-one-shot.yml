@@ -3,7 +3,7 @@ name: E4 overlay fallback single-owner ablation (one-shot)
 on:
   pull_request:
     branches: [experiment/complexity-ablation]
-    types: [opened]
+    types: [opened, reopened]
 
 permissions:
   contents: read
