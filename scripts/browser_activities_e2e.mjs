@@ -251,6 +251,10 @@ try {
   await assert(`!!document.querySelector('[data-activity-id="imported-job"]')`, 'job survives navigation and follows persisted discovery');
   if (importCount !== 1 || importedJobCount !== 1) throw new Error('upload or ASR job admitted more than once');
   await checkpoint('10-imported-job-after-navigation');
+  await call('Page.reload', { ignoreCache: true });
+  await assert(`location.hash === '#activities' && !!document.querySelector('[data-activity-id="imported-job"]')`,
+    'full reload discovers the same submitted ASR from the persistent job service');
+  await checkpoint('10b-import-after-reload');
   jobs.push({
     ...fixture('inline-analysis', 'completed', 'analysis'),
     scope_type: 'inline_text', scope_id: 'analysis-run-1',
