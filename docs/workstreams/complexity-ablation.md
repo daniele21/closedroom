@@ -1,6 +1,6 @@
 # Complexity ablation — minimum complexity, equivalent product behavior
 
-Status: E4/E5 SCOPED ITERATION COMPLETE — ISOLATED EXPERIMENTS. No merge or PR to dev authorized.
+Status: CONSOLIDATED SOURCE PASS / PACKAGED-APP PENDING — EXPERIMENT ONLY; no dev PR/merge.
 Experiment branch: `experiment/complexity-ablation`
 Read-only reference: `dev` at `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f` (2026-10-13). Refresh baseline identity on resume.
 
@@ -28,16 +28,9 @@ Reuse evidence from `architectural-consolidation.md` and `selective-efficiency.m
 5. Run focused and selector-required tests/E2E; diagnose failures without weakening tests.
 6. KEEP / REWORK / REVERT / BLOCKED_FOR_EVIDENCE; no automatic merge to `dev`.
 
-## Feature coverage and guarded surfaces
+## Affected surfaces
 
-| Surface | Canonical owners | Required equivalence oracle |
-| --- | --- | --- |
-| Native/browser recording, permissions, recovery, menu/detection | `useRecorder`, native helper, `RecordingStore`, `menubar.py` | recording API, native lifecycle, recording UI, meeting-detection-start; real Mac separately |
-| Note/screenshot/display overlay | `RecordingOverlayPage`, `RecordingStore` screenshot artifacts | call-overlay-screenshot-evidence, meeting-moments-notes + native capture recovery |
-| Upload/path/multi-track transcription + diarization | transcription router, application/service, jobs | transcription application, router ablation, recording API and transcription-workflow |
-| Analysis, edits, meeting/project search | analysis jobs, catalog, `MeetingDetailPage` | shared analysis pipeline, note edit revision, archive search, persistence |
-| Local/opt-in providers, inference lifecycle | `RuntimeServiceManager`, AI adapters | explicit selection, model readiness, resource arbitration, bounded cleanup |
-| Packaging, native app identity | `ClosedRoom.spec`, build scripts | immutable artifact smoke; source tests alone not enough |
+Meeting/overlay/recording UI, transcription router/application and read-only RecordingStore projection. Preserve local-first, provenance, recovery and native capture/package identity; synthetic browser evidence ≠ WKWebView/TCC/MLX.
 
 ## Candidate queue and independence
 
@@ -84,10 +77,14 @@ All checks below are **source/synthetic or scoped**; they do not prove represent
 
 **Net production LOC vs `dev`: −48** (previous −45, E4.4 −3), overlay React states −3, Meeting React states −1, Meeting load refs 3→1. All one-shot validation workflows removed; no merge into `dev`. Stop speculative ablations; broader E5 HOLD pending #86; exact-head/base gates and representative Mac proof remain before integration/release.
 
+## Consolidated pre-integration audit — 2026-10-14
+
+`dev` `747a0e5`: **55 changed files**. Production **−48 LOC** (10 files), tests/E2E **+869 LOC**, optional tooling **+506 LOC**. Fifteen lossless WebP images save ~51.9 MiB. Fewer owners/states do not mean fewer total lines or measured RAM/CPU. No overlapping files with open SQLite PR #86.
+
+Selector **INTEGRATION / STRONG**: governance, source-tests, browser-e2e, **packaged-app**. [Consolidated run 38560561537](https://github.com/daniele21/closedroom/actions/runs/38560561537) PASS: governance/docs, **716/716 Python**, lint/tsc, **8/8 browser FULL_MEDIA**. Earlier [38559430185](https://github.com/daniele21/closedroom/actions/runs/38559430185) had 4 obsolete static assertions: corrected to enforce independent list generations, stale-load identity and note/visual lifetimes; no product behavior weakened. Disposable PRs #132/#133 closed unmerged; workflow deleted. Final exact-HEAD/base proof is **not** established by the temporary PR.
+
+**PENDING:** local finalized macOS .app/FTS5 lifecycle gate; representative WKWebView/TCC/audio/MLX remain release evidence. For an expressly authorized integration, separate (1) frontend plus browser oracles, (2) backend ASR/diarization plus read-only visual projection, (3) documentation media. Hold optional footprint-audit tooling until real bundle measurements. No merge into `dev`.
+
 ## Resume checkpoint
 
-- BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
-- TARGET: `experiment/complexity-ablation`; no changes to `dev`. Validation PRs #119–#123 closed without merge; disposable workflows removed.
-- Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4/C2.2/C2.3/C2.4 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
-- Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
-- Next: HOLD speculative ablations; E4 and narrow read-only E5 now KEEP with scoped evidence. Wait for SQLite PR #86 before any persistence write-path changes; integration only after explicit authorization and selected strong/exact-head gates.
+Experiment is isolated. Retain repository-selected strong preflight, source/packaged-app and target-Mac release gaps. C3 path/upload cache convergence remains rejected; E5 write changes await SQLite migration PR #86.
