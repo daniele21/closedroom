@@ -25,8 +25,10 @@ export function useActivities(enabled = true) {
       if (mounted.current && generation.current === epoch) setStale(true);
     } finally {
       window.clearTimeout(timeout);
-      requestController.current = null;
-      inFlight.current = false;
+      if (requestController.current === controller) {
+        requestController.current = null;
+        inFlight.current = false;
+      }
       if (mounted.current && generation.current === epoch) setLoading(false);
     }
   }, []);
@@ -44,6 +46,8 @@ export function useActivities(enabled = true) {
       generation.current += 1;
       mounted.current = false;
       requestController.current?.abort();
+      requestController.current = null;
+      inFlight.current = false;
       window.clearInterval(timer);
       window.removeEventListener('focus', onVisible);
       document.removeEventListener('visibilitychange', onVisible);
