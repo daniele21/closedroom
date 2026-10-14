@@ -180,7 +180,10 @@ def pyinstaller_collect_audit(toc_file: Path, files: list[dict]) -> dict:
     """
     if toc_file.name != "COLLECT-00.toc" or toc_file.stat().st_size > 32 * 1024 * 1024:
         raise ValueError("Expected a COLLECT-00.toc of at most 32 MiB")
-    value = ast.literal_eval(toc_file.read_text(encoding="utf-8"))
+    try:
+        value = ast.literal_eval(toc_file.read_text(encoding="utf-8"))
+    except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
+        raise ValueError("Malformed COLLECT-00.toc literal") from None
     if not isinstance(value, (list, tuple)) or len(value) > 100000:
         raise ValueError("Invalid COLLECT-00.toc list or excessive entries")
     physically_present = {entry["path"]: entry["bytes"] for entry in files}
