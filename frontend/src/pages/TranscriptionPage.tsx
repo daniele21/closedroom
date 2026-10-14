@@ -175,6 +175,7 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
   const lastASRProgressRef = useRef('');
   const lastJobStepRef = useRef('');
   const activeJobIdRef = useRef<string | null>(null);
+  const pendingSubmissionRef = useRef<{ signature: string; id: string } | null>(null);
 
   const loadRecordings = async () => {
     try {
@@ -426,7 +427,7 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
       if (selectedRecordingId) {
         setProgressStatus(lang === 'it' ? 'Trascrizione tracce della registrazione...' : 'Transcribing recording tracks...');
         setProgressPercent(10);
-        const job = await ApiClient.createTranscriptionJob(selectedRecordingId, {
+        const options = {
           model: asrProvider === 'local' ? targetModel || undefined : undefined,
           language: targetLanguage || undefined,
           task: targetTask,
@@ -445,7 +446,20 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
           ),
           diarization_provider: diarizationProvider,
           visual_intelligence_enabled: visualIntelligenceEnabled,
-        });
+        };
+        // Preserve this identity if the POST fails before its response arrives.
+        // A new deliberate run after an acknowledged submit uses a new ID.
+        const signature = JSON.stringify([selectedRecordingId, options]);
+        const requestId = (
+          pendingSubmissionRef.current?.signature === signature
+            ? pendingSubmissionRef.current.id
+            : crypto.randomUUID()
+        );
+        pendingSubmissionRef.current = { signature, id: requestId };
+        const job = await ApiClient.createTranscriptionJob(
+          selectedRecordingId, options, requestId,
+        );
+        pendingSubmissionRef.current = null;
         activeJobIdRef.current = job.id;
         let currentJob = job;
         while (!TERMINAL_JOB_STATUSES.has(currentJob.status)) {
