@@ -154,6 +154,28 @@ class JobStoreTests(unittest.TestCase):
                 ["job-c", "job-b", "job-a"],
             )
 
+    def test_active_discovery_pages_all_jobs_beyond_500(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "closedroom.db")
+            with store.connection() as conn:
+                for index in range(510):
+                    conn.execute(
+                        "INSERT INTO jobs (id, type, status, current_step, "
+                        "progress, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+                        (f"job-{index:03d}", "transcription", "queued", "queued",
+                         float(index), float(index)),
+                    )
+            first = store.list_jobs(view="active", summary=True, limit=500)
+            self.assertEqual(len(first), 500)
+            last = first[-1]
+            second = store.list_jobs(
+                view="active", summary=True, limit=500,
+                before=(last["created_at"], last["id"]),
+            )
+            self.assertEqual(len(second), 10)
+            self.assertEqual(len({job["id"] for job in first + second}), 510)
+            self.assertEqual(second[-1]["id"], "job-000")
+
     def test_restart_interrupts_old_active_jobs_beyond_recent_500(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "closedroom.db")
