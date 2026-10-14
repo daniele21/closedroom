@@ -80,7 +80,7 @@ Fasi sequenziali; `BLOCKED` indica una dipendenza non completata.
 | ID | Esito osservabile e confine di scrittura | Dipende da | Stato |
 | --- | --- | --- | --- |
 | BG-1 | Contratto recuperabile: lista attivi/storico, snapshot/eventi, identità sorgente/risultato e terminali uniformi. Owner: jobs, router/schemas, manager, test/API client. | — | ACTIVE |
-| BG-2 | Audio importato elaborabile come le registrazioni, senza cattura fittizia; composizione audio→analisi persistita. Owner: RecordingStore/router, manager preparation/analysis, client e test. | BG-1 | BLOCKED |
+| BG-2 | Audio importato elaborabile come le registrazioni, senza cattura fittizia; composizione audio→analisi persistita. Owner: RecordingStore/router, manager preparation/analysis, client e test. | BG-1 | ACTIVE |
 | BG-3 | Cambiare schermata conserva osservazione e contesto; ritorno o reload recupera i job dal server. Owner: shell/provider frontend, jobEvents, pagine e consumer Meeting. | BG-2 | BLOCKED |
 | BG-4 | Attività globali con cancel, risultato, retry e feedback accessibili. Owner: App/componenti/i18n/design, test UI. | BG-3 | BLOCKED |
 | BG-5 | Percorso completo verificato e pronto all'integrazione. Owner: test, browser E2E/registro, docs durature; preflight sul candidato. | BG-4 | BLOCKED |
@@ -172,20 +172,18 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
   obblighi in `docs/current-state.md`/runbook release. Identità prodotto N/A.
   Applicare `finalize-workstream` e cancellare il piano soltanto a lavoro concluso.
 
-## Checkpoint 2026-10-14 — BG-1 e Attività
+## Checkpoint — 2026-10-14
 
-- Stato BG-1 ACTIVE; BG-2..5 BLOCKED. Base `dev`
-  `ff65035bca385430d2e47da5f3a0b5b2a6b35c85`; PR #134.
-- Il nuovo `dev` ha introdotto `/v1/activities`, shell Attività,
-  progress ASR/visual, e fix della lease di capture sullo stop.
-  `activity_summaries` è l'unico owner della discovery; non duplicarlo.
-- Da BG-1 sul branch: restart corretto oltre i 500 recenti,
-  `Idempotency-Key` per ASR/diarizzazione/analisi diretta con ammissione
-  SQLite atomica, cancellazione parent via manager, terminali UI allineati.
-  Il key per POST senza risposta vive soltanto nel component montato.
-- Test su concorrenza, replay, API e restart. Preflight STRONG su
-  `5167ef0`: 713 test, lint/typecheck ed E2E browser PASS; governance FAIL
-  soltanto per budget di questo file, ora ridotto. Nuovo HEAD PENDING.
-- Gap: replay parent/pipeline, SSE/reconnect, cancel/submit race e storico;
-  BG-2 richiede import atomico in `RecordingStore`. Nessun build in Actions.
-- La reale TCC/audio/WKWebView e MLX/Metal rimane release evidence.
+- BG-1 branch `feature/background-processing-bg1` PR #134, commit
+  `97d5431`: STRONG source checks, 713 Python tests, lint/typecheck,
+  browser E2E e governance PASS; package/target-Mac non attestati.
+- BG-2 branch `feature/background-processing-bg2` basato su BG-1:
+  importazione audio `/v1/recordings/import-audio` con staging atomico,
+  limite 2 GiB, replay con `Idempotency-Key`, recupero dopo crash,
+  metadata `recorded` e nessuna prenotazione capture. Source tests
+  scritti, esecuzione e integrazione ancora PENDING.
+- Riusa `RecordingStore`, normale ASR e `MeetingPreparationManager`;
+  nessun nuovo scheduler. Restano BG-2 upload cancelabile durante
+  trasferimento, orchestrazione audio→analisi dal wizard e UI import.
+  BG-3..5 BLOCKED. No build su GitHub Actions.
+- Evidenza target-Mac TCC/WKWebView/MLX differita a RELEASE.
