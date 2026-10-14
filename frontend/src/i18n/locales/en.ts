@@ -539,7 +539,7 @@ const en = {
     dropzoneTitle: 'Drag an audio file here or click to browse',
     dropzoneCompactTitle: 'Drop the file here',
     dropzoneMax: 'Supports MP3, WAV, M4A, WEBM etc.',
-    dropzoneMaxShort: 'MP3, WAV, M4A, WEBM, FLAC · Max 25 MB',
+    dropzoneMaxShort: 'MP3, WAV, M4A, WEBM, FLAC · Max 2 GB',
     browseAudio: 'Select audio',
     changeSource: 'Change source',
     selectedFileLabel: 'Selected file:',
