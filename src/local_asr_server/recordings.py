@@ -951,26 +951,15 @@ class RecordingStore:
         ]
         screenshots = self.list_screenshots(recording_id)
         for item in screenshots:
-            if not item.get("available"):
-                frames.append({
-                    "sequence": 1_000_000_000 + int(item.get("sequence") or 0),
-                    "timestamp": float(item.get("timestamp") or 0.0),
-                    "path": None,
-                    "evidence_source": "manual_screenshot",
-                    "capture_kind": "manual",
-                    "evidence_id": item.get("screenshot_id"),
-                    "screenshot_id": item.get("screenshot_id"),
-                    "sha256": item.get("sha256"),
-                    "display_id": item.get("display_id"),
-                    "display_title": item.get("display_title"),
-                    "available": False,
-                })
-                continue
+            available = bool(item.get("available"))
             frames.append({
                 "sequence": 1_000_000_000 + int(item.get("sequence") or 0),
                 "timestamp": float(item.get("timestamp") or 0.0),
-                "path": self.screenshot_asset_path(
-                    recording_id, str(item["screenshot_id"]), thumbnail=False,
+                "path": (
+                    self.screenshot_asset_path(
+                        recording_id, str(item["screenshot_id"]), thumbnail=False,
+                    )
+                    if available else None
                 ),
                 "evidence_source": "manual_screenshot",
                 "capture_kind": "manual",
@@ -979,7 +968,7 @@ class RecordingStore:
                 "sha256": item.get("sha256"),
                 "display_id": item.get("display_id"),
                 "display_title": item.get("display_title"),
-                "available": True,
+                "available": available,
             })
         return sorted(
             frames,
