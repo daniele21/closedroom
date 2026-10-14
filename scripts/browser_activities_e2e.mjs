@@ -89,8 +89,27 @@ try {
   let sequence = 0;
   const pending = new Map();
   socket.addEventListener('message', ({ data }) => { const msg = JSON.parse(data); if (msg.id && pending.has(msg.id)) { const { resolve, reject, timeout } = pending.get(msg.id); clearTimeout(timeout); pending.delete(msg.id); msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result); } });
-  const call = (method, params = {}) => new Promise((resolve, reject) => { const id = ++sequence; const timeout = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout ${method}`)); }, 10000); pending.set(id, { resolve, reject, timeout }); socket.send(JSON.stringify({ id, method, params })); });
-  const evaluate = async (expression) => { const value = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails)); return value.result.value; };
+  // CDP may reject object serialization even when the UI is healthy. Each
+  // command includes a bounded, non-sensitive callsite for diagnosis.
+  const call = (method, params = {}) => new Promise((resolve, reject) => {
+    const id = ++sequence;
+    const label = method === 'Runtime.evaluate' ? `${method}: ${String(params.expression).slice(0, 120)}` : method;
+    const timeout = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${label}`)); }, 10000);
+    pending.set(id, {
+      resolve,
+      reject: (error) => reject(new Error(`${label}: ${error.message}`)),
+      timeout,
+    });
+    socket.send(JSON.stringify({ id, method, params }));
+  });
+  const evaluate = async (expression) => {
+    // The journeys only assert primitives. Do not ask CDP to serialize a
+    // returned DOM node, browser object or a cyclic React/DevTools structure.
+    const primitiveExpression = `(() => { const value = eval(${JSON.stringify(expression)}); return value === null || ['boolean', 'string', 'number'].includes(typeof value) ? value : null; })()`;
+    const value = await call('Runtime.evaluate', { expression: primitiveExpression, returnByValue: true, awaitPromise: true });
+    if (value.exceptionDetails) throw new Error(`UI expression failed (${expression.slice(0, 120)}): ${JSON.stringify(value.exceptionDetails)}`);
+    return value.result.value;
+  };
   const assert = async (expression, label) => { for (let i = 0; i < 80; i++) { if (await evaluate(expression)) return; await sleep(100); } throw new Error(label); };
   const screenshot = async (filename) => { const shot = await call('Page.captureScreenshot', { format: 'png' }); await fs.writeFile(path.join(evidence, filename), Buffer.from(shot.data, 'base64')); };
   const checkpoint = async (name) => { await screenshot(`${name}.png`); checkpoints.push(name); };
