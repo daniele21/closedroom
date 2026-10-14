@@ -88,6 +88,12 @@ class RecordingApiTests(unittest.TestCase):
             get_services(self.app).recordings.audio_path(item["id"]).read_bytes(),
             audio,
         )
+        after_commit_cancel = self.client.post(
+            "/v1/recordings/import-audio/import-test-1/cancel",
+        )
+        self.assertEqual(after_commit_cancel.status_code, 200)
+        self.assertFalse(after_commit_cancel.json()["cancel_requested"])
+        self.assertTrue(after_commit_cancel.json()["already_published"])
         replay = submit()
         self.assertEqual(replay.status_code, 201)
         self.assertEqual(replay.json()["id"], item["id"])
@@ -99,6 +105,26 @@ class RecordingApiTests(unittest.TestCase):
         )
         self.assertEqual(invalid.status_code, 409)
         self.assertEqual(len(get_services(self.app).recordings.list()), 1)
+
+    def test_cancel_before_import_starts_prevents_later_publish(self) -> None:
+        cancelled = self.client.post(
+            "/v1/recordings/import-audio/upload-cancelled/cancel",
+        )
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertTrue(cancelled.json()["cancel_requested"])
+        upload = self.client.post(
+            "/v1/recordings/import-audio",
+            files={"file": ("later.wav", _wav_bytes(), "audio/wav")},
+            headers={"Idempotency-Key": "upload-cancelled"},
+        )
+        self.assertEqual(upload.status_code, 409)
+        self.assertEqual(get_services(self.app).recordings.list(), [])
+        retry = self.client.post(
+            "/v1/recordings/import-audio",
+            files={"file": ("later.wav", _wav_bytes(), "audio/wav")},
+            headers={"Idempotency-Key": "new-request-id"},
+        )
+        self.assertEqual(retry.status_code, 201)
 
     @patch("local_asr_server.server.transcribe_file_sync")
     def test_imported_audio_uses_existing_transcription_job(self, transcribe) -> None:
