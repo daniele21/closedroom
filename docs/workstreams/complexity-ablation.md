@@ -1,6 +1,6 @@
 # Complexity ablation — minimum complexity, equivalent product behavior
 
-Status: CONSOLIDATED SOURCE PASS / PACKAGED-APP PENDING — EXPERIMENT ONLY; no dev PR/merge.
+Status: SOURCE PASS (OLD BASE); RECONCILIATION + PACKAGE PENDING. No dev PR/merge.
 Experiment branch: `experiment/complexity-ablation`
 Read-only reference: `dev` at `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f` (2026-10-13). Refresh baseline identity on resume.
 
@@ -82,6 +82,8 @@ All checks below are **source/synthetic or scoped**; they do not prove represent
 `dev` `747a0e5`: **55 changed files**. Production **−48 LOC** (10 files), tests/E2E **+869 LOC**, optional tooling **+506 LOC**. Fifteen lossless WebP images save ~51.9 MiB. Fewer owners/states do not mean fewer total lines or measured RAM/CPU. No overlapping files with open SQLite PR #86.
 
 Selector **INTEGRATION / STRONG**: governance, source-tests, browser-e2e, **packaged-app**. [Consolidated run 38560561537](https://github.com/daniele21/closedroom/actions/runs/38560561537) PASS: governance/docs, **716/716 Python**, lint/tsc, **8/8 browser FULL_MEDIA**. Earlier [38559430185](https://github.com/daniele21/closedroom/actions/runs/38559430185) had 4 obsolete static assertions: corrected to enforce independent list generations, stale-load identity and note/visual lifetimes; no product behavior weakened. Disposable PRs #132/#133 closed unmerged; workflow deleted. Final exact-HEAD/base proof is **not** established by the temporary PR.
+
+**Base changed:** `dev` advanced to `a30e69e` (+1 background-processing commit). Candidate is behind by 1. Both touch `MeetingDetailPage.tsx` and `design/ux-contract.json`; no same-line hunks detected, but semantic reconciliation and new-base gates remain PENDING. Source PASS applies to old `dev` `747a0e5` only.
 
 **PENDING:** local finalized macOS .app/FTS5 lifecycle gate; representative WKWebView/TCC/audio/MLX remain release evidence. For an expressly authorized integration, separate (1) frontend plus browser oracles, (2) backend ASR/diarization plus read-only visual projection, (3) documentation media. Hold optional footprint-audit tooling until real bundle measurements. No merge into `dev`.
 
