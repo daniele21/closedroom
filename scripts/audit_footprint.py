@@ -6,6 +6,7 @@ Usage:
   python3 scripts/audit_footprint.py bundle --app /path/to/ClosedRoom.app
   python3 scripts/audit_footprint.py bundle --latest-finalized --root .
   python3 scripts/audit_footprint.py bundle --app /path/to/ClosedRoom.app --compare previous.json
+  python3 scripts/audit_footprint.py bundle --latest-finalized --pyinstaller-toc build/ClosedRoom/COLLECT-00.toc
 
 JSON contains repository-relative paths or bundle-internal paths only. It never
 reads file contents in bundle mode and does not scan the user's data directory.
@@ -13,10 +14,11 @@ reads file contents in bundle mode and does not scan the user's data directory.
 from __future__ import annotations
 
 import argparse
+import ast
 from collections import defaultdict
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 
@@ -169,7 +171,88 @@ def latest_finalized_app(root: Path) -> Path:
     return max(items, key=lambda pair: pair[0])[1]
 
 
-def bundle_audit(app: Path) -> dict:
+def pyinstaller_collect_audit(toc_file: Path, files: list[dict]) -> dict:
+    """Read only a COLLECT-00.toc literal, never evaluate it or inspect source paths.
+
+    PyInstaller's (destination, source, type) list is a build input; only
+    destination paths with exactly one physical match in this .app are counted.
+    It cannot attribute pure Python modules packed in the executable/PYZ.
+    """
+    if toc_file.name != "COLLECT-00.toc" or toc_file.stat().st_size > 32 * 1024 * 1024:
+        raise ValueError("Expected a COLLECT-00.toc of at most 32 MiB")
+    value = ast.literal_eval(toc_file.read_text(encoding="utf-8"))
+    if not isinstance(value, (list, tuple)) or len(value) > 100000:
+        raise ValueError("Invalid COLLECT-00.toc list or excessive entries")
+    physically_present = {entry["path"]: entry["bytes"] for entry in files}
+    possible_roots = (
+        "Contents/MacOS", "Contents/Frameworks", "Contents/Resources",
+        "Contents/MacOS/_internal", "Contents/Frameworks/_internal",
+        "Contents/Resources/_internal",
+    )
+    count_unmatched = count_ambiguous = count_ignored = 0
+    candidate_matches: dict[str, list[tuple[str, str]]] = {}
+    for entry in value:
+        if (not isinstance(entry, (tuple, list)) or len(entry) != 3
+                or not all(isinstance(part, str) or part is None for part in entry)):
+            raise ValueError("Invalid COLLECT-00.toc entry")
+        dest, _source_private, entry_type = entry
+        if not dest or not isinstance(dest, str) or not isinstance(entry_type, str):
+            raise ValueError("Invalid COLLECT-00.toc destination or type")
+        # Never include _source_private in output or filesystem access.
+        if entry_type not in {"BINARY", "EXTENSION", "DATA", "ZIPFILE"}:
+            count_ignored += 1
+            continue
+        dest_path = PurePosixPath(dest)
+        if (dest.startswith("/") or "\\" in dest or ":" in dest
+                or any(part in ("", ".", "..") for part in dest.split("/"))
+                or dest_path.as_posix() != dest):
+            raise ValueError("Unsafe COLLECT-00.toc destination")
+        candidates = [f"{prefix}/{dest}" for prefix in possible_roots
+                      if f"{prefix}/{dest}" in physically_present]
+        if not candidates:
+            count_unmatched += 1
+        elif len(candidates) > 1:
+            count_ambiguous += 1
+        else:
+            group = dest.split("/", 1)[0] if "/" in dest else "_top_level_files"
+            candidate_matches.setdefault(candidates[0], []).append((group, entry_type))
+
+    aggregate: dict[str, dict[str, int]] = defaultdict(lambda: {"files": 0, "bytes": 0})
+    type_totals: dict[str, dict[str, int]] = defaultdict(lambda: {"files": 0, "bytes": 0})
+    matched_bytes = 0
+    matched_count = 0
+    for path, claims in candidate_matches.items():
+        if len(claims) != 1:
+            count_ambiguous += len(claims)
+            continue
+        group, entry_type = claims[0]
+        size = physically_present[path]
+        aggregate[group]["files"] += 1
+        aggregate[group]["bytes"] += size
+        type_totals[entry_type]["files"] += 1
+        type_totals[entry_type]["bytes"] += size
+        matched_bytes += size
+        matched_count += 1
+    return {
+        "evidence": "user_supplied_pyinstaller_collect_toc",
+        "provenance": "toc_to_app_revision_not_verified",
+        "source_paths_exposed": False,
+        "matched_file_count": matched_count,
+        "matched_bytes": matched_bytes,
+        "unmatched_entry_count": count_unmatched,
+        "ambiguous_entry_count": count_ambiguous,
+        "ignored_non_physical_entry_count": count_ignored,
+        "destination_groups": [
+            {"destination_prefix": name, **counts}
+            for name, counts in sorted(aggregate.items(), key=lambda pair: (-pair[1]["bytes"], pair[0]))
+        ],
+        "entry_types": dict(sorted(type_totals.items())),
+        "unattributed_bundle_bytes": sum(item["bytes"] for item in files) - matched_bytes,
+        "caution": "Names are COLLECT destination prefixes, not proven installed Python distribution sizes. Compressed/PYZ/EXE modules remain opaque; the TOC may come from a different build.",
+    }
+
+
+def bundle_audit(app: Path, *, pyinstaller_toc: Path | None = None) -> dict:
     if app.suffix != ".app" or not (app / "Contents").is_dir():
         raise ValueError("Expected an existing macOS .app directory containing Contents/")
     files = []
@@ -201,6 +284,7 @@ def bundle_audit(app: Path) -> dict:
     manifest = _validated_manifest(app, counted_files=len(files) + symlinks, bytes_total=total_bytes)
     components = _size_groups(files, _component_group)
     roles = _size_groups(files, _file_role)
+    toc_report = pyinstaller_collect_audit(pyinstaller_toc, files) if pyinstaller_toc else None
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "macos_app_bundle",
@@ -217,6 +301,7 @@ def bundle_audit(app: Path) -> dict:
         "file_roles": roles,
         "unattributed_opaque_archive_bytes": roles.get("opaque_archives", {}).get("bytes", 0),
         "artifact_identity": manifest,
+        "pyinstaller_collect": toc_report,
         "largest_files": _largest(files, 25),
         "measurement": "logical file sizes within .app, excluding symlinks; not disk allocation, DMG, memory or startup",
         "caution": "Groups count physically bundled files only. PyInstaller executable/PYZ/zip contents may hide modules; no per-dependency size or safety-to-remove claim.",
@@ -235,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
     selector.add_argument("--latest-finalized", action="store_true", help="Resolve latest successful local artifact manifest")
     bundle.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1],
                         help="Checkout containing dist/artifacts, only for --latest-finalized")
+    bundle.add_argument("--pyinstaller-toc", type=Path,
+                        help="Explicit build/ClosedRoom/COLLECT-00.toc; ignores private source paths")
     for command in (repo, bundle):
         command.add_argument("--compare", type=Path, help="Previous report JSON of the same kind")
     args = parser.parse_args(argv)
@@ -243,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
             report = repository_audit(args.root, args.ref)
         else:
             app = latest_finalized_app(args.root) if args.latest_finalized else args.app
-            report = bundle_audit(app)
+            report = bundle_audit(app, pyinstaller_toc=args.pyinstaller_toc)
         if args.compare:
             baseline = json.loads(args.compare.read_text(encoding="utf-8"))
             if baseline.get("kind") != report["kind"] or baseline.get("schema_version") != SCHEMA_VERSION:
