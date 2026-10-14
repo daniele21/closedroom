@@ -56,6 +56,20 @@ export function useAudioImports(enabled = true) {
         }
         update(id, { phase: 'submitting' });
         const job: TranscriptionJob = await ApiClient.createTranscriptionJob(source.id, options, id);
+        if (cancels.current.has(id)) {
+          // A cancellation may race with publication and job admission.
+          // Stop an already-admitted job instead of pretending it never ran.
+          try {
+            await ApiClient.cancelJob(job.id);
+            update(id, { phase: 'cancelled', jobId: job.id });
+          } catch (error) {
+            update(id, {
+              phase: 'failed', jobId: job.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          return;
+        }
         update(id, { phase: 'submitted', jobId: job.id });
       } catch (error) {
         update(id, {
