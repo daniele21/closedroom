@@ -3,7 +3,7 @@ name: E4/E5 isolated ablation regression (one-shot)
 on:
   pull_request:
     branches: [experiment/complexity-ablation]
-    types: [opened]
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: read
@@ -18,11 +18,13 @@ jobs:
         env:
           PR_BASE: ${{ github.base_ref }}
         run: test "$PR_BASE" = "experiment/complexity-ablation"
-      - name: Python projection contract
+      - name: Python projection contract (isolated test-only dependencies)
         run: |
-          python3 -m py_compile src/local_asr_server/recordings.py test/test_visual_evidence_projection_ablation.py
-          PYTHONPATH=src python3 -m unittest discover -s test -p 'test_visual_evidence_projection_ablation.py' -v
-          PYTHONPATH=src python3 -m unittest discover -s test -p 'test_recording_notes.py' -v
+          python3 -m venv /tmp/closedroom-e5-test
+          /tmp/closedroom-e5-test/bin/python -m pip install "Pillow==12.0.0"
+          /tmp/closedroom-e5-test/bin/python -m py_compile src/local_asr_server/recordings.py test/test_visual_evidence_projection_ablation.py
+          PYTHONPATH=src /tmp/closedroom-e5-test/bin/python -m unittest discover -s test -p 'test_visual_evidence_projection_ablation.py' -v
+          PYTHONPATH=src /tmp/closedroom-e5-test/bin/python -m unittest discover -s test -p 'test_recording_notes.py' -v
       - name: Frontend dependencies (no macOS app build)
         run: |
           npm install --global pnpm@9.15.9
