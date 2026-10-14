@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from local_asr_server.server import AudioRouter, create_app
+from local_asr_server.app_services import get_services
 from support import deterministic_settings
 
 
@@ -64,6 +65,42 @@ class RecordingApiTests(unittest.TestCase):
         self.settings_patcher.stop()
         self.client.close()
         self.temp_dir.cleanup()
+
+    def test_jobs_endpoint_exposes_lightweight_paginated_discovery(self) -> None:
+        jobs = get_services(self.app).jobs
+        for job_id in ("job-1", "job-2", "job-3"):
+            jobs.create(
+                job_id=job_id, job_type="analysis",
+                scope_type="recording", scope_id="rec-1",
+                payload={"prompt": "private"},
+            )
+        jobs.update("job-1", status="completed", result={"text": "private"})
+
+        active = self.client.get("/v1/jobs", params={
+            "view": "active", "summary": "true", "limit": 1,
+        })
+        self.assertEqual(active.status_code, 200)
+        self.assertEqual(len(active.json()["items"]), 1)
+        self.assertTrue(active.json()["has_more"])
+        self.assertNotIn("payload", active.text)
+        self.assertNotIn("private", active.text)
+        cursor = active.json()["next_cursor"]
+        next_page = self.client.get("/v1/jobs", params={
+            "view": "active", "summary": "true", "limit": 1,
+            "before_created_at": cursor["created_at"], "before_id": cursor["id"],
+        })
+        self.assertEqual(next_page.status_code, 200)
+        self.assertNotEqual(active.json()["items"][0]["id"], next_page.json()["items"][0]["id"])
+        self.assertEqual(
+            [item["id"] for item in self.client.get(
+                "/v1/jobs", params={"view": "history", "summary": "true"},
+            ).json()["items"]],
+            ["job-1"],
+        )
+        self.assertEqual(self.client.get(
+            "/v1/jobs", params={"before_id": "job-2"},
+        ).status_code, 422)
+        self.assertIn("result", self.client.get("/v1/jobs").json()["items"][0])
 
     def test_visual_frame_upload_is_staged_only_while_recording(self) -> None:
         created = self.client.post(

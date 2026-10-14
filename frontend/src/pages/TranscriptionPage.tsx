@@ -1,3 +1,4 @@
+import { TERMINAL_JOB_STATUSES } from '../api/jobEvents';
 import React, { useState, useEffect, useRef } from 'react';
 import { ApiClient, ASRTrackProgress, Recording, Transcription, VisualProcessingProgress } from '../api/apiClient';
 import { DEFAULTS } from '../api/config';
@@ -447,7 +448,7 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
         });
         activeJobIdRef.current = job.id;
         let currentJob = job;
-        while (!['completed', 'failed', 'cancelled'].includes(currentJob.status)) {
+        while (!TERMINAL_JOB_STATUSES.has(currentJob.status)) {
           setProgressPercent(currentJob.progress || 10);
           setProgressStep(currentJob.current_step || currentJob.status);
           const currentStepName = currentJob.current_step || currentJob.status;
