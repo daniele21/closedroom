@@ -227,7 +227,7 @@ try {
   if (!inputNode.nodeId) throw new Error('Transcription file input is not discoverable');
   await call('DOM.setFileInputFiles', { files: [localFixture], nodeId: inputNode.nodeId });
   try {
-    await assert(`document.querySelector('audio[controls]') && document.querySelector('button.w-full.mt-4')`, 'file config view ready');
+    await assert(`!!document.querySelector('audio[controls]') && Array.from(document.querySelectorAll('button')).some((b) => /Transcribe audio|Trascrivi audio/i.test(b.textContent || ''))`, 'file config view ready');
   } catch (error) {
     const state = await evaluate(`JSON.stringify({
       hash: location.hash,
@@ -241,7 +241,7 @@ try {
     })`);
     throw new Error(`file config view ready; page diagnostics: ${state}; ${error.message}`);
   }
-  await evaluate(`document.querySelector('button.w-full.mt-4').click()`);
+  await evaluate(`Array.from(document.querySelectorAll('button')).find((b) => /Transcribe audio|Trascrivi audio/i.test(b.textContent || ''))?.click()`);
   await assert(`location.hash === '#activities' && !!document.querySelector('[data-audio-import]')`, 'upload visible globally while in progress');
   await checkpoint('09-importing-audio');
   await evaluate(`location.hash = '#projects'`);
