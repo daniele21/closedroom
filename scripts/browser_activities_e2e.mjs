@@ -155,7 +155,7 @@ try {
   // A file import belongs to MainApp, so routing away cannot lose the
   // upload->job handoff. This is a deterministic simulated local backend.
   await evaluate(`location.hash = '#transcription'`);
-  await assert(`document.querySelectorAll('button').length > 5 && document.body.innerText.includes('Sorgente')`, 'transcription source view ready');
+  await assert(`document.querySelectorAll('button').length > 5 && /Sorgente|Source/i.test(document.body.innerText)`, 'transcription source view ready');
   await evaluate(`Array.from(document.querySelectorAll('button')).find((b) => /^(File audio|Audio file|File)$/i.test(b.innerText.trim()))?.click()`);
   await assert(`!!document.querySelector('input[type=file]')`, 'audio import source input present');
   await evaluate(`(() => {
