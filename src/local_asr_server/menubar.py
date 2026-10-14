@@ -384,7 +384,11 @@ class ClosedRoomApp(rumps.App):
             self._status_item_image = image  # retain the NSImage for the item lifetime
 
             if hasattr(status_item, "setAutosaveName_"):
-                status_item.setAutosaveName_("ClosedRoomMenuBarItem")
+                status_item.setAutosaveName_(
+                    "ClosedRoomTestMenuBarItem"
+                    if get_app_identity().bundle_identifier == "com.closedroom.app.test"
+                    else "ClosedRoomMenuBarItem"
+                )
             if hasattr(status_item, "setVisible_"):
                 status_item.setVisible_(True)
             status_item.setLength_(AppKit.NSSquareStatusItemLength)

@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import plistlib
 import platform
 import shutil
 import subprocess
@@ -182,6 +183,17 @@ def main() -> int:
     dmg_path = Path(args.dmg).resolve() if args.dmg else None
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
+    info_plist = app_path / "Contents" / "Info.plist"
+    with info_plist.open("rb") as handle:
+        bundle_info = plistlib.load(handle)
+    if str(bundle_info.get("CFBundleShortVersionString", "")) != args.version:
+        raise SystemExit("bundle product version does not match canonical VERSION")
+    if str(bundle_info.get("CFBundleIdentifier", "")) != args.bundle_id:
+        raise SystemExit("bundle identifier does not match requested build variant")
+    bundle_build_number = str(bundle_info.get("CFBundleVersion", ""))
+    if not bundle_build_number.isdecimal() or int(bundle_build_number) < 1:
+        raise SystemExit("bundle must have a positive numeric CFBundleVersion")
+
     manifest_path = artifact_dir / MANIFEST_NAME
     if manifest_path.exists():
         raise SystemExit(f"refusing to mutate finalized artifact: {manifest_path}")
@@ -209,6 +221,7 @@ def main() -> int:
         "project": "local-asr-server",
         "product": args.product,
         "product_version": args.version,
+        "bundle_build_number": int(bundle_build_number),
         "build_id": args.build_id,
         "previous_successful_build_id": previous.get("build_id") if previous else None,
         "lineage": {

@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from local_asr_server.paths import APP_BUNDLE_ID
+from local_asr_server.paths import get_logs_dir
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -48,11 +48,9 @@ def _find_app_binary() -> Path | None:
         if current_binary.exists():
             return current_binary
 
-    app_paths: list[Path] = []
+    # Non-bundled CLI selection must not accidentally pick the Test app.
     for root in _APP_ROOTS:
-        app_paths.extend(sorted(root.glob("ClosedRoom*.app")))
-
-    for app in app_paths:
+        app = root / "ClosedRoom.app"
         binary = app / "Contents" / "MacOS" / "ClosedRoom"
         if binary.exists():
             return binary
@@ -61,13 +59,16 @@ def _find_app_binary() -> Path | None:
 
 def _generate_plist(binary_path: Path) -> str:
     """Generate the launchd plist XML content."""
+    from local_asr_server.app_identity import get_app_identity
+    bundle_id = get_app_identity().bundle_identifier
+    logs = get_logs_dir()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>{APP_BUNDLE_ID}</string>
+    <string>{bundle_id}</string>
     <key>ProgramArguments</key>
     <array>
         <string>{binary_path}</string>
@@ -77,9 +78,9 @@ def _generate_plist(binary_path: Path) -> str:
     <key>KeepAlive</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>{Path.home()}/Library/Logs/ClosedRoom/stdout.log</string>
+    <string>{logs}/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>{Path.home()}/Library/Logs/ClosedRoom/stderr.log</string>
+    <string>{logs}/stderr.log</string>
 </dict>
 </plist>
 """
