@@ -263,6 +263,19 @@ class MeetingPreparationTests(unittest.TestCase):
         self.assertEqual(calls, ["transcription"])
         self.assertEqual(stages, ["analysis:trans-1", "analysis:trans-1"])
 
+    def test_default_parent_retry_rejects_changed_effective_asr(self) -> None:
+        parent = self.manager.create(
+            "rec-1",
+            start_transcription=self._queued_transcription_factory([]),
+            start_pipeline=self._completed_pipeline_factory([]),
+        )
+        stored = self.store.get(parent["id"])
+        self.assertTrue(self.manager.default_retry_compatible(stored))
+        self.settings["speaker_diarization_enabled"] = True
+        self.assertFalse(self.manager.default_retry_compatible(stored))
+        self.settings["speaker_diarization_enabled"] = False
+        self.assertTrue(self.manager.default_retry_compatible(stored))
+
     def test_duplicate_prepare_returns_same_active_parent(self) -> None:
         transcription_calls = []
         analysis_calls = []
