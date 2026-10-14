@@ -82,6 +82,13 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertNotIn("localStorage", hook)
         self.assertNotIn("sessionStorage", hook)
 
+    def test_inline_analysis_open_resolves_persisted_run_not_transcription(self) -> None:
+        activities = (ROOT / "frontend/src/pages/ActivitiesPage.tsx").read_text(encoding="utf-8")
+        analysis = (ROOT / "frontend/src/pages/AnalysisPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("navigateTo('analysis', `run/${job.scope_id}`)", activities)
+        self.assertIn("detailId.startsWith('run/')", analysis)
+        self.assertIn("ApiClient.getAnalysisRun(detailId.slice(4))", analysis)
+
     def test_real_sse_wire_identity_and_single_stream_owner(self) -> None:
         events = (ROOT / "frontend/src/api/jobEvents.ts").read_text(encoding="utf-8")
         activities = (ROOT / "frontend/src/hooks/useActivities.ts").read_text(encoding="utf-8")
