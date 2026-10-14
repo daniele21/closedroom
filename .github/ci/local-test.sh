@@ -25,4 +25,4 @@ python3 scripts/verify_stage_environment_policy.py
 python3 scripts/verify_product_experience.py
 python3 scripts/verify_docs.py
 python3 scripts/verify_agent_context.py
-python3 -m unittest test.test_validation_profile_selector test.test_build_artifact_metadata -v
+python3 -m unittest test.test_validation_profile_selector test.test_build_artifact_metadata test.test_build_identity test.test_product_version -v
