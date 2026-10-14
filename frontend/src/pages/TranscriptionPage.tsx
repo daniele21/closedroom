@@ -545,8 +545,6 @@ export default function TranscriptionPage({ detailPath, navigateTo, audioImports
         showTranscriptionOutcome(result);
         openCompletedTranscription(result, selectedRecordingId);
         return;
-      }
-
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         showToast(`${t('transcription.toastTranscriptionError')}: ${err.message}`, 'error');
