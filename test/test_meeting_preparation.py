@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from local_asr_server.jobs import JobStore
+from local_asr_server.schemas import AnalysisRequest, TranscriptionJobRequest
 from local_asr_server.meeting_preparation import (
     MEETING_PREPARATION_JOB_TYPE,
     MeetingPreparationManager,
@@ -216,6 +217,51 @@ class MeetingPreparationTests(unittest.TestCase):
                 "jobs": jobs,
             }
         return factory
+
+    def test_custom_audio_analysis_preserves_choices_and_avoids_duplicate_asr(self) -> None:
+        calls = []
+        stages = []
+        options = TranscriptionJobRequest(language="es", task="translate")
+        selected = AnalysisRequest(prompt="Summarize locally", llm_provider="mock")
+        first = self.manager.create(
+            "rec-1",
+            start_transcription=self._completed_transcription_factory(calls),
+            start_pipeline=self._completed_pipeline_factory(stages),
+            include_screenshots=False,
+            transcription_request=options,
+            custom_analysis=selected,
+        )
+        completed = self.store.get(first["id"])
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(completed["result"]["pipeline_id"], "audio_analysis")
+        self.assertEqual(completed["payload"]["transcription_options"]["language"], "es")
+        self.assertEqual(completed["payload"]["analysis_options"]["prompt"], "Summarize locally")
+        self.assertEqual(calls, ["transcription"])
+        self.assertEqual(stages, ["analysis:trans-1"])
+        duplicate = self.manager.create(
+            "rec-1",
+            start_transcription=self._completed_transcription_factory(calls),
+            start_pipeline=self._completed_pipeline_factory(stages),
+            include_screenshots=False,
+            transcription_request=options,
+            custom_analysis=selected,
+        )
+        self.assertEqual(first["id"], duplicate["id"])
+        self.assertTrue(duplicate["reused_completed"])
+        self.assertEqual(calls, ["transcription"])
+
+        altered = self.manager.create(
+            "rec-1",
+            start_transcription=self._completed_transcription_factory(calls),
+            start_pipeline=self._completed_pipeline_factory(stages),
+            include_screenshots=False,
+            transcription_request=options,
+            custom_analysis=AnalysisRequest(prompt="Different brief", llm_provider="mock"),
+        )
+        self.assertNotEqual(altered["id"], first["id"])
+        self.assertEqual(altered["status"], "completed")
+        self.assertEqual(calls, ["transcription"])
+        self.assertEqual(stages, ["analysis:trans-1", "analysis:trans-1"])
 
     def test_duplicate_prepare_returns_same_active_parent(self) -> None:
         transcription_calls = []

@@ -158,6 +158,43 @@ class RecordingApiTests(unittest.TestCase):
         self.assertEqual(status["status"], "completed", status.get("error"))
         self.assertIsNone(get_services(self.app).recordings.active_recording())
 
+    @patch("local_asr_server.transcription_jobs.TranscriptionJobManager._run", return_value=None)
+    def test_imported_audio_analysis_is_durable_parent_without_premature_llm(self, _run) -> None:
+        imported = self.client.post(
+            "/v1/recordings/import-audio",
+            files={"file": ("planned.wav", _wav_bytes(), "audio/wav")},
+        )
+        self.assertEqual(imported.status_code, 201)
+        recording_id = imported.json()["id"]
+        url = f"/v1/recordings/{recording_id}/audio-analysis-jobs"
+        body = {
+            "transcription": {"language": "it", "asr_provider": "local"},
+            "analysis": {
+                "llm_provider": "mock",
+                "template_id": "meeting_brief",
+                "prompt": "Extract action items",
+            },
+        }
+        first = self.client.post(url, json=body)
+        self.assertEqual(first.status_code, 202, first.text)
+        parent = first.json()
+        self.assertEqual(parent["type"], "meeting_preparation")
+        services = get_services(self.app)
+        self.assertEqual(len(services.jobs.list_children(parent["id"], stage="transcription")), 1)
+        self.assertEqual(services.jobs.list_children(parent["id"], stage="analysis"), [])
+        self.assertIsNone(services.recordings.active_recording())
+        again = self.client.post(url, json=body)
+        self.assertEqual(again.status_code, 202)
+        self.assertEqual(again.json()["id"], parent["id"])
+        summary = self.client.get("/v1/activities").json()["items"]
+        self.assertEqual(len([j for j in summary if j["id"] == parent["id"]]), 1)
+        self.assertNotIn("Extract action items", repr(summary))
+        invalid = self.client.post(url, json={
+            **body, "analysis": {**body["analysis"], "text": "wrong source"},
+        })
+        self.assertEqual(invalid.status_code, 422)
+        self.assertNotEqual(parent["status"], "failed")
+
     def test_activities_exposes_all_active_jobs_without_content(self) -> None:
         jobs = get_services(self.app).jobs
         for job_id in ("job-1", "job-2", "job-3"):

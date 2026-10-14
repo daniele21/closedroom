@@ -61,6 +61,16 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertIn("openAnalysisSetup('meeting_deep')", page)
         self.assertIn("<AnalysisSetupModal", page)
 
+    def test_audio_analysis_is_shell_owned_and_server_orchestrated(self) -> None:
+        page = (ROOT / "frontend/src/pages/AnalysisPage.tsx").read_text(encoding="utf-8")
+        hook = (ROOT / "frontend/src/hooks/useAudioImports.ts").read_text(encoding="utf-8")
+        route = (ROOT / "src/local_asr_server/routers/workspace.py").read_text(encoding="utf-8")
+        self.assertIn("audioImports.startAnalysis(importedFile", page)
+        self.assertNotIn("ApiClient.transcribe(formData)", page)
+        self.assertIn("ApiClient.createAudioAnalysisPreparation(source.id, options, analysis)", hook)
+        self.assertIn('"/v1/recordings/{recording_id}/audio-analysis-jobs"', route)
+        self.assertIn("MeetingPreparationManager(", route)
+
     def test_import_uses_one_shell_owned_upload_to_durable_job_handoff(self) -> None:
         app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
         page = (ROOT / "frontend/src/pages/TranscriptionPage.tsx").read_text(encoding="utf-8")
