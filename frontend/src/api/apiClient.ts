@@ -769,6 +769,13 @@ export const ApiClient = {
     })).json();
   },
 
+  async cancelRecordingAudioImport(requestId: string): Promise<{ cancel_requested: boolean; already_published: boolean }> {
+    return (await request(
+      '/v1/recordings/import-audio/' + encodeURIComponent(requestId) + '/cancel',
+      { method: 'POST' },
+    )).json();
+  },
+
   async listRecordings(): Promise<{ items: Recording[] }> {
     return (await request('/v1/recordings')).json();
   },
