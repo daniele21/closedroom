@@ -175,6 +175,20 @@ def enforce_retention(lineage_root: Path, current_dir: Path, keep: int) -> list[
     return removed
 
 
+def read_bundle_identity(app: Path, product_version: str, bundle_id: str) -> int:
+    """Validate signed-bundle metadata before making an immutable manifest."""
+    with (app / "Contents" / "Info.plist").open("rb") as handle:
+        bundle_info = plistlib.load(handle)
+    if str(bundle_info.get("CFBundleShortVersionString", "")) != product_version:
+        raise ValueError("bundle product version does not match canonical VERSION")
+    if str(bundle_info.get("CFBundleIdentifier", "")) != bundle_id:
+        raise ValueError("bundle identifier does not match requested build variant")
+    number = str(bundle_info.get("CFBundleVersion", ""))
+    if not number.isdecimal() or int(number) < 1:
+        raise ValueError("bundle must have a positive numeric CFBundleVersion")
+    return int(number)
+
+
 def main() -> int:
     args = parse_args()
     root = Path(args.root).resolve()
@@ -183,16 +197,7 @@ def main() -> int:
     dmg_path = Path(args.dmg).resolve() if args.dmg else None
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    info_plist = app_path / "Contents" / "Info.plist"
-    with info_plist.open("rb") as handle:
-        bundle_info = plistlib.load(handle)
-    if str(bundle_info.get("CFBundleShortVersionString", "")) != args.version:
-        raise SystemExit("bundle product version does not match canonical VERSION")
-    if str(bundle_info.get("CFBundleIdentifier", "")) != args.bundle_id:
-        raise SystemExit("bundle identifier does not match requested build variant")
-    bundle_build_number = str(bundle_info.get("CFBundleVersion", ""))
-    if not bundle_build_number.isdecimal() or int(bundle_build_number) < 1:
-        raise SystemExit("bundle must have a positive numeric CFBundleVersion")
+    bundle_build_number = read_bundle_identity(app_path, args.version, args.bundle_id)
 
     manifest_path = artifact_dir / MANIFEST_NAME
     if manifest_path.exists():
@@ -221,7 +226,7 @@ def main() -> int:
         "project": "local-asr-server",
         "product": args.product,
         "product_version": args.version,
-        "bundle_build_number": int(bundle_build_number),
+        "bundle_build_number": bundle_build_number,
         "build_id": args.build_id,
         "previous_successful_build_id": previous.get("build_id") if previous else None,
         "lineage": {

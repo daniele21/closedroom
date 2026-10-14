@@ -88,8 +88,7 @@ def _generate_plist(binary_path: Path) -> str:
 
 def _ensure_log_dir() -> None:
     """Create the log directory used by the LaunchAgent."""
-    log_dir = Path.home() / "Library" / "Logs" / "ClosedRoom"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    get_logs_dir(create=True)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
