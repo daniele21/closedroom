@@ -77,7 +77,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn('data-screenshot-action="true"', self.overlay)
         self.assertNotIn("<select", self.overlay)
         self.assertIn("display.width} × {display.height", self.overlay)
-        self.assertIn("screenshotFeedback === 'saved'", self.overlay)
+        self.assertIn("lastSavedScreenshotId !== null", self.overlay)
         self.assertIn("ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId)", self.overlay)
         self.assertIn("if (isUndoingScreenshot)", self.overlay)
         self.assertIn("isCapturingScreenshot || isUndoingScreenshot", self.overlay)
