@@ -56,6 +56,9 @@ export default function AnalysisPage({ detailId, navigateTo: _navigateTo, demoMo
   // File Import State
   const [importedFile, setImportedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Only preserve the identity of an unacknowledged POST in the mounted page.
+  // Global/route recovery belongs to BG-3, not local persistent storage.
+  const pendingAnalysisSubmitRef = useRef<{ signature: string; id: string } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Settings & Provider State
@@ -251,7 +254,13 @@ export default function AnalysisPage({ detailId, navigateTo: _navigateTo, demoMo
         setStatusText(t('analysis.analyzingStatus'));
       }
 
-      const created = await ApiClient.createAnalysisJob(payload);
+      const signature = JSON.stringify(payload);
+      const requestId = pendingAnalysisSubmitRef.current?.signature === signature
+        ? pendingAnalysisSubmitRef.current.id
+        : crypto.randomUUID();
+      pendingAnalysisSubmitRef.current = { signature, id: requestId };
+      const created = await ApiClient.createAnalysisJob(payload, requestId);
+      pendingAnalysisSubmitRef.current = null;
       let job = await ApiClient.getJob(created.job_id);
       while (!['completed', 'failed', 'cancelled', 'interrupted'].includes(job.status)) {
         await new Promise((resolve) => window.setTimeout(resolve, 500));
