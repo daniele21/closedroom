@@ -8,6 +8,7 @@ const en = {
     imports: "Audio imports",
     importing: "Saving audio locally…",
     importSubmitting: "Audio saved · starting transcription…",
+    importSubmitted: "Transcription started · syncing Activities…",
     importCancelling: "Cancelling audio import…",
     importFailed: "Import failed",
     cancel: "Cancel",
