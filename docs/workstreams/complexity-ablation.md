@@ -68,19 +68,7 @@ All checks below are **source/synthetic or scoped**; they do not prove represent
 
 ## Selective architecture review — 2026-10-13
 
-**Decision: KEEP existing ablations on this isolated branch, with a stop on speculative cuts.** The current diff contains 5 production files, 4 test files and this workstream; no dependency/build/CI workflow change remains. All **9 source/test Git blobs exactly match** the successfully validated merge source `88c0a617909878f3235cdf0734fafba7dfb9a282` (run 38465528741). The intervening commits changed docs/temporary workflows only, so no further Actions were needed for this documentation-only review.
-
-| Area | Decision and reason |
-| --- | --- |
-| C3.2 | **KEEP:** one diarization policy, cache owners stay separate |
-| C1.1–C1.4 | **KEEP:** 3 overlay states and duplicated SSE/HTTP policies removed without losing observable Undo/note flows |
-| C2.1–C2.3 | **KEEP:** −2 load refs, −1 unnecessary memo; delayed-result/failed-result regressions covered |
-| C2.4 | **KEEP but NO GENERALIZATION:** +12 LOC buys one canonical list-loading policy with two independent state instances; diagnostics and visual frames intentionally remain separate |
-| C3.3/C4–C7 | **BLOCKED / NOT PROVEN:** correctness/migration, representative native/capture or packaged performance gates |
-
-**Measured source change vs `dev`: −24 net production LOC; overlay React `useState` declarations 34→31; Meeting load refs 3→1; one Meeting memo removed.** The C2.4 helper has fewer syntactic `useState` *call sites*, not fewer runtime React states. No performance, memory, inference-quality or release claim follows from this experiment.
-
-**STOP / HOLD:** No speculative general-purpose hook, monolith file split or cache merge. A new ablation needs a reproduced defect or measurable improvement. Integration to `dev` requires separate user authorization, exact HEAD/base and repository-selected validation.
+**KEEP existing C1/C2/C3.2 ablations on isolated branch.** One canonical diarization policy (path/upload caches remain semantically distinct), three fewer overlay states, two fewer Meeting request refs, one fewer memoized intermediary. C2.4 keeps independent screenshot/note state while sharing their list-load policy (+12 LOC); diagnostics/visual frames must remain distinct. At this checkpoint −24 net production LOC vs `dev`; no RAM/CPU or native Mac proof. All nine source/test blobs matched synthetic run [38465528741](https://github.com/daniele21/closedroom/actions/runs/38465528741). C3.3 cache convergence rejected; storage migrations and native/package changes deferred. These were STOP/HOLD decisions for speculative work, not approval to integrate.
 
 ## E4/E5 bounded follow-up — 2026-10-14
 
