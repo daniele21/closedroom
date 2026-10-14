@@ -240,14 +240,18 @@ class JobStore:
             row = conn.execute(
                 """
                 SELECT * FROM jobs
-                WHERE type = ? AND scope_type = ? AND scope_id = ?
-                  AND dedupe_key = ?
+                WHERE type = ? AND dedupe_key = ?
                 ORDER BY created_at DESC, id DESC LIMIT 1
                 """,
-                (job_type, scope_type, scope_id, identity),
+                (job_type, identity),
             ).fetchone()
             if row is not None:
                 existing = self._row_to_job(row)
+                if (
+                    existing["scope_type"] != scope_type
+                    or (scope_type != "inline_text" and existing["scope_id"] != scope_id)
+                ):
+                    raise ValueError("Submission ID reused for a different source")
                 if (existing.get("payload") or {}).get("request_hash") != request_hash:
                     raise ValueError("Submission ID reused with different options")
                 return existing, False
