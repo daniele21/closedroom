@@ -80,8 +80,6 @@ class AnalysisJobManager:
         job_id = str(uuid.uuid4())
         run_id = str(uuid.uuid4())
         scope_type, scope_id = self._resolve_scope(body, run_id)
-        if request_id is not None and scope_type == "inline_text":
-            scope_id = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
         settings = AnalysisService.settings_with_request_overrides(load_settings(), body)
         provider = settings.get("llm_provider", "mock")
         effective_model = self._effective_model(provider, settings)
