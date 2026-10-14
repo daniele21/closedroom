@@ -174,24 +174,14 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
 
 ## Checkpoint — 2026-10-14
 
-- BG-1 branch `feature/background-processing-bg1` PR #134, commit
-  `97d5431`: STRONG source checks, 713 Python tests, lint/typecheck,
-  browser E2E e governance PASS; package/target-Mac non attestati.
-- BG-2 branch `feature/background-processing-bg2` basato su BG-1:
-  importazione audio `/v1/recordings/import-audio` con staging atomico,
-  limite 2 GiB, replay con `Idempotency-Key`, recupero dopo crash,
-  metadata `recorded` e nessuna prenotazione capture. Source tests
-  scritti, esecuzione e integrazione ancora PENDING.
-- Riusa `RecordingStore`, ASR e `MeetingPreparationManager` senza
-  scheduler extra. Import→ASR è ora posseduto dalla shell: cambio pagina
-  conserva upload e submit, Attività mostra l'import cancellabile e
-  riconcilia il job dal backend. Journey browser con route change aggiunto;
-  E2E/preflight exact-head PENDING. BG-3 ora usa SSE globale (massimo 3
-  follower prioritari) condiviso con Meeting: la normalizzazione è fedele
-  ai `job_events` SQLite (`job_id`, `payload`) e il fallback GET non
-  espone prompt come progresso. Browser fixture ora simula il wire reale
-  e verifica una sola connessione per job; diagnosticata anche la
-  serializzazione CDP. Restano Analysis audio→LLM con provider espliciti,
-  conferma E2E, recupero import dopo reload e retry uniforme.
-  BG-3 ACTIVE parziale, BG-4..5 BLOCKED; nessuna build in Actions.
-- Evidenza target-Mac TCC/WKWebView/MLX differita a RELEASE.
+- BG-1 PR #134, `97d5431`: 713 test Python e preflight sorgente PASS;
+  gate package/target-Mac non attestati.
+- BG-2/3 PR #135, stacked su BG-1: import audio atomico nel RecordingStore
+  (2 GiB, dedupe/cancel/crash cleanup) e submit ASR dalla shell; Attività
+  conserva upload e job tra route. SSE condiviso con Meeting, fino a 3
+  follower in shell; eventi `job_id/payload` SQLite normalizzati, nessun
+  prompt esposto nel fallback GET. Browser journey import/navigation e
+  stream unico aggiornati; preflight exact-head PENDING.
+- Restano audio→LLM con opzioni esplicite, recovery import post-reload,
+  retry e proof assemblata. BG-3 parziale, BG-4/5 BLOCKED; niente build
+  Actions. TCC/WKWebView/MLX target-Mac differiti a RELEASE.
