@@ -304,10 +304,10 @@
     }
   ],
   "reference_views": [
-    "docs/assets/0.home.png",
-    "docs/assets/1.recording.png",
-    "docs/assets/2.recording-active.png",
-    "docs/assets/5.meeting-analysis.png",
+    "docs/assets/0.home.webp",
+    "docs/assets/1.recording.webp",
+    "docs/assets/2.recording-active.webp",
+    "docs/assets/5.meeting-analysis.webp",
     "frontend/src as canonical state/error implementation"
   ],
   "validation": {
