@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
 from local_asr_server.audio_diagnostics import build_quality_report
@@ -15,6 +15,7 @@ from local_asr_server.recordings import (
     RecordingConflict,
     RecordingNotFound,
     RecordingStore,
+    MAX_IMPORTED_AUDIO_BYTES,
 )
 from local_asr_server.schemas import (
     CreateRecordingRequest,
@@ -51,6 +52,39 @@ def create_recording(request: Request, body: CreateRecordingRequest):
     except OSError as exc:
         logger.error("Failed to create recording session: %s", exc)
         raise HTTPException(status_code=507, detail=str(exc)) from exc
+
+
+@router.post("/v1/recordings/import-audio", status_code=201)
+def import_recording_audio(
+    request: Request,
+    file: UploadFile = File(...),
+    title: str | None = Form(None),
+    project_name: str | None = Form(None),
+    language: str | None = Form(None),
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
+):
+    """Persist a local audio source; no capture session or AI job is started."""
+    if file.size is not None and file.size > MAX_IMPORTED_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Imported audio exceeds maximum size")
+    try:
+        return get_services(request.app).recordings.import_audio(
+            file.file,
+            filename=file.filename or "",
+            title=title,
+            project_name=project_name,
+            language=language,
+            model=request.app.state.default_model,
+            request_id=idempotency_key,
+        )
+    except RecordingConflict as exc:
+        detail = str(exc)
+        status = 413 if "exceeds maximum size" in detail else 409
+        raise HTTPException(status_code=status, detail=detail) from exc
+    except OSError as exc:
+        logger.error("Local audio import failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=507, detail="Could not store imported audio") from exc
 
 
 @router.post("/v1/recordings/{recording_id}/chunks")
