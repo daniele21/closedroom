@@ -77,6 +77,24 @@ const alternateMeetingFixture = {
   },
 };
 
+const screenshotFixture = {
+  screenshot_id: 'synthetic-shared-key',
+  recording_id: MEETING_ID,
+  request_id: 'synthetic-shot-request',
+  sequence: 0,
+  capture_kind: 'manual',
+  timestamp: 50,
+  display_id: 1,
+  display_title: 'Launch screenshot A',
+  width: 1200,
+  height: 720,
+  sha256: 'synthetic',
+  available: false,
+  thumbnail_available: false,
+  original_url: '/fixture/screenshot-original.jpg',
+  thumbnail_url: '/fixture/screenshot-thumbnail.jpg',
+};
+
 const diagnosticsFixture = {
   recording_id: MEETING_ID,
   outcome_status: 'completed',
@@ -205,11 +223,15 @@ function fixtureServer(port) {
         failNextAlternateScreenshots = false;
         return json(res, 503, { detail: 'synthetic screenshot failure' });
       }
-      return json(res, 200, { items: [], total: 0 });
+      return json(res, 200, { items: [{
+        ...screenshotFixture,
+        recording_id: ALTERNATE_MEETING_ID,
+        display_title: 'Pricing screenshot B',
+      }], total: 1 });
     }
     if (pathname === `/v1/recordings/${MEETING_ID}/screenshots`) {
       counts.screenshots += 1;
-      return json(res, 200, { items: [], total: 0 });
+      return json(res, 200, { items: [screenshotFixture], total: 1 });
     }
     if (pathname === `/v1/recordings/${MEETING_ID}/notes`) {
       counts.notes += 1;
@@ -582,8 +604,25 @@ try {
     if (!visible) throw new Error('stale Meeting content leaked into ' + title);
   };
 
+  // E4: selection is owned by the current list and recording identity.
+  // Both fixtures intentionally share an ID so a stale selection would
+  // accidentally rebind to an unrelated Meeting unless scoped.
+  await browser.clickCss('[data-key-moment-id="synthetic-shared-key"]');
+  const opened = await browser.execute(`
+    return Array.from(document.querySelectorAll('[role="dialog"]')).some((node) =>
+      (node.innerText || '').includes('Launch screenshot A'));
+  `);
+  if (!opened) throw new Error('original Meeting key-moment modal did not open');
   await setMeetingHash(ALTERNATE_MEETING_ID);
   await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  await waitCount('alternate_screenshots', 1);
+  const leaked = await browser.execute(`
+    return Array.from(document.querySelectorAll('[role="dialog"]')).some((node) =>
+      ['Screenshot della riunione', 'Meeting screenshot'].includes(node.getAttribute('aria-label')));
+  `);
+  if (leaked) throw new Error('stale key-moment modal carried into alternate Meeting');
+  await checkpoint(browser, '07-meeting-key-moment-scope');
+
   holdNextMeetingId = MEETING_ID;
   await setMeetingHash(MEETING_ID);
   await waitCount('held_meeting', 1);
