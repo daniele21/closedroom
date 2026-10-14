@@ -145,21 +145,29 @@ export default function AnalysisPage({ detailId, navigateTo: _navigateTo, demoMo
     loadSettings();
   }, [demoMode]);
 
-  // Preselected transcription from URL/Router Detail
+  // Route to a persisted result by its canonical run ID. Inline analyses
+  // have no transcription, so never feed their run ID to getTranscription.
   useEffect(() => {
-    if (demoMode) return;
-    if (detailId) {
-      // Find if we have loaded it
+    if (demoMode || !detailId) return;
+    let cancelled = false;
+    if (detailId.startsWith('run/')) {
+      setSelectedTranscriptionId('');
+      ApiClient.getAnalysisRun(detailId.slice(4)).then((run) => {
+        if (!cancelled && run.result) setAnalysisResult(run.result);
+      }).catch(() => {
+        if (!cancelled) showToast(
+          lang === 'it' ? 'Risultato analisi non disponibile.' : 'Analysis result unavailable.',
+          'error',
+        );
+      });
+    } else {
       setSelectedTranscriptionId(detailId);
-      
-      // Proactively fetch and check if it already has an analysis
       ApiClient.getTranscription(detailId).then((tr) => {
-        if (tr.analysis) {
-          setAnalysisResult(tr.analysis.result || tr.analysis);
-        }
+        if (!cancelled && tr.analysis) setAnalysisResult(tr.analysis.result || tr.analysis);
       }).catch(() => {});
     }
-  }, [demoMode, detailId, transcriptions]);
+    return () => { cancelled = true; };
+  }, [demoMode, detailId]);
 
 
 
