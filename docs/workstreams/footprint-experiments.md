@@ -1,6 +1,6 @@
 # Footprint experiments — Git assets and packaged-app inventory
 
-Status: **E1 LOSSLESS IMAGES OPTIMIZED / E2 MEASUREMENT READY, REAL MAC PENDING**. Isolated branch `experiment/complexity-ablation` only. Do not merge into `dev`, alter PyInstaller exclusions, or remove media without new evidence.
+Status: **E1 IMAGES OPTIMIZED / VIDEO HELD FOR HDR / E2 REAL MAC PENDING**. Isolated branch `experiment/complexity-ablation` only. Do not merge into `dev`, alter PyInstaller exclusions, or remove media without new evidence.
 
 ## Goal and boundaries
 
@@ -21,7 +21,11 @@ Using GitHub's recursive tree for source commit `c62c2fcbaf8303ffc23ef1e96650291
 
 After changes, experiment tree `d69aee89b46448b535c664ff24f52ce007dd4353`: **511 tracked blobs, 101,054,403 bytes** (~96.4 MiB), of which `docs/assets/` is **88,530,348 bytes** (~84.4 MiB). The total-tree net change relative to pre-audit commit `c62c2fc` is **−54,379,062 bytes**, differing from media-only saving because new scripts/tests/docs were added. No Git history rewrite, no bundle-size or download-size claim. Original demo video remains **60,206,568 bytes**, byte-identical.
 
-**Remaining E1 opportunity:** evaluate re-encoding the demo video separately with playback/text legibility, duration, frame rate and audio-stream equivalence evidence before replacing it; no video transcode has been accepted.
+**E1.2 — demo video codec audit: DO_NOT_BUILD without HDR evidence (2026-10-14).** FFprobe of the original public `docs/assets/Closed-Room-demo.mov` reports HEVC / `yuv420p10le`, 2990×1582, **40.918333 s**, average `17370/307` fps, **60,206,568 bytes**. The full metadata also indicates an HDR transfer function; our fidelity guard correctly rejected conversion before encoding. Re-encoding to 8-bit SDR would change the color boundary, and generic SSIM alone cannot certify HDR/color metadata or UI text quality. This is a **negative experiment, not a compression PASS**. Source blob `14094632acbed9b6cc819617e6ba60721ba0e89c` remains unchanged.
+
+One-off [PR #125](https://github.com/daniele21/closedroom/pull/125) targeted experiment only and was **closed unmerged**; temporary video script/tests/workflow removed from the experiment branch. Last [run 38539599858](https://github.com/daniele21/closedroom/actions/runs/38539599858): **2 synthetic tests PASS**, video trial intentionally **BLOCKED** on HDR preservation. Earlier runs had runner ffmpeg absence, stale disposable validation head, and a fixture assertion mismatch; these were gate/environment issues, not product regressions. No .app build, uploaded artifact, video file replacement or change to `dev`.
+
+Revisit only with a dedicated HDR-preserving HEVC Main10 trial that explicitly proves `color_primaries`, `color_transfer`, `color_space`, mastering/side data metadata as applicable, timing, exact audio and readable small text using representative visual playback. Without this, **KEEP the video as-is**.
 
 ## E2 — bundled dependency audit (not yet measured on a real app)
 
