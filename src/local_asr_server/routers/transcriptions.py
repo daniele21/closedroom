@@ -535,7 +535,9 @@ def _submit_recording_transcription_job(
             runner,
             payload={
                 "recording_id": recording_id,
-                # Preserve *all* effective submit options for explicit retry,
+                # Preserve the existing top-level consumer contract.
+                "visual_intelligence_enabled": body.visual_intelligence_enabled,
+                # Preserve *all* submitted options for explicit retry,
                 # not only the visual toggle. No implicit settings migration.
                 "transcription_options": body.model_dump(mode="json"),
                 **({"retry_of": retry_of} if retry_of is not None else {}),
