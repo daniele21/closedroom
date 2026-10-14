@@ -313,7 +313,7 @@ class ClosedRoomApp(rumps.App):
         self._status_item_repair_count = 0
         icon_path = str(self._menu_bar_icon_path) if self._menu_bar_icon_path.is_file() else None
         super().__init__(
-            name="ClosedRoom",
+            name=get_app_identity().display_name,
             title=None if icon_path else "CR",
             icon=icon_path,
             template=False,
