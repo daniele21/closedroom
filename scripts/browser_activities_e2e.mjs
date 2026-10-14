@@ -199,13 +199,18 @@ try {
   await assert(`document.querySelectorAll('button').length > 5 && /Sorgente|Source/i.test(document.body.innerText)`, 'transcription source view ready');
   await evaluate(`Array.from(document.querySelectorAll('button')).find((b) => /^(File audio|Audio file|File)$/i.test(b.innerText.trim()))?.click()`);
   await assert(`!!document.querySelector('input[type=file]')`, 'audio import source input present');
-  await evaluate(`(() => {
-    const input = document.querySelector('input[type=file]');
-    const transfer = new DataTransfer();
-    transfer.items.add(new File([new Uint8Array(48)], 'local-clip.wav', { type: 'audio/wav' }));
-    Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  })()`);
+  // Use the real Chromium file-input path: dispatching a synthetic change
+  // with a redefined FileList does not reliably model a user file selection.
+  const localFixture = path.join(profile, 'local-clip.wav');
+  await fs.writeFile(localFixture, Buffer.alloc(48));
+  await call('DOM.enable');
+  const documentNode = await call('DOM.getDocument');
+  const inputNode = await call('DOM.querySelector', {
+    nodeId: documentNode.root.nodeId,
+    selector: 'input[type=file]',
+  });
+  if (!inputNode.nodeId) throw new Error('Transcription file input is not discoverable');
+  await call('DOM.setFileInputFiles', { files: [localFixture], nodeId: inputNode.nodeId });
   await assert(`document.querySelector('audio[controls]') && document.querySelector('button.w-full.mt-4')`, 'file config view ready');
   await evaluate(`document.querySelector('button.w-full.mt-4').click()`);
   await assert(`location.hash === '#activities' && !!document.querySelector('[data-audio-import]')`, 'upload visible globally while in progress');
