@@ -229,12 +229,15 @@ class FootprintAuditTests(unittest.TestCase):
             toc.write_text(repr([("../secret", "/home/build/source", "DATA")]))
             with self.assertRaisesRegex(ValueError, "Unsafe"):
                 audit_footprint.bundle_audit(app, pyinstaller_toc=toc)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(audit_footprint.main([
+                    "bundle", "--app", str(app), "--pyinstaller-toc", str(toc)
+                ]), 2)
+            self.assertNotIn("/home/build/source", stderr.getvalue())
             toc.write_text("__import__('os').system('touch /tmp/never-run')", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "Malformed"):
                 audit_footprint.bundle_audit(app, pyinstaller_toc=toc)
-            self.assertNotIn("/home/build/source", repr(
-                audit_footprint.pyinstaller_collect_audit.__doc__
-            ))
 
     def test_pyinstaller_collect_rejects_non_toc_name_and_non_list_payload(self):
         with tempfile.TemporaryDirectory() as temporary:
