@@ -42,10 +42,10 @@ class LocalBuildIdentityTests(unittest.TestCase):
             self.assertEqual(path.read_text(), "invalid")
 
     def test_explicit_build_number_validation(self) -> None:
-        for invalid in ("0", "-3", "1.2.0", "abc", "2147483648"):
+        for invalid in ("0", "-3", "1.2.0", "abc", "2147483648", "00017"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 identity.validate_number(invalid)
-        self.assertEqual(identity.validate_number("00017"), 17)
+        self.assertEqual(identity.validate_number("17"), 17)
 
     def test_repo_scripts_share_build_identity_owner(self) -> None:
         repo = Path(__file__).parents[1]
