@@ -42,7 +42,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("/screenshots", self.client)
 
     def test_source_mode_uses_browser_overlay_without_false_warning(self) -> None:
-        self.assertIn("res?.fallback_expected", self.recorder)
+        self.assertIn("if (result?.fallback_expected) {", self.recorder)
         self.assertIn("setFallbackNotice(null)", self.recorder)
         self.assertIn("openBrowserPopup()", self.recorder)
 
@@ -70,7 +70,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("ApiClient.selectScreenshotDisplay(recordingId, displayId)", self.overlay)
         self.assertIn("/screenshot-display", self.client)
         self.assertIn("pendingDisplayIdRef.current", self.overlay)
-        self.assertIn("pendingSelection === null || backendDisplayId === pendingSelection", self.overlay)
+        self.assertIn("backendDisplayId === null || (pendingSelection !== null && backendDisplayId !== pendingSelection)", self.overlay)
         self.assertIn('data-overlay-control-center="true"', self.overlay)
         self.assertIn('data-display-selector="true"', self.overlay)
         self.assertIn('data-display-picker="true"', self.overlay)
@@ -93,7 +93,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
 
     def test_meeting_and_structured_notes_share_the_same_screenshot_assets(self) -> None:
         self.assertIn("useMeetingAccessories", self.meeting)
-        self.assertIn("ApiClient.recordingScreenshots(recordingId)", self.meeting_accessories)
+        self.assertIn("useMeetingItemList<RecordingScreenshot>(recordingId, demoMode, ApiClient.recordingScreenshots)", self.meeting_accessories)
         self.assertIn("screenshots,", self.meeting)
         self.assertGreaterEqual(self.meeting.count("screenshots={screenshots}"), 2)
         self.assertIn("onOpenScreenshot={openKeyMoment}", self.meeting)
