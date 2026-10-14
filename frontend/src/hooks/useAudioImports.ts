@@ -21,6 +21,7 @@ export function useAudioImports(enabled = true) {
   const [items, setItems] = useState<AudioImportTask[]>([]);
   const mounted = useRef(true);
   const cancels = useRef(new Set<string>());
+  const uploadControllers = useRef(new Map<string, AbortController>());
   const update = useCallback((id: string, next: Partial<AudioImportTask>) => {
     if (!mounted.current) return;
     setItems((current) => current.map((item) => item.id === id ? { ...item, ...next } : item));
@@ -41,9 +42,12 @@ export function useAudioImports(enabled = true) {
 
     const run = async () => {
       let source: Recording | undefined;
+      const controller = new AbortController();
+      uploadControllers.current.set(id, controller);
       try {
         source = await ApiClient.importRecordingAudio(
-          file, { title: file.name.replace(/\.[^.]+$/, ''), language: options.language }, id,
+          file, { title: file.name.replace(/\.[^.]+$/, ''), language: options.language },
+          id, controller.signal,
         );
         update(id, { recordingId: source.id });
         if (cancels.current.has(id)) {
@@ -60,6 +64,7 @@ export function useAudioImports(enabled = true) {
           error: error instanceof Error ? error.message : String(error),
         });
       } finally {
+        uploadControllers.current.delete(id);
         cancels.current.delete(id);
       }
     };
@@ -79,6 +84,7 @@ export function useAudioImports(enabled = true) {
     update(id, { phase: 'cancelling' });
     try {
       const result = await ApiClient.cancelRecordingAudioImport(id);
+      if (result.cancel_requested) uploadControllers.current.get(id)?.abort();
       if (!result.cancel_requested) {
         // The source was committed just before cancellation. The upload
         // handoff will not submit AI because cancels.current is set.
