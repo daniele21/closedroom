@@ -1,0 +1,72 @@
+name: Temporary Complexity Ablation Source Readiness
+
+on:
+  pull_request:
+    branches: [experiment/complexity-ablation]
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  consolidated-source:
+    runs-on: macos-14
+    timeout-minutes: 85
+    steps:
+      - name: Verify isolated experiment PR identity
+        env:
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          test "$BASE" = "experiment/complexity-ablation"
+          test "$HEAD" = "experiment/complexity-ablation-readiness-validation"
+          test "$REPO" = "$GITHUB_REPOSITORY"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Verify exact source and Apple Silicon runner
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(uname -m)" = arm64
+          git diff --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install source dependencies (no .app build)
+        run: |
+          brew list uv >/dev/null 2>&1 || brew install uv
+          npm install --global pnpm@9.15.9
+          uv sync --all-extras --frozen --python 3.12
+          cd frontend && pnpm install --frozen-lockfile
+      - name: Repository and documentation contracts
+        run: |
+          python3 scripts/verify_repository.py
+          python3 scripts/verify_operations.py
+          python3 scripts/verify_e2e.py
+          python3 scripts/verify_stage_environment_policy.py
+          python3 scripts/verify_product_experience.py
+          python3 scripts/verify_docs.py
+          python3 scripts/verify_agent_context.py
+      - name: Complete deterministic Python source suite
+        env:
+          UV_CACHE_DIR: .cache/uv
+        run: uv run --frozen --python 3.12 python -m unittest discover -s test -v
+      - name: Frontend type and lint
+        run: |
+          cd frontend
+          pnpm run lint
+          pnpm exec tsc --noEmit
+      - name: Critical saved-meeting / overlay / workspace browser FULL_MEDIA
+        env:
+          E2E_SOURCE_REVISION: ${{ github.event.pull_request.head.sha }}
+        run: |
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          node scripts/browser_meeting_ui_e2e.mjs
+      - name: Distinguish incomplete integration gates
+        run: |
+          echo "Source + browser gates complete. Packaged-app gate remains PENDING on the target Mac."
+          echo "No macOS .app builds, no media/artifact upload and no dev merge in this workflow."
