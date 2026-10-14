@@ -61,6 +61,14 @@ function MainApp() {
   const isDemoActive = demoMode || Boolean(tourStep);
   const activities = useActivities(!isDemoActive && activePage !== 'overlay');
   const audioImports = useAudioImports(!isDemoActive);
+  const importedJobIds = audioImports.items.filter((item) => item.phase === 'submitted')
+    .map((item) => item.jobId).join('|');
+  useEffect(() => {
+    if (importedJobIds) void activities.refresh();
+  }, [importedJobIds, activities.refresh]);
+  const activeImportsCount = audioImports.items.filter((item) =>
+    ['uploading', 'submitting', 'cancelling'].includes(item.phase),
+  ).length;
 
   const navigateTo = (page: string, detail: string | null = null) => {
     const pageRouteMap: Record<string, string> = {
@@ -370,7 +378,7 @@ function MainApp() {
               >
                 <item.icon className="h-[18px] w-[18px]" aria-hidden="true" />
                 <span>{item.label}</span>
-                {item.id === 'activities' && activities.activeCount > 0 && <Badge>{activities.activeCount}</Badge>}
+                {item.id === 'activities' && activities.activeCount + activeImportsCount > 0 && <Badge>{activities.activeCount + activeImportsCount}</Badge>}
               </button>
             ))}
           </nav>
