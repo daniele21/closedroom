@@ -82,7 +82,7 @@ Fasi sequenziali; `BLOCKED` indica una dipendenza non completata.
 | BG-1 | Contratto recuperabile: lista attivi/storico, snapshot/eventi, identità sorgente/risultato e terminali uniformi. Owner: jobs, router/schemas, manager, test/API client. | — | ACTIVE |
 | BG-2 | Audio importato elaborabile come le registrazioni, senza cattura fittizia; composizione audio→analisi persistita. Owner: RecordingStore/router, manager preparation/analysis, client e test. | BG-1 | ACTIVE |
 | BG-3 | Cambiare schermata conserva osservazione e contesto; ritorno o reload recupera i job dal server. Owner: shell/provider frontend, jobEvents, pagine e consumer Meeting. | BG-2 | ACTIVE |
-| BG-4 | Attività globali con cancel, risultato, retry e feedback accessibili. Owner: App/componenti/i18n/design, test UI. | BG-3 | BLOCKED |
+| BG-4 | Attività globali con cancel, risultato, retry e feedback accessibili. Owner: App/componenti/i18n/design, test UI. | BG-3 | ACTIVE |
 | BG-5 | Percorso completo verificato e pronto all'integrazione. Owner: test, browser E2E/registro, docs durature; preflight sul candidato. | BG-4 | BLOCKED |
 
 ### BG-1 — contratto e recupero
@@ -174,14 +174,12 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
 
 ## Checkpoint — 2026-10-14
 
-- BG-1 PR #134, `97d5431`: 713 test Python e preflight sorgente PASS;
-  gate package/target-Mac non attestati.
-- BG-2/3 PR #135, stacked su BG-1: import audio atomico nel RecordingStore
-  (2 GiB, dedupe/cancel/crash cleanup) e submit ASR dalla shell; Attività
-  conserva upload e job tra route. SSE condiviso con Meeting, fino a 3
-  follower in shell; eventi `job_id/payload` SQLite normalizzati, nessun
-  prompt esposto nel fallback GET. Browser journey import/navigation e
-  stream unico aggiornati; preflight exact-head PENDING.
-- Restano audio→LLM con opzioni esplicite, recovery import post-reload,
-  retry e proof assemblata. BG-3 parziale, BG-4/5 BLOCKED; niente build
-  Actions. TCC/WKWebView/MLX target-Mac differiti a RELEASE.
+- BG-1 PR #134: source STRONG PASS, package Mac non attestato.
+- BG-2/3/4 PR #135 (stacked): import locale atomico, ASR e analisi
+  personalizzata concatenati dal parent persistente, job shell-owned
+  tra route, SSE condiviso con Meeting, reload/discovery e cancel staged
+  su unload. Retry esplicito idempotente di job diretti e parent,
+  nessun auto-retry o seconda coda pesante.
+- BG-5: test store/API/preparation e journey browser FULL_MEDIA estesi;
+  preflight exact-head e prova package ancora richiesti; nessuna build
+  in GitHub Actions. Target-Mac TCC/WKWebView/MLX obblighi RELEASE.
