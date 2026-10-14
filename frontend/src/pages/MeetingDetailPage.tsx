@@ -199,7 +199,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
   // The screenshot list owns current content; selection retains only its meeting-scoped identity.
   const [selectedScreenshotKey, setSelectedScreenshotKey] = useState<{ meetingId: string; id: string } | null>(null);
-  const [keyMomentVisualRequested, setKeyMomentVisualRequested] = useState(false);
   const [showAllScreenshots, setShowAllScreenshots] = useState(false);
   const [momentQuestion, setMomentQuestion] = useState('');
   const [momentAskRunId, setMomentAskRunId] = useState<string | null>(null);
@@ -249,7 +248,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
 
   const openKeyMoment = (shot: RecordingScreenshot) => {
     if (!recordingId) return;
-    setKeyMomentVisualRequested(true);
     setSelectedScreenshotKey({ meetingId: recordingId, id: shot.screenshot_id });
   };
 
@@ -304,7 +302,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     demoMode ? null : recordingId,
     Boolean(
       (visualResultAvailable && activeTab === 'analysis')
-      || (visualResultAvailable && keyMomentVisualRequested),
+      || (visualResultAvailable && selectedScreenshot !== null),
     ),
   );
   const selectedKeyMomentVisual = selectedScreenshot
@@ -354,7 +352,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     : null;
 
   useEffect(() => {
-    setKeyMomentVisualRequested(false);
     setSelectedScreenshotKey(null);
   }, [recordingId]);
 
