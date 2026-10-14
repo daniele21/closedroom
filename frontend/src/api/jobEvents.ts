@@ -72,7 +72,11 @@ function runJobEventStream(jobId: string, options: JobEventFollowerOptions): () 
       current_step: wire.current_step || wire.status || 'running',
       progress: Number(wire.progress || 0),
       updated_at: wire.updated_at ?? wire.event_created_at ?? wire.created_at ?? 0,
-      progress_detail: wire.event_payload ?? wire.payload ?? wire.progress_detail,
+      // GET snapshots contain the original request payload (potentially a
+      // sensitive prompt), whereas SSE rows use payload for progress only.
+      progress_detail: wire.job_id
+        ? wire.event_payload ?? wire.payload ?? wire.progress_detail
+        : wire.event_payload ?? wire.progress_detail,
       sequence: wire.sequence,
     };
     options.onUpdate(normalized);
