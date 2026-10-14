@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -527,14 +527,37 @@ def list_jobs(
     scope_type: str | None = Query(default=None),
     scope_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
+    view: Literal["recent", "active", "history"] = Query(default="recent"),
+    summary: bool = Query(default=False),
+    before_created_at: float | None = Query(default=None),
+    before_id: str | None = Query(default=None, min_length=1),
 ):
+    # Legacy default returns full snapshots; Activities requests compact metadata.
+    if (before_created_at is None) != (before_id is None):
+        raise HTTPException(status_code=422, detail="Both cursor fields are required")
+    before = (
+        (before_created_at, before_id)
+        if before_created_at is not None and before_id is not None else None
+    )
+    jobs = get_services(request.app).transcription_jobs.list(
+        job_type=type,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        limit=limit + 1,
+        view=view,
+        before=before,
+        summary=summary,
+    )
+    items = jobs[:limit]
+    more = len(jobs) > limit
+    tail = items[-1] if more and items else None
     return {
-        "items": get_services(request.app).transcription_jobs.list(
-            job_type=type,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            limit=limit,
-        )
+        "items": items,
+        "has_more": more,
+        "next_cursor": (
+            {"created_at": tail["created_at"], "id": tail["id"]}
+            if tail is not None else None
+        ),
     }
 
 
