@@ -51,14 +51,3 @@ The selector resolves risks -> concrete gates -> profile. Profiles are shorthand
 For meaningful work state observable outcome, owner, invariants and proof. Classify failures before patching. Each failed repair needs a falsifiable hypothesis; after two failed repairs with the same signature, change diagnostic strategy and obtain new discriminating evidence before a third. On resume refresh head/tree/base; checkpoint evidence is a pointer, not current-source proof.
 
 Before integration update affected canonical docs. Transfer durable truth and deferred release obligations before deleting completed plans. Never weaken privacy/auth/migration/resource cleanup, mutate finalized artifacts, create a second owner or overclaim hosted macOS evidence as target-Mac proof.
-
-
-## Shared Mac CI (local-runner-infra)
-
-This repository uses `daniele21/local-runner-infra` for an initial self-hosted macOS validation lane.
-
-- `.github/workflows/local-ci.yml` submits exact commits via GitHub `repository_dispatch` using `CENTRAL_DISPATCH_TOKEN`. Do not replace it with `runs-on: self-hosted` targeting runners registered to another repository.
-- Keep the source-owned test commands in `.github/ci/local-test.sh`; update this bounded lane when appropriate. A central job checks out the exact commit and invokes it on one of the central Mac runners.
-- Check central run logs and the `local-ci/mac` commit status for the **test** outcome. A successful dispatch is only a successful submission.
-- Do **not** delete existing PR/release workflows, Linux/Windows build matrices, required checks, or specialist validation based on this initial lane. Prove equivalence and gain approval before any replacement.
-- Central contract and onboarding: https://github.com/daniele21/local-runner-infra/blob/main/docs/integration-guide.md
