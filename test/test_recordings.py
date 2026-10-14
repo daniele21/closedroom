@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import tempfile
 import threading
@@ -27,6 +28,77 @@ class RecordingStoreTests(unittest.TestCase):
             model="test-model",
             language="it",
         )
+
+    def test_import_audio_is_published_durably_without_active_capture(self) -> None:
+        source = b"audio bytes" * 128
+        created = self.store.import_audio(
+            io.BytesIO(source), filename="meeting.mp3",
+            model="test-model", language="it",
+        )
+        self.assertEqual(created["status"], "recorded")
+        self.assertEqual(created["capture_backend"], "import")
+        self.assertEqual(created["capture_status"], "stopped")
+        self.assertIsNone(self.store.active_recording())
+        self.assertEqual(self.store.audio_path(created["id"]).read_bytes(), source)
+        tracks = self.store.transcribable_tracks(created["id"])
+        self.assertEqual(len(tracks), 1)
+        self.assertEqual(tracks[0][0]["source"], "mixed")
+        self.assertEqual(tracks[0][0]["chunks"][0]["sha256"], hashlib.sha256(source).hexdigest())
+        reopened = RecordingStore(self.root, use_settings_dir=False)
+        self.assertEqual(reopened.get(created["id"])["status"], "recorded")
+        self.assertEqual(reopened.audio_path(created["id"]).read_bytes(), source)
+
+    def test_import_request_is_idempotent_even_after_restart(self) -> None:
+        data = b"meeting audio"
+        first = self.store.import_audio(
+            io.BytesIO(data), filename="meeting.wav", title="Imported call",
+            model="test-model", request_id="import-001",
+        )
+        restarted = RecordingStore(self.root, use_settings_dir=False)
+        second = restarted.import_audio(
+            io.BytesIO(data), filename="meeting.wav", title="Imported call",
+            model="test-model", request_id="import-001",
+        )
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(len(restarted.list()), 1)
+        with self.assertRaisesRegex(RecordingConflict, "different audio or options"):
+            restarted.import_audio(
+                io.BytesIO(b"other"), filename="meeting.wav",
+                title="Imported call", model="test-model", request_id="import-001",
+            )
+        self.assertEqual(len(restarted.list()), 1)
+
+    def test_failed_import_cleans_staging_and_keeps_no_recording(self) -> None:
+        from local_asr_server.recordings import MAX_IMPORTED_AUDIO_BYTES
+
+        with self.assertRaisesRegex(RecordingConflict, "empty"):
+            self.store.import_audio(io.BytesIO(b""), filename="empty.wav", model="test")
+        with self.assertRaisesRegex(RecordingConflict, "Unsupported"):
+            self.store.import_audio(io.BytesIO(b"data"), filename="../not-audio.exe", model="test")
+
+        class SizeOverrunStream:
+            def read(self, _size):
+                return b"oversized"
+
+        # A low test limit exercises the actual bounded-copy path, not only
+        # the early Content-Length check in the API.
+        with patch("local_asr_server.recordings.MAX_IMPORTED_AUDIO_BYTES", 3):
+            with self.assertRaisesRegex(RecordingConflict, "maximum size"):
+                self.store.import_audio(SizeOverrunStream(), filename="too-big.wav", model="test")
+        self.assertEqual(self.store.list(), [])
+        self.assertEqual(list(self.root.glob("*/.import-*")), [])
+
+    def test_startup_discards_only_interrupted_import_staging(self) -> None:
+        date_dir = self.root / "2026-10-14"
+        interrupted = date_dir / ".import-crashed"
+        interrupted.mkdir(parents=True)
+        (interrupted / "recording.wav").write_bytes(b"partial")
+        valid = self.store.import_audio(
+            io.BytesIO(b"valid"), filename="normal.wav", model="test-model",
+        )
+        reopened = RecordingStore(self.root, use_settings_dir=False)
+        self.assertFalse(interrupted.exists())
+        self.assertEqual(reopened.audio_path(valid["id"]).read_bytes(), b"valid")
 
     def test_atomic_json_writes_use_independent_temporary_files(self) -> None:
         target = self.root / "state.json"
