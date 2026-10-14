@@ -626,44 +626,26 @@ marcati; non viene invocato un LLM.
 
 ## 14. Job, eventi e concorrenza
 
-Trascrizioni, analisi e visual intelligence on-demand sono ammesse dal
-process-wide `HeavyWorkloadArbiter`, con default una sola esecuzione pesante
-attiva e queue bounded. Non esiste una coda distribuita esterna né un secondo
-scheduler per il visuale.
+`HeavyWorkloadArbiter` è l'unico scheduler di trascrizione/analisi/visual,
+con default 1 lavoro pesante attivo e coda bounded. `ResourcePolicy` consulta
+`RecordingStore.active_recording()` al submit e prima dell'esecuzione: blocca
+nuovi avvii durante capture senza preemptare lavoro già attivo. Nessun secondo
+scheduler o queue distribuita.
 
-`ResourcePolicy` è un guard read-only sopra l'arbiter: consulta lazily
-`RecordingStore.active_recording()` e rifiuta l'avvio di nuovi workload pesanti
-quando esiste una registrazione attiva. La policy viene verificata sia al submit
-sia immediatamente prima dell'esecuzione, quindi copre il race job-in-coda ->
-inizio registrazione -> worker libero. Non preempta workload già attivi e non
-introduce un secondo mutex/scheduler.
+`JobStore` persiste in SQLite stato, progresso, payload/risultato,
+cancellazione, timestamp ed eventi sequenziali (massimo 512 per job).
 
-`JobStore` persiste:
+`GET /v1/jobs` mantiene il default completo; `summary=true` con
+`view=active|history|recent` e cursore `before_created_at,before_id`
+restituisce metadati SQL e `parent_job_id`, senza payload privati.
+`Idempotency-Key` sui POST diretti ASR/diarizzazione/analisi identifica il
+submit SQLite: replay anche terminale = stesso job, opzioni/sorgente diverse
+= 409, nuovo ID = retry volontario. `meeting_preparation` conserva il suo dedupe.
 
-- stato corrente e progress in `jobs`;
-- timeline sequenziale bounded in `job_events`, con al massimo 512 eventi per job;
-- payload e risultato JSON;
-- richiesta di cancellazione;
-- timestamp di avvio e completamento.
-
-La discovery `GET /v1/jobs` è backward-compatible (default snapshot completo,
-`view=recent`); il consumer Attività può selezionare `summary=true` e
-`view=active|history` con paginazione keyset `before_created_at,before_id`.
-La proiezione SQL non carica prompt, payload, progress_detail o risultati.
-`parent_job_id` espone la relazione persistita per evitare doppi conteggi.
-Gli avvii diretti ASR, diarizzazione e analisi possono inviare una chiave
-`Idempotency-Key`, serializzata in SQLite dal `JobStore` con fingerprint
-delle opzioni; replay di un run completato non provoca una nuova inferenza.
-Una chiave diversa rappresenta invece una richiesta nuova. La correlazione
-`meeting_preparation` resta governata dal suo owner esistente.
-
-Il transcription job pubblica esplicitamente anche `diarizing`,
-`visual_processing` e `audio_intelligence` per i workflow tecnici compatibili.
-Il job `visual_intelligence` on-demand usa lo stesso store e pubblica progress
-bounded del processing v2. Quando esiste un `JobStore`, il manager non duplica
-gli eventi persistiti nella queue process-local; quella queue resta solo per il
-fallback senza store. Nel normale Meeting `useMeetingJobEvents` segue lo stream
-SSE persistito e ricarica lo stato canonico al terminale, senza interval polling.
+I job ASR/visual condividono eventi bounded `diarizing`,
+`visual_processing` e `audio_intelligence`. Con store persistente il manager
+non duplica eventi nella queue in memoria (solo fallback). Nel Meeting
+`useMeetingJobEvents` segue SSE e ricarica lo snapshot al terminale.
 
 Stati terminali: `completed`, `failed`, `cancelled`, `interrupted`. Una rejection
 di resource policy termina il job prima del workload con reason
@@ -672,9 +654,8 @@ di resource policy termina il job prima del workload con reason
 richiesta ed essere uscito. Al riavvio del server, i job non terminali diventano
 `interrupted`, perché i thread non possono sopravvivere al processo.
 
-Questa scelta è adeguata a una singola app desktop locale. Un futuro execution
-backend multi-processo richiederebbe lease, heartbeat, coda durevole e worker
-idempotenti.
+Un eventuale backend multi-processo richiederebbe lease, heartbeat e
+worker idempotenti: non fa parte della presente architettura.
 
 ## 15. Analisi e runtime LLM
 

@@ -14,23 +14,16 @@ consente un nuovo avvio esplicito, senza promettere ripresa dal punto raggiunto.
 
 ## Base verificata e confini
 
-- `runtime/workload_arbiter.py`: unico scheduler pesante; default 1 attivo e 8
-  pendenti. Le prenotazioni capture trattengono i job in attesa senza uccidere
-  quelli attivi. Conservare questa precedenza e la resource policy.
-- `jobs/job_store.py`: stato, payload, risultato, cancellazione ed eventi SQLite.
-  `server.py` marca i run incompleti `interrupted` al riavvio.
-- `transcription_jobs.py` e `analysis_jobs.py` eseguono indipendentemente dalla UI.
-  `meeting_preparation.py` compone child job e conserva dedupe/riuso esistenti.
-- `routers/transcriptions.py`: lista `/v1/jobs`, snapshot, eventi SSE e cancel.
-  La lista attuale è per recenza e limitata a 500; non basta a garantire la
-  scoperta di tutti i job attivi sotto uno storico molto popolato.
-- `api/jobEvents.ts` e `hooks/useMeetingJobEvents.ts`: follower SSE e consumer
-  Meeting esistenti; le pagine dedicate usano ancora polling e stato locale.
-- `TranscriptionPage.tsx`: registrazioni via job; file audio via richiesta
-  streaming diretta. Il loop job non include oggi `interrupted` tra i terminali.
-- `AnalysisPage.tsx`: analisi via job, ma pre-trascrizione audio importato diretta;
-  ritorno alla pagina senza recupero uniforme del run.
-- `App.tsx` smonta le pagine al cambio route; manca una vista Attività globale.
+- `HeavyWorkloadArbiter`: unico scheduler, default 1 attivo/8 pending; le
+  prenotazioni capture trattengono la coda senza uccidere job attivi.
+- `JobStore` + `server.py`: stato/eventi SQLite e `interrupted` al restart;
+  la discovery precedente era limitata ai 500 job più recenti.
+- `transcription_jobs.py`, `analysis_jobs.py`, `meeting_preparation.py`:
+  esecuzione server-side e composizione parent/child con dedupe esistente.
+- `routers/transcriptions.py`: job list/detail/SSE/cancel.
+- `jobEvents.ts`, `useMeetingJobEvents.ts`: SSE Meeting già disponibile;
+  Transcription/Analysis usano polling e upload diretti, `App.tsx` smonta
+  le pagine al cambio route. Manca Attività globale.
 
 Esclusi: coda distribuita, più concorrenza, riordino, esecuzione ad app chiusa,
 notifiche di sistema, auto-retry. Preservare compatibilità API dirette.
@@ -176,30 +169,21 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
 ## Checkpoint unico di ripresa
 
 - 2026-10-14: BG-1 ACTIVE; BG-2..5 BLOCKED (dipendenza non ancora validata).
-- Branch `feature/background-processing-bg1`, basato su `dev`
-  `a30e69e99c03c7b4ec52da7155e6645dbf9d1a27` / tree
-  `8ebfb66be7b028e0cbd2a6c6d3b608c8a80556e2`.
-  Aggiornare HEAD/tree live al resume; nessun merge su `dev`.
-- Codice scritto: discovery attivi/storico keyset (nessun payload nelle summary),
-  parent metadata, `interrupted` oltre 500 al riavvio, cancel globale delegato,
-  terminali UI uniformi. Submit con `Idempotency-Key` per recording ASR,
-  diarizzazione e analisi diretta: ammissione SQLite atomica, replay terminale
-  e 409 su collisione; retry esplicito crea una nuova chiave. La pagina
-  Trascrizione conserva la chiave di POST ambiguo finché non riceve conferma.
-- Test aggiunti: `test_job_store` (concorrenza e storico >500), `test_recording_api`
-  (discovery, cancel e duplicate ASR) e `test_analysis_api` (replay analisi).
-  **Ancora non eseguiti**; il runner container non possiede un checkout git
-  e il network pubblico non risolve GitHub. Gate source test, lint, TS,
-  documentazione e API end-to-end PENDING, non PASS.
-- Rischi residui: la deduplica del parent preparation segue l'attuale identità
-  del risultato, non una request-id isolata; le pipeline multiple senza
-  coordinatore di submit non hanno ancora retry idempotente; SSE/reconnect e
-  race cancel/avvio richiedono verifica assemblata; route unmount non conserva
-  ancora la chiave client (BG-3).
-- Prossimo passo: selezionare gate STRONG da diff/head/base, usare solo
-  preflight remoto source-only strettamente necessario, diagnosticare
-  eventuali regressioni; poi sbloccare BG-2 secondo acceptance e aggiungere
-  l'owner di upload atomico in `RecordingStore`. Evitare GitHub Actions
-  build e upload FULL_MEDIA.
-- REAL_ENVIRONMENT: TCC/audio fisico/WKWebView e MLX/Metal rappresentativi
-  restano `DEFERRED_TO_RELEASE` quando applicabili.
+- Branch `feature/background-processing-bg1`, base `dev`
+  `a30e69e99c03c7b4ec52da7155e6645dbf9d1a27`; PR #134.
+  Ricontrollare HEAD/tree/base al resume. Nessun merge.
+- Implementati: discovery `active/history` keyset+parent senza payload,
+  restart >500, cancel via owner e terminali UI. `Idempotency-Key` rende
+  ASR, diarizzazione e analisi diretta idempotenti anche dopo il terminale;
+  stesso ID/opzioni diverse -> 409. La pagina Trascrizione conserva il key
+  durante POST ambiguo.
+- Test aggiunti per concorrenza, pagination, restart, submit e cancel.
+  Source-only preflight PR #134: selector INTEGRATION/STRONG. Gate governance
+  FALLITO per budget docs (architecture 12177 >12000, workstream 3220 >3000);
+  test/TS/browser E2E ancora PENDING al checkpoint. Questa revisione comprime
+  la documentazione senza modificare le soglie.
+- Restano: identità per parent/pipeline multiple, SSE/reconnect e race
+  cancel/admission, recupero chiave dopo unmount (BG-3).
+- Prossima azione: raccogliere test PR #134, correggere regressioni,
+  chiudere BG-1 prima di BG-2 import atomico. No build GitHub Actions.
+  Target-Mac TCC/audio/WKWebView/MLX differito a RELEASE.
