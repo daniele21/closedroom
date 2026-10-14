@@ -211,7 +211,21 @@ try {
   });
   if (!inputNode.nodeId) throw new Error('Transcription file input is not discoverable');
   await call('DOM.setFileInputFiles', { files: [localFixture], nodeId: inputNode.nodeId });
-  await assert(`document.querySelector('audio[controls]') && document.querySelector('button.w-full.mt-4')`, 'file config view ready');
+  try {
+    await assert(`document.querySelector('audio[controls]') && document.querySelector('button.w-full.mt-4')`, 'file config view ready');
+  } catch (error) {
+    const state = await evaluate(`JSON.stringify({
+      hash: location.hash,
+      page: document.querySelector('[data-workspace-page]')?.getAttribute('data-workspace-page'),
+      fileInputCount: document.querySelectorAll('input[type=file]').length,
+      audioElementCount: document.querySelectorAll('audio[controls]').length,
+      selectedFileCount: document.querySelector('input[type=file]')?.files?.length ?? 0,
+      stepLabels: Array.from(document.querySelectorAll('nav button')).slice(-8).map(node => node.textContent?.trim().slice(0, 50)),
+      actionLabels: Array.from(document.querySelectorAll('main button')).slice(-12).map(node => node.textContent?.trim().slice(0, 50)),
+      renderedAlertCount: document.querySelectorAll('[role=alert]').length,
+    })`);
+    throw new Error(`file config view ready; page diagnostics: ${state}; ${error.message}`);
+  }
   await evaluate(`document.querySelector('button.w-full.mt-4').click()`);
   await assert(`location.hash === '#activities' && !!document.querySelector('[data-audio-import]')`, 'upload visible globally while in progress');
   await checkpoint('09-importing-audio');
