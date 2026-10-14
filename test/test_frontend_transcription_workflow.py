@@ -61,6 +61,27 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertIn("openAnalysisSetup('meeting_deep')", page)
         self.assertIn("<AnalysisSetupModal", page)
 
+    def test_import_uses_one_shell_owned_upload_to_durable_job_handoff(self) -> None:
+        app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
+        page = (ROOT / "frontend/src/pages/TranscriptionPage.tsx").read_text(encoding="utf-8")
+        hook = (ROOT / "frontend/src/hooks/useAudioImports.ts").read_text(encoding="utf-8")
+        activities = (ROOT / "frontend/src/pages/ActivitiesPage.tsx").read_text(encoding="utf-8")
+        client = (ROOT / "frontend/src/api/apiClient.ts").read_text(encoding="utf-8")
+
+        self.assertIn("const audioImports = useAudioImports(", app)
+        self.assertIn("audioImports={audioImports}", app)
+        self.assertIn("audioImports.startTranscription(selectedFile, options)", page)
+        self.assertNotIn("ApiClient.transcribe(formData", page)
+        self.assertIn("ApiClient.importRecordingAudio(", hook)
+        self.assertIn("ApiClient.createTranscriptionJob(source.id, options, id)", hook)
+        self.assertIn("phase: 'submitting'", hook)
+        self.assertIn("ApiClient.cancelRecordingAudioImport(id)", hook)
+        self.assertIn("data-audio-import={upload.id}", activities)
+        self.assertIn("'/v1/recordings/import-audio'", client)
+        # Request IDs and file objects stay in the shell, never persistent UI storage.
+        self.assertNotIn("localStorage", hook)
+        self.assertNotIn("sessionStorage", hook)
+
     def test_recording_route_contract_is_centralized(self) -> None:
         route_helper = (ROOT / "frontend/src/utils/transcriptionRoute.ts").read_text(encoding="utf-8")
         transcription_page = (ROOT / "frontend/src/pages/TranscriptionPage.tsx").read_text(encoding="utf-8")
