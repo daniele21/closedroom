@@ -491,6 +491,25 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     setProgressText(t('recording.progressNone'));
   }, [isPreparingRecording, releaseCaptureLease, setIsVerifying, t]);
 
+  // Both capture backends ask the same local overlay owner; only their
+  // capture startup boundaries differ. A source-mode browser popup is expected.
+  const requestRecordingOverlay = useCallback(() => {
+    void ApiClient.toggleOverlay(true).then((result) => {
+      if (result?.success) return;
+      if (result?.fallback_expected) {
+        setFallbackNotice(null);
+      } else {
+        setFallbackNotice(t('recording.overlayFallbackNotice'));
+        showToast(t('recording.overlayFallbackNotice'), 'warning');
+      }
+      openBrowserPopup();
+    }).catch(() => {
+      setFallbackNotice(t('recording.overlayFallbackNotice'));
+      showToast(t('recording.overlayFallbackNotice'), 'warning');
+      openBrowserPopup();
+    });
+  }, [t, showToast]);
+
   const startRecording = useCallback(async (
     title: string,
     projectName = '',
@@ -644,23 +663,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
               postNativeStatus();
               broadcastIntervalRef.current = setInterval(postNativeStatus, OVERLAY_STATUS_INTERVAL_MS);
 
-              // Native panel exists only in app mode. In source/server mode the
-              // backend explicitly marks the browser popup as the expected surface.
-              ApiClient.toggleOverlay(true).then((res) => {
-                if (!res || !res.success) {
-                  if (!res?.fallback_expected) {
-                    setFallbackNotice(t('recording.overlayFallbackNotice'));
-                    showToast(t('recording.overlayFallbackNotice'), 'warning');
-                  } else {
-                    setFallbackNotice(null);
-                  }
-                  openBrowserPopup();
-                }
-              }).catch(() => {
-                setFallbackNotice(t('recording.overlayFallbackNotice'));
-                showToast(t('recording.overlayFallbackNotice'), 'warning');
-                openBrowserPopup();
-              });
+              requestRecordingOverlay();
 
               setIsVerifying(false);
               dispatchLifecycle({ type: 'recording_started' });
@@ -981,22 +984,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       postBrowserStatus();
       broadcastIntervalRef.current = setInterval(postBrowserStatus, OVERLAY_STATUS_INTERVAL_MS);
 
-      // In source/server mode the browser popup is the expected overlay surface.
-      ApiClient.toggleOverlay(true).then((res) => {
-        if (!res || !res.success) {
-          if (!res?.fallback_expected) {
-            setFallbackNotice(t('recording.overlayFallbackNotice'));
-            showToast(t('recording.overlayFallbackNotice'), 'warning');
-          } else {
-            setFallbackNotice(null);
-          }
-          openBrowserPopup();
-        }
-      }).catch(() => {
-        setFallbackNotice(t('recording.overlayFallbackNotice'));
-        showToast(t('recording.overlayFallbackNotice'), 'warning');
-        openBrowserPopup();
-      });
+      requestRecordingOverlay();
 
       setIsVerifying(false);
       dispatchLifecycle({ type: 'recording_started' });
@@ -1025,7 +1013,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       setStatusState('error');
       showToast(t('recording.startFailed', { error: error.message }), 'error');
     }
-  }, [t, selectedMicrophone, selectedSystemDevice, captureCapabilities, setCapturePermissions, loadDevices, releaseMedia, restoreAudioRoute, showToast, stopRecording, drawAudioMeter, stopAudioMeter, releaseCaptureLease, setIsVerifying]);
+  }, [t, selectedMicrophone, selectedSystemDevice, captureCapabilities, setCapturePermissions, loadDevices, releaseMedia, restoreAudioRoute, showToast, stopRecording, drawAudioMeter, stopAudioMeter, releaseCaptureLease, setIsVerifying, requestRecordingOverlay]);
 
   const toggleTestAudioRoute = async () => {
     setIsVerifying(true);
