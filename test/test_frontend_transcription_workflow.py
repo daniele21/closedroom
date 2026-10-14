@@ -89,7 +89,9 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         journey = (ROOT / "scripts/browser_activities_e2e.mjs").read_text(encoding="utf-8")
 
         self.assertIn("id: jobId", events)
-        self.assertIn("wire.event_payload ?? wire.payload ?? wire.progress_detail", events)
+        self.assertIn("progress_detail: wire.job_id", events)
+        self.assertIn("? wire.event_payload ?? wire.payload ?? wire.progress_detail", events)
+        self.assertIn(": wire.event_payload ?? wire.progress_detail", events)
         self.assertIn("sharedJobStreams = new Map", events)
         self.assertIn("followJobEvents(jobId, {", activities)
         self.assertIn("followJobEvents(jobId, {", meeting)
