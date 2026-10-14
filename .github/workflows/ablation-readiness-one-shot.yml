@@ -3,7 +3,7 @@ name: Temporary Complexity Ablation Source Readiness
 on:
   pull_request:
     branches: [experiment/complexity-ablation]
-    types: [opened]
+    types: [opened, reopened]
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ jobs:
           REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           test "$BASE" = "experiment/complexity-ablation"
-          test "$HEAD" = "experiment/complexity-ablation-readiness-validation"
+          test "$HEAD" = "experiment/complexity-ablation-readiness-v2"
           test "$REPO" = "$GITHUB_REPOSITORY"
       - uses: actions/checkout@v4
         with:
