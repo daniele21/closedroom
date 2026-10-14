@@ -3,7 +3,7 @@ name: Temporary demo video fidelity audit (no app build)
 on:
   pull_request:
     branches: [experiment/complexity-ablation]
-    types: [opened]
+    types: [opened, reopened]
 
 permissions:
   contents: write
@@ -26,8 +26,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: true
-      - name: Ensure native video codecs are present
+      - name: Install ffmpeg and verify codec availability
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
           command -v ffmpeg
           command -v ffprobe
           ffmpeg -hide_banner -encoders | grep libx264
