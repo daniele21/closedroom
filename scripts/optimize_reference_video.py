@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test a high-quality H.264 re-encode of ClosedRoom's public documentation demo.
+"""Test a high-quality 10-bit HEVC re-encode of ClosedRoom's public documentation demo.
 
 Offline-only tools: ffmpeg and ffprobe. No meeting content, no app build.
 Default: benchmark original vs candidate without modifying tracked files.
@@ -8,7 +8,6 @@ Default: benchmark original vs candidate without modifying tracked files.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -48,7 +47,7 @@ def check_source(metadata: dict) -> tuple[dict, list[dict]]:
     v = videos[0]
     if not v.get("width") or not v.get("height"):
         raise ValueError("Missing frame dimensions")
-    if v.get("pix_fmt") not in ("yuv420p", "yuv422p", "yuv444p", "nv12", "bgra", "rgb24"):
+    if v.get("pix_fmt") != "yuv420p10le" or v.get("codec_name") != "hevc":
         raise ValueError("Unsupported pixel format: " + str(v.get("pix_fmt")))
     if v.get("color_transfer") in ("smpte2084", "arib-std-b67"):
         raise ValueError("HDR video: 8-bit SDR conversion would lose color information")
@@ -83,8 +82,8 @@ def ssim_scores(reference: Path, candidate: Path, stats: Path) -> list[float]:
     return scores
 
 
-def audit(source: Path, *, apply: bool = False, crf: int = 18, preset: str = "medium",
-          min_saving: float = 25.0, min_avg_ssim: float = 0.985,
+def audit(source: Path, *, apply: bool = False, crf: int = 20, preset: str = "faster",
+          min_saving: float = 25.0, min_avg_ssim: float = 0.990,
           min_frame_ssim: float = 0.94) -> dict:
     if not source.is_file() or not source.suffix.lower() == ".mov":
         raise ValueError("Requires an existing .mov file")
@@ -98,13 +97,14 @@ def audit(source: Path, *, apply: bool = False, crf: int = 18, preset: str = "me
             "ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
             "-i", str(source), "-map", "0:v:0", "-map", "0:a?",
             "-map_metadata", "0", "-map_chapters", "0",
-            "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
-            "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart",
+            "-c:v", "libx265", "-preset", preset, "-crf", str(crf),
+            "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1", "-fps_mode:v", "passthrough",
+            "-c:a", "copy", "-movflags", "+faststart",
             str(candidate)
         ])
         output_meta = probe(candidate)
         out_v, out_audio = check_source(output_meta)
-        if (out_v["width"], out_v["height"]) != (v["width"], v["height"]):
+        if (out_v["width"], out_v["height"], out_v.get("pix_fmt")) != (v["width"], v["height"], v["pix_fmt"]):
             raise ValueError("Source/candidate dimensions differ")
         if (out_v.get("avg_frame_rate") != v.get("avg_frame_rate")
                 or len(out_audio) != len(audios)):
@@ -118,6 +118,8 @@ def audit(source: Path, *, apply: bool = False, crf: int = 18, preset: str = "me
         output_duration = float(output_meta.get("format", {}).get("duration", 0))
         if abs(source_duration - output_duration) > 0.05:
             raise ValueError("Video duration changed by over 50 milliseconds")
+        if out_v.get("codec_name") != "hevc":
+            raise ValueError("Output codec unexpectedly changed")
         scores = ssim_scores(source, candidate, stats)
         new_bytes = candidate.stat().st_size
         saving_percent = 100 * (original_bytes - new_bytes) / original_bytes
@@ -159,10 +161,10 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
     p.add_argument("--apply", action="store_true")
-    p.add_argument("--crf", type=int, default=18)
-    p.add_argument("--preset", choices=("veryfast", "faster", "fast", "medium", "slow"), default="medium")
+    p.add_argument("--crf", type=int, default=20)
+    p.add_argument("--preset", choices=("veryfast", "faster", "fast", "medium", "slow"), default="faster")
     p.add_argument("--min-saving", type=float, default=25.0)
-    p.add_argument("--min-avg-ssim", type=float, default=0.985)
+    p.add_argument("--min-avg-ssim", type=float, default=0.990)
     p.add_argument("--min-frame-ssim", type=float, default=0.94)
     args = p.parse_args(argv)
     try:
