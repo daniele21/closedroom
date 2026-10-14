@@ -1,6 +1,6 @@
 # Complexity ablation — minimum complexity, equivalent product behavior
 
-Status: PAUSED AFTER SELECTIVE REVIEW — ISOLATED EXPERIMENTS. No merge or PR to dev authorized.
+Status: E4/E5 SCOPED ITERATION COMPLETE — ISOLATED EXPERIMENTS. No merge or PR to dev authorized.
 Experiment branch: `experiment/complexity-ablation`
 Read-only reference: `dev` at `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f` (2026-10-13). Refresh baseline identity on resume.
 
@@ -82,10 +82,20 @@ All checks below are **source/synthetic or scoped**; they do not prove represent
 
 **STOP / HOLD:** No speculative general-purpose hook, monolith file split or cache merge. A new ablation needs a reproduced defect or measurable improvement. Integration to `dev` requires separate user authorization, exact HEAD/base and repository-selected validation.
 
+## E4/E5 bounded follow-up — 2026-10-14
+
+**E4 — KEEP (PRODUCT_LOCAL, ITERATION, SCOPED, REMOTE_AUTOMATED).** `MeetingDetailPage.tsx` held an entire `selectedScreenshot` object, which outlived the screenshot list and its meeting identity. Replace with `{meetingId, id}` selection and derive the object from current `screenshotById`; selection resets on recording change, and the modal disappears when its screenshot is no longer present. This is **+6 frontend production LOC** but removes the stale independent screenshot snapshot (same number of React state call sites). New browser oracle uses *identical screenshot IDs on two different meetings* and switches route while the key-moment dialog is open. This now closes the old dialog rather than leaking/rebinding the selection to the other meeting. No new generic hook.
+
+**E5 — KEEP narrow read-only projection (PRODUCT_NONE, ITERATION, SCOPED, REMOTE_AUTOMATED).** In `RecordingStore.list_visual_evidence_frames`, available and unavailable screenshots duplicated the same 11 metadata fields. One canonical dict projection now conditionally resolves the original asset path **only for available entries**, preserving unavailable `path=None`, separate manual sequence namespace, timestamp ordering and continuous-frame provenance. **−11 backend production LOC.** No migration, note/screenshot manifest persistence, catalog mutation, concurrency, revision or recovery changes. PR #86 (SQLite migration) is still open on `dev` and changes catalog/job-store owners, not this method. No further E5 write-path refactoring until the migration stabilizes.
+
+**Focused exact-source evidence:** [38546454969](https://github.com/daniele21/closedroom/actions/runs/38546454969), job 115793602870 **SUCCESS**: E5 projection 2/2, existing note tests 4/4, source syntax, frontend ESLint and TypeScript, saved-Meeting browser recovery/races including `07-meeting-key-moment-scope` and screenshot/note independent retries. First attempt [38546234844](https://github.com/daniele21/closedroom/actions/runs/38546234844) failed due missing Pillow on runner, resolved with isolated test-only dependency installation, not a production defect. Temporary PR #128 closed **unmerged**, one-shot workflow deleted. No app package, uploads or representative WKWebView/TCC/capture/inference evidence.
+
+**Structural cumulative score vs `dev`: approx. −29 net production LOC** (earlier −24, E4 +6 and E5 −11); overlay states −3, Meeting request refs 3→1. E4 provides a user-visible stale-modal correctness improvement, not merely fewer LOC. Do not claim resource, runtime or release readiness gains. Next: HOLD broad E5 persistence changes pending #86; E4/E5 remain isolated until explicit integration authorization and repository-selected exact-head/base gates.
+
 ## Resume checkpoint
 
 - BASE read-only `dev`: `747a0e5dad92f1f8d190cddc8fb1a1d651c0d36f`; refresh base and comparison on next run.
 - TARGET: `experiment/complexity-ablation`; no changes to `dev`. Validation PRs #119–#123 closed without merge; disposable workflows removed.
 - Confirmed: C3.1 merged before isolation. C3.2/C1.1/C1.2/C2.1/C1.3/C1.4/C2.2/C2.3/C2.4 KEEP on experiment branch; focused Python/frontend/browser checks PASS.
 - Unresolved: full-repository exact-head integration gates if later requested, runtime performance/bundle measurements and physical Mac/WKWebView/TCC evidence; path/upload cache convergence is rejected without additional semantic/quality evidence.
-- Next: HOLD after selective review; resume only with measurable or user-visible motivation or explicit integration authorization.
+- Next: HOLD speculative ablations; E4 and narrow read-only E5 now KEEP with scoped evidence. Wait for SQLite PR #86 before any persistence write-path changes; integration only after explicit authorization and selected strong/exact-head gates.
