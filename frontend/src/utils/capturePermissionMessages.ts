@@ -4,7 +4,7 @@ import type { CaptureDiagnostics } from '../api/apiClient';
 // permission request, selected capture mode and refresh stay screen-owned.
 type Translate = (key: string) => string;
 
-export function nativeCaptureUnavailableMessage(reason: string, t: Translate): string {
+export function getNativeCaptureUnavailableMessage(reason: string, t: Translate): string {
   if (reason === 'screen_capture_stream_pending') return t('recording.nativeCapturePendingReason');
   if (reason === 'helper_missing') return t('recording.nativeCaptureHelperMissingReason');
   if (reason === 'macos_required' || reason === 'macos_14_required') {
