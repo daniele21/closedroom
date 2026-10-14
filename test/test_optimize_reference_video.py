@@ -31,8 +31,8 @@ class ReferenceVideoTests(unittest.TestCase):
                 "ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
                 "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12:duration=2",
                 "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-                "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264",
-                "-preset", "ultrafast", "-crf", "0", "-pix_fmt", "yuv420p",
+                "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx265",
+                "-preset", "ultrafast", "-x265-params", "lossless=1", "-pix_fmt", "yuv420p10le",
                 "-c:a", "pcm_s16le", str(source),
             ], check=True)
             orig = source.stat().st_size
