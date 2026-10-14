@@ -82,6 +82,20 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertNotIn("localStorage", hook)
         self.assertNotIn("sessionStorage", hook)
 
+    def test_real_sse_wire_identity_and_single_stream_owner(self) -> None:
+        events = (ROOT / "frontend/src/api/jobEvents.ts").read_text(encoding="utf-8")
+        activities = (ROOT / "frontend/src/hooks/useActivities.ts").read_text(encoding="utf-8")
+        meeting = (ROOT / "frontend/src/hooks/useMeetingJobEvents.ts").read_text(encoding="utf-8")
+        journey = (ROOT / "scripts/browser_activities_e2e.mjs").read_text(encoding="utf-8")
+
+        self.assertIn("id: jobId", events)
+        self.assertIn("wire.event_payload ?? wire.payload ?? wire.progress_detail", events)
+        self.assertIn("sharedJobStreams = new Map", events)
+        self.assertIn("followJobEvents(jobId, {", activities)
+        self.assertIn("followJobEvents(jobId, {", meeting)
+        self.assertIn("job_id: id, sequence", journey)
+        self.assertIn("duplicate EventSource", journey)
+
     def test_recording_route_contract_is_centralized(self) -> None:
         route_helper = (ROOT / "frontend/src/utils/transcriptionRoute.ts").read_text(encoding="utf-8")
         transcription_page = (ROOT / "frontend/src/pages/TranscriptionPage.tsx").read_text(encoding="utf-8")
