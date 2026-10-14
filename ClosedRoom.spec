@@ -21,6 +21,7 @@ PROJECT_ROOT   = Path(SPECPATH)                                     # noqa: F821
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from product_version import read_product_version
 APP_VERSION = read_product_version(PROJECT_ROOT)
+BUILD_NUMBER = os.environ.get("CLOSEDROOM_BUILD_NUMBER", APP_VERSION)
 
 CACHE_DIR      = PROJECT_ROOT / ".cache"
 AUDIO_HELPER   = CACHE_DIR / "audio-helper" / "audio-helper"
@@ -297,7 +298,7 @@ app = BUNDLE(                                                           # noqa: 
         "CFBundleName": APP_DISPLAY_NAME,
         "CFBundleDisplayName": APP_DISPLAY_NAME,
         "CFBundleIdentifier": APP_BUNDLE_ID,
-        "CFBundleVersion": APP_VERSION,
+        "CFBundleVersion": BUILD_NUMBER,
         "CFBundleShortVersionString": APP_VERSION,
         "NSHumanReadableCopyright": "© 2026 ClosedRoom",
         "NSHighResolutionCapable": True,
