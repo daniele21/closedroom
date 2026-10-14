@@ -10,6 +10,16 @@ from local_asr_server.transcription_jobs import TranscriptionJobManager
 
 
 class JobStoreTests(unittest.TestCase):
+    def test_job_parent_lookup_is_storage_owned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "closedroom.db")
+            store.create(job_id="parent", job_type="meeting_preparation")
+            store.create(job_id="child", job_type="analysis")
+            self.assertIsNone(store.parent_of("child"))
+            store.link_child("parent", "child", stage="analysis")
+            self.assertEqual(store.parent_of("child"), "parent")
+            self.assertEqual(JobStore(Path(tmp) / "closedroom.db").parent_of("child"), "parent")
+
     def test_create_update_and_reopen_job(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "closedroom.db"

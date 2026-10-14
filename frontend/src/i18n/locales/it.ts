@@ -15,6 +15,8 @@ const it = {
     open: "Apri",
     openResult: "Apri risultato",
     refresh: "Aggiorna",
+    retry: "Riprova",
+    retrying: "Nuovo avvio…",
     offline: "Connessione al servizio non disponibile. Gli stati mostrati potrebbero non essere aggiornati.",
     captureWait: "In attesa che termini la registrazione.",
     queueWait: "In attesa che si liberi il lavoro in corso.",

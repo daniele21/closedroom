@@ -142,6 +142,16 @@ registrano atomicamente l'unica nuova ownership. Wrapper `uv`, worker ASR,
 helper nativi e processi estranei non vengono terminati. Server standard,
 reload e menu bar sono quindi mutuamente esclusivi. Verifica:
 `test/test_port_manager.py`, `test/test_cli.py` e `test/test_paths.py`.
+### Retry esplicito dei job diretti
+
+La vista Attività offre un retry solo per job di trascrizione/analisi
+`failed` o `interrupted`. `POST /v1/jobs/{id}/retry` usa un nuovo
+`Idempotency-Key` e il manager originale, salva `retry_of` e conserva
+provider, lingua e opzioni. Non rilancia isolatamente child di preparazione
+o pipeline né un legacy job senza opzioni salvate. Nessun retry automatico
+dopo reconnect. Validare `test_recording_api`, `test_analysis_api` e
+`test_job_store`.
+
 ### Attività e coda
 
 La shell offre **Attività** con conteggio dei lavori principali attivi, sorgente,

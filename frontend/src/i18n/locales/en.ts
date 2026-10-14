@@ -15,6 +15,8 @@ const en = {
     open: "Open",
     openResult: "Open result",
     refresh: "Refresh",
+    retry: "Retry",
+    retrying: "Starting again…",
     offline: "Cannot connect to the service. Displayed states may be out of date.",
     captureWait: "Waiting for recording to end.",
     queueWait: "Waiting for current work to finish.",

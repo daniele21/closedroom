@@ -779,6 +779,46 @@ class RecordingApiTests(unittest.TestCase):
         self.assertIsNone(saved.get("analysis"))
 
     @patch("local_asr_server.transcription_jobs.TranscriptionJobManager._run", return_value=None)
+    def test_explicit_transcription_retry_preserves_options_and_is_idempotent(self, _run) -> None:
+        services = get_services(self.app)
+        recording = self.client.post("/v1/recordings", json={
+            "title": "Retry source", "mime_type": "audio/wav", "capture_mode": "mic_only",
+        }).json()
+        previous = services.jobs.create(
+            job_id="failed-asr-original", job_type="transcription", scope_type="recording",
+            scope_id=recording["id"], status="failed", current_step="failed",
+            payload={"recording_id": recording["id"], "transcription_options": {
+                "language": "es", "task": "translate", "asr_provider": "local",
+                "visual_intelligence_enabled": False,
+            }},
+        )
+        url = f"/v1/jobs/{previous['id']}/retry"
+        headers = {"Idempotency-Key": "retry-asr-once"}
+        one = self.client.post(url, headers=headers)
+        again = self.client.post(url, headers=headers)
+        self.assertEqual(one.status_code, 202, one.text)
+        self.assertEqual(one.json()["job_id"], again.json()["job_id"])
+        created = services.jobs.get(one.json()["job_id"])
+        self.assertEqual(created["payload"]["transcription_options"]["language"], "es")
+        self.assertEqual(created["payload"]["transcription_options"]["task"], "translate")
+        self.assertEqual(created["payload"]["retry_of"], previous["id"])
+        self.assertNotEqual(previous["id"], created["id"])
+        self.assertEqual(self.client.post(url).status_code, 422)
+        self.assertEqual(self.client.post(
+            f"/v1/jobs/{created['id']}/retry", headers=headers,
+        ).status_code, 409)
+
+        legacy = services.jobs.create(
+            job_id="legacy-failed-asr", job_type="transcription",
+            scope_type="recording", scope_id=recording["id"], status="failed",
+            payload={"recording_id": recording["id"]},
+        )
+        self.assertEqual(self.client.post(
+            f"/v1/jobs/{legacy['id']}/retry",
+            headers={"Idempotency-Key": "retry-legacy"},
+        ).status_code, 409)
+
+    @patch("local_asr_server.transcription_jobs.TranscriptionJobManager._run", return_value=None)
     def test_transcription_submit_idempotency_does_not_duplicate_jobs(self, _run) -> None:
         created = self.client.post(
             "/v1/recordings",
