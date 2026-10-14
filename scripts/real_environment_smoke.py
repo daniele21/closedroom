@@ -41,7 +41,7 @@ LABELS = {
     "ready": ("Ready to record", "Pronto per registrare"),
     "start": ("Start Recording", "Avvia Registrazione"),
     "stop": ("Stop and Save", "Termina e salva"),
-    "meeting_workspace": ("Prepare notes", "Prepara note", "Transcript only", "Solo trascrizione"),
+    "meeting_workspace": ("Prepare notes", "Prepara note", "Transcribe call", "Trascrivi chiamata"),
     "search": ("Search meeting, project or text", "Cerca meeting, progetto o testo"),
     "close": ("Close", "Chiudi"),
     "permission": ("ClosedRoom needs a permission", "ClosedRoom ha bisogno di un permesso"),
