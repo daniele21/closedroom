@@ -2,25 +2,34 @@ import { useState } from 'react';
 import { Clock3, Loader2, XCircle } from 'lucide-react';
 import type { TranscriptionJob } from '../../api/apiClient';
 import { useTranslation } from '../../i18n/i18n';
-import { localizeJobStep } from '../../utils/jobs';
+import { formatASRTrackProgressStatus, formatDuration, formatVisualProgressStatus, isASRTrackProgress, isVisualProcessingProgress, localizeJobStep } from '../../utils/jobs';
 import { Button } from '../ui/Button';
 
-type ProgressJob = Pick<TranscriptionJob, 'id' | 'type' | 'status' | 'current_step' | 'progress'> & { label?: string; cancellable?: boolean };
+type ProgressJob = Pick<TranscriptionJob, 'id' | 'type' | 'status' | 'current_step' | 'progress' | 'progress_detail'> & { label?: string; cancellable?: boolean };
 
-function JobProgress({ job, onCancel }: { job: ProgressJob; onCancel: (id: string, type?: string) => Promise<void> }) {
+export function JobProgress({ job, onCancel }: { job: ProgressJob; onCancel: (id: string, type?: string) => Promise<void> }) {
   const { t } = useTranslation();
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(false);
   const waiting = ['queued', 'waiting_for_service', 'retrying'].includes(job.status);
-  const cancelling = job.status === 'cancelling' || submitting;
-  // Analysis only emits start/end markers; 10% is not measured inference progress.
-  const percent = !waiting && !cancelling && job.type !== 'analysis' && Number.isFinite(job.progress) && job.progress > 0
-    ? Math.min(100, Math.round(job.progress)) : null;
+  const cancelling = ['cancelling', 'cancel_requested'].includes(job.status) || submitting;
+  const detail = job.progress_detail;
+  const asr = isASRTrackProgress(detail) ? detail : null;
+  const visual = isVisualProcessingProgress(detail) ? detail : null;
+  const measured = asr && asr.phase === 'transcribing' && asr.processed_audio_seconds > 0 && Number(asr.audio_duration_seconds) > 0
+    ? asr.track_percent : visual && visual.total > 0 ? (visual.processed / visual.total) * 100 : null;
+  const percent = !waiting && !cancelling && measured !== null && Number.isFinite(measured)
+    ? Math.min(100, Math.max(0, Math.round(measured))) : null;
+  const progressText = asr && asr.phase === 'transcribing' && asr.processed_audio_seconds > 0
+    ? formatASRTrackProgressStatus(asr, t) : asr && asr.phase === 'transcribing'
+      ? t('meetingProgress.trackWaiting', { track: asr.track_label || asr.track_id || t('activities.unknownSource'), duration: formatDuration(asr.audio_duration_seconds) })
+      : visual ? formatVisualProgressStatus(visual, t) : null;
   const statusKey = cancelling ? 'cancelling' : waiting ? job.status : 'running';
   const stepKeys: Record<string, string> = {
     preparing_transcript: 'transcript', preparing_visual_evidence: 'visual', preparing_notes: 'notes',
     analysis: 'analysis', loading_model: 'loadingModel', downloading: 'downloading', transcribing: 'transcribing',
   };
-  const rawStep = job.current_step;
+  const rawStep = asr && ['loading_model', 'downloading'].includes(asr.phase) ? asr.phase : job.current_step;
   const localized = localizeJobStep(rawStep, t);
   const step = job.label || (stepKeys[rawStep] ? t(`meetingProgress.${stepKeys[rawStep]}`)
     : localized !== rawStep ? localized : t(`meetingProgress.${job.type === 'meeting_preparation' ? 'preparation' : job.type === 'analysis' ? 'analysis' : 'processing'}`));
@@ -28,7 +37,8 @@ function JobProgress({ job, onCancel }: { job: ProgressJob; onCancel: (id: strin
 
   const cancel = async () => {
     setSubmitting(true);
-    try { await onCancel(job.id, job.type); } finally { setSubmitting(false); }
+    setError(false);
+    try { await onCancel(job.id, job.type); } catch { setError(true); } finally { setSubmitting(false); }
   };
 
   return (
@@ -36,7 +46,7 @@ function JobProgress({ job, onCancel }: { job: ProgressJob; onCancel: (id: strin
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <span className="text-sm font-medium text-text-primary">{step}</span>
         <span className="text-xs text-text-secondary tabular-nums" role="status" aria-live="polite" aria-atomic="true">
-          {percent === null ? stateText : `${percent}% · ${t('meetingProgress.byStages')}`}
+          {percent === null ? stateText : `${percent}% · ${t(asr ? 'meetingProgress.measured' : 'meetingProgress.measuredItems')}`}
         </span>
       </div>
       {!waiting && !cancelling && (
@@ -47,14 +57,15 @@ function JobProgress({ job, onCancel }: { job: ProgressJob; onCancel: (id: strin
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent ?? undefined}
-          aria-valuetext={percent === null ? stateText : `${percent}% · ${t('meetingProgress.byStages')}`}
+          aria-valuetext={percent === null ? stateText : `${percent}% · ${t(asr ? 'meetingProgress.measured' : 'meetingProgress.measuredItems')}`}
         >
           <div className={percent === null ? 'meeting-progress-indeterminate' : 'meeting-progress-fill'} style={percent === null ? undefined : { width: `${percent}%` }} />
         </div>
       )}
+      {error && <p className="mt-2 text-xs text-danger" role="alert">{t('activities.actionFailed')}</p>}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <p className="min-w-0 flex-1 text-xs leading-relaxed text-text-secondary">
-          {t(`meetingProgress.${cancelling ? 'cancellingHint' : waiting ? 'waitingHint' : percent === null ? 'indeterminateHint' : 'stagesHint'}`)}
+          {(!waiting && !cancelling ? progressText : null) || t(`meetingProgress.${cancelling ? 'cancellingHint' : waiting ? 'waitingHint' : 'indeterminateHint'}`)}
         </p>
         {job.cancellable !== false && <Button variant="ghost" size="sm" disabled={cancelling} onClick={() => void cancel()} className="min-h-8 shrink-0 text-danger hover:text-danger-hover" aria-label={`${t('common.cancel')} · ${step}`}>
           <XCircle className="h-3.5 w-3.5" aria-hidden="true" />

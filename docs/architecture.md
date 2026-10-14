@@ -646,13 +646,12 @@ introduce un secondo mutex/scheduler.
 - richiesta di cancellazione;
 - timestamp di avvio e completamento.
 
-Il transcription job pubblica esplicitamente anche `diarizing`,
-`visual_processing` e `audio_intelligence` per i workflow tecnici compatibili.
-Il job `visual_intelligence` on-demand usa lo stesso store e pubblica progress
-bounded del processing v2. Quando esiste un `JobStore`, il manager non duplica
-gli eventi persistiti nella queue process-local; quella queue resta solo per il
-fallback senza store. Nel normale Meeting `useMeetingJobEvents` segue lo stream
-SSE persistito e ricarica lo stato canonico al terminale, senza interval polling.
+I job ASR conservano gli stati tecnici attivi, inclusi `diarizing`,
+`visual_processing` e `audio_intelligence`. JobStore conserva eventi bounded;
+la queue process-local serve solo senza store. Meeting segue parent e child
+via SSE; la shell scopre ogni 5 secondi riepiloghi `/v1/activities` senza
+payload/risultati, separando tutti gli attivi dallo storico bounded. Lo scheduler
+associa lease capture/recording; stop/cancel nativi rilasciano la lease backend.
 
 Stati terminali: `completed`, `failed`, `cancelled`, `interrupted`. Una rejection
 di resource policy termina il job prima del workload con reason

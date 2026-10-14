@@ -602,7 +602,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         localStorage.setItem('asr-active-recording-id', session.id);
         
         void ApiClient.logClientEvent('info', 'recorder', 'Starting native capture on backend', { sessionId: session.id, mode });
-        await ApiClient.startNativeCapture(session.id, mode, visualWindowId);
+        await ApiClient.startNativeCapture(session.id, mode, visualWindowId, 0.5, captureReservationIdRef.current || undefined);
         captureLeaseCommittedRef.current = true;
         
         // Connect EventSource to receive real-time levels and capture status

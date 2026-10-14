@@ -173,18 +173,19 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
   obblighi in `docs/current-state.md`/runbook release. Identità prodotto N/A.
   Applicare `finalize-workstream` e cancellare il piano soltanto a lavoro concluso.
 
-## Checkpoint unico di ripresa
+## Checkpoint 2026-10-14 — visibilità e stop nativo
 
-- Data: 2026-10-14. Pianificazione soltanto; nessuna implementazione eseguita.
-- Branch `dev`; HEAD/base locale osservata
-  `15ec412ce10cb5e49438f6e09271f2883ea65973`; base PR/remota non verificata.
-  Tree HEAD `d9f16ca4f16a9df4821aac5d02a3b50a182c5aa3`; tree locale già dirty.
-- Modifiche preesistenti: docs/design/policy, MeetingDetailPage, browser
-  preparation, verifier docs, menubar, test e static generati. Non attribuirle
-  al workstream né sovrascriverle; rivalutare overlap prima delle modifiche.
-- Fatti confermati: owner e percorsi elencati nella base, verificati nel codice.
-  Esclusa l'ipotesi “manca uno scheduler”: arbiter cablato in `server.py` per
-  entrambi i manager. Nessun test di esecuzione background svolto in questa chat.
-- Da verificare: correlazione retry, import senza capture, run senza recording.
-- Prossima azione: aggiornare head/tree/base e overlap; riprodurre avvio→route→
-  ritorno con runtime isolato, poi definire il contratto BG-1 con test failing.
+Head di partenza `a30e69e`; working tree contiene la correzione della lease
+nativa e una prima vista Attività.
+Confermato: gli stati `transcribing_mic/system` non erano inclusi tra gli attivi;
+lo stop diretto dell'overlay non rilasciava la lease server. Ora lo start lega
+lease/recording e lo stop backend la rilascia dopo la terminazione; una failure
+prima della terminazione conserva la protezione. Attività legge tutti gli attivi
+prima dello storico bounded, senza risultati/prompt, e mostra progresso misurato
+ASR/visuale; Meeting osserva parent e child con una sola riga pubblica.
+
+La shell scopre riepiloghi ogni 5 secondi; il follower SSE globale resta aperto. Importazione durevole, dedupe/retry uniforme e pre-trascrizione audio
+restano nel work graph originario. Prove correnti: `test_capture_admission_api`,
+`test_job_store`, suite completa e `dist/evidence/browser-activities/manifest.json`.
+Su resume rinfrescare head/tree/base.
+TCC/audio reale, MLX/Metal e WKWebView restano `DEFERRED_TO_RELEASE`.

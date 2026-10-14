@@ -269,6 +269,7 @@ class TranscriptionJobManager:
             if job.cancel_requested:
                 self._emit(job, "cancelled", job.progress)
                 return
+            self._emit(job, "running", 0, "starting")
             result = runner(job)
             if job.cancel_requested:
                 self._emit(job, "cancelled", job.progress)

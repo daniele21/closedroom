@@ -1697,10 +1697,8 @@ class RecordingStore:
                         if (row["scope_type"] == "recording" and row["scope_id"] == recording_id)
                         or (row["scope_type"] == "transcription" and row["scope_id"] in transcript_ids)
                     }
-                    active_statuses = {
-                        "queued", "running", "waiting_for_service", "retrying",
-                        "cancel_requested", "cancelling",
-                    }
+                    from local_asr_server.jobs.models import ACTIVE_JOB_STATUSES
+                    active_statuses = set(ACTIVE_JOB_STATUSES)
                     if any(row["id"] in owned_job_ids and row["status"] in active_statuses for row in jobs):
                         raise RecordingConflict("Wait for active meeting processing to finish")
                     for row in jobs:

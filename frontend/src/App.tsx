@@ -1,6 +1,8 @@
+import { useActivities } from './hooks/useActivities';
 import { lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
 import {
   AudioWaveform,
+  ListTodo,
   BarChart3,
   ChevronDown,
   FolderKanban,
@@ -27,6 +29,7 @@ import { TourRecordingMock } from './features/tour/TourRecordingMock';
 import { TOUR_STEPS, TourStepId, tourStepIndex } from './features/tour/tourSteps';
 import './workspace.css';
 
+const ActivitiesPage = lazy(() => import('./pages/ActivitiesPage'));
 const RecordingPage = lazy(() => import('./pages/RecordingPage'));
 const TranscriptionPage = lazy(() => import('./pages/TranscriptionPage'));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
@@ -55,6 +58,7 @@ function MainApp() {
     return urlParams.get('demo') === 'true' || localStorage.getItem('demoMode') === 'true';
   });
   const isDemoActive = demoMode || Boolean(tourStep);
+  const activities = useActivities(!isDemoActive && activePage !== 'overlay');
 
   const navigateTo = (page: string, detail: string | null = null) => {
     const pageRouteMap: Record<string, string> = {
@@ -116,6 +120,7 @@ function MainApp() {
         analysis: 'analysis',
         settings: 'settings',
         overlay: 'overlay',
+        activities: 'activities',
         meeting: 'meeting',
       };
       setActivePage(pageMap[pageName] || 'home');
@@ -255,6 +260,8 @@ function MainApp() {
             onActivateDemo={!isDemoActive ? activateDemo : undefined}
           />
         );
+      case 'activities':
+        return <ActivitiesPage activities={activities} navigateTo={navigateTo} />;
       case 'meeting':
         return <MeetingDetailPage recordingId={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'recording':
@@ -295,6 +302,7 @@ function MainApp() {
   const navItems = [
     { id: 'home', label: t('nav.home'), icon: BarChart3, active: todayActive },
     { id: 'projects', label: t('nav.projects'), icon: FolderKanban, active: activePage === 'projects' },
+    { id: 'activities', label: t('nav.activities'), icon: ListTodo, active: activePage === 'activities' },
   ];
 
   return (
@@ -360,6 +368,7 @@ function MainApp() {
               >
                 <item.icon className="h-[18px] w-[18px]" aria-hidden="true" />
                 <span>{item.label}</span>
+                {item.id === 'activities' && activities.activeCount > 0 && <Badge>{activities.activeCount}</Badge>}
               </button>
             ))}
           </nav>

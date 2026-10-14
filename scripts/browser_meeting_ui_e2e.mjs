@@ -9,6 +9,7 @@ const canonicalEvidenceRoot = path.resolve(
 );
 
 const journeys = [
+  { script: 'scripts/browser_activities_e2e.mjs', env: {} },
   {
     script: 'scripts/browser_call_overlay_screenshot_e2e.mjs',
     env: {
