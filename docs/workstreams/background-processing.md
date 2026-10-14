@@ -81,7 +81,7 @@ Fasi sequenziali; `BLOCKED` indica una dipendenza non completata.
 | --- | --- | --- | --- |
 | BG-1 | Contratto recuperabile: lista attivi/storico, snapshot/eventi, identità sorgente/risultato e terminali uniformi. Owner: jobs, router/schemas, manager, test/API client. | — | ACTIVE |
 | BG-2 | Audio importato elaborabile come le registrazioni, senza cattura fittizia; composizione audio→analisi persistita. Owner: RecordingStore/router, manager preparation/analysis, client e test. | BG-1 | ACTIVE |
-| BG-3 | Cambiare schermata conserva osservazione e contesto; ritorno o reload recupera i job dal server. Owner: shell/provider frontend, jobEvents, pagine e consumer Meeting. | BG-2 | BLOCKED |
+| BG-3 | Cambiare schermata conserva osservazione e contesto; ritorno o reload recupera i job dal server. Owner: shell/provider frontend, jobEvents, pagine e consumer Meeting. | BG-2 | ACTIVE |
 | BG-4 | Attività globali con cancel, risultato, retry e feedback accessibili. Owner: App/componenti/i18n/design, test UI. | BG-3 | BLOCKED |
 | BG-5 | Percorso completo verificato e pronto all'integrazione. Owner: test, browser E2E/registro, docs durature; preflight sul candidato. | BG-4 | BLOCKED |
 
@@ -182,8 +182,11 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
   limite 2 GiB, replay con `Idempotency-Key`, recupero dopo crash,
   metadata `recorded` e nessuna prenotazione capture. Source tests
   scritti, esecuzione e integrazione ancora PENDING.
-- Riusa `RecordingStore`, ASR e `MeetingPreparationManager`;
-  senza scheduler extra. Cancel esplicito server-side con token in
-  memoria, guard atomico e cleanup; resta il collegamento alla shell
-  e import→analisi dal wizard. BG-3..5 BLOCKED; niente build Actions.
+- Riusa `RecordingStore`, ASR e `MeetingPreparationManager` senza
+  scheduler extra. Import→ASR è ora posseduto dalla shell: cambio pagina
+  conserva upload e submit, Attività mostra l'import cancellabile e
+  riconcilia il job dal backend. Journey browser con route change aggiunto;
+  E2E/preflight exact-head PENDING. Restano Analysis audio→LLM con le
+  scelte esplicite dell'utente, SSE globale e recupero dopo reload.
+  BG-3 ACTIVE parziale, BG-4..5 BLOCKED; nessuna build in Actions.
 - Evidenza target-Mac TCC/WKWebView/MLX differita a RELEASE.
