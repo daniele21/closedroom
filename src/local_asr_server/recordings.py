@@ -327,6 +327,7 @@ class RecordingStore:
                     if existing is not None:
                         if existing.get("import_fingerprint") != fingerprint:
                             raise RecordingConflict("Import request identity reused with different audio or options")
+                        self._upsert_catalog(existing)
                         return self.public_metadata(existing)
 
                 final = stage_parent / recording_id
@@ -370,6 +371,16 @@ class RecordingStore:
                 self._write_metadata(stage, metadata)
                 stage.rename(final)
                 published = True
+                # Best-effort durable directory entry. The committed source is
+                # kept even if the filesystem does not support directory fsync.
+                try:
+                    fd = os.open(stage_parent, os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                except OSError:
+                    logger.warning("Audio import directory fsync unavailable")
                 # If indexing fails after publication, sync_catalog() repairs it
                 # on restart; never delete successfully committed user audio.
                 self._upsert_catalog(metadata)
