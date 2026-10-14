@@ -1,0 +1,62 @@
+name: Temporary documentation media compression (no app build)
+
+on:
+  pull_request:
+    branches: [experiment/complexity-ablation]
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  docs-media-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check source and destination
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          test "$PR_BASE" = "experiment/complexity-ablation"
+          test "$PR_REPO" = "$GITHUB_REPOSITORY"
+          test "$PR_HEAD" = "experiment/complexity-ablation-media-validation"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install image codec for source-only media compression
+        run: python -m pip install "Pillow==12.0.0"
+      - name: Unit-test lossless pixel/reference invariants
+        run: python -m unittest test.test_optimize_reference_media -v
+      - name: Convert doc PNGs losslessly, no app build or artifact upload
+        run: |
+          python scripts/optimize_reference_media.py --apply | tee /tmp/closedroom-reference-media-report.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('/tmp/closedroom-reference-media-report.json').read_text())
+          assert report['sources_scanned'] >= 14, report
+          assert report['total_saved_bytes'] > 0, 'No media savings; do not commit churn'
+          assert len(report['converted']) > 0
+          print('RESULT', len(report['converted']), 'images saved', report['total_saved_bytes'], 'bytes')
+          PY
+          git diff --check
+          git add -A
+          git diff --cached --check
+          python - <<'PY'
+          import subprocess
+          changed = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '-z'])
+          paths = [p.decode() for p in changed.split(b'\0') if p]
+          assert all(p.startswith('docs/assets/') or p == 'README.md' or
+                     p.endswith(('.md', '.html')) for p in paths), paths
+          print('Changed paths:', paths)
+          PY
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git commit -m "perf(experiment): lossless reference media optimization"
+          git push origin HEAD:"$GITHUB_HEAD_REF"
