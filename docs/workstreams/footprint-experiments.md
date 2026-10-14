@@ -1,6 +1,6 @@
 # Footprint experiments — Git assets and packaged-app inventory
 
-Status: **E1 IMAGES OPTIMIZED / VIDEO HELD FOR HDR / E2 REAL MAC PENDING**. Isolated branch `experiment/complexity-ablation` only. Do not merge into `dev`, alter PyInstaller exclusions, or remove media without new evidence.
+Status: **E1 IMAGES OPTIMIZED / VIDEO HELD FOR HDR / E2 READ-ONLY BUNDLE AUDITOR VALIDATED; REAL MAC MEASUREMENT PENDING**. Isolated branch `experiment/complexity-ablation` only. Do not merge into `dev`, alter PyInstaller exclusions, or remove media without new evidence.
 
 ## Goal and boundaries
 
@@ -27,24 +27,30 @@ One-off [PR #125](https://github.com/daniele21/closedroom/pull/125) targeted exp
 
 Revisit only with a dedicated HDR-preserving HEVC Main10 trial that explicitly proves `color_primaries`, `color_transfer`, `color_space`, mastering/side data metadata as applicable, timing, exact audio and readable small text using representative visual playback. Without this, **KEEP the video as-is**.
 
-## E2 — bundled dependency audit (not yet measured on a real app)
+## E2 — finalized .app footprint attribution (synthetic gates PASS; real Mac pending)
 
 `ClosedRoom.spec` already excludes `torch`, `cv2`, `datasets`, `pyarrow`, `pandas`, `multiprocess`; packaging still collects local MLX and opt-in provider components. In `selective-efficiency.md`, SE-3 ONNX/VAD quality is BLOCKED, and SE-6 PyTorch frozen proof is ACTIVE. **Do not claim savings** from speculative dependency removal.
 
-Run on the Mac from the exact checkout (no build in GitHub Actions):
+The canonical read-only auditor `scripts/audit_footprint.py` can resolve the **latest successful finalized local artifact** using `dist/artifacts/*/*/build-manifest.json`; no guessed path to `/Applications`, no build and no change to the finalized artifact:
 
 ```bash
 mkdir -p dist/evidence/footprint
 python3 scripts/audit_footprint.py repository > dist/evidence/footprint/git-tree.json
+python3 scripts/audit_footprint.py bundle --latest-finalized --root . > dist/evidence/footprint/finalized-app.json
+# If measuring an installed app rather than a locally finalized artifact:
 python3 scripts/audit_footprint.py bundle --app /Applications/ClosedRoom.app > dist/evidence/footprint/installed-app.json
+# For a later comparable build:
+python3 scripts/audit_footprint.py bundle --latest-finalized --compare dist/evidence/footprint/finalized-app.json
 ```
 
-For an exact locally finalized artifact, pass the `.app` path recorded in `dist/last-build.json` instead of assuming `/Applications` has the current revision. Reports contain only repo-relative or bundle-internal file paths and sizes, never audio/transcripts or full local file paths. Compare subsequent artifacts with `--compare <baseline-report.json>`.
+Report fields include: full logical file-byte totals, `Contents` groups, complete `component_groups`, 25 largest file/directory groups, non-overlapping physical `file_roles`, opaque archive bytes and top individual files. Adjacent finalized manifest is checked against app filename, file count (including symlinks), and total logical bytes. Only then are source revision, build ID, version, channel, signing and optional DMG byte count reported. **This is size/count identity, not a cryptographic manifest checksum check.** When no manifest is adjacent, identity is `absent` rather than inferred. `--compare` emits deltas by section/role/component.
 
-**Measurement limitations:** logical file bytes, symlink targets skipped; excludes `.git` history, DMG compression, physical disk allocation, memory, CPU and start time. PyInstaller PYZ archives mask per-Python-package size, so a more granular module/TOC report is needed *before* excluding any additional dependency. No representative `.app` was available in this execution environment.
+Privacy: data outside the selected `.app` and the repository Git tree is not scanned; no meeting data, arbitrary absolute local paths, binary content, model weights or private user recordings appear in the JSON report. File paths within the bundle are reported because they are necessary for attribution.
+
+**Limitations:** logical file sizes excluding symlink targets, not disk allocation, compressed DMG, RAM/CPU or startup. Directory groups are physical location only, **not complete Python distribution sizes**. PyInstaller executable/PYZ/ZIP internals can hide modules; don't infer that unlisted dependencies are absent. Changes to `ClosedRoom.spec` or runtime dependencies remain BLOCKED pending FULL packaged-app/import/Qwen/MLX tests and applicable REAL_ENVIRONMENT checks. No representative `.app` was available to measure here.
 
 ## Evidence and decisions
 
-`scripts/audit_footprint.py` and `test/test_audit_footprint.py`: three synthetic standard-library `unittest` cases PASS locally, covering immutable HEAD vs dirty working tree, duplicated blob IDs, a fake `.app` with symlinks and incompatible baseline rejection. The separate image optimizer adds three pixel/link/threshold tests, PASS on run 38531940499. **Not** a bundled-app smoke, external package gate or real Mac test. The one-off docs-media job was run and removed; no production code, dependency or build metadata changed.
+`scripts/audit_footprint.py` and `test/test_audit_footprint.py`: **6 synthetic standard-library tests PASS** in source-only [38542371392](https://github.com/daniele21/closedroom/actions/runs/38542371392) (syntax/py_compile PASS too). Covers immutable Git inventory, symlink-safe bundle sizes, physical component/archive accounting, privacy of unrelated paths, latest finalized selection, manifest mismatch, comparison deltas and manifest path traversal. Temporary PR #126 closed **unmerged**, workflow deleted. Earlier image compression tests PASS in [38531940499](https://github.com/daniele21/closedroom/actions/runs/38531940499). **Not** a real bundled-app smoke, Python package TOC measurement or target-Mac evidence. No app build or media artifacts uploaded, no production/dependency/build-spec changes.
 
-**HOLD E2 until real bundle report.** Candidate actions: E1 video fidelity/format experiment; E2 find oversized legitimate bundled packages, then choose narrowly-scoped exclusion with FULL package/import/MLX/Qwen smoke and target-Mac checks. Maintain `dev` unchanged.
+**HOLD dependency removal until real bundle report.** Next E2 decision is based on measured largest physical components plus explicitly unattributed PyInstaller archives, then source-owned dependency evidence and FULL package/import/MLX/Qwen smoke. Video stays unchanged pending HDR-grade evidence. Maintain `dev` unchanged.
