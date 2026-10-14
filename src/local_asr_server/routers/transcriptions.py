@@ -9,7 +9,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional, Literal
+from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -20,8 +20,8 @@ from local_asr_server.analysis_jobs import ANALYSIS_JOB_TYPE
 from local_asr_server.meeting_preparation import MeetingPreparationManager, MEETING_PREPARATION_JOB_TYPE
 from local_asr_server.transcription_jobs import (
     DIARIZATION_JOB_TYPE,
-    VISUAL_INTELLIGENCE_JOB_TYPE,
     TRANSCRIPTION_JOB_TYPE,
+    VISUAL_INTELLIGENCE_JOB_TYPE,
     TranscriptionJob,
 )
 from local_asr_server.settings import load_settings
@@ -543,6 +543,17 @@ def create_transcription_job(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.get("/v1/activities")
+def list_activities(request: Request, recent_limit: int = Query(default=30, ge=1, le=100)):
+    arbiter = request.app.state.heavy_workload_arbiter.snapshot()
+    return {
+        "items": get_services(request.app).jobs.activity_summaries(recent_limit=recent_limit),
+        "capture_blocked": bool(arbiter["capture_reservation"]["active"]),
+        "active_count": arbiter["active_count"],
+        "queue_depth": arbiter["queue_depth"],
+    }
+
+
 @router.get("/v1/jobs")
 def list_jobs(
     request: Request,
@@ -550,37 +561,14 @@ def list_jobs(
     scope_type: str | None = Query(default=None),
     scope_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
-    view: Literal["recent", "active", "history"] = Query(default="recent"),
-    summary: bool = Query(default=False),
-    before_created_at: float | None = Query(default=None),
-    before_id: str | None = Query(default=None, min_length=1),
 ):
-    # Legacy default returns full snapshots; Activities requests compact metadata.
-    if (before_created_at is None) != (before_id is None):
-        raise HTTPException(status_code=422, detail="Both cursor fields are required")
-    before = (
-        (before_created_at, before_id)
-        if before_created_at is not None and before_id is not None else None
-    )
-    jobs = get_services(request.app).transcription_jobs.list(
-        job_type=type,
-        scope_type=scope_type,
-        scope_id=scope_id,
-        limit=limit + 1,
-        view=view,
-        before=before,
-        summary=summary,
-    )
-    items = jobs[:limit]
-    more = len(jobs) > limit
-    tail = items[-1] if more and items else None
     return {
-        "items": items,
-        "has_more": more,
-        "next_cursor": (
-            {"created_at": tail["created_at"], "id": tail["id"]}
-            if tail is not None else None
-        ),
+        "items": get_services(request.app).transcription_jobs.list(
+            job_type=type,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            limit=limit,
+        )
     }
 
 

@@ -134,13 +134,12 @@ export interface CaptureDiagnostics {
 }
 
 export interface TranscriptionJob {
+  parent_job_id?: string | null;
   id: string;
   type?: string;
   scope_type?: string | null;
   scope_id?: string | null;
   recording_id?: string | null;
-  parent_job_id?: string | null;
-  has_result?: boolean;
   status: string;
   current_step: string;
   progress: number;
@@ -151,20 +150,16 @@ export interface TranscriptionJob {
   updated_at: number;
 }
 
-export interface JobListPage {
-  items: TranscriptionJob[];
-  has_more: boolean;
-  next_cursor: { created_at: number; id: string } | null;
+export interface ActivityJob extends TranscriptionJob {
+  source_label?: string | null;
+  parent_job_id?: string | null;
 }
 
-export interface JobListOptions {
-  view?: 'recent' | 'active' | 'history';
-  type?: string;
-  scope_type?: string;
-  scope_id?: string;
-  limit?: number;
-  summary?: boolean;
-  before?: { created_at: number; id: string };
+export interface ActivitySnapshot {
+  items: ActivityJob[];
+  capture_blocked: boolean;
+  active_count: number;
+  queue_depth: number;
 }
 
 export interface VisualProcessingProgress {
@@ -802,11 +797,11 @@ export const ApiClient = {
     return (await request(`/v1/recordings/${recordingId}/stop`, { method: 'POST' })).json();
   },
 
-  async startNativeCapture(recordingId: string, mode: 'both' | 'mic_only' | 'pc_only', visualWindowId?: number, visualFps = 0.5): Promise<any> {
+  async startNativeCapture(recordingId: string, mode: 'both' | 'mic_only' | 'pc_only', visualWindowId?: number, visualFps = 0.5, reservationId?: string): Promise<any> {
     return (await request(`/v1/recordings/${recordingId}/capture/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode, visual_window_id: visualWindowId, visual_fps: visualFps }),
+      body: JSON.stringify({ mode, visual_window_id: visualWindowId, visual_fps: visualFps, reservation_id: reservationId }),
     })).json();
   },
 
@@ -951,20 +946,12 @@ export const ApiClient = {
     })).json();
   },
 
-  async listJobs(options: JobListOptions = {}): Promise<JobListPage> {
-    const params = new URLSearchParams();
-    if (options.view) params.set('view', options.view);
-    if (options.type) params.set('type', options.type);
-    if (options.scope_type) params.set('scope_type', options.scope_type);
-    if (options.scope_id) params.set('scope_id', options.scope_id);
-    if (options.limit !== undefined) params.set('limit', String(options.limit));
-    if (options.summary !== undefined) params.set('summary', String(options.summary));
-    if (options.before) {
-      params.set('before_created_at', String(options.before.created_at));
-      params.set('before_id', options.before.id);
-    }
-    const query = params.toString();
-    return (await request('/v1/jobs' + (query ? '?' + query : ''))).json();
+  async cancelMeetingPreparation(recordingId: string, jobId: string): Promise<TranscriptionJob> {
+    return (await request(`/v1/meetings/${recordingId}/preparation-jobs/${jobId}/cancel`, { method: 'POST' })).json();
+  },
+
+  async listActivities(signal?: AbortSignal): Promise<ActivitySnapshot> {
+    return (await request('/v1/activities', { signal })).json();
   },
 
   async getJob(jobId: string): Promise<TranscriptionJob> {

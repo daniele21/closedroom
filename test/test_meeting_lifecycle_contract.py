@@ -20,16 +20,14 @@ class MeetingLifecycleFrontendContracts(unittest.TestCase):
         self.assertIn('className="w-full select-text resize-none', overlay)
 
     def test_meeting_progress_displays_running_and_measured_state(self) -> None:
-        meeting = (ROOT / 'frontend/src/pages/MeetingDetailPage.tsx').read_text(encoding='utf-8')
-        progress = (ROOT / 'frontend/src/components/meeting/MeetingProcessingStatus.tsx').read_text(encoding='utf-8')
-        self.assertIn('<MeetingProcessingStatus', meeting)
-        self.assertIn('...displayedActiveJobs', meeting)
+        meeting = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
+        progress = (ROOT / "frontend/src/components/meeting/MeetingProcessingStatus.tsx").read_text(encoding="utf-8")
+        self.assertIn("<MeetingProcessingStatus", meeting)
         self.assertIn('data-meeting-job-progress={job.type}', progress)
-        self.assertIn('role="progressbar"', progress)
-        self.assertIn('aria-valuemax={100}', progress)
-        self.assertIn('aria-valuenow={percent ?? undefined}', progress)
-        self.assertIn('meeting-progress-indeterminate', progress)
-        self.assertIn("job.type !== 'analysis'", progress)
+        self.assertIn("isASRTrackProgress", progress)
+        self.assertIn("processed_audio_seconds > 0", progress)
+        self.assertIn("aria-valuenow={percent ?? undefined}", progress)
+        self.assertIn("meeting-progress-indeterminate", progress)
         self.assertIn('role="status"', progress)
 
     def test_archive_and_permanent_delete_are_distinct_explicit_actions(self) -> None:

@@ -80,6 +80,7 @@ class HeavyWorkloadArbiter:
         self._cancelled: set[str] = set()
         self._capture_reservation_id: str | None = None
         self._capture_reservation_state: str | None = None
+        self._capture_recording_id: str | None = None
         self._capture_requested_at: float | None = None
         self._closed = False
         self._submitted = 0
@@ -200,10 +201,28 @@ class HeavyWorkloadArbiter:
             if self._capture_reservation_id != reservation_id:
                 return False
             self._capture_reservation_id = None
+            self._capture_recording_id = None
             self._capture_reservation_state = None
             self._capture_requested_at = None
             self._state_changed.notify_all()
             return True
+
+    def bind_capture(self, reservation_id: str, recording_id: str) -> None:
+        """Associate the granted lease with the run that must release it."""
+        with self._state_changed:
+            if self._capture_reservation_id != reservation_id:
+                raise CaptureReservationNotFound("capture reservation is not active")
+            if self._capture_reservation_state != "granted":
+                raise CaptureReservationConflict("capture reservation is not granted")
+            if self._capture_recording_id not in {None, recording_id}:
+                raise CaptureReservationConflict("capture reservation belongs to another recording")
+            self._capture_recording_id = recording_id
+
+    def release_recording_capture(self, recording_id: str) -> bool:
+        with self._state_changed:
+            if self._capture_recording_id != recording_id or self._capture_reservation_id is None:
+                return False
+            return self.release_capture(self._capture_reservation_id)
 
     def cancel_pending(self, task_id: str) -> bool:
         """Mark queued work for cancellation without interrupting active execution."""
@@ -246,6 +265,7 @@ class HeavyWorkloadArbiter:
         with self._state_changed:
             self._closed = True
             self._capture_reservation_id = None
+            self._capture_recording_id = None
             self._capture_reservation_state = None
             self._capture_requested_at = None
             if cancel_pending:

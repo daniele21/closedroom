@@ -6,6 +6,7 @@ from typing import Any, Callable
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from local_asr_server.app_services import get_services
+from local_asr_server.jobs.models import ACTIVE_JOB_STATUSES
 from local_asr_server.catalog_search import CatalogMeetingSearch, MeetingSearchUnavailable
 from local_asr_server.meeting_diagnostics import build_meeting_diagnostic_report
 from local_asr_server.meeting_preparation import MeetingPreparationManager
@@ -74,15 +75,15 @@ def _ensure_meeting_idle(services, recording_id: str) -> None:
     # Never archive a meeting with a running pipeline; preparation can own
     # active transcription and analysis jobs without changing recording status.
     with services.catalog.connection() as conn:
+        placeholders = ", ".join("?" for _ in ACTIVE_JOB_STATUSES)
         active = conn.execute(
-            """
+            f"""
             SELECT 1 FROM jobs
             WHERE scope_type = 'recording' AND scope_id = ?
-              AND status IN ('queued', 'running', 'waiting_for_service',
-                             'retrying', 'cancel_requested', 'cancelling')
+              AND status IN ({placeholders})
             LIMIT 1
             """,
-            (recording_id,),
+            [recording_id, *ACTIVE_JOB_STATUSES],
         ).fetchone()
     if active:
         raise HTTPException(status_code=409, detail="Wait for active meeting processing to finish")

@@ -273,6 +273,12 @@ def _build_meeting(app: FastAPI, recording: dict[str, Any], *, compact: bool = F
                 limit=50,
             )
         )
+    parent_ids = {
+        child["id"]: parent["id"]
+        for parent in related_jobs if parent.get("type") == "meeting_preparation"
+        for child in get_services(app).jobs.list_children(parent["id"])
+    }
+    related_jobs = [{**job, "parent_job_id": parent_ids.get(job["id"])} for job in related_jobs]
     canonical_runs = _exclude_incomplete_preparation_runs(current_runs, related_jobs)
     expanded_canonical_runs = expand_analysis_runs(canonical_runs)
     jobs = [

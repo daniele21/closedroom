@@ -168,69 +168,6 @@ class JobStoreTests(unittest.TestCase):
             self.assertTrue(created)
             self.assertEqual(retry["id"], "explicit-retry")
 
-    def test_activity_discovery_is_stable_compact_and_parent_aware(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = JobStore(Path(tmp) / "closedroom.db")
-            for job_id in ("job-a", "job-b", "job-c"):
-                store.create(
-                    job_id=job_id,
-                    job_type="analysis",
-                    scope_type="recording",
-                    scope_id="rec-1",
-                    payload={"prompt": "private meeting content"},
-                )
-            store.link_child("job-c", "job-b", stage="analysis")
-            store.update("job-a", status="completed", result={"text": "private result"})
-            # Equal timestamps require a deterministic ID tiebreaker.
-            with store.connection() as conn:
-                conn.execute("UPDATE jobs SET created_at = 100")
-
-            active = store.list_jobs(view="active", summary=True)
-            self.assertEqual([item["id"] for item in active], ["job-c", "job-b"])
-            self.assertEqual(active[-1]["parent_job_id"], "job-c")
-            self.assertNotIn("payload", active[0])
-            self.assertNotIn("result", active[0])
-            self.assertNotIn("error", active[0])
-            history = store.list_jobs(view="history", summary=True)
-            self.assertEqual([item["id"] for item in history], ["job-a"])
-            self.assertTrue(history[0]["has_result"])
-
-            first = store.list_jobs(limit=1, summary=True)
-            second = store.list_jobs(
-                limit=1, summary=True,
-                before=(first[0]["created_at"], first[0]["id"]),
-            )
-            third = store.list_jobs(
-                limit=1, summary=True,
-                before=(second[0]["created_at"], second[0]["id"]),
-            )
-            self.assertEqual(
-                [item["id"] for item in first + second + third],
-                ["job-c", "job-b", "job-a"],
-            )
-
-    def test_active_discovery_pages_all_jobs_beyond_500(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = JobStore(Path(tmp) / "closedroom.db")
-            with store.connection() as conn:
-                for index in range(510):
-                    conn.execute(
-                        "INSERT INTO jobs (id, type, status, current_step, "
-                        "progress, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
-                        (f"job-{index:03d}", "transcription", "queued", "queued",
-                         float(index), float(index)),
-                    )
-            first = store.list_jobs(view="active", summary=True, limit=500)
-            self.assertEqual(len(first), 500)
-            last = first[-1]
-            second = store.list_jobs(
-                view="active", summary=True, limit=500,
-                before=(last["created_at"], last["id"]),
-            )
-            self.assertEqual(len(second), 10)
-            self.assertEqual(len({job["id"] for job in first + second}), 510)
-            self.assertEqual(second[-1]["id"], "job-000")
-
     def test_restart_interrupts_old_active_jobs_beyond_recent_500(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "closedroom.db")
@@ -346,6 +283,25 @@ class JobStoreTests(unittest.TestCase):
             self.assertEqual(recovered["status"], "completed")
             self.assertEqual(recovered["result"], {"text": "Ciao"})
 
+
+    def test_activities_discover_old_active_phases_without_loading_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / 'jobs.db')
+            store.create(job_id='old-active', job_type='transcription', scope_type='recording', scope_id='rec')
+            store.update('old-active', status='transcribing_system', current_step='transcribing_system',
+                         progress=50, progress_detail={'kind': 'asr_track_progress', 'track_percent': 40},
+                         result={'text': 'PRIVATE RESULT'})
+            with store.connection() as conn:
+                for index in range(510):
+                    store._insert_job(conn, job_id=f'done-{index}', job_type='analysis', scope_type='inline_text',
+                                      scope_id='run', payload={'text': 'PRIVATE PROMPT'}, status='completed',
+                                      current_step='completed', progress=100, dedupe_key=None, now=9999999999 + index)
+            self.assertTrue(store.has_active_job(job_type='transcription'))
+            items = store.activity_summaries(recent_limit=3)
+            self.assertEqual(len(items), 4)
+            self.assertEqual(items[0]['id'], 'old-active')
+            self.assertEqual(items[0]['progress_detail']['track_percent'], 40)
+            self.assertTrue(all('payload' not in item and 'result' not in item for item in items))
 
 if __name__ == "__main__":
     unittest.main()

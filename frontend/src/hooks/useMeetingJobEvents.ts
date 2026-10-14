@@ -2,16 +2,17 @@ import { useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from '
 import type { Meeting, TranscriptionJob } from '../api/apiClient';
 import { followJobEvents } from '../api/jobEvents';
 
-const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'waiting_for_service', 'retrying', 'cancelling']);
+import { ACTIVE_JOB_STATUSES } from '../utils/jobs';
 
 function activeMeetingJobIds(meeting: Meeting | null): string[] {
   if (!meeting) return [];
   const activePreparation = (meeting.jobs || []).find((job) => (
     job.type === 'meeting_preparation' && ACTIVE_JOB_STATUSES.has(job.status)
   ));
-  // A preparation parent is the user-facing owner of its child ASR/analysis work.
-  // Follow only that parent while it is active to avoid duplicate streams and UI churn.
-  if (activePreparation) return [activePreparation.id];
+  // Keep one visible activity while observing its measured child progress.
+  if (activePreparation) return [activePreparation.id, ...(meeting.jobs || [])
+    .filter((job) => job.parent_job_id === activePreparation.id && ACTIVE_JOB_STATUSES.has(job.status))
+    .map((job) => job.id)].sort();
 
   const ids = new Set<string>();
   for (const job of meeting.jobs || []) {

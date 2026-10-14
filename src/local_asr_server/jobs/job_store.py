@@ -8,18 +8,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from local_asr_server.catalog import CatalogStore
-from local_asr_server.jobs.models import TERMINAL_JOB_STATUSES
 
 
 DEFAULT_JOB_EVENT_CAPACITY = 512
-ACTIVE_JOB_STATUSES = (
-    "queued",
-    "running",
-    "waiting_for_service",
-    "retrying",
-    "cancel_requested",
-    "cancelling",
-)
+from local_asr_server.jobs.models import ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES
 
 
 def _json_dump(value: Any) -> str | None:
@@ -462,58 +454,64 @@ class JobStore:
         scope_type: str | None = None,
         scope_id: str | None = None,
         limit: int = 100,
-        view: str = "recent",
-        before: tuple[float, str] | None = None,
-        summary: bool = False,
     ) -> list[dict[str, Any]]:
-        """Stable keyset discovery without loading private payloads into summaries."""
-        if view not in {"recent", "active", "history"}:
-            raise ValueError("Invalid job discovery view")
         clauses: list[str] = []
         params: list[Any] = []
         if job_type:
-            clauses.append("jobs.type = ?")
+            clauses.append("type = ?")
             params.append(job_type)
         if scope_type:
-            clauses.append("jobs.scope_type = ?")
+            clauses.append("scope_type = ?")
             params.append(scope_type)
         if scope_id:
-            clauses.append("jobs.scope_id = ?")
+            clauses.append("scope_id = ?")
             params.append(scope_id)
-        if view == "active":
-            markers = ", ".join("?" for _ in ACTIVE_JOB_STATUSES)
-            clauses.append(f"jobs.status IN ({markers})")
-            params.extend(ACTIVE_JOB_STATUSES)
-        elif view == "history":
-            statuses = sorted(TERMINAL_JOB_STATUSES)
-            markers = ", ".join("?" for _ in statuses)
-            clauses.append(f"jobs.status IN ({markers})")
-            params.extend(statuses)
-        if before is not None:
-            clauses.append(
-                "(jobs.created_at < ? OR (jobs.created_at = ? AND jobs.id < ?))"
-            )
-            params.extend((before[0], before[0], before[1]))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        # One extra row is allowed for pagination's has_more flag.
-        params.append(max(1, min(limit, 501)))
-        columns = (
-            "jobs.id, jobs.type, jobs.scope_type, jobs.scope_id, jobs.status, "
-            "jobs.current_step, jobs.progress, jobs.created_at, jobs.updated_at, "
-            "jobs.started_at, jobs.completed_at, jobs.cancel_requested, "
-            "(jobs.result_json IS NOT NULL) AS has_result, "
-            "(SELECT links.parent_job_id FROM job_links AS links "
-            "WHERE links.child_job_id = jobs.id "
-            "ORDER BY links.created_at DESC LIMIT 1) AS parent_job_id"
-        ) if summary else "jobs.*"
+        params.append(max(1, min(limit, 500)))
         with self.connection() as conn:
             rows = conn.execute(
-                f"SELECT {columns} FROM jobs {where} "
-                "ORDER BY jobs.created_at DESC, jobs.id DESC LIMIT ?",
+                f"SELECT * FROM jobs {where} ORDER BY created_at DESC LIMIT ?",
                 params,
             ).fetchall()
-        convert = self._row_to_job_summary if summary else self._row_to_job
-        return [convert(row) for row in rows]
+        return [self._row_to_job(row) for row in rows]
+
+    def activity_summaries(self, *, recent_limit: int = 30) -> list[dict[str, Any]]:
+        """All unfinished work plus bounded history, without meeting content."""
+        terminal = sorted(TERMINAL_JOB_STATUSES)
+        placeholders = ", ".join("?" for _ in terminal)
+        columns = "id, type, scope_type, scope_id, status, current_step, progress, progress_detail_json, created_at, updated_at"
+        with self.connection() as conn:
+            active = conn.execute(
+                f"SELECT {columns} FROM jobs WHERE status NOT IN ({placeholders}) ORDER BY created_at",
+                terminal,
+            ).fetchall()
+            recent = conn.execute(
+                f"SELECT {columns} FROM jobs WHERE status IN ({placeholders}) ORDER BY updated_at DESC LIMIT ?",
+                [*terminal, max(1, min(recent_limit, 100))],
+            ).fetchall()
+            ids = [row["id"] for row in [*active, *recent]]
+            id_placeholders = ", ".join("?" for _ in ids)
+            links = {row["child_job_id"]: row["parent_job_id"] for row in conn.execute(
+                f"SELECT child_job_id, parent_job_id FROM job_links WHERE child_job_id IN ({id_placeholders})", ids
+            )}
+            has_recordings = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'recordings'").fetchone()
+            scopes = list({row["scope_id"] for row in [*active, *recent] if row["scope_type"] == "recording"})
+            scope_placeholders = ", ".join("?" for _ in scopes)
+            titles = dict(conn.execute(
+                f"SELECT id, title FROM recordings WHERE id IN ({scope_placeholders})", scopes
+            )) if has_recordings and scopes else {}
+        items = []
+        for row in [*active, *recent]:
+            item = dict(row)
+            detail = _json_load(item.pop("progress_detail_json"), None)
+            # Only measured progress metadata belongs in this lightweight view.
+            item["progress_detail"] = detail if isinstance(detail, dict) and detail.get("kind") in {
+                "asr_track_progress", "visual_processing_progress"
+            } else None
+            item["parent_job_id"] = links.get(item["id"])
+            item["source_label"] = titles.get(item["scope_id"]) if item["scope_type"] == "recording" else None
+            items.append(item)
+        return items
 
     def link_child(
         self,
@@ -617,27 +615,6 @@ class JobStore:
             "DELETE FROM job_events WHERE job_id = ? AND sequence <= ?",
             (job_id, next_sequence - self.event_capacity),
         )
-
-    @staticmethod
-    def _row_to_job_summary(row: sqlite3.Row) -> dict[str, Any]:
-        """Metadata only: clients fetch the canonical job for sensitive details."""
-        return {
-            "id": row["id"],
-            "type": row["type"],
-            "scope_type": row["scope_type"],
-            "scope_id": row["scope_id"],
-            "recording_id": row["scope_id"] if row["scope_type"] == "recording" else None,
-            "parent_job_id": row["parent_job_id"],
-            "status": row["status"],
-            "current_step": row["current_step"],
-            "progress": row["progress"],
-            "has_result": bool(row["has_result"]),
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            "started_at": row["started_at"],
-            "completed_at": row["completed_at"],
-            "cancel_requested": bool(row["cancel_requested"]),
-        }
 
     def _row_to_job(self, row: sqlite3.Row) -> dict[str, Any]:
         return {

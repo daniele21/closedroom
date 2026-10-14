@@ -14,16 +14,23 @@ consente un nuovo avvio esplicito, senza promettere ripresa dal punto raggiunto.
 
 ## Base verificata e confini
 
-- `HeavyWorkloadArbiter`: unico scheduler, default 1 attivo/8 pending; le
-  prenotazioni capture trattengono la coda senza uccidere job attivi.
-- `JobStore` + `server.py`: stato/eventi SQLite e `interrupted` al restart;
-  la discovery precedente era limitata ai 500 job più recenti.
-- `transcription_jobs.py`, `analysis_jobs.py`, `meeting_preparation.py`:
-  esecuzione server-side e composizione parent/child con dedupe esistente.
-- `routers/transcriptions.py`: job list/detail/SSE/cancel.
-- `jobEvents.ts`, `useMeetingJobEvents.ts`: SSE Meeting già disponibile;
-  Transcription/Analysis usano polling e upload diretti, `App.tsx` smonta
-  le pagine al cambio route. Manca Attività globale.
+- `runtime/workload_arbiter.py`: unico scheduler pesante; default 1 attivo e 8
+  pendenti. Le prenotazioni capture trattengono i job in attesa senza uccidere
+  quelli attivi. Conservare questa precedenza e la resource policy.
+- `jobs/job_store.py`: stato, payload, risultato, cancellazione ed eventi SQLite.
+  `server.py` marca i run incompleti `interrupted` al riavvio.
+- `transcription_jobs.py` e `analysis_jobs.py` eseguono indipendentemente dalla UI.
+  `meeting_preparation.py` compone child job e conserva dedupe/riuso esistenti.
+- `routers/transcriptions.py`: lista `/v1/jobs`, snapshot, eventi SSE e cancel.
+  La lista attuale è per recenza e limitata a 500; non basta a garantire la
+  scoperta di tutti i job attivi sotto uno storico molto popolato.
+- `api/jobEvents.ts` e `hooks/useMeetingJobEvents.ts`: follower SSE e consumer
+  Meeting esistenti; le pagine dedicate usano ancora polling e stato locale.
+- `TranscriptionPage.tsx`: registrazioni via job; file audio via richiesta
+  streaming diretta. Il loop job non include oggi `interrupted` tra i terminali.
+- `AnalysisPage.tsx`: analisi via job, ma pre-trascrizione audio importato diretta;
+  ritorno alla pagina senza recupero uniforme del run.
+- `App.tsx` smonta le pagine al cambio route; manca una vista Attività globale.
 
 Esclusi: coda distribuita, più concorrenza, riordino, esecuzione ad app chiusa,
 notifiche di sistema, auto-retry. Preservare compatibilità API dirette.
@@ -166,24 +173,21 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
   obblighi in `docs/current-state.md`/runbook release. Identità prodotto N/A.
   Applicare `finalize-workstream` e cancellare il piano soltanto a lavoro concluso.
 
-## Checkpoint unico di ripresa
+## Checkpoint 2026-10-14 — BG-1 e Attività
 
-- 2026-10-14: BG-1 ACTIVE; BG-2..5 BLOCKED (dipendenza non ancora validata).
-- Branch `feature/background-processing-bg1`, base `dev`
-  `a30e69e99c03c7b4ec52da7155e6645dbf9d1a27`; PR #134.
-  Ricontrollare HEAD/tree/base al resume. Nessun merge.
-- Implementati: discovery `active/history` keyset+parent senza payload,
-  restart >500, cancel via owner e terminali UI. `Idempotency-Key` rende
-  ASR, diarizzazione e analisi diretta idempotenti anche dopo il terminale;
-  stesso ID/opzioni diverse -> 409. La pagina Trascrizione conserva il key
-  durante POST ambiguo.
-- Test aggiunti per concorrenza, pagination, restart, submit e cancel.
-  Source-only preflight PR #134: selector INTEGRATION/STRONG. Gate governance
-  FALLITO per budget docs (architecture 12177 >12000, workstream 3220 >3000);
-  test/TS/browser E2E ancora PENDING al checkpoint. Questa revisione comprime
-  la documentazione senza modificare le soglie.
-- Restano: identità per parent/pipeline multiple, SSE/reconnect e race
-  cancel/admission, recupero chiave dopo unmount (BG-3).
-- Prossima azione: raccogliere test PR #134, correggere regressioni,
-  chiudere BG-1 prima di BG-2 import atomico. No build GitHub Actions.
-  Target-Mac TCC/audio/WKWebView/MLX differito a RELEASE.
+- Stato BG-1 ACTIVE; BG-2..5 BLOCKED. Base `dev`
+  `ff65035bca385430d2e47da5f3a0b5b2a6b35c85`; PR #134.
+- Il nuovo `dev` ha introdotto `/v1/activities`, shell Attività,
+  progress ASR/visual, e fix della lease di capture sullo stop.
+  `activity_summaries` è l'unico owner della discovery; non duplicarlo.
+- Da BG-1 sul branch: restart corretto oltre i 500 recenti,
+  `Idempotency-Key` per ASR/diarizzazione/analisi diretta con ammissione
+  SQLite atomica, cancellazione parent via manager, terminali UI allineati.
+  Il key per POST senza risposta vive soltanto nel component montato.
+- Test nuovi su submission concorrenziale e terminale, API direct e
+  recupero restart. Preflight STRONG initial FAIL per budget docs e
+  contratti UI obsoleti, corretti; validazione nuovo HEAD/base PENDING.
+- Gap: replay parent/pipeline, stream SSE/reconnect, race cancel/submit,
+  storico oltre il recente; BG-2 richiede import atomico in `RecordingStore`
+  senza stato `recording` fittizio. Nessun build GitHub Actions.
+- La reale TCC/audio/WKWebView e MLX/Metal rimane release evidence.

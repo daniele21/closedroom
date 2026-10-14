@@ -160,41 +160,26 @@ class TranscriptionJobManager:
         scope_type: str | None = None,
         scope_id: str | None = None,
         limit: int = 100,
-        view: str = "recent",
-        before: tuple[float, str] | None = None,
-        summary: bool = False,
     ) -> list[dict[str, Any]]:
         if self._store is None:
-            if view not in {"recent", "active", "history"}:
-                raise ValueError("Invalid job discovery view")
-            from local_asr_server.jobs.job_store import ACTIVE_JOB_STATUSES
-
             with self._lock:
                 jobs = list(self._jobs.values())
-            ordered = sorted(jobs, key=lambda item: (item.created_at, item.id), reverse=True)
             return [
-                (
-                    {k: v for k, v in job.public().items() if k not in {"result", "progress_detail", "error"}}
-                    | {"parent_job_id": None, "has_result": job.result is not None}
-                    if summary else job.public()
-                )
-                for job in ordered
+                job.public()
+                for job in sorted(jobs, key=lambda item: item.created_at, reverse=True)
                 if (job_type is None or job_type == job.job_type)
                 and (scope_type is None or scope_type == job.scope_type)
                 and (scope_id is None or scope_id == (job.scope_id or job.recording_id))
-                and (view == "recent" or (job.status in ACTIVE_JOB_STATUSES) == (view == "active"))
-                and (before is None or (job.created_at, job.id) < before)
             ][:limit]
-        stored_jobs = self._store.list_jobs(
-            job_type=job_type,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            limit=limit,
-            view=view,
-            before=before,
-            summary=summary,
-        )
-        return stored_jobs if summary else [self._stored_public(job) for job in stored_jobs]
+        return [
+            self._stored_public(job)
+            for job in self._store.list_jobs(
+                job_type=job_type,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                limit=limit,
+            )
+        ]
 
     def cancel(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -301,6 +286,7 @@ class TranscriptionJobManager:
             if job.cancel_requested:
                 self._emit(job, "cancelled", job.progress)
                 return
+            self._emit(job, "running", 0, "starting")
             result = runner(job)
             if job.cancel_requested:
                 self._emit(job, "cancelled", job.progress)
