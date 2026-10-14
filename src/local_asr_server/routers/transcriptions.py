@@ -748,6 +748,27 @@ def retry_job(
                    if key in AnalysisRequest.model_fields}
         if not (options.get("text") or options.get("transcription_id") or options.get("recording_id")):
             raise HTTPException(status_code=409, detail="Original analysis source unavailable")
+        # A retry must not silently switch provider/model/settings if the app
+        # configuration changed after the original job was admitted.
+        effective = payload.get("llm_options")
+        if not isinstance(effective, dict) or not effective.get("provider"):
+            raise HTTPException(status_code=409, detail="Original analysis options unavailable")
+        options.update({
+            "llm_provider": effective["provider"],
+            "gemini_model": effective.get("model") if effective["provider"] == "gemini" else None,
+            "local_llm_model": effective.get("model") if str(effective["provider"]).endswith("_local") else None,
+            "local_llm_mode": effective.get("mode"),
+            "local_llm_url": effective.get("url"),
+            "local_llm_quality_preset": effective.get("quality_preset"),
+            "local_llm_temperature": effective.get("temperature"),
+            "local_llm_reasoning": effective.get("reasoning"),
+            "local_llm_max_output_tokens": effective.get("max_output_tokens"),
+            "local_llm_json_mode": effective.get("json_mode"),
+            "local_llm_backend": effective.get("backend"),
+            "local_llm_model_path": effective.get("model_path"),
+            "local_llm_mmproj_path": effective.get("mmproj_path"),
+            "local_llm_ctx_size": effective.get("ctx_size"),
+        })
         body = AnalysisRequest.model_validate(options)
         try:
             created = services.analysis_jobs.create(
