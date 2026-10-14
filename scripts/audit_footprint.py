@@ -4,6 +4,7 @@
 Usage:
   python3 scripts/audit_footprint.py repository [--root .] [--ref HEAD]
   python3 scripts/audit_footprint.py bundle --app /path/to/ClosedRoom.app
+  python3 scripts/audit_footprint.py bundle --latest-finalized --root .
   python3 scripts/audit_footprint.py bundle --app /path/to/ClosedRoom.app --compare previous.json
 
 JSON contains repository-relative paths or bundle-internal paths only. It never
@@ -88,6 +89,86 @@ def repository_audit(root: Path, ref: str = "HEAD") -> dict:
     }
 
 
+def _component_group(path: str) -> str:
+    """A real file/directory in the .app, never inferred Python distribution size."""
+    parts = Path(path).parts
+    if len(parts) >= 3 and parts[:2] in (
+        ("Contents", "Frameworks"), ("Contents", "Resources")
+    ):
+        # Loose binaries/files directly under a section share one group.
+        return "/".join((*parts[:2], parts[2] if len(parts) > 3 else "_root_files"))
+    if len(parts) >= 2:
+        return "/".join(parts[:2])
+    return "_app_root"
+
+
+def _file_role(path: str) -> str:
+    """Non-overlapping physical-file categories, *not* dependency attribution."""
+    parts = Path(path).parts
+    name = parts[-1].lower()
+    suffix = Path(name).suffix
+    if "static" in parts or "web" in parts and suffix in {".js", ".css", ".html"}:
+        return "bundled_web_ui"
+    if suffix in {".gguf", ".onnx", ".safetensors", ".mlmodel", ".mlmodelc"}:
+        return "model_or_ml_artifact"
+    if suffix in {".pyz", ".zip", ".whl"} or name.startswith("pyz-"):
+        return "opaque_archives"
+    if suffix in {".dylib", ".so", ".metallib", ".pyd", ".a"}:
+        return "native_libraries_and_extensions"
+    if ".framework" in parts or any(part.endswith(".framework") for part in parts):
+        return "framework_files"
+    if suffix in {".png", ".jpg", ".jpeg", ".icns", ".json", ".txt", ".tiktoken", ".npz", ".db", ".sqlite", ".html", ".css", ".js"}:
+        return "other_resources"
+    return "unclassified_bundle_files"
+
+
+def _validated_manifest(app: Path, *, counted_files: int, bytes_total: int) -> dict:
+    manifest_path = app.parent / "build-manifest.json"
+    if not manifest_path.exists():
+        return {"status": "absent", "source_revision": None}
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    identity = manifest.get("artifacts", {}).get("app", {})
+    if (manifest.get("status") != "successful"
+            or identity.get("path") != app.name
+            or identity.get("bytes") != bytes_total
+            or identity.get("file_count") != counted_files):
+        raise ValueError("Adjacent build manifest does not match this .app's size, file count and name")
+    source = manifest.get("source", {})
+    lineage = manifest.get("lineage", {})
+    dmg = manifest.get("artifacts", {}).get("dmg")
+    return {
+        "status": "size_and_count_match_not_checksum_verified",
+        "source_revision": source.get("revision"),
+        "source_dirty": source.get("dirty"),
+        "build_id": manifest.get("build_id"),
+        "product_version": manifest.get("product_version"),
+        "channel": lineage.get("channel"),
+        "signing": manifest.get("configuration", {}).get("signing"),
+        "dmg_bytes_if_present": dmg.get("bytes") if isinstance(dmg, dict) else None,
+    }
+
+
+def latest_finalized_app(root: Path) -> Path:
+    """Match smoke_packaged_app's finalized-artifact selection, without its runtime imports."""
+    items: list[tuple[str, Path]] = []
+    for manifest_file in (root / "dist" / "artifacts").glob("*/*/build-manifest.json"):
+        try:
+            manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if manifest.get("status") != "successful":
+            continue
+        filename = manifest.get("artifacts", {}).get("app", {}).get("path")
+        if not isinstance(filename, str) or Path(filename).name != filename or not filename.endswith(".app"):
+            continue
+        app = manifest_file.parent / filename
+        if app.is_dir():
+            items.append((str(manifest.get("created_at") or ""), app))
+    if not items:
+        raise ValueError("No finalized local .app and build-manifest.json found under dist/artifacts")
+    return max(items, key=lambda pair: pair[0])[1]
+
+
 def bundle_audit(app: Path) -> dict:
     if app.suffix != ".app" or not (app / "Contents").is_dir():
         raise ValueError("Expected an existing macOS .app directory containing Contents/")
@@ -116,17 +197,25 @@ def bundle_audit(app: Path) -> dict:
         pieces = Path(path).parts
         return "/".join(pieces[:2]) if len(pieces) >= 2 else "app_root"
 
+    total_bytes = sum(item["bytes"] for item in files)
+    manifest = _validated_manifest(app, counted_files=len(files) + symlinks, bytes_total=total_bytes)
+    components = _size_groups(files, _component_group)
+    roles = _size_groups(files, _file_role)
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "macos_app_bundle",
         "app_name": app.name,
         "count": len(files),
         "symlinks_not_followed": symlinks,
-        "total_bytes": sum(item["bytes"] for item in files),
+        "total_bytes": total_bytes,
         "groups": _size_groups(files, classify),
+        "component_groups": dict(sorted(components.items(), key=lambda item: (-item[1]["bytes"], item[0]))[:30]),
+        "file_roles": roles,
+        "unattributed_opaque_archive_bytes": roles.get("opaque_archives", {}).get("bytes", 0),
+        "artifact_identity": manifest,
         "largest_files": _largest(files, 25),
         "measurement": "file logical sizes within .app, excluding symlink targets; not disk allocation, DMG, memory or startup",
-        "caution": "PyInstaller archives hide per-Python-package bytes; no dependency removal is inferred from this report",
+        "caution": "Groups count physically bundled files only. PyInstaller executable/PYZ/zip contents may hide modules; no per-dependency size or safety-to-remove claim.",
     }
 
 
@@ -137,12 +226,20 @@ def main(argv: list[str] | None = None) -> int:
     repo.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     repo.add_argument("--ref", default="HEAD")
     bundle = sub.add_parser("bundle", help="Measure an existing local packaged app, never build it")
-    bundle.add_argument("--app", type=Path, required=True)
+    selector = bundle.add_mutually_exclusive_group(required=True)
+    selector.add_argument("--app", type=Path, help="Existing .app path")
+    selector.add_argument("--latest-finalized", action="store_true", help="Resolve latest successful local artifact manifest")
+    bundle.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1],
+                        help="Checkout containing dist/artifacts, only for --latest-finalized")
     for command in (repo, bundle):
         command.add_argument("--compare", type=Path, help="Previous report JSON of the same kind")
     args = parser.parse_args(argv)
     try:
-        report = repository_audit(args.root, args.ref) if args.mode == "repository" else bundle_audit(args.app)
+        if args.mode == "repository":
+            report = repository_audit(args.root, args.ref)
+        else:
+            app = latest_finalized_app(args.root) if args.latest_finalized else args.app
+            report = bundle_audit(app)
         if args.compare:
             baseline = json.loads(args.compare.read_text(encoding="utf-8"))
             if baseline.get("kind") != report["kind"] or baseline.get("schema_version") != SCHEMA_VERSION:
@@ -152,6 +249,15 @@ def main(argv: list[str] | None = None) -> int:
                 "delta_bytes": report["total_bytes"] - baseline["total_bytes"],
                 "delta_files": report["count"] - baseline["count"],
             }
+            if report["kind"] == "macos_app_bundle":
+                for group in ("file_roles", "groups", "component_groups"):
+                    previous = baseline.get(group, {})
+                    current = report.get(group, {})
+                    report["comparison"][group + "_delta_bytes"] = {
+                        name: current.get(name, {}).get("bytes", 0) - previous.get(name, {}).get("bytes", 0)
+                        for name in sorted(set(previous) | set(current))
+                        if current.get(name, {}).get("bytes", 0) != previous.get(name, {}).get("bytes", 0)
+                    }
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
