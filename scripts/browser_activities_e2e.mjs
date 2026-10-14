@@ -147,6 +147,12 @@ try {
   await assert(`!!document.querySelector('[data-activity-id="first"]')`, 'jobs survive navigation');
   await call('Emulation.setDeviceMetricsOverride', { width: 680, height: 900, deviceScaleFactor: 1, mobile: false });
   await checkpoint('03-return-compact');
+  await evaluate(`location.hash = '#meeting/first'`);
+  await assert(`!!document.querySelector('[data-meeting-job-progress]')`, 'Meeting job visible while shell follows it');
+  await sleep(250);
+  if ((activeSse.get('first') || 0) !== 1) throw new Error('Meeting and shell did not share one SSE connection');
+  await evaluate(`location.hash = '#activities'`);
+  await assert(`!!document.querySelector('[data-activity-id="first"]')`, 'Activity still available after shared follower navigation');
   captureBlocked = true;
   await refresh();
   await assert(`document.body.innerText.includes('recording to end') || document.body.innerText.includes('termini la registrazione')`, 'capture wait explained');
