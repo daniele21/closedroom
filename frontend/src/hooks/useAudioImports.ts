@@ -33,6 +33,24 @@ export function useAudioImports(enabled = true) {
     return () => { mounted.current = false; };
   }, []);
 
+  // On a real window reload, a File object cannot be reconstructed.
+  // Abort only unfinished transfers; persisted sources/jobs are never
+  // deleted and their status is discovered again from SQLite at bootstrap.
+  useEffect(() => {
+    const onPageHide = () => {
+      for (const [id, controller] of uploadControllers.current) {
+        // keepalive allows cancellation to reach the loopback service after
+        // browser teardown, unlike a normal request cancelled by unloading.
+        void fetch(`/v1/recordings/import-audio/${encodeURIComponent(id)}/cancel`, {
+          method: 'POST', credentials: 'same-origin', keepalive: true,
+        }).catch(() => {});
+        controller.abort();
+      }
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, []);
+
   const startImport = useCallback((
     file: File,
     options: TranscriptionOptions,
