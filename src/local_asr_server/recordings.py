@@ -11,7 +11,7 @@ import hashlib
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from local_asr_server.catalog import CatalogStore
 from local_asr_server.recording_screenshot_artifacts import (
@@ -84,6 +84,22 @@ NOTE_MANIFEST_VERSION = 1
 NOTE_MANIFEST_FILE = "notes.json"
 MAX_NOTE_TEXT_CHARS = 4_000
 
+# Imports are local recorded sources, never capture sessions. Uploads are
+# streamed to a bounded staging directory and published via atomic rename.
+MAX_IMPORTED_AUDIO_BYTES = 2 * 1024 * 1024 * 1024
+IMPORT_READ_CHUNK_BYTES = 1024 * 1024
+IMPORT_AUDIO_MIME = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
+    ".webm": "audio/webm",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+}
+
+
 
 class RecordingError(Exception):
     pass
@@ -134,6 +150,7 @@ class RecordingStore:
             not_found_error=RecordingNotFound,
         )
         self._recover_interrupted_deletions()
+        self._cleanup_interrupted_audio_imports()
         self._mark_interrupted_jobs()
         self._reconcile_screenshot_assets()
         self.sync_catalog()
@@ -226,6 +243,140 @@ class RecordingStore:
         self._write_metadata(session_dir, metadata)
         self._upsert_catalog(metadata)
         return self.public_metadata(metadata)
+
+    def _cleanup_interrupted_audio_imports(self) -> None:
+        """Discard uncommitted import directories from a previous process."""
+        for stage in self.root.glob("*/.import-*"):
+            if stage.is_dir() and not stage.is_symlink():
+                try:
+                    shutil.rmtree(stage)
+                except OSError:
+                    logger.warning("Could not clean interrupted audio import staging")
+
+    def import_audio(
+        self,
+        source: BinaryIO,
+        *,
+        filename: str,
+        title: str | None = None,
+        project_name: str | None = None,
+        model: str,
+        language: str | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Publish one immutable audio source without ever holding capture admission.
+
+        A caller-provided request ID makes ambiguous upload responses replayable.
+        The fingerprint covers file bytes and visible import options; a different
+        upload with the same ID conflicts rather than replacing prior evidence.
+        """
+        if request_id is not None and (not request_id or len(request_id) > 128):
+            raise RecordingConflict("Invalid import request identity")
+        name = Path(filename).name
+        extension = Path(name).suffix.lower()
+        if extension not in IMPORT_AUDIO_MIME:
+            raise RecordingConflict("Unsupported audio format")
+        clean_title = (title or Path(name).stem or "Imported audio").strip()[:200]
+        clean_project = (project_name or "").strip()[:200]
+        if not clean_title:
+            clean_title = "Imported audio"
+        recording_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"closedroom/audio-import/v1/{request_id}")
+            if request_id is not None else uuid.uuid4()
+        )
+        date_dir = datetime.now(timezone.utc).date().isoformat()
+        root = self.root
+        stage_parent = root / date_dir
+        stage_parent.mkdir(parents=True, exist_ok=True)
+        stage = stage_parent / f".import-{uuid.uuid4().hex}"
+        stage.mkdir()
+        audio_file = stage / f"recording{extension}"
+        digest = hashlib.sha256()
+        size = 0
+        published = False
+        try:
+            with audio_file.open("xb") as output:
+                while True:
+                    chunk = source.read(IMPORT_READ_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_IMPORTED_AUDIO_BYTES:
+                        raise RecordingConflict("Imported audio exceeds maximum size")
+                    output.write(chunk)
+                    digest.update(chunk)
+                if not size:
+                    raise RecordingConflict("Imported audio is empty")
+                output.flush()
+                os.fsync(output.fileno())
+            source_hash = digest.hexdigest()
+            fingerprint = hashlib.sha256(json.dumps({
+                "source_sha256": source_hash,
+                "title": clean_title,
+                "project_name": clean_project,
+                "model": model,
+                "language": language,
+                "extension": extension,
+            }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+            with self._lock_for(recording_id):
+                if request_id is not None:
+                    try:
+                        existing = self.get(recording_id, include_result=False)
+                    except RecordingNotFound:
+                        existing = None
+                    if existing is not None:
+                        if existing.get("import_fingerprint") != fingerprint:
+                            raise RecordingConflict("Import request identity reused with different audio or options")
+                        return existing
+
+                final = stage_parent / recording_id
+                if final.exists():
+                    raise RecordingConflict("Import destination already exists")
+                now = _utc_now()
+                track = {
+                    "id": "mixed", "source": "mixed", "label": TRACK_LABELS["mixed"],
+                    "mime_type": IMPORT_AUDIO_MIME[extension], "extension": extension,
+                    "chunk_count": 1, "bytes_written": size,
+                    "chunks": [{
+                        "sequence": 0, "sha256": source_hash, "size": size,
+                        "received_at": now,
+                    }],
+                    "primary": True,
+                    "audio_file": f"{date_dir}/{recording_id}/recording{extension}",
+                }
+                metadata = {
+                    "id": recording_id,
+                    "title": clean_title, "project_name": clean_project,
+                    "status": "recorded", "created_at": now, "stopped_at": now,
+                    "completed_at": None, "archived_at": None,
+                    "mime_type": IMPORT_AUDIO_MIME[extension],
+                    "extension": extension, "chunk_count": 1, "bytes_written": size,
+                    "model": model, "language": language, "error": None,
+                    "relative_dir": f"{date_dir}/{recording_id}",
+                    "capture_mode": "legacy_mixed", "capture_backend": "import",
+                    "capture_status": "stopped", "timeline": None,
+                    "quality_report": None, "warnings": [],
+                    "primary_track_id": "mixed", "audio_tracks": [track],
+                    "screenshot_count": 0,
+                    "screenshot_manifest_version": SCREENSHOT_MANIFEST_VERSION,
+                    "screenshot_revision": 0,
+                    "note_count": 0, "note_manifest_version": NOTE_MANIFEST_VERSION,
+                    "note_revision": 0,
+                    "import_source_sha256": source_hash,
+                    "import_fingerprint": fingerprint,
+                }
+                # Metadata points to the final directory, which becomes visible
+                # to readers only when all bytes and metadata are on disk.
+                self._write_metadata(stage, metadata)
+                stage.rename(final)
+                published = True
+                # If indexing fails after publication, sync_catalog() repairs it
+                # on restart; never delete successfully committed user audio.
+                self._upsert_catalog(metadata)
+                return self.public_metadata(metadata)
+        finally:
+            if not published:
+                shutil.rmtree(stage, ignore_errors=True)
 
     def update(self, recording_id: str, title: str | None = None, project_name: str | None = None) -> dict[str, Any]:
         with self._lock_for(recording_id):
