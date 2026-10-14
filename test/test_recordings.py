@@ -68,6 +68,56 @@ class RecordingStoreTests(unittest.TestCase):
             )
         self.assertEqual(len(restarted.list()), 1)
 
+    def test_import_does_not_occupy_capture_during_upload(self) -> None:
+        release = threading.Event()
+        halfway = threading.Event()
+
+        class SlowInput:
+            def __init__(self):
+                self.calls = 0
+
+            def read(self, _size):
+                self.calls += 1
+                if self.calls == 1:
+                    return b"audio"
+                halfway.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("test stream did not resume")
+                return b""
+
+        outcome = {}
+        def import_in_thread():
+            outcome["recording"] = self.store.import_audio(
+                SlowInput(), filename="call.wav", model="test-model",
+            )
+
+        worker = threading.Thread(target=import_in_thread)
+        worker.start()
+        try:
+            self.assertTrue(halfway.wait(timeout=5))
+            self.assertIsNone(self.store.active_recording())
+            self.assertEqual(self.store.list(), [])
+        finally:
+            release.set()
+            worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(outcome["recording"]["status"], "recorded")
+
+    def test_concurrent_replays_publish_only_one_source(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def import_once(_index):
+            return self.store.import_audio(
+                io.BytesIO(b"same audio"), filename="same.webm",
+                model="test-model", request_id="concurrent-upload",
+            )["id"]
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            identifiers = list(executor.map(import_once, range(8)))
+        self.assertEqual(len(set(identifiers)), 1)
+        self.assertEqual(len(self.store.list()), 1)
+        self.assertEqual(list(self.root.glob("*/.import-*")), [])
+
     def test_failed_import_cleans_staging_and_keeps_no_recording(self) -> None:
         from local_asr_server.recordings import MAX_IMPORTED_AUDIO_BYTES
 
