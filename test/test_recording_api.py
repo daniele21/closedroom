@@ -195,6 +195,45 @@ class RecordingApiTests(unittest.TestCase):
         self.assertEqual(invalid.status_code, 422)
         self.assertNotEqual(parent["status"], "failed")
 
+    @patch("local_asr_server.services.analysis_service.AnalysisService.analyze")
+    @patch("local_asr_server.server.transcribe_file_sync")
+    def test_import_to_asr_to_analysis_failure_preserves_transcript(self, transcribe, analyze) -> None:
+        transcribe.return_value = {
+            "text": "Keep this accurate transcript", "language": "it",
+            "segments": [{"id": 0, "start": 0.0, "end": 1.0,
+                          "text": "Keep this accurate transcript"}],
+        }
+        analyze.side_effect = RuntimeError("synthetic analysis failure")
+        audio = self.client.post(
+            "/v1/recordings/import-audio",
+            files={"file": ("one.wav", _wav_bytes(), "audio/wav")},
+        )
+        self.assertEqual(audio.status_code, 201)
+        recording_id = audio.json()["id"]
+        started = self.client.post(
+            f"/v1/recordings/{recording_id}/audio-analysis-jobs",
+            json={"transcription": {"language": "it"},
+                  "analysis": {"llm_provider": "mock",
+                               "prompt": "Extract the key points"}},
+        )
+        self.assertEqual(started.status_code, 202, started.text)
+        job_id = started.json()["id"]
+        import time
+        for _ in range(150):
+            parent = get_services(self.app).jobs.get(job_id)
+            if parent["status"] in {"completed", "failed", "cancelled", "interrupted"}:
+                break
+            time.sleep(0.04)
+        self.assertEqual(parent["status"], "failed", parent.get("error"))
+        result = parent.get("result") or {}
+        self.assertTrue(result.get("transcription_id"))
+        transcript = get_services(self.app).transcriptions.get(result["transcription_id"])
+        self.assertIn("Keep this accurate transcript", transcript["text"])
+        analysis_children = get_services(self.app).jobs.list_children(job_id, stage="analysis")
+        self.assertEqual(len(analysis_children), 1)
+        self.assertEqual(analysis_children[0]["status"], "failed")
+        self.assertFalse(self.client.get("/v1/recordings/active").json()["active"])
+
     @patch("local_asr_server.transcription_jobs.TranscriptionJobManager._run", return_value=None)
     def test_custom_audio_parent_retry_is_idempotent_after_failure(self, _run) -> None:
         imported = self.client.post(
