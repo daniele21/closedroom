@@ -19,6 +19,7 @@ let captureBlocked = false;
 let cancelCount = 0;
 let importCount = 0;
 let importedJobCount = 0;
+const activeSse = new Map();
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const json = (value, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)); };
@@ -52,10 +53,24 @@ const server = http.createServer((req, res) => {
     const id = url.pathname.split('/')[3];
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
     let sequence = 0;
-    const send = () => { const item = jobs.find((j) => j.id === id); if (item) res.write(`data: ${JSON.stringify({ ...item, sequence: ++sequence })}\n\n`); };
+    activeSse.set(id, (activeSse.get(id) || 0) + 1);
+    const send = () => {
+      const item = jobs.find((j) => j.id === id);
+      if (!item) return;
+      // SQLite rows use an event ID and put measured progress in payload.
+      const event = {
+        id: `event-${id}-${++sequence}`, job_id: id, sequence,
+        status: item.status, current_step: item.current_step, progress: item.progress,
+        payload: item.progress_detail || null, created_at: item.updated_at + sequence / 1000,
+      };
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
     send();
     const interval = setInterval(send, 150);
-    req.on('close', () => clearInterval(interval));
+    req.on('close', () => {
+      clearInterval(interval);
+      activeSse.set(id, Math.max(0, (activeSse.get(id) || 1) - 1));
+    });
     return;
   }
   if (/^\/v1\/jobs\/[^/]+$/.test(url.pathname)) return json(jobs.find((j) => j.id === url.pathname.split('/')[3]) || {});
@@ -161,6 +176,7 @@ try {
   await assert(`document.querySelector('[data-meeting-job-progress] [role="progressbar"]')?.getAttribute('aria-valuenow') === '40'`, 'Meeting shows legacy active status with measured progress');
   jobs[0] = { ...jobs[0], status: 'transcribing_system', current_step: 'transcribing_system', progress_detail: { ...detail, track_id: 'system', track_label: 'Computer', track_percent: 65, processed_audio_seconds: 195 } };
   await assert(`document.querySelector('[data-meeting-job-progress] [role="progressbar"]')?.getAttribute('aria-valuenow') === '65'`, 'Meeting follows phase transition via SSE');
+  if ((activeSse.get('first') || 0) > 1) throw new Error('duplicate EventSource opened for the same job');
   await checkpoint('07-meeting-measured-sse');
   jobs = [{ ...fixture('parent', 'running', 'meeting_preparation'), scope_id: 'first', current_step: 'preparing_transcript' }, { ...fixture('child', 'transcribing_mic'), scope_id: 'first', parent_job_id: 'parent', progress_detail: detail }];
   await evaluate(`location.hash = '#projects'`);
