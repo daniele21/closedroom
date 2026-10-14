@@ -3,6 +3,7 @@ from __future__ import annotations
 from local_asr_server.app_services import get_services
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -10,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional, Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
@@ -499,8 +500,22 @@ def transcribe_recording(recording_id: str, request: Request, body: TranscribeRe
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
 
 
+def _submission_fingerprint(body: BaseModel) -> str:
+    # Fingerprint the explicit options, not mutable server settings.
+    # No prompt, transcript or other request content appears in this digest.
+    raw = json.dumps(body.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 @router.post("/v1/recordings/{recording_id}/transcription-jobs", status_code=202)
-def create_transcription_job(recording_id: str, request: Request, body: TranscriptionJobRequest):
+def create_transcription_job(
+    recording_id: str,
+    request: Request,
+    body: TranscriptionJobRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
+):
     try:
         get_services(request.app).recordings.get(recording_id, include_result=False)
     except RecordingNotFound as exc:
@@ -513,14 +528,19 @@ def create_transcription_job(recording_id: str, request: Request, body: Transcri
             payload["analysis_pipeline"] = pipeline
         return payload
 
-    return get_services(request.app).transcription_jobs.create(
-        recording_id,
-        runner,
-        payload={
-            "recording_id": recording_id,
-            "visual_intelligence_enabled": body.visual_intelligence_enabled,
-        },
-    )
+    try:
+        return get_services(request.app).transcription_jobs.create(
+            recording_id,
+            runner,
+            payload={
+                "recording_id": recording_id,
+                "visual_intelligence_enabled": body.visual_intelligence_enabled,
+            },
+            request_id=idempotency_key,
+            request_hash=_submission_fingerprint(body) if idempotency_key else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/v1/jobs")
@@ -569,6 +589,9 @@ def create_diarization_job(
     transcription_id: str,
     request: Request,
     body: DiarizationJobRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
 ):
     try:
         transcription = get_services(request.app).transcriptions.get(transcription_id)
@@ -605,10 +628,11 @@ def create_diarization_job(
             progress_callback=progress,
         )
 
-    return get_services(request.app).transcription_jobs.create(
-        recording_id,
-        runner,
-        job_type=DIARIZATION_JOB_TYPE,
+    try:
+        return get_services(request.app).transcription_jobs.create(
+            recording_id,
+            runner,
+            job_type=DIARIZATION_JOB_TYPE,
         scope_type="transcription",
         scope_id=transcription_id,
         payload={
@@ -617,8 +641,12 @@ def create_diarization_job(
             "provider": body.provider,
             "speechmatics_region": body.speechmatics_region,
             "speechmatics_model": body.speechmatics_model,
-        },
-    )
+            },
+            request_id=idempotency_key,
+            request_hash=_submission_fingerprint(body) if idempotency_key else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/v1/jobs/{job_id}")
