@@ -1,0 +1,25 @@
+name: Temporary PyInstaller TOC footprint check
+
+on:
+  pull_request:
+    branches: [experiment/complexity-ablation]
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  scoped:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check isolated experiment target
+        env:
+          PR_BASE: ${{ github.base_ref }}
+        run: test "$PR_BASE" = "experiment/complexity-ablation"
+      - name: Syntax and offline source tests only
+        run: |
+          python3 -m py_compile scripts/audit_footprint.py test/test_audit_footprint.py
+          python3 -m unittest discover -s test -p 'test_audit_footprint.py' -v
+          git diff --check
