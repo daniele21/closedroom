@@ -44,6 +44,12 @@ const server = http.createServer((req, res) => {
     return json(job, 202);
   }
   if (url.pathname === '/v1/transcription/source-data') return json({ recordings: [], projects: [], settings: {} });
+  if (url.pathname === '/v1/analysis-runs/analysis-run-1') return json({
+    id: 'analysis-run-1', scope_type: 'inline_text', scope_id: 'analysis-run-1',
+    status: 'completed', result: {
+      title: 'Verified standalone analysis', markdown: '# Verified standalone analysis\\nFinal summary',
+    },
+  });
   if (url.pathname === '/v1/activities') return offline ? json({ detail: 'offline' }, 503) : json({ items: jobs, capture_blocked: captureBlocked, active_count: jobs.some((j) => j.status === 'transcribing_mic') ? 1 : 0, queue_depth: jobs.filter((j) => j.status === 'queued').length });
   if (url.pathname === '/v1/meetings/first') return json({
     id: 'first', recording: { id: 'first', title: 'Synthetic Meeting progress', project_name: 'E2E', status: 'recorded', mime_type: 'audio/wav', audio_file: 'synthetic.wav', bytes_written: 100, created_at: '2026-10-14T10:00:00Z', stopped_at: '2026-10-14T10:05:00Z', duration_seconds: 300 },
@@ -236,6 +242,17 @@ try {
   await assert(`!!document.querySelector('[data-activity-id="imported-job"]')`, 'job survives navigation and follows persisted discovery');
   if (importCount !== 1 || importedJobCount !== 1) throw new Error('upload or ASR job admitted more than once');
   await checkpoint('10-imported-job-after-navigation');
+  jobs.push({
+    ...fixture('inline-analysis', 'completed', 'analysis'),
+    scope_type: 'inline_text', scope_id: 'analysis-run-1',
+  });
+  await refresh();
+  await assert(`!!document.querySelector('[data-activity-id="inline-analysis"]')`,
+    'completed standalone analysis visible in recent history');
+  await evaluate(`document.querySelector('[data-activity-id="inline-analysis"] button').click()`);
+  await assert(`location.hash === '#analysis/run/analysis-run-1' && document.body.innerText.includes('Verified standalone analysis')`,
+    'open result resolves durable inline analysis run and renders its result');
+  await checkpoint('11-standalone-analysis-result');
 
 } catch (error) { failed = String(error.stack || error); }
 finally {
