@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiClient, type ActivitySnapshot } from '../api/apiClient';
-import { TERMINAL_JOB_STATUSES } from '../api/jobEvents';
+import { followJobEvents, TERMINAL_JOB_STATUSES } from '../api/jobEvents';
 
 /** Shell-owned discovery uses lightweight summaries; it never starts or retries work. */
 export function useActivities(enabled = true) {
@@ -49,6 +49,38 @@ export function useActivities(enabled = true) {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [enabled, refresh]);
+  // Discovery stays bounded and handles newly created jobs, but progress
+  // follows the same SSE connection already used by Meeting. A route change
+  // does not close the stream while the shell still observes this job.
+  const activeIdsKey = snapshot.items
+    .filter((job) => !TERMINAL_JOB_STATUSES.has(job.status))
+    .map((job) => job.id).sort().join('|');
+
+  useEffect(() => {
+    if (!enabled || !activeIdsKey) return;
+    const cleanups = activeIdsKey.split('|').map((jobId) => followJobEvents(jobId, {
+      onUpdate: (event) => {
+        setSnapshot((current) => {
+          const existing = current.items.find((item) => item.id === jobId);
+          if (!existing || existing.updated_at > event.updated_at) return current;
+          return {
+            ...current,
+            items: current.items.map((item) => item.id !== jobId ? item : {
+              ...item,
+              status: event.status,
+              current_step: event.current_step,
+              progress: event.progress,
+              progress_detail: event.progress_detail,
+              updated_at: event.updated_at,
+            }),
+          };
+        });
+      },
+      onTerminal: () => { void refresh(); },
+    }));
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [enabled, activeIdsKey, refresh]);
+
   const ids = new Set(snapshot.items.map((job) => job.id));
   const jobs = snapshot.items.filter((job) => !job.parent_job_id || !ids.has(job.parent_job_id));
   const activeCount = jobs.filter((job) => !TERMINAL_JOB_STATUSES.has(job.status)).length;
