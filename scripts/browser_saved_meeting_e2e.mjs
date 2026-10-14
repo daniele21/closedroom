@@ -729,7 +729,11 @@ try {
   await browser.clickCss('[data-key-moment-id="synthetic-shared-key"]');
   await waitCount('alternate_visual_context', 1);
   await browser.clickCss('button[aria-label="Chiudi screenshot"], button[aria-label="Close screenshot"]');
-  await waitAbsent(browser, ['Pricing screenshot B'], 1500);
+  const dialogStillOpen = await browser.execute(`
+    return Array.from(document.querySelectorAll('[role="dialog"]')).some((node) =>
+      ['Screenshot della riunione', 'Meeting screenshot'].includes(node.getAttribute('aria-label')));
+  `);
+  if (dialogStillOpen) throw new Error('key-moment dialog did not close');
   await browser.clickCss('[data-key-moment-id="synthetic-shared-key"]');
   await waitCount('alternate_visual_context', 2);
   await checkpoint(browser, '10-visual-context-demand-not-sticky');
