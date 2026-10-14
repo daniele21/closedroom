@@ -140,7 +140,9 @@ class AnalysisApiTests(unittest.TestCase):
         previous = jobs.create(
             job_id="failed-analysis", job_type="analysis", scope_type="inline_text",
             scope_id="source-1", status="failed", current_step="failed",
-            payload={"text": "local review", "prompt": "Custom brief", "llm_provider": "mock",
+            payload={"text": "local review", "prompt": "Custom brief",
+                     "llm_options": {"provider": "mock", "model": "",
+                                     "quality_preset": "balanced", "json_mode": True},
                      "template_id": "custom_question", "analysis_type": "custom_question"},
         )
         url = "/v1/jobs/failed-analysis/retry"
