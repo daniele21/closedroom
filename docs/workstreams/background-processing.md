@@ -161,8 +161,7 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
 
 - Baseline mirata: suite job store/arbiter, analysis/transcription e preparation;
   aggiungere test runtime di navigazione, non soltanto assert sul testo sorgente.
-- Frontend: `cd frontend && pnpm run lint && pnpm exec tsc --noEmit`.
-- Docs: `python3 scripts/verify_docs.py` e context route con questo workstream.
+- Frontend: lint/typecheck; docs: `scripts/verify_docs.py`.
 - INTEGRATION: leggere `skills/preflight-change/SKILL.md`, selector su head/base
   aggiornati, diff completo, gate richiesti e journey affetti FULL_MEDIA. Niente
   build/package o upload FULL_MEDIA in Actions; prove package locali.
@@ -184,10 +183,9 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
   `Idempotency-Key` per ASR/diarizzazione/analisi diretta con ammissione
   SQLite atomica, cancellazione parent via manager, terminali UI allineati.
   Il key per POST senza risposta vive soltanto nel component montato.
-- Test nuovi su submission concorrenziale e terminale, API direct e
-  recupero restart. Preflight STRONG initial FAIL per budget docs e
-  contratti UI obsoleti, corretti; validazione nuovo HEAD/base PENDING.
-- Gap: replay parent/pipeline, stream SSE/reconnect, race cancel/submit,
-  storico oltre il recente; BG-2 richiede import atomico in `RecordingStore`
-  senza stato `recording` fittizio. Nessun build GitHub Actions.
+- Test su concorrenza, replay, API e restart. Preflight STRONG su
+  `5167ef0`: 713 test, lint/typecheck ed E2E browser PASS; governance FAIL
+  soltanto per budget di questo file, ora ridotto. Nuovo HEAD PENDING.
+- Gap: replay parent/pipeline, SSE/reconnect, cancel/submit race e storico;
+  BG-2 richiede import atomico in `RecordingStore`. Nessun build in Actions.
 - La reale TCC/audio/WKWebView e MLX/Metal rimane release evidence.
