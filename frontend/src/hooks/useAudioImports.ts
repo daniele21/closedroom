@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiClient, type Recording, type TranscriptionJob } from '../api/apiClient';
 
 type TranscriptionOptions = Parameters<typeof ApiClient.createTranscriptionJob>[1];
+type AnalysisOptions = Parameters<typeof ApiClient.createAnalysisJob>[0];
 
 export interface AudioImportTask {
   id: string;
@@ -32,9 +33,10 @@ export function useAudioImports(enabled = true) {
     return () => { mounted.current = false; };
   }, []);
 
-  const startTranscription = useCallback((
+  const startImport = useCallback((
     file: File,
     options: TranscriptionOptions,
+    analysis?: AnalysisOptions,
   ): string => {
     if (!enabled) throw new Error('Audio import is unavailable');
     const id = crypto.randomUUID();
@@ -55,7 +57,9 @@ export function useAudioImports(enabled = true) {
           return;
         }
         update(id, { phase: 'submitting' });
-        const job: TranscriptionJob = await ApiClient.createTranscriptionJob(source.id, options, id);
+        const job: TranscriptionJob = analysis
+          ? await ApiClient.createAudioAnalysisPreparation(source.id, options, analysis)
+          : await ApiClient.createTranscriptionJob(source.id, options, id);
         if (cancels.current.has(id)) {
           // A cancellation may race with publication and job admission.
           // Stop an already-admitted job instead of pretending it never ran.
@@ -86,6 +90,11 @@ export function useAudioImports(enabled = true) {
     return id;
   }, [enabled, update]);
 
+  const startTranscription = useCallback((file: File, options: TranscriptionOptions) =>
+    startImport(file, options), [startImport]);
+  const startAnalysis = useCallback((file: File, transcription: TranscriptionOptions, analysis: AnalysisOptions) =>
+    startImport(file, transcription, analysis), [startImport]);
+
   const cancel = useCallback(async (id: string) => {
     const task = items.find((item) => item.id === id);
     if (!task || !['uploading', 'submitting'].includes(task.phase)) return;
@@ -110,7 +119,7 @@ export function useAudioImports(enabled = true) {
     }
   }, [items, update]);
 
-  return { items, startTranscription, cancel };
+  return { items, startTranscription, startAnalysis, cancel };
 }
 
 export type AudioImportsState = ReturnType<typeof useAudioImports>;

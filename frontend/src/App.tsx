@@ -286,7 +286,7 @@ function MainApp() {
       case 'projects':
         return <ProjectsPage navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'analysis':
-        return <AnalysisPage detailId={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
+        return <AnalysisPage detailId={routeDetail} navigateTo={navigateTo} audioImports={audioImports} demoMode={isDemoActive} />;
       case 'settings':
         return <SettingsPage />;
       default:

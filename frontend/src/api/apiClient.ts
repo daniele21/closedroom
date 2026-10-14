@@ -769,6 +769,18 @@ export const ApiClient = {
     })).json();
   },
 
+  async createAudioAnalysisPreparation(
+    recordingId: string,
+    transcription: Parameters<typeof ApiClient.createTranscriptionJob>[1],
+    analysis: Parameters<typeof ApiClient.createAnalysisJob>[0],
+  ): Promise<TranscriptionJob> {
+    return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/audio-analysis-jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcription, analysis }),
+    })).json();
+  },
+
   async cancelRecordingAudioImport(requestId: string): Promise<{ cancel_requested: boolean; already_published: boolean }> {
     return (await request(
       '/v1/recordings/import-audio/' + encodeURIComponent(requestId) + '/cancel',
