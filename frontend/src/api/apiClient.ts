@@ -26,7 +26,7 @@ export interface Recording {
   status: RecordingStatus;
   error?: string | null;
   partial?: boolean;
-  capture_backend?: 'browser' | 'native';
+  capture_backend?: 'browser' | 'native' | 'import';
   capture_status?: string;
   quality_report?: any;
   warnings?: string[];
@@ -746,6 +746,26 @@ export const ApiClient = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
+    })).json();
+  },
+
+  async importRecordingAudio(
+    file: File,
+    options: { title?: string; project_name?: string; language?: string } = {},
+    requestId?: string,
+    signal?: AbortSignal,
+  ): Promise<Recording> {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    for (const [key, value] of Object.entries(options)) {
+      if (value !== undefined) body.append(key, value);
+    }
+    // Multipart boundary is assigned by fetch; never set Content-Type.
+    return (await request('/v1/recordings/import-audio', {
+      method: 'POST',
+      body,
+      signal,
+      headers: requestId ? { 'Idempotency-Key': requestId } : {},
     })).json();
   },
 
