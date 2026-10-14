@@ -46,6 +46,16 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("setFallbackNotice(null)", self.recorder)
         self.assertIn("openBrowserPopup()", self.recorder)
 
+    def test_browser_and_native_recording_share_one_overlay_fallback_owner(self) -> None:
+        self.assertEqual(self.recorder.count("ApiClient.toggleOverlay(true)"), 1)
+        self.assertEqual(self.recorder.count("requestRecordingOverlay();"), 2)
+        self.assertIn("if (result?.success) return;", self.recorder)
+        self.assertIn("if (result?.fallback_expected) {", self.recorder)
+        self.assertIn("setFallbackNotice(null)", self.recorder)
+        self.assertIn("showToast(t('recording.overlayFallbackNotice'), 'warning')", self.recorder)
+        self.assertIn("openBrowserPopup()", self.recorder)
+        self.assertIn("requestRecordingOverlay]);", self.recorder)
+
     def test_browser_overlay_uses_control_center_dimensions_and_local_resize(self) -> None:
         self.assertIn("const width = 420;", self.recorder)
         self.assertIn("const height = 170;", self.recorder)
