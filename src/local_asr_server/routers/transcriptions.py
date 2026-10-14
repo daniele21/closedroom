@@ -753,6 +753,14 @@ def retry_job(
             )
         else:
             from local_asr_server.schemas import MeetingPreparationRequest
+            manager = MeetingPreparationManager(
+                services, default_model=request.app.state.default_model,
+            )
+            if not manager.default_retry_compatible(previous):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Original preparation provider/options changed or unavailable; reopen Meeting",
+                )
             resumed = prepare_meeting(
                 recording_id, request,
                 MeetingPreparationRequest(include_screenshots=bool(

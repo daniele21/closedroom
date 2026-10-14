@@ -258,6 +258,32 @@ class MeetingPreparationManager:
             self._fail_parent(parent["id"], f"Unable to start transcription: {exc}")
         return self.services.jobs.get(parent["id"]) or parent
 
+    def default_retry_compatible(self, previous: dict[str, Any]) -> bool:
+        """Fail closed if the effective default pipeline or ASR has changed."""
+        result = previous.get("result") or {}
+        if not result.get("analysis_identity") or not result.get("asr_identity"):
+            return False
+        original_pipeline = (previous.get("payload") or {}).get("pipeline_id")
+        if original_pipeline != MEETING_PREPARATION_PIPELINE:
+            return False
+        selected = AnalysisPipelineRequest(
+            recording_id=previous.get("scope_id"),
+            pipeline_id=MEETING_PREPARATION_PIPELINE,
+        )
+        try:
+            analysis_identity = _hash_json(
+                self.services.analysis_jobs.pipeline_identity(selected)
+            )
+            asr_identity, _ = self._asr_identity(
+                TranscriptionJobRequest(visual_intelligence_enabled=False)
+            )
+        except Exception:
+            return False
+        return (
+            result["analysis_identity"] == analysis_identity
+            and result["asr_identity"] == asr_identity
+        )
+
     def cancel(self, parent_job_id: str) -> dict[str, Any] | None:
         parent = self.services.jobs.get(parent_job_id)
         if parent is None or parent["type"] != MEETING_PREPARATION_JOB_TYPE:
