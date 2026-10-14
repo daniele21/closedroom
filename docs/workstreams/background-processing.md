@@ -186,7 +186,12 @@ assenza di residui e dati sensibili nei log. Nessuna promessa MLX/TCC da fake.
   scheduler extra. Import→ASR è ora posseduto dalla shell: cambio pagina
   conserva upload e submit, Attività mostra l'import cancellabile e
   riconcilia il job dal backend. Journey browser con route change aggiunto;
-  E2E/preflight exact-head PENDING. Restano Analysis audio→LLM con le
-  scelte esplicite dell'utente, SSE globale e recupero dopo reload.
+  E2E/preflight exact-head PENDING. BG-3 ora usa SSE globale (massimo 3
+  follower prioritari) condiviso con Meeting: la normalizzazione è fedele
+  ai `job_events` SQLite (`job_id`, `payload`) e il fallback GET non
+  espone prompt come progresso. Browser fixture ora simula il wire reale
+  e verifica una sola connessione per job; diagnosticata anche la
+  serializzazione CDP. Restano Analysis audio→LLM con provider espliciti,
+  conferma E2E, recupero import dopo reload e retry uniforme.
   BG-3 ACTIVE parziale, BG-4..5 BLOCKED; nessuna build in Actions.
 - Evidenza target-Mac TCC/WKWebView/MLX differita a RELEASE.

@@ -149,15 +149,21 @@ fase, annullamento, apertura del risultato e 30 lavori recenti. Gli attivi sono
 selezionati prima del limite dello storico, inclusi gli stati tecnici ASR.
 `GET /v1/activities` restituisce solo riepiloghi: niente prompt o risultati.
 La scoperta nella shell avviene ogni 5 secondi mentre la finestra è visibile;
-Meeting usa SSE anche per il progresso dei child della preparazione. La perdita
-connessione conserva l'ultimo stato e lo segnala come non aggiornato. La coda
+fino a tre job prioritari usano SSE per il progresso, condividendo una sola
+connessione per job anche quando si apre Meeting. Gli eventi SQLite sono
+normalizzati su `job_id` (l'ID dell'evento non è quello del job) e il recupero
+snapshot usa solo progress metadata, mai il payload originale di analisi.
+La perdita connessione conserva l'ultimo stato e lo segnala come non aggiornato. La coda
 mostra l'attesa della registrazione o del lavoro attivo quando lo scheduler la
 conferma, senza dedurre una posizione dalla recenza.
 
 Lo start nativo associa la prenotazione capture alla registrazione; stop/cancel
 backend la rilasciano dopo la terminazione, anche dallo stop diretto dell'overlay.
-Uno stop fallito conserva la protezione. Le importazioni audio streaming dirette
-restano fuori dalla coda durevole; conversione e retry uniformi sono nel piano
-`workstreams/background-processing.md`. Prove: suite job/capture, browser
+Uno stop fallito conserva la protezione. La pagina Trascrizione importa ora
+l'audio nel RecordingStore e fa partire un job ASR persistente dalla shell,
+anche se si cambia vista; Attività mostra upload e annullamento. La pagina
+Analisi usa ancora il percorso audio streaming diretto, in attesa della
+composizione audio→ASR→analisi. Retry uniforme e recupero dopo reload sono nel
+piano `workstreams/background-processing.md`. Prove: suite job/capture, browser
 `scripts/browser_activities_e2e.mjs` con screenshot/video sintetici. Restano
 `DEFERRED_TO_RELEASE` TCC/audio fisico, MLX/Metal e interazione WKWebView.
