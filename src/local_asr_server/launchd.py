@@ -48,12 +48,22 @@ def _find_app_binary() -> Path | None:
         if current_binary.exists():
             return current_binary
 
-    # Non-bundled CLI selection must not accidentally pick the Test app.
+    # Legacy versioned production bundles remain supported, but the CLI must
+    # not launch ClosedRoom Test when looking for the stable app.
+    import plistlib
+
     for root in _APP_ROOTS:
-        app = root / "ClosedRoom.app"
-        binary = app / "Contents" / "MacOS" / "ClosedRoom"
-        if binary.exists():
-            return binary
+        for app in sorted(root.glob("ClosedRoom*.app")):
+            binary = app / "Contents" / "MacOS" / "ClosedRoom"
+            if not binary.is_file():
+                continue
+            try:
+                with (app / "Contents" / "Info.plist").open("rb") as handle:
+                    info = plistlib.load(handle)
+            except (OSError, ValueError, plistlib.InvalidFileException):
+                continue
+            if info.get("CFBundleIdentifier") == "com.closedroom.app":
+                return binary
     return None
 
 
