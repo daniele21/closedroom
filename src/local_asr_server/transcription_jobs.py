@@ -84,7 +84,11 @@ class TranscriptionJobManager:
         scope_id: str | None = None,
         payload: dict[str, Any] | None = None,
         on_terminal: JobTerminalCallback | None = None,
+        request_id: str | None = None,
+        request_hash: str | None = None,
     ) -> dict[str, Any]:
+        if request_id is not None and (self._store is None or not request_hash):
+            raise ValueError("Durable store and request fingerprint required for submissions")
         job = TranscriptionJob(
             id=str(uuid.uuid4()),
             recording_id=recording_id,
@@ -93,17 +97,30 @@ class TranscriptionJobManager:
             scope_id=scope_id or recording_id,
             payload=payload or {},
         )
+        if self._store is not None:
+            if request_id is not None:
+                admitted, created = self._store.create_or_get_submission(
+                    job_id=job.id,
+                    job_type=job.job_type,
+                    scope_type=job.scope_type,
+                    scope_id=job.scope_id or "",
+                    request_id=request_id,
+                    request_hash=request_hash or "",
+                    payload=job.payload or {"recording_id": recording_id},
+                )
+                if not created:
+                    return self.get(admitted["id"]) or self._stored_public(admitted)
+            else:
+                self._store.create(
+                    job_id=job.id,
+                    job_type=job.job_type,
+                    scope_type=job.scope_type,
+                    scope_id=job.scope_id,
+                    payload=job.payload or {"recording_id": recording_id},
+                )
         with self._lock:
             self._jobs[job.id] = job
-        if self._store is not None:
-            self._store.create(
-                job_id=job.id,
-                job_type=job.job_type,
-                scope_type=job.scope_type,
-                scope_id=job.scope_id,
-                payload=job.payload or {"recording_id": recording_id},
-            )
-        else:
+        if self._store is None:
             self._emit(job, "queued", 0)
 
         if self._arbiter is None:
