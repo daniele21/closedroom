@@ -195,6 +195,48 @@ class RecordingApiTests(unittest.TestCase):
         self.assertEqual(invalid.status_code, 422)
         self.assertNotEqual(parent["status"], "failed")
 
+    @patch("local_asr_server.transcription_jobs.TranscriptionJobManager._run", return_value=None)
+    def test_custom_audio_parent_retry_is_idempotent_after_failure(self, _run) -> None:
+        imported = self.client.post(
+            "/v1/recordings/import-audio",
+            files={"file": ("parent.wav", _wav_bytes(), "audio/wav")},
+        )
+        recording_id = imported.json()["id"]
+        route = f"/v1/recordings/{recording_id}/audio-analysis-jobs"
+        data = {"transcription": {"language": "es"},
+                "analysis": {"llm_provider": "mock", "prompt": "Decision log"}}
+        first = self.client.post(
+            route, json=data, headers={"Idempotency-Key": "initial-parent"},
+        )
+        self.assertEqual(first.status_code, 202, first.text)
+        original_id = first.json()["id"]
+        services = get_services(self.app)
+        services.jobs.update(
+            original_id, status="failed", current_step="failed",
+            error="Synthetic ASR boundary failure",
+        )
+        retry_route = f"/v1/jobs/{original_id}/retry"
+        headers = {"Idempotency-Key": "parent-retry-once"}
+        retry = self.client.post(retry_route, headers=headers)
+        again = self.client.post(retry_route, headers=headers)
+        self.assertEqual(retry.status_code, 202, retry.text)
+        self.assertEqual(retry.json()["job_id"], again.json()["job_id"])
+        self.assertNotEqual(retry.json()["job_id"], original_id)
+        self.assertEqual(
+            services.jobs.get(retry.json()["job_id"])["payload"]["analysis_options"]["prompt"],
+            "Decision log",
+        )
+        self.assertEqual(
+            services.jobs.get(retry.json()["job_id"])["payload"]["transcription_options"]["language"],
+            "es",
+        )
+        self.assertEqual(
+            len(services.jobs.list_children(retry.json()["job_id"], stage="transcription")), 1,
+        )
+        self.assertEqual(self.client.post(retry_route, headers={
+            "Idempotency-Key": "new-parent-intent",
+        }).status_code, 202)
+
     def test_activities_exposes_all_active_jobs_without_content(self) -> None:
         jobs = get_services(self.app).jobs
         for job_id in ("job-1", "job-2", "job-3"):
