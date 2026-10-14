@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from local_asr_server.catalog import CatalogStore
+from local_asr_server.jobs.models import TERMINAL_JOB_STATUSES
 
 
 DEFAULT_JOB_EVENT_CAPACITY = 512
@@ -333,11 +334,21 @@ class JobStore:
 
     def interrupt_incomplete(self, *, reason: str = "Interrupted by server restart") -> list[dict[str, Any]]:
         """Terminally mark work that cannot survive this process restart."""
+        # Scan all non-terminal IDs, including work older than recent history.
+        markers = ", ".join("?" for _ in ACTIVE_JOB_STATUSES)
+        with self.connection() as conn:
+            ids = [
+                row["id"] for row in conn.execute(
+                    f"SELECT id FROM jobs WHERE status IN ({markers})",
+                    ACTIVE_JOB_STATUSES,
+                ).fetchall()
+            ]
         interrupted = []
-        for job in self.list_jobs(limit=500):
-            if job["status"] in {"completed", "failed", "cancelled", "interrupted"}:
-                continue
-            updated = self.update(job["id"], status="interrupted", current_step="interrupted", error=reason, message=reason)
+        for job_id in ids:
+            updated = self.update(
+                job_id, status="interrupted", current_step="interrupted",
+                error=reason, message=reason,
+            )
             if updated:
                 interrupted.append(updated)
         return interrupted
@@ -395,26 +406,58 @@ class JobStore:
         scope_type: str | None = None,
         scope_id: str | None = None,
         limit: int = 100,
+        view: str = "recent",
+        before: tuple[float, str] | None = None,
+        summary: bool = False,
     ) -> list[dict[str, Any]]:
+        """Stable keyset discovery without loading private payloads into summaries."""
+        if view not in {"recent", "active", "history"}:
+            raise ValueError("Invalid job discovery view")
         clauses: list[str] = []
         params: list[Any] = []
         if job_type:
-            clauses.append("type = ?")
+            clauses.append("jobs.type = ?")
             params.append(job_type)
         if scope_type:
-            clauses.append("scope_type = ?")
+            clauses.append("jobs.scope_type = ?")
             params.append(scope_type)
         if scope_id:
-            clauses.append("scope_id = ?")
+            clauses.append("jobs.scope_id = ?")
             params.append(scope_id)
+        if view == "active":
+            markers = ", ".join("?" for _ in ACTIVE_JOB_STATUSES)
+            clauses.append(f"jobs.status IN ({markers})")
+            params.extend(ACTIVE_JOB_STATUSES)
+        elif view == "history":
+            statuses = sorted(TERMINAL_JOB_STATUSES)
+            markers = ", ".join("?" for _ in statuses)
+            clauses.append(f"jobs.status IN ({markers})")
+            params.extend(statuses)
+        if before is not None:
+            clauses.append(
+                "(jobs.created_at < ? OR (jobs.created_at = ? AND jobs.id < ?))"
+            )
+            params.extend((before[0], before[0], before[1]))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params.append(max(1, min(limit, 500)))
+        # One extra row is allowed for pagination's has_more flag.
+        params.append(max(1, min(limit, 501)))
+        columns = (
+            "jobs.id, jobs.type, jobs.scope_type, jobs.scope_id, jobs.status, "
+            "jobs.current_step, jobs.progress, jobs.created_at, jobs.updated_at, "
+            "jobs.started_at, jobs.completed_at, jobs.cancel_requested, "
+            "(jobs.result_json IS NOT NULL) AS has_result, "
+            "(SELECT links.parent_job_id FROM job_links AS links "
+            "WHERE links.child_job_id = jobs.id "
+            "ORDER BY links.created_at DESC LIMIT 1) AS parent_job_id"
+        ) if summary else "jobs.*"
         with self.connection() as conn:
             rows = conn.execute(
-                f"SELECT * FROM jobs {where} ORDER BY created_at DESC LIMIT ?",
+                f"SELECT {columns} FROM jobs {where} "
+                "ORDER BY jobs.created_at DESC, jobs.id DESC LIMIT ?",
                 params,
             ).fetchall()
-        return [self._row_to_job(row) for row in rows]
+        convert = self._row_to_job_summary if summary else self._row_to_job
+        return [convert(row) for row in rows]
 
     def link_child(
         self,
@@ -518,6 +561,27 @@ class JobStore:
             "DELETE FROM job_events WHERE job_id = ? AND sequence <= ?",
             (job_id, next_sequence - self.event_capacity),
         )
+
+    @staticmethod
+    def _row_to_job_summary(row: sqlite3.Row) -> dict[str, Any]:
+        """Metadata only: clients fetch the canonical job for sensitive details."""
+        return {
+            "id": row["id"],
+            "type": row["type"],
+            "scope_type": row["scope_type"],
+            "scope_id": row["scope_id"],
+            "recording_id": row["scope_id"] if row["scope_type"] == "recording" else None,
+            "parent_job_id": row["parent_job_id"],
+            "status": row["status"],
+            "current_step": row["current_step"],
+            "progress": row["progress"],
+            "has_result": bool(row["has_result"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+            "cancel_requested": bool(row["cancel_requested"]),
+        }
 
     def _row_to_job(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
