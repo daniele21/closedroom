@@ -66,6 +66,93 @@ class FootprintAuditTests(unittest.TestCase):
                 self.assertEqual(audit_footprint.main(["bundle", "--app", str(app), "--compare", str(prev)]), 2)
                 self.assertEqual(audit_footprint.main(["bundle", "--app", str(app)]), 0)
 
+    def test_bundle_breaks_down_real_component_directories_without_guessing_python_modules(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = root / "ClosedRoom.app"
+            resources = app / "Contents/Resources"
+            frameworks = app / "Contents/Frameworks"
+            for folder in (resources / "static/assets", frameworks / "mlx/lib", frameworks / "mlx_whisper"):
+                folder.mkdir(parents=True)
+            (resources / "static/assets/app.js").write_bytes(b"js" * 10)
+            (frameworks / "mlx/lib/libmlx.dylib").write_bytes(b"a" * 40)
+            (frameworks / "mlx_whisper/preprocessor.so").write_bytes(b"b" * 25)
+            (resources / "base_library.zip").write_bytes(b"z" * 18)
+            (app / "Contents/MacOS").mkdir()
+            (app / "Contents/MacOS/ClosedRoom").write_bytes(b"embedded-pyz-data")
+            # A user meeting artifact outside the .app must never be enumerated.
+            (root / "private-meeting-transcript.txt").write_text("a user's local meeting content")
+            report = audit_footprint.bundle_audit(app)
+            self.assertEqual(report["count"], 5)
+            self.assertEqual(report["total_bytes"], 20 + 40 + 25 + 18 + len(b"embedded-pyz-data"))
+            self.assertEqual(report["component_groups"]["Contents/Frameworks/mlx"]["bytes"], 40)
+            self.assertEqual(report["component_groups"]["Contents/Frameworks/mlx_whisper"]["bytes"], 25)
+            self.assertEqual(report["file_roles"]["bundled_web_ui"]["bytes"], 20)
+            self.assertEqual(report["file_roles"]["opaque_archives"]["bytes"], 18)
+            self.assertEqual(report["unattributed_opaque_archive_bytes"], 18)
+            self.assertEqual(sum(v["bytes"] for v in report["file_roles"].values()), report["total_bytes"])
+            self.assertNotIn(str(root), json.dumps(report))
+            self.assertNotIn("a user's local meeting content", json.dumps(report))
+            self.assertEqual(report["artifact_identity"]["status"], "absent")
+
+    def test_finalized_selection_identity_and_manifest_mismatch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lineage = root / "dist/artifacts/macos-arm64-local"
+            def create(build_id, created_at, body):
+                folder = lineage / build_id
+                app = folder / f"ClosedRoom-{build_id}.app"
+                (app / "Contents/Resources").mkdir(parents=True)
+                (app / "Contents/Resources/asset.bin").write_bytes(body)
+                manifest = {
+                    "status": "successful", "created_at": created_at, "build_id": build_id,
+                    "product_version": "0.2.0", "source": {"revision": "a" * 40, "dirty": False},
+                    "lineage": {"channel": "local"}, "configuration": {"signing": "identified"},
+                    "artifacts": {"app": {"path": app.name, "bytes": len(body), "file_count": 1},
+                                  "dmg": {"bytes": 15}},
+                }
+                (folder / "build-manifest.json").write_text(json.dumps(manifest))
+                return app, manifest, folder
+            older, _, _ = create("one", "2026-10-01T10:00:00+00:00", b"one")
+            latest, identity, manifest_dir = create("two", "2026-10-14T10:00:00+00:00", b"newer")
+            self.assertEqual(audit_footprint.latest_finalized_app(root), latest)
+            report = audit_footprint.bundle_audit(latest)
+            self.assertEqual(report["artifact_identity"]["source_revision"], "a" * 40)
+            self.assertEqual(report["artifact_identity"]["status"], "size_and_count_match_not_checksum_verified")
+            self.assertEqual(report["artifact_identity"]["dmg_bytes_if_present"], 15)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(audit_footprint.main(["bundle", "--latest-finalized", "--root", str(root)]), 0)
+            self.assertEqual(json.loads(out.getvalue())["total_bytes"], 5)
+            compare = root / "previous.json"
+            compare.write_text(json.dumps(audit_footprint.bundle_audit(older)))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(audit_footprint.main([
+                    "bundle", "--app", str(latest), "--compare", str(compare)
+                ]), 0)
+            delta = json.loads(out.getvalue())["comparison"]
+            self.assertEqual(delta["delta_bytes"], 2)
+            self.assertEqual(delta["component_groups_delta_bytes"]["Contents/Resources/_root_files"], 2)
+            self.assertEqual(delta["file_roles_delta_bytes"]["unclassified_bundle_files"], 2)
+            identity["artifacts"]["app"]["bytes"] = 2000
+            (manifest_dir / "build-manifest.json").write_text(json.dumps(identity))
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                audit_footprint.bundle_audit(latest)
+
+    def test_finalized_selection_avoids_path_traversal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            folder = root / "dist/artifacts/mac/bad"
+            folder.mkdir(parents=True)
+            (folder / "build-manifest.json").write_text(json.dumps({
+                "status": "successful", "artifacts": {"app": {"path": "../../Some.app"}}
+            }))
+            with self.assertRaisesRegex(ValueError, "No finalized"):
+                audit_footprint.latest_finalized_app(root)
+
+
+
 
 if __name__ == "__main__":
     unittest.main()
