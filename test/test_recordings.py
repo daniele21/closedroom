@@ -103,6 +103,46 @@ class RecordingStoreTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertEqual(outcome["recording"]["status"], "recorded")
 
+    def test_cancel_inflight_import_prevents_publication(self) -> None:
+        halfway = threading.Event()
+        release = threading.Event()
+        outcome = {}
+
+        class PausedSource:
+            def __init__(self):
+                self.calls = 0
+
+            def read(self, _size):
+                self.calls += 1
+                if self.calls == 1:
+                    return b"partial audio"
+                halfway.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("cancelled upload was not resumed")
+                return b"more audio"
+
+        def import_in_thread():
+            try:
+                self.store.import_audio(
+                    PausedSource(), filename="cancel.wav", model="test-model",
+                    request_id="cancel-upload-1",
+                )
+            except RecordingConflict as exc:
+                outcome["error"] = str(exc)
+
+        worker = threading.Thread(target=import_in_thread)
+        worker.start()
+        try:
+            self.assertTrue(halfway.wait(timeout=5))
+            self.assertTrue(self.store.cancel_audio_import("cancel-upload-1"))
+        finally:
+            release.set()
+            worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(outcome.get("error"), "Audio import cancelled")
+        self.assertEqual(self.store.list(), [])
+        self.assertEqual(list(self.root.glob("*/.import-*")), [])
+
     def test_concurrent_replays_publish_only_one_source(self) -> None:
         from concurrent.futures import ThreadPoolExecutor
 
