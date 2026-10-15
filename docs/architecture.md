@@ -308,8 +308,8 @@ PyInstaller usa `menubar.py` come entry point. `build.sh`:
 6. firma helper e bundle;
 7. produce `.app` e, salvo `--no-dmg`, il DMG versionato.
 
-`VERSION` resta SemVer; `scripts/build_identity.py` incrementa
-`CFBundleVersion`. `build.sh --test` crea un'app con dati/ID separati.
+Build Test: `build.sh --test` isola app e dati; `CFBundleVersion`
+incrementa e `VERSION` resta SemVer.
 
 Il runtime hook PyInstaller limita il preload MLX ai subprocess ASR/LLM/VLM;
 menu/API restano cold finché non serve inferenza.
