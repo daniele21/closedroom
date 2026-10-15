@@ -308,7 +308,16 @@ PyInstaller usa `menubar.py` come entry point. `build.sh`:
 6. firma helper e bundle;
 7. produce `.app` e, salvo `--no-dmg`, il DMG versionato.
 
-Le build Test hanno bundle/runtime distinti e `CFBundleVersion` incrementale.
+`VERSION` resta la versione prodotto SemVer (`CFBundleShortVersionString`).
+`scripts/build_identity.py` assegna automaticamente `CFBundleVersion`
+intero e crescente a ogni build, con stato persistente e lock atomico in
+`~/Library/Application Support/ClosedRoom/Builds/` (fuori da `dist`).
+`build.sh --test --no-dmg` crea `ClosedRoom Test.app`
+(`com.closedroom.app.test`) senza sostituire `ClosedRoom.app`.
+Le build Test isolano dati, cache, log, launchd e identità della menu bar.
+Per la build finalizzata: `scripts/build_artifact.sh --test --no-dmg`.
+La produzione forza la variante stabile; `--install` mantiene il vincolo
+di firma non ad-hoc per evitare confusione con i permessi macOS.
 
 Il runtime hook PyInstaller limita il preload MLX ai subprocess ASR/LLM/VLM;
 menu/API restano cold finché non serve inferenza.

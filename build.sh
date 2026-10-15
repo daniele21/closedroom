@@ -164,11 +164,8 @@ else
     fi
 fi
 
-if [[ -n "${CLOSEDROOM_BUILD_NUMBER:-}" ]]; then
-    CLOSEDROOM_BUILD_NUMBER="$(python3 "$SCRIPT_DIR/scripts/build_identity.py" --validate-build-number "$CLOSEDROOM_BUILD_NUMBER")"
-else
-    CLOSEDROOM_BUILD_NUMBER="$(python3 "$SCRIPT_DIR/scripts/build_identity.py" --next-build-number)"
-fi
+# Every canonical build invocation allocates a fresh local sequence number.
+CLOSEDROOM_BUILD_NUMBER="$(python3 "$SCRIPT_DIR/scripts/build_identity.py" --next-build-number)"
 export CLOSEDROOM_BUILD_NUMBER
 
 echo ""

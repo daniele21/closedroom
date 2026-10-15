@@ -228,6 +228,8 @@ def main() -> int:
             env["CLOSEDROOM_APP_NAME"] = app_name
             env["CLOSEDROOM_APP_BUNDLE_NAME"] = app_bundle_name
             env["CLOSEDROOM_APP_DISPLAY_NAME"] = app_name
+            env["CLOSEDROOM_BUILD_VARIANT"] = "stable"
+            env.pop("CLOSEDROOM_BUILD_NUMBER", None)
             try:
                 run(
                     ["bash", "build.sh", "--no-dmg", "--clean"],
