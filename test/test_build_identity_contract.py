@@ -18,7 +18,6 @@ class BuildIdentityContractTests(unittest.TestCase):
         self.assertIn('APP_BUNDLE_NAME', build)
         self.assertIn('APP_DISPLAY_NAME', build)
         self.assertIn('APP_PATH="$DIST_DIR/$APP_BUNDLE_NAME"', build)
-        self.assertIn('[[ "$BUILD_VARIANT" != "test" ]]', artifact)
         self.assertIn('CLOSEDROOM_APP_DISPLAY_NAME="$APP_DISPLAY_NAME"', build)
         self.assertNotIn('APP_BUNDLE_BASENAME="${APP_NAME}-${APP_VERSION}"', build)
 
@@ -44,6 +43,7 @@ class BuildIdentityContractTests(unittest.TestCase):
         self.assertIn('DMG_BASENAME="${APP_DISPLAY_NAME// /-}-${APP_VERSION}"', build)
         self.assertIn('scripts/build_identity.py', artifact)
         self.assertIn('--variant "$BUILD_VARIANT" --identity-tsv', artifact)
+        self.assertIn('[[ "$BUILD_VARIANT" != "test" ]]', artifact)
         self.assertIn('STAGING_APP="$ROOT/dist/$APP_BUNDLE_NAME"', artifact)
         self.assertIn(
             'FINAL_BASENAME="${APP_DISPLAY_NAME// /-}-${APP_VERSION}-${BUILD_ID}-${SOURCE_REVISION}"',
