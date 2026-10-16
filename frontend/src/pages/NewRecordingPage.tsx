@@ -17,6 +17,7 @@ import { ApiClient, CaptureWindow, Recording } from '../api/apiClient';
 import { NEW_RECORDING_PROJECT_STORAGE_KEY } from '../api/config';
 import { useTranslation } from '../i18n/i18n';
 import { useToast } from '../context/ToastContext';
+import { capturePermissionFailureMessage, getNativeCaptureUnavailableMessage } from '../utils/capturePermissionMessages';
 import { openBrowserPopup, useRecorder } from '../hooks/useRecorder';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -62,16 +63,7 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
   const nativeCaptureUnavailableReason = recorder.captureCapabilities?.native.reason
     || recorder.captureCapabilities?.native.error
     || '';
-  const nativeCaptureUnavailableMessage = (() => {
-    if (nativeCaptureUnavailableReason === 'screen_capture_stream_pending') return t('recording.nativeCapturePendingReason');
-    if (nativeCaptureUnavailableReason === 'helper_missing') return t('recording.nativeCaptureHelperMissingReason');
-    if (nativeCaptureUnavailableReason === 'macos_required' || nativeCaptureUnavailableReason === 'macos_14_required') {
-      return t('recording.nativeCaptureMacosRequiredReason');
-    }
-    if (nativeCaptureUnavailableReason === 'screen_recording_permission_required') return t('recording.nativeCaptureScreenPermissionReason');
-    if (nativeCaptureUnavailableReason === 'microphone_permission_required') return t('recording.nativeCaptureMicPermissionReason');
-    return nativeCaptureUnavailableReason || t('recording.nativeCaptureUnavailableUnknown');
-  })();
+  const nativeCaptureUnavailableMessage = getNativeCaptureUnavailableMessage(nativeCaptureUnavailableReason, t);
 
   const needsComputerAudio = sourceMode !== 'mic_only';
   const micReady = nativeCaptureReady
@@ -129,12 +121,7 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
       const result = await ApiClient.ensureCapturePermissions(sourceMode);
       await recorder.refreshCapturePermissions();
       if (!result.ok) {
-        const message = result.diagnostics?.code_signature && result.diagnostics.code_signature !== 'signed'
-          ? t('recording.permissionsUnsignedHelper')
-          : result.diagnostics?.bundle_identifier && result.diagnostics.bundle_identifier !== 'com.closedroom.nativecapture'
-            ? t('recording.permissionsInvalidHelper')
-            : t('recording.permissionsRequired');
-        setPermissionError(message);
+        setPermissionError(capturePermissionFailureMessage(result.diagnostics, t));
       }
     } catch (err) {
       setPermissionError(err instanceof Error ? err.message : String(err));
