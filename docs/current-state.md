@@ -49,7 +49,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
 - [`selective-efficiency.md`](workstreams/selective-efficiency.md): persisted audio fingerprint reuse and privacy-safe VAD comparison tooling; ONNX removal remains evidence-gated.
-- [`complexity-ablation.md`](workstreams/complexity-ablation.md): selected state/policy refactors in isolated integration candidate from updated `dev`; source/E2E/package validation pending, optional image/footprint work remains experimental.
+- [`complexity-ablation.md`](workstreams/complexity-ablation.md): selected C1/C2/C3/E4/E5 refactors integrated in #137; optional footprint inventory is read-only and needs target-Mac measurements.
 - Meeting Moments integrated through PR #100 (`4e159414`); INTEGRATION / STRONG preflight #659 passed on exact head `816da96a`. Target-Mac menu/focus/hotkey/TCC confirmation remains RELEASE evidence.
 
 PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
