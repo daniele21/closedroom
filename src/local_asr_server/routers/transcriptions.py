@@ -98,29 +98,6 @@ def _normalize_diarization_provider(provider: str | None) -> str:
     return selected
 
 
-def _apply_initial_diarization(
-    app: Any,
-    audio_path: Path,
-    payload: dict[str, Any],
-    *,
-    provider: str,
-    speechmatics_region: str | None,
-    speechmatics_model: str | None,
-) -> dict[str, Any]:
-    if provider == DIARIZATION_PROVIDER_DISABLED:
-        return payload
-    existing = payload.get("stats", {}).get("speaker_diarization") or {}
-    if existing.get("status") == "completed" and existing.get("provider") == provider:
-        return payload
-    return get_services(app).diarization.process_audio_payload(
-        audio_path,
-        payload,
-        provider=provider,
-        speechmatics_region=speechmatics_region,
-        speechmatics_model=speechmatics_model,
-    )
-
-
 def run_recording_transcription(
     app: Any,
     recording_id: str,
@@ -342,7 +319,7 @@ async def transcribe_upload(
                             backend=TranscriptionService.backend(provider, target_model),
                             provider_options=public_options,
                             payload_postprocessor=(
-                                lambda source_path, payload: _apply_initial_diarization(
+                                lambda source_path, payload: SingleFileTranscriptionUseCase.apply_initial_diarization(
                                     request.app,
                                     source_path,
                                     payload,
@@ -449,7 +426,7 @@ def transcribe_path(request: Request, body: TranscribePathRequest):
                 **TranscriptionService.payload_metadata(provider, target_model, public_options),
             },
         }
-        payload = _apply_initial_diarization(
+        payload = SingleFileTranscriptionUseCase.apply_initial_diarization(
             request.app,
             audio_path,
             payload,
