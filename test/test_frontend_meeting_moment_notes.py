@@ -50,7 +50,9 @@ class FrontendMeetingMomentNotesContractTests(unittest.TestCase):
         self.assertIn("ApiClient.updateRecordingNote", self.meeting)
         self.assertIn("ApiClient.deleteRecordingNote", self.meeting)
         self.assertIn("notes={notes}", self.meeting)
-        self.assertIn("ApiClient.recordingNotes(recordingId)", self.accessories)
+        self.assertIn("useMeetingItemList<RecordingNote>(recordingId, demoMode, ApiClient.recordingNotes)", self.accessories)
+        self.assertIn("loadNotes,", self.accessories)
+        self.assertIn("invalidateNotes()", self.accessories)
         self.assertNotIn("seg.text =", self.transcript)
         self.assertNotIn("seg.id =", self.transcript)
 
