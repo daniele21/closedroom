@@ -185,8 +185,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const { t, lang } = useTranslation();
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
-  const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
-  const [keyMomentVisualRequested, setKeyMomentVisualRequested] = useState(false);
+  // The screenshot list owns current content; selection retains only its meeting-scoped identity.
+  const [selectedScreenshotKey, setSelectedScreenshotKey] = useState<{ meetingId: string; id: string } | null>(null);
   const [showAllScreenshots, setShowAllScreenshots] = useState(false);
   const [momentQuestion, setMomentQuestion] = useState('');
   const [momentAskRunId, setMomentAskRunId] = useState<string | null>(null);
@@ -226,14 +226,17 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const tabListRef = useRef<HTMLDivElement | null>(null);
   const analysisMenuRef = useRef<HTMLDivElement | null>(null);
   const analysisMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const loadGenerationRef = useRef(0);
-  const loadInFlightRef = useRef<{ key: string; generation: number; promise: Promise<void> } | null>(null);
-  const loadQueuedRef = useRef(false);
+  // One request identity owns stale-response protection, coalescing and queued reloads.
+  const loadInFlightRef = useRef<{
+    key: string;
+    queued: boolean;
+    promise: Promise<void>;
+  } | null>(null);
   const userSelectedTabRef = useRef(false);
 
   const openKeyMoment = (shot: RecordingScreenshot) => {
-    setKeyMomentVisualRequested(true);
-    setSelectedScreenshot(shot);
+    if (!recordingId) return;
+    setSelectedScreenshotKey({ meetingId: recordingId, id: shot.screenshot_id });
   };
 
   const handleTimestampClick = (time: number) => {
@@ -272,6 +275,13 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     ),
     [screenshots, meeting?.transcription?.segments],
   );
+  const screenshotById = useMemo(
+    () => new Map(screenshots.map((shot) => [shot.screenshot_id, shot])),
+    [screenshots],
+  );
+  const selectedScreenshot = selectedScreenshotKey?.meetingId === recordingId
+    ? screenshotById.get(selectedScreenshotKey.id) || null
+    : null;
   const selectedKeyMomentContext = selectedScreenshot
     ? keyMomentContexts.get(selectedScreenshot.screenshot_id)
     : null;
@@ -280,7 +290,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     demoMode ? null : recordingId,
     Boolean(
       (visualResultAvailable && activeTab === 'analysis')
-      || (visualResultAvailable && keyMomentVisualRequested),
+      || (visualResultAvailable && selectedScreenshot !== null),
     ),
   );
   const selectedKeyMomentVisual = selectedScreenshot
@@ -291,10 +301,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const screenshotGroups = useMemo(
     () => visualSourcesStale ? [] : (visualData?.document.manual_screenshot_groups || []),
     [visualData?.document.manual_screenshot_groups, visualSourcesStale],
-  );
-  const screenshotById = useMemo(
-    () => new Map(screenshots.map((shot) => [shot.screenshot_id, shot])),
-    [screenshots],
   );
   const groupByScreenshotId = useMemo(() => {
     const groups = new Map<string, VisualManualScreenshotGroup>();
@@ -334,7 +340,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     : null;
 
   useEffect(() => {
-    setKeyMomentVisualRequested(false);
+    setSelectedScreenshotKey(null);
   }, [recordingId]);
 
   useEffect(() => {
@@ -444,13 +450,15 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     const key = `${recordingId}:${demoMode ? 'demo' : 'live'}:${lang}`;
     const activeLoad = loadInFlightRef.current;
     if (activeLoad?.key === key) {
-      loadQueuedRef.current = true;
+      activeLoad.queued = true;
       return activeLoad.promise;
     }
 
-    const generation = ++loadGenerationRef.current;
-    loadQueuedRef.current = false;
-    const promise = (async () => {
+    // Assign identity before starting the request so stale completions cannot
+    // publish state for another meeting or an unmounted view.
+    const request = { key, queued: false, promise: Promise.resolve() };
+    loadInFlightRef.current = request;
+    request.promise = (async () => {
       try {
         setError(null);
         let data: Meeting;
@@ -464,7 +472,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         } else {
           data = await ApiClient.getMeeting(recordingId);
         }
-        if (generation !== loadGenerationRef.current) return;
+        if (loadInFlightRef.current !== request) return;
         setMeeting(data);
         const availableTypes = Object.keys(data.latest_analysis || {});
         if (availableTypes.length > 0) {
@@ -476,23 +484,19 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           }
         }
       } catch (err: any) {
-        if (generation !== loadGenerationRef.current) return;
+        if (loadInFlightRef.current !== request) return;
         setError(err?.message || t('meeting.errorNotAvailable'));
       } finally {
-        if (generation === loadGenerationRef.current) {
+        if (loadInFlightRef.current === request) {
           setLoading(false);
         }
       }
     })().finally(() => {
-      if (loadInFlightRef.current?.generation !== generation) return;
+      if (loadInFlightRef.current !== request) return;
       loadInFlightRef.current = null;
-      if (loadQueuedRef.current) {
-        loadQueuedRef.current = false;
-        void load();
-      }
+      if (request.queued) void load();
     });
-    loadInFlightRef.current = { key, generation, promise };
-    return promise;
+    return request.promise;
   };
 
   useEffect(() => {
@@ -503,7 +507,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     userSelectedTabRef.current = false;
     void load();
     return () => {
-      loadGenerationRef.current += 1;
+      // Invalidates the previous request and any queued same-key refresh.
+      loadInFlightRef.current = null;
     };
   }, [recordingId, demoMode, lang]);
 
@@ -538,12 +543,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     () => (meeting?.jobs || []).filter((job) => activeJobStatuses.has(job.status)),
     [meeting],
   );
-  const preparationJobs = useMemo(
-    () => (meeting?.jobs || []).filter((job) => job.type === 'meeting_preparation'),
-    [meeting],
-  );
   const activePreparation = activeJobs.find((job) => job.type === 'meeting_preparation');
-  const latestPreparation = preparationJobs[0];
+  const latestPreparation = (meeting?.jobs || []).find((job) => job.type === 'meeting_preparation');
   const displayedActiveJobs = activePreparation
     ? [{ ...activePreparation, progress_detail: activeJobs.find((job) => job.parent_job_id === activePreparation.id
       && job.progress_detail && job.status !== 'queued')?.progress_detail || activePreparation.progress_detail }]
@@ -1886,7 +1887,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           role="dialog"
           aria-modal="true"
           aria-label={lang === 'it' ? 'Screenshot della riunione' : 'Meeting screenshot'}
-          onClick={() => setSelectedScreenshot(null)}
+          onClick={() => setSelectedScreenshotKey(null)}
         >
           <div
             className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle bg-bg-elevated shadow-2xl"
@@ -1912,7 +1913,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 </Button>
                 <button
                   type="button"
-                  onClick={() => setSelectedScreenshot(null)}
+                  onClick={() => setSelectedScreenshotKey(null)}
                   className="rounded-lg p-2 text-text-muted hover:bg-bg-surface hover:text-text-primary"
                   aria-label={lang === 'it' ? 'Chiudi screenshot' : 'Close screenshot'}
                 >
