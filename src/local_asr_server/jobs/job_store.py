@@ -207,6 +207,62 @@ class JobStore:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             return self._row_to_job(row), True
 
+    def create_or_get_submission(
+        self,
+        *,
+        job_id: str,
+        job_type: str,
+        scope_type: str,
+        scope_id: str,
+        request_id: str,
+        request_hash: str,
+        payload: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically recover the *same submission*, including terminal outcomes.
+
+        Distinct explicit retries use a new request ID. Unlike preparation
+        result reuse, submission identity never silently reruns finished work.
+        """
+        if not request_id or len(request_id) > 128:
+            raise ValueError("Invalid submission identity")
+        identity = f"submit:{request_id}"
+        now = time.time()
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT * FROM jobs
+                WHERE type = ? AND dedupe_key = ?
+                ORDER BY created_at DESC, id DESC LIMIT 1
+                """,
+                (job_type, identity),
+            ).fetchone()
+            if row is not None:
+                existing = self._row_to_job(row)
+                if (
+                    existing["scope_type"] != scope_type
+                    or (scope_type != "inline_text" and existing["scope_id"] != scope_id)
+                ):
+                    raise ValueError("Submission ID reused for a different source")
+                if (existing.get("payload") or {}).get("request_hash") != request_hash:
+                    raise ValueError("Submission ID reused with different options")
+                return existing, False
+            self._insert_job(
+                conn,
+                job_id=job_id,
+                job_type=job_type,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                payload={**(payload or {}), "request_hash": request_hash},
+                status="queued",
+                current_step="queued",
+                progress=0,
+                dedupe_key=identity,
+                now=now,
+            )
+            created = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            return self._row_to_job(created), True
+
     def _insert_job(
         self,
         conn: sqlite3.Connection,
@@ -326,11 +382,21 @@ class JobStore:
 
     def interrupt_incomplete(self, *, reason: str = "Interrupted by server restart") -> list[dict[str, Any]]:
         """Terminally mark work that cannot survive this process restart."""
+        # Scan all non-terminal IDs, including work older than recent history.
+        markers = ", ".join("?" for _ in ACTIVE_JOB_STATUSES)
+        with self.connection() as conn:
+            ids = [
+                row["id"] for row in conn.execute(
+                    f"SELECT id FROM jobs WHERE status IN ({markers})",
+                    ACTIVE_JOB_STATUSES,
+                ).fetchall()
+            ]
         interrupted = []
-        for job in self.list_jobs(limit=500):
-            if job["status"] in {"completed", "failed", "cancelled", "interrupted"}:
-                continue
-            updated = self.update(job["id"], status="interrupted", current_step="interrupted", error=reason, message=reason)
+        for job_id in ids:
+            updated = self.update(
+                job_id, status="interrupted", current_step="interrupted",
+                error=reason, message=reason,
+            )
             if updated:
                 interrupted.append(updated)
         return interrupted

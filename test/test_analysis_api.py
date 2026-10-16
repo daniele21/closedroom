@@ -134,6 +134,31 @@ class AnalysisApiTests(unittest.TestCase):
 
     @patch("local_asr_server.analysis_jobs.AnalysisJobManager._run", return_value=None)
     @patch("local_asr_server.analysis_jobs.load_settings")
+    def test_direct_analysis_submission_recovers_after_ambiguous_response(self, mock_load, _run) -> None:
+        mock_load.return_value = {"llm_provider": "mock"}
+        payload = {"text": "private review", "llm_provider": "mock"}
+        headers = {"Idempotency-Key": "analysis-submit-1"}
+        first = self.client.post("/v1/analysis-jobs", json=payload, headers=headers)
+        second = self.client.post("/v1/analysis-jobs", json=payload, headers=headers)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(first.json()["job_id"], second.json()["job_id"])
+        self.assertEqual(first.json()["analysis_run_id"], second.json()["analysis_run_id"])
+        self.assertEqual(len(self.app.state.job_store.list_jobs(job_type="analysis")), 1)
+        different = self.client.post(
+            "/v1/analysis-jobs",
+            json={"text": "different review", "llm_provider": "mock"},
+            headers=headers,
+        )
+        self.assertEqual(different.status_code, 409)
+        another = self.client.post(
+            "/v1/analysis-jobs", json=payload,
+            headers={"Idempotency-Key": "analysis-retry-2"},
+        )
+        self.assertEqual(another.status_code, 202)
+        self.assertNotEqual(another.json()["job_id"], first.json()["job_id"])
+
+    @patch("local_asr_server.analysis_jobs.AnalysisJobManager._run", return_value=None)
+    @patch("local_asr_server.analysis_jobs.load_settings")
     def test_source_scoped_analysis_job_does_not_expand_to_full_recording_transcript(self, mock_load, _mock_run) -> None:
         mock_load.return_value = {
             "llm_provider": "mock",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -66,7 +67,14 @@ class AnalysisJobManager:
         body: AnalysisRequest,
         *,
         on_terminal: AnalysisTerminalCallback | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
+        request_hash = (
+            hashlib.sha256(json.dumps(
+                body.model_dump(mode="json"), sort_keys=True, ensure_ascii=False,
+            ).encode("utf-8")).hexdigest()
+            if request_id is not None else None
+        )
         body = self._with_recording_transcription(body)
         body = self._with_template_defaults(body)
         job_id = str(uuid.uuid4())
@@ -79,18 +87,36 @@ class AnalysisJobManager:
         payload = self._request_payload(body)
         input_hash = self._input_hash(body, payload)
 
-        self._store.create(
-            job_id=job_id,
-            job_type=ANALYSIS_JOB_TYPE,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            payload={
-                **payload,
-                "analysis_run_id": run_id,
-                "llm_options": llm_options,
-                "input_hash": input_hash,
-            },
-        )
+        stored_payload = {
+            **payload,
+            "analysis_run_id": run_id,
+            "llm_options": llm_options,
+            "input_hash": input_hash,
+        }
+        if request_id is not None:
+            admitted, created = self._store.create_or_get_submission(
+                job_id=job_id,
+                job_type=ANALYSIS_JOB_TYPE,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                request_id=request_id,
+                request_hash=request_hash or "",
+                payload=stored_payload,
+            )
+            if not created:
+                return {
+                    "job_id": admitted["id"],
+                    "analysis_run_id": (admitted.get("payload") or {})["analysis_run_id"],
+                    "status": admitted["status"],
+                }
+        else:
+            self._store.create(
+                job_id=job_id,
+                job_type=ANALYSIS_JOB_TYPE,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                payload=stored_payload,
+            )
         self._catalog.create_analysis_run(
             {
                 "id": run_id,

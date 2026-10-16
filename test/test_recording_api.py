@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from local_asr_server.server import AudioRouter, create_app
+from local_asr_server.app_services import get_services
 from support import deterministic_settings
 
 
@@ -64,6 +65,50 @@ class RecordingApiTests(unittest.TestCase):
         self.settings_patcher.stop()
         self.client.close()
         self.temp_dir.cleanup()
+
+    def test_activities_exposes_all_active_jobs_without_content(self) -> None:
+        jobs = get_services(self.app).jobs
+        for job_id in ("job-1", "job-2", "job-3"):
+            jobs.create(
+                job_id=job_id, job_type="analysis",
+                scope_type="recording", scope_id="rec-1",
+                payload={"prompt": "private"},
+            )
+        jobs.update("job-1", status="completed", result={"text": "private"})
+        response = self.client.get("/v1/activities", params={"recent_limit": 1})
+        self.assertEqual(response.status_code, 200)
+        items = response.json()["items"]
+        self.assertEqual({item["id"] for item in items},
+                         {"job-1", "job-2", "job-3"})
+        self.assertNotIn("payload", response.text)
+        self.assertNotIn("private", response.text)
+        self.assertNotIn("result", response.text)
+
+    def test_global_cancel_dispatches_to_analysis_and_preparation_owners(self) -> None:
+        services = get_services(self.app)
+        services.jobs.create(
+            job_id="analysis-job", job_type="analysis",
+            scope_type="recording", scope_id="rec-1",
+        )
+        response = self.client.post("/v1/jobs/analysis-job/cancel")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(services.jobs.get("analysis-job")["cancel_requested"])
+
+        services.jobs.create(
+            job_id="prepare-job", job_type="meeting_preparation",
+            scope_type="recording", scope_id="rec-1",
+        )
+        services.jobs.create(
+            job_id="child-job", job_type="analysis",
+            scope_type="recording", scope_id="rec-1",
+        )
+        services.jobs.link_child("prepare-job", "child-job", stage="analysis")
+        cancelled = self.client.post("/v1/jobs/prepare-job/cancel")
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertTrue(services.jobs.get("child-job")["cancel_requested"])
+        self.assertTrue(services.jobs.get("prepare-job")["cancel_requested"])
+        # Cooperative child cancellation does not fake a terminal parent.
+        self.assertEqual(services.jobs.get("prepare-job")["status"], "cancelling")
 
     def test_visual_frame_upload_is_staged_only_while_recording(self) -> None:
         created = self.client.post(
@@ -640,6 +685,32 @@ class RecordingApiTests(unittest.TestCase):
 
         saved = self.app.state.transcription_store.get(data["saved_id"])
         self.assertIsNone(saved.get("analysis"))
+
+    @patch("local_asr_server.transcription_jobs.TranscriptionJobManager._run", return_value=None)
+    def test_transcription_submit_idempotency_does_not_duplicate_jobs(self, _run) -> None:
+        created = self.client.post(
+            "/v1/recordings",
+            json={"title": "Recording", "mime_type": "audio/wav", "capture_mode": "mic_only"},
+        )
+        recording_id = created.json()["id"]
+        url = f"/v1/recordings/{recording_id}/transcription-jobs"
+        options = {"language": "it", "visual_intelligence_enabled": False}
+        headers = {"Idempotency-Key": "once-1"}
+        first = self.client.post(url, json=options, headers=headers)
+        second = self.client.post(url, json=options, headers=headers)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(first.json()["id"], second.json()["id"])
+        self.assertEqual(len(get_services(self.app).jobs.list_jobs(job_type="transcription")), 1)
+        collision = self.client.post(
+            url, json={"language": "en", "visual_intelligence_enabled": False},
+            headers=headers,
+        )
+        self.assertEqual(collision.status_code, 409)
+        retry = self.client.post(
+            url, json=options, headers={"Idempotency-Key": "new-2"},
+        )
+        self.assertEqual(retry.status_code, 202)
+        self.assertNotEqual(first.json()["id"], retry.json()["id"])
 
     @patch("local_asr_server.server.transcribe_file_sync")
     def test_transcription_job_for_recording(self, transcribe) -> None:

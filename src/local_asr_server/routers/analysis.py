@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from local_asr_server.app_services import get_services
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from local_asr_server.analysis_templates import list_pipelines, list_templates
 from local_asr_server.schemas import AnalysisPipelineRequest, AnalysisRequest, StructuredNoteEditRequest
@@ -31,8 +31,19 @@ def analyze_transcription(request: Request, body: AnalysisRequest):
 
 
 @router.post("/v1/analysis-jobs", status_code=202)
-def create_analysis_job(request: Request, body: AnalysisRequest):
-    return get_services(request.app).analysis_jobs.create(body)
+def create_analysis_job(
+    request: Request,
+    body: AnalysisRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
+):
+    try:
+        return get_services(request.app).analysis_jobs.create(
+            body, request_id=idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/v1/analysis-pipelines", status_code=202)
