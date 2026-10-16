@@ -7,12 +7,14 @@ cd "$ROOT"
 CREATE_DMG=false
 CLEAN_TRANSIENT=false
 INSTALL=false
+BUILD_VARIANT="${CLOSEDROOM_BUILD_VARIANT:-stable}"
 for arg in "$@"; do
   case "$arg" in
     --dmg) CREATE_DMG=true ;;
     --no-dmg) CREATE_DMG=false ;;
     --clean) CLEAN_TRANSIENT=true ;;
     --install) INSTALL=true ;;
+    --test) BUILD_VARIANT=test ;;
     *) echo "Unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
@@ -21,8 +23,10 @@ done
 [[ "$(uname -m)" == "arm64" ]] || { echo "Canonical artifact build requires Apple Silicon arm64" >&2; exit 1; }
 command -v uv >/dev/null 2>&1 || { echo "uv is required" >&2; exit 1; }
 
-APP_NAME="${CLOSEDROOM_APP_NAME:-ClosedRoom}"
-APP_BUNDLE_NAME="${CLOSEDROOM_APP_BUNDLE_NAME:-${APP_NAME}.app}"
+IFS=$'\t' read -r APP_NAME APP_BUNDLE_NAME APP_DISPLAY_NAME APP_BUNDLE_ID < <(
+  python3 scripts/build_identity.py --variant "$BUILD_VARIANT" --identity-tsv
+)
+export CLOSEDROOM_BUILD_VARIANT="$BUILD_VARIANT"
 APP_VERSION="$(python3 scripts/product_version.py --root "$ROOT")"
 SOURCE_REVISION="${CLOSEDROOM_SOURCE_REVISION:-$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)}"
 if [[ -n "$(git status --porcelain 2>/dev/null || true)" ]]; then DIRTY=true; else DIRTY=false; fi
@@ -30,6 +34,9 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then DEFAULT_CHANNEL="ci"; else DEFAUL
 CHANNEL="${CLOSEDROOM_BUILD_CHANNEL:-$DEFAULT_CHANNEL}"
 VARIANT="app"
 $CREATE_DMG && VARIANT="package"
+if [[ "$BUILD_VARIANT" == "test" ]]; then
+  VARIANT="test-$VARIANT"
+fi
 
 if [[ -n "${CLOSEDROOM_BUILD_ID:-}" ]]; then
   BUILD_ID="$CLOSEDROOM_BUILD_ID"
@@ -42,8 +49,8 @@ BUILD_ID="$(printf '%s' "$BUILD_ID" | tr -cs 'A-Za-z0-9._-' '-')"
 LINEAGE="macos-arm64-${CHANNEL}-${VARIANT}"
 ARTIFACT_DIR="$ROOT/dist/artifacts/$LINEAGE/$BUILD_ID"
 STAGING_APP="$ROOT/dist/$APP_BUNDLE_NAME"
-STAGING_DMG="$ROOT/dist/${APP_NAME}-${APP_VERSION}.dmg"
-FINAL_BASENAME="${APP_NAME}-${APP_VERSION}-${BUILD_ID}-${SOURCE_REVISION}"
+STAGING_DMG="$ROOT/dist/${APP_DISPLAY_NAME// /-}-${APP_VERSION}.dmg"
+FINAL_BASENAME="${APP_DISPLAY_NAME// /-}-${APP_VERSION}-${BUILD_ID}-${SOURCE_REVISION}"
 FINAL_APP="$ARTIFACT_DIR/${FINAL_BASENAME}.app"
 FINAL_DMG="$ARTIFACT_DIR/${FINAL_BASENAME}.dmg"
 
@@ -80,6 +87,7 @@ else
   build_args+=(--no-dmg)
 fi
 $INSTALL && build_args+=(--install)
+[[ "$BUILD_VARIANT" != "test" ]] || build_args+=(--test)
 ./build.sh "${build_args[@]}"
 
 [[ -d "$STAGING_APP" ]] || { echo "Expected staging app missing: $STAGING_APP" >&2; exit 1; }
@@ -100,7 +108,7 @@ finalize_args=(
   --build-id "$BUILD_ID"
   --source-revision "$SOURCE_REVISION"
   --dirty "$DIRTY"
-  --bundle-id "${CLOSEDROOM_APP_BUNDLE_ID:-com.closedroom.app}"
+  --bundle-id "$APP_BUNDLE_ID"
   --signing "$signing"
   --channel "$CHANNEL"
   --variant "$VARIANT"

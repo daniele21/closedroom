@@ -35,10 +35,16 @@
 set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-APP_NAME="${CLOSEDROOM_APP_NAME:-ClosedRoom}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_VARIANT="${CLOSEDROOM_BUILD_VARIANT:-stable}"
+for arg in "$@"; do
+    [[ "$arg" != "--test" ]] || BUILD_VARIANT="test"
+done
+# The same immutable identity selection is used by direct and finalized builds.
+IFS=$'\t' read -r APP_NAME APP_BUNDLE_NAME APP_DISPLAY_NAME BUNDLE_ID < <(
+    python3 "$SCRIPT_DIR/scripts/build_identity.py" --variant "$BUILD_VARIANT" --identity-tsv
+)
 APP_VERSION="$(python3 "$SCRIPT_DIR/scripts/product_version.py" --root "$SCRIPT_DIR")"
-BUNDLE_ID="${CLOSEDROOM_APP_BUNDLE_ID:-com.closedroom.app}"
 BUILD_PYTHON_VERSION="${CLOSEDROOM_BUILD_PYTHON_VERSION:-3.10}"
 BUILD_ASSETS="$SCRIPT_DIR/build_assets"
 # uv refuses to build a source tree when its cache lives inside that same tree.
@@ -47,10 +53,8 @@ BUILD_ASSETS="$SCRIPT_DIR/build_assets"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$HOME/Library/Caches/ClosedRoom/uv}"
 export PYINSTALLER_CONFIG_DIR="${PYINSTALLER_CONFIG_DIR:-$SCRIPT_DIR/.cache/pyinstaller}"
 DIST_DIR="$SCRIPT_DIR/dist"
-APP_BUNDLE_NAME="${CLOSEDROOM_APP_BUNDLE_NAME:-${APP_NAME}.app}"
-APP_DISPLAY_NAME="${CLOSEDROOM_APP_DISPLAY_NAME:-$APP_NAME}"
 APP_PATH="$DIST_DIR/$APP_BUNDLE_NAME"
-DMG_BASENAME="${APP_NAME}-${APP_VERSION}"
+DMG_BASENAME="${APP_DISPLAY_NAME// /-}-${APP_VERSION}"
 DMG_PATH="$DIST_DIR/${DMG_BASENAME}.dmg"
 LEGACY_VERSIONED_APP_PATH="$DIST_DIR/${APP_NAME}-${APP_VERSION}.app"
 CREATE_DMG=true
@@ -102,6 +106,9 @@ while [[ $# -gt 0 ]]; do
             INSTALL_TO_APPLICATIONS=true
             shift
             ;;
+        --test)
+            shift
+            ;;
         --sign)
             [[ $# -ge 2 ]] || die "--sign requires an identity name or fingerprint"
             SIGN_IDENTITY="$2"
@@ -109,10 +116,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help|-h)
             cat <<'EOF'
-Usage: ./build.sh [--no-dmg] [--clean] [--install] [--sign <identity>]
+Usage: ./build.sh [--test] [--no-dmg] [--clean] [--install] [--sign <identity>]
 
-The local app bundle identity is stable (ClosedRoom.app / com.closedroom.app).
-VERSION controls the product version embedded in Info.plist and versioned DMG name.
+Default: ClosedRoom.app (com.closedroom.app); --test: ClosedRoom Test.app
+(com.closedroom.app.test) with separate data, permissions and install name.
+VERSION is the product version; CFBundleVersion auto-increments per build.
 Use a stable code-signing identity with --install to preserve macOS TCC identity.
 EOF
             exit 0
@@ -156,11 +164,15 @@ else
     fi
 fi
 
+# Every canonical build invocation allocates a fresh local sequence number.
+CLOSEDROOM_BUILD_NUMBER="$(python3 "$SCRIPT_DIR/scripts/build_identity.py" --next-build-number)"
+export CLOSEDROOM_BUILD_NUMBER
+
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-echo "  Building $APP_NAME v$APP_VERSION"
+echo "  Building $APP_DISPLAY_NAME v$APP_VERSION"
 echo "  App:      $APP_BUNDLE_NAME"
-echo "  Version:  $APP_VERSION"
+echo "  Version:  $APP_VERSION (build $CLOSEDROOM_BUILD_NUMBER)"
 echo "  Bundle ID: $BUNDLE_ID"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
     echo "  Signing:  ad-hoc (TCC permissions will reset on install)"
@@ -173,7 +185,7 @@ echo ""
 # ── Clean ─────────────────────────────────────────────────────────────────────
 if $CLEAN_BUILD; then
     log "Cleaning previous build artifacts..."
-    rm -rf "$DIST_DIR" build/ __pycache__ build_venv
+    rm -rf build/ __pycache__ build_venv "$DIST_DIR/wheels" "$SCRIPT_DIR/.cache/pyinstaller"
     ok "Cleaned"
 fi
 
@@ -253,7 +265,7 @@ cat > "$NATIVE_HELPER_APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
-    <string>$APP_VERSION</string>
+    <string>$CLOSEDROOM_BUILD_NUMBER</string>
     <key>CFBundleShortVersionString</key>
     <string>$APP_VERSION</string>
     <key>LSUIElement</key>
@@ -384,7 +396,7 @@ cd "$SCRIPT_DIR"
 
 log "  Removing stale app artifacts..."
 rm -rf "$APP_PATH"
-if [[ "$LEGACY_VERSIONED_APP_PATH" != "$APP_PATH" ]]; then
+if [[ "$BUILD_VARIANT" == "stable" && "$LEGACY_VERSIONED_APP_PATH" != "$APP_PATH" ]]; then
     rm -rf "$LEGACY_VERSIONED_APP_PATH"
 fi
 
@@ -587,7 +599,7 @@ fi
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-ok "$APP_NAME v$APP_VERSION built successfully!"
+ok "$APP_DISPLAY_NAME v$APP_VERSION (build $CLOSEDROOM_BUILD_NUMBER) built successfully!"
 echo ""
 echo "  App:  $APP_PATH"
 $CREATE_DMG && echo "  DMG:  $DMG_PATH" || true

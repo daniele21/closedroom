@@ -39,6 +39,15 @@ class ProductVersionTests(unittest.TestCase):
             self.assertNotIn("['project']['version']", source)
             self.assertNotIn("pyproject.toml", source)
 
+    def test_build_number_keeps_semver_and_native_helper_in_sync(self) -> None:
+        repo = Path(__file__).parents[1]
+        build = (repo / "build.sh").read_text(encoding="utf-8")
+        spec_source = (repo / "ClosedRoom.spec").read_text(encoding="utf-8")
+        self.assertIn('CLOSEDROOM_BUILD_NUMBER="$(python3', build)
+        self.assertIn('<string>$CLOSEDROOM_BUILD_NUMBER</string>', build)
+        self.assertIn('"CFBundleShortVersionString": APP_VERSION', spec_source)
+        self.assertIn('"CFBundleVersion": BUILD_NUMBER', spec_source)
+
     def test_tag_round_trip_uses_repository_version(self) -> None:
         version = product_version.read_product_version(ROOT)
         tag = product_version.tag_for_version(version)

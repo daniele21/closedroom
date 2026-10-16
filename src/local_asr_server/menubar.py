@@ -313,7 +313,7 @@ class ClosedRoomApp(rumps.App):
         self._status_item_repair_count = 0
         icon_path = str(self._menu_bar_icon_path) if self._menu_bar_icon_path.is_file() else None
         super().__init__(
-            name="ClosedRoom",
+            name=get_app_identity().display_name,
             title=None if icon_path else "CR",
             icon=icon_path,
             template=False,
@@ -384,7 +384,11 @@ class ClosedRoomApp(rumps.App):
             self._status_item_image = image  # retain the NSImage for the item lifetime
 
             if hasattr(status_item, "setAutosaveName_"):
-                status_item.setAutosaveName_("ClosedRoomMenuBarItem")
+                status_item.setAutosaveName_(
+                    "ClosedRoomTestMenuBarItem"
+                    if get_app_identity().bundle_identifier == "com.closedroom.app.test"
+                    else "ClosedRoomMenuBarItem"
+                )
             if hasattr(status_item, "setVisible_"):
                 status_item.setVisible_(True)
             status_item.setLength_(AppKit.NSSquareStatusItemLength)

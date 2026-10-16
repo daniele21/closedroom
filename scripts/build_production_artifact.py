@@ -223,9 +223,13 @@ def main() -> int:
             env["PATH"] = f"{wrapper_dir}:{env.get('PATH', '')}"
             env["CLOSEDROOM_SIGN_IDENTITY"] = identity
             env["CLOSEDROOM_BUILD_CHANNEL"] = "release"
+            # Never let a test-build shell environment change the release identity.
+            env["CLOSEDROOM_BUILD_VARIANT"] = "stable"
             env["CLOSEDROOM_APP_NAME"] = app_name
             env["CLOSEDROOM_APP_BUNDLE_NAME"] = app_bundle_name
             env["CLOSEDROOM_APP_DISPLAY_NAME"] = app_name
+            env["CLOSEDROOM_BUILD_VARIANT"] = "stable"
+            env.pop("CLOSEDROOM_BUILD_NUMBER", None)
             try:
                 run(
                     ["bash", "build.sh", "--no-dmg", "--clean"],
