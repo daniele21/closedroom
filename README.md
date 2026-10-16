@@ -28,8 +28,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/assets/closedroom-product-overview.png">
-    <img src="docs/assets/closedroom-product-overview.png" alt="ClosedRoom product workflow from a new meeting through recording, transcription, structured notes, review, and project memory">
+  <a href="docs/assets/closedroom-product-overview.webp">
+    <img src="docs/assets/closedroom-product-overview.webp" alt="ClosedRoom product workflow from a new meeting through recording, transcription, structured notes, review, and project memory">
   </a>
 </p>
 
@@ -77,9 +77,9 @@ Under that simple flow, ClosedRoom saves the meeting before expensive AI work, e
     <th>Meeting intelligence</th>
   </tr>
   <tr>
-    <td align="center"><a href="docs/assets/0.home.png"><img src="docs/assets/0.home.png" width="240" alt="ClosedRoom Today workspace"></a></td>
-    <td align="center"><a href="docs/assets/1.recording.png"><img src="docs/assets/1.recording.png" width="240" alt="ClosedRoom recording setup"></a></td>
-    <td align="center"><a href="docs/assets/5.meeting-analysis.png"><img src="docs/assets/5.meeting-analysis.png" width="240" alt="ClosedRoom meeting intelligence workspace"></a></td>
+    <td align="center"><a href="docs/assets/0.home.webp"><img src="docs/assets/0.home.webp" width="240" alt="ClosedRoom Today workspace"></a></td>
+    <td align="center"><a href="docs/assets/1.recording.webp"><img src="docs/assets/1.recording.webp" width="240" alt="ClosedRoom recording setup"></a></td>
+    <td align="center"><a href="docs/assets/5.meeting-analysis.webp"><img src="docs/assets/5.meeting-analysis.webp" width="240" alt="ClosedRoom meeting intelligence workspace"></a></td>
   </tr>
   <tr>
     <td align="center">Meetings, actions, decisions, risks and context</td>
@@ -94,8 +94,8 @@ Under that simple flow, ClosedRoom saves the meeting before expensive AI work, e
     <th>Deep-dive actions</th>
   </tr>
   <tr>
-    <td align="center"><a href="docs/assets/6.project-analysis.png"><img src="docs/assets/6.project-analysis.png" width="320" alt="ClosedRoom project memory workspace"></a></td>
-    <td align="center"><a href="docs/assets/4.deep-dive-actions.png"><img src="docs/assets/4.deep-dive-actions.png" width="320" alt="ClosedRoom deep-dive action items"></a></td>
+    <td align="center"><a href="docs/assets/6.project-analysis.webp"><img src="docs/assets/6.project-analysis.webp" width="320" alt="ClosedRoom project memory workspace"></a></td>
+    <td align="center"><a href="docs/assets/4.deep-dive-actions.webp"><img src="docs/assets/4.deep-dive-actions.webp" width="320" alt="ClosedRoom deep-dive action items"></a></td>
   </tr>
   <tr>
     <td align="center">Cross-meeting status, decisions, risks and updates</td>
@@ -117,7 +117,7 @@ Optional visual intelligence can be enabled for a specifically selected macOS wi
 
 During native recording, the compact overlay can also save a **manual full-display screenshot** as local meeting evidence. The image is timestamped against the recording clock, reopens from the transcript/notes at that point, and stays separate from spoken evidence. This action is manual rather than continuous, and remote-provider selection does not silently send the screenshot outside the Mac.
 
-![ClosedRoom speaker intelligence: audio diarization produces stable speaker clusters, while optional visual evidence can support conservative names or abstain](docs/assets/closedroom-speaker-intelligence.png)
+![ClosedRoom speaker intelligence: audio diarization produces stable speaker clusters, while optional visual evidence can support conservative names or abstain](docs/assets/closedroom-speaker-intelligence.webp)
 
 _Visual evidence may support naming an existing speaker cluster; it never replaces audio diarization, and low-confidence mappings remain unknown._
 
@@ -138,7 +138,7 @@ The default product path keeps the sensitive meeting workflow on the Mac. Cloud 
 
 This is a product boundary, not a marketing label: provider selection, runtime ownership and failure states are explicit so a local failure does not silently move meeting content to a cloud API.
 
-![ClosedRoom high-level local-first architecture](docs/assets/closedroom-high-level-architecture.png)
+![ClosedRoom high-level local-first architecture](docs/assets/closedroom-high-level-architecture.webp)
 
 _The default trust boundary stays on the user's Mac; cloud providers sit outside it and are used only when explicitly selected._
 
@@ -174,7 +174,7 @@ The key ownership split is:
 - **[Korgis](https://github.com/daniele21/korgis) owns reusable Local AI runtime infrastructure:** model loading, backend selection, runtime lifecycle, text/vision inference, logs and diagnostics. The current integration still uses the internal `local-llm-server` package/runtime identity where required by the implementation.
 - **Native helpers own platform-specific capture and diarization work** behind explicit process boundaries.
 
-![ClosedRoom detailed technical architecture](docs/assets/closedroom-detailed-technical-architecture.png)
+![ClosedRoom detailed technical architecture](docs/assets/closedroom-detailed-technical-architecture.webp)
 
 For durable ownership and extension rules, read [`docs/architecture.md`](docs/architecture.md).
 
