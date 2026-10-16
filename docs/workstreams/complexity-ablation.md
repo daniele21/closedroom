@@ -77,15 +77,9 @@ C1/C2/C3.2 and E4/E5-read are retained; C3.3 cache conflation is rejected. Synth
 
 **Net production LOC vs `dev`: −48** (previous −45, E4.4 −3), overlay React states −3, Meeting React states −1, Meeting load refs 3→1. All one-shot validation workflows removed; no merge into `dev`. Stop speculative ablations; broader E5 HOLD pending #86; exact-head/base gates and representative Mac proof remain before integration/release.
 
-## Consolidated pre-integration audit — 2026-10-14
+## Original-base preflight
 
-`dev` `747a0e5`: **55 changed files**. Production **−48 LOC** (10 files), tests/E2E **+869 LOC**, optional tooling **+506 LOC**. Fifteen lossless WebP images save ~51.9 MiB. Fewer owners/states do not mean fewer total lines or measured RAM/CPU. No overlapping files with open SQLite PR #86.
-
-Selector **INTEGRATION / STRONG**: governance, source-tests, browser-e2e, **packaged-app**. [Consolidated run 38560561537](https://github.com/daniele21/closedroom/actions/runs/38560561537) PASS: governance/docs, **716/716 Python**, lint/tsc, **8/8 browser FULL_MEDIA**. Earlier [38559430185](https://github.com/daniele21/closedroom/actions/runs/38559430185) had 4 obsolete static assertions: corrected to enforce independent list generations, stale-load identity and note/visual lifetimes; no product behavior weakened. Disposable PRs #132/#133 closed unmerged; workflow deleted. Final exact-HEAD/base proof is **not** established by the temporary PR.
-
-**Base changed:** `dev` advanced to `a30e69e` (+1 background-processing commit). Candidate is behind by 1. Both touch `MeetingDetailPage.tsx` and `design/ux-contract.json`; no same-line hunks detected, but semantic reconciliation and new-base gates remain PENDING. Source PASS applies to old `dev` `747a0e5` only.
-
-**PENDING:** local finalized macOS .app/FTS5 lifecycle gate; representative WKWebView/TCC/audio/MLX remain release evidence. Selected integration now carries (1) frontend state/policy ablations with browser oracles and (2) backend ASR/diarization/read-only visual projection, ported onto the newer `dev` base using uniquely matching source hunks; (3) documentation media conversion, README references and optional footprint-audit tooling deliberately remain isolated. Exact-head source and Mac package evidence still PENDING; no merge into `dev` yet.
+Old `dev@747a0e5` audit: 716 Python tests, lint/tsc and 8 browser FULL_MEDIA passed in [38560561537](https://github.com/daniele21/closedroom/actions/runs/38560561537). This evidence is **not equivalent** to new-base integration. Original branch retains media/footprint experiments outside the selected integration scope.
 
 ## Integration candidate checkpoint — 2026-10-16
 
