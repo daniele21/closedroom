@@ -59,9 +59,9 @@ All checks below are **source/synthetic or scoped**; they do not prove represent
 
 **Negative / deferred:** C3.3 would incorrectly collapse path ASR-only cache (diarization per call) with upload final-result cache (diarization in key); do **not** unify without differential evidence. C4 storage migrations, C5/C7 native lifecycle and C6 dependency/package dieting remain evidence-gated.
 
-## Selective architecture review — 2026-10-13
+## Selection summary
 
-**KEEP existing C1/C2/C3.2 ablations on isolated branch.** One canonical diarization policy (path/upload caches remain semantically distinct), three fewer overlay states, two fewer Meeting request refs, one fewer memoized intermediary. C2.4 keeps independent screenshot/note state while sharing their list-load policy (+12 LOC); diagnostics/visual frames must remain distinct. At this checkpoint −24 net production LOC vs `dev`; no RAM/CPU or native Mac proof. All nine source/test blobs matched synthetic run [38465528741](https://github.com/daniele21/closedroom/actions/runs/38465528741). C3.3 cache convergence rejected; storage migrations and native/package changes deferred. These were STOP/HOLD decisions for speculative work, not approval to integrate.
+C1/C2/C3.2 and E4/E5-read are retained; C3.3 cache conflation is rejected. Synthetic source tests do not establish physical Mac/runtime or performance evidence. The original experiment branch preserves the per-step test history.
 
 ## E4/E5 bounded follow-up — 2026-10-14
 
@@ -69,9 +69,9 @@ All checks below are **source/synthetic or scoped**; they do not prove represent
 
 **E5 KEEP only read projection (PRODUCT_NONE / ITERATION / SCOPED / REMOTE_AUTOMATED):** `RecordingStore.list_visual_evidence_frames` centralizes available/unavailable screenshot metadata and resolves assets only when available. −11 LOC, preserves provenance/order, no SQLite/manifest/write/recovery change. Two visual + four note tests and synthetic Meeting browser PASS on [38546454969](https://github.com/daniele21/closedroom/actions/runs/38546454969). SQLite PR #86 OPEN; all persistence write paths HOLD.
 
-**E4.2 KEEP (PRODUCT_NONE / ITERATION / STRONG / REMOTE_AUTOMATED):** One `useRecorder` fallback/notice policy for native and browser overlays; audio/timer/lease/SSE remain separate. −12 LOC. [38550028682](https://github.com/daniele21/closedroom/actions/runs/38550028682) PASS: 15 relevant source tests, lint/tsc and synthetic overlay E2E. Earlier CI failures were stale static assertions after prior ablations, not runtime regressions. PR #129 closed unmerged.
+**E4.2 KEEP:** one recorder overlay fallback policy; recording, timing, and lease lifecycles stay distinct. Synthetic evidence: [38550028682](https://github.com/daniele21/closedroom/actions/runs/38550028682) PASS.
 
-**E4.3 KEEP (PRODUCT_NONE / ITERATION / SCOPED / REMOTE_AUTOMATED):** Shared `capturePermissionMessages.ts` owns pure UI copy for helper unavailability and diagnostic priority in `NewRecordingPage` and `RecordingPage`; per-screen permission request/mode/readiness remain separate. −4 net production LOC. [38553150338](https://github.com/daniele21/closedroom/actions/runs/38553150338) PASS: 14 behavioral cases + both consumers + lint/tsc; PR #130 closed unmerged.
+**E4.3 KEEP:** capture helper failure copy centralized, permissions and readiness still screen-owned. [38553150338](https://github.com/daniele21/closedroom/actions/runs/38553150338) PASS.
 
 **E4.4 KEEP (PRODUCT_LOCAL / ITERATION / SCOPED / REMOTE_AUTOMATED):** Remove sticky `keyMomentVisualRequested` state; visual context loads on analysis tab or currently open meeting-scoped key-moment dialog. −3 LOC, **−1 React state**. [38554778757](https://github.com/daniele21/closedroom/actions/runs/38554778757) PASS: 12 source contracts, lint/tsc, synthetic browser V2 fetch only when opened + refetch on close/reopen, plus late Meeting replies and notes/screenshots retry. PR #131 closed unmerged, workflow deleted. Intentional tradeoff: repeat local fetch on reopening rather than retain idle data. No actual macOS/WKWebView/TCC or performance measurements.
 
@@ -86,10 +86,6 @@ Selector **INTEGRATION / STRONG**: governance, source-tests, browser-e2e, **pack
 **Base changed:** `dev` advanced to `a30e69e` (+1 background-processing commit). Candidate is behind by 1. Both touch `MeetingDetailPage.tsx` and `design/ux-contract.json`; no same-line hunks detected, but semantic reconciliation and new-base gates remain PENDING. Source PASS applies to old `dev` `747a0e5` only.
 
 **PENDING:** local finalized macOS .app/FTS5 lifecycle gate; representative WKWebView/TCC/audio/MLX remain release evidence. Selected integration now carries (1) frontend state/policy ablations with browser oracles and (2) backend ASR/diarization/read-only visual projection, ported onto the newer `dev` base using uniquely matching source hunks; (3) documentation media conversion, README references and optional footprint-audit tooling deliberately remain isolated. Exact-head source and Mac package evidence still PENDING; no merge into `dev` yet.
-
-## Resume checkpoint
-
-Experiment is isolated. Retain repository-selected strong preflight, source/packaged-app and target-Mac release gaps. C3 path/upload cache convergence remains rejected; E5 write changes await SQLite migration PR #86.
 
 ## Integration candidate checkpoint — 2026-10-16
 
