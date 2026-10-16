@@ -9,10 +9,7 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
 - PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio benchmark tooling; dual-track audio remains canonical pending representative evidence.
 - PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and adaptive Today/Meeting/Projects workspace.
-- PRS-17 passed FULL preflight #306 (411 Python tests and Meeting FULL_MEDIA).
 - PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
-- PR #65 verified Search open/focus/close accessibility; shortcut delivery stays nonblocking.
-- PRS-18 target-Mac evidence remains active.
 - GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata; runtime/install identity stays stable as `ClosedRoom.app` / `ClosedRoom` / `com.closedroom.app`, while DMGs/finalized artifacts carry version + build/source identity.
 - GRP-3 stages immutable artifacts with source identity and checksums.
 - GRP-4/5 now build and draft releases locally from the exact tag; Actions release workflows are retired. Apple notarization remains mandatory.
@@ -52,6 +49,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
 - [`selective-efficiency.md`](workstreams/selective-efficiency.md): persisted audio fingerprint reuse and privacy-safe VAD comparison tooling; ONNX removal remains evidence-gated.
+- [`complexity-ablation.md`](workstreams/complexity-ablation.md): selected C1/C2/C3/E4/E5 refactors integrated in #137; optional footprint inventory is read-only and needs target-Mac measurements.
 - Meeting Moments integrated through PR #100 (`4e159414`); INTEGRATION / STRONG preflight #659 passed on exact head `816da96a`. Target-Mac menu/focus/hotkey/TCC confirmation remains RELEASE evidence.
 
 PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.

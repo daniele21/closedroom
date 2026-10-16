@@ -8,6 +8,7 @@ import path from 'node:path';
 
 const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 const MEETING_ID = 'e2e-meeting';
+const ALTERNATE_MEETING_ID = 'e2e-meeting-other';
 const VIDEO_FPS = 4;
 const DIAGNOSTICS_DELAY_MS = 1400;
 const root = path.resolve(process.cwd());
@@ -56,6 +57,44 @@ const meetingFixture = {
   updated_at: '2026-09-05T10:10:05Z',
 };
 
+const alternateMeetingFixture = {
+  ...meetingFixture,
+  id: ALTERNATE_MEETING_ID,
+  recording: {
+    ...meetingFixture.recording,
+    id: ALTERNATE_MEETING_ID,
+    title: 'Alternate pricing review',
+  },
+  transcription: {
+    ...meetingFixture.transcription,
+    id: 'e2e-other-transcription',
+    recording_id: ALTERNATE_MEETING_ID,
+    text: 'Pricing review belongs only to the alternate meeting.',
+    segments: [{
+      ...meetingFixture.transcription.segments[0],
+      text: 'Pricing review belongs only to the alternate meeting.',
+    }],
+  },
+};
+
+const screenshotFixture = {
+  screenshot_id: 'synthetic-shared-key',
+  recording_id: MEETING_ID,
+  request_id: 'synthetic-shot-request',
+  sequence: 0,
+  capture_kind: 'manual',
+  timestamp: 50,
+  display_id: 1,
+  display_title: 'Launch screenshot A',
+  width: 1200,
+  height: 720,
+  sha256: 'synthetic',
+  available: false,
+  thumbnail_available: false,
+  original_url: '/fixture/screenshot-original.jpg',
+  thumbnail_url: '/fixture/screenshot-thumbnail.jpg',
+};
+
 const diagnosticsFixture = {
   recording_id: MEETING_ID,
   outcome_status: 'completed',
@@ -73,7 +112,15 @@ const diagnosticsFixture = {
   }],
 };
 
-const counts = { session: 0, health: 0, meeting: 0, diagnostics: 0, visual_frames: 0, screenshots: 0 };
+const counts = {
+  session: 0, health: 0, meeting: 0, alternate_meeting: 0, held_meeting: 0,
+  diagnostics: 0, visual_frames: 0, screenshots: 0, alternate_screenshots: 0, notes: 0, alternate_notes: 0,
+  alternate_visual_context: 0,
+};
+let failNextAlternateScreenshots = false;
+let failNextAlternateNotes = false;
+let holdNextMeetingId = null;
+const heldMeetingResponses = [];
 const checkpoints = [];
 let frameIndex = 0;
 
@@ -151,9 +198,17 @@ function fixtureServer(port) {
         recordings: true,
       });
     }
-    if (pathname === `/v1/meetings/${MEETING_ID}`) {
-      counts.meeting += 1;
-      return json(res, 200, meetingFixture);
+    if ([MEETING_ID, ALTERNATE_MEETING_ID].some((id) => pathname === `/v1/meetings/${id}`)) {
+      const requestedId = pathname.slice('/v1/meetings/'.length);
+      if (requestedId === MEETING_ID) counts.meeting += 1;
+      else counts.alternate_meeting += 1;
+      if (holdNextMeetingId === requestedId) {
+        holdNextMeetingId = null;
+        counts.held_meeting += 1;
+        const gate = await new Promise((resolve) => heldMeetingResponses.push(resolve));
+        if (gate === 'error') return json(res, 503, { detail: 'stale_meeting_fetch_failed' });
+      }
+      return json(res, 200, requestedId === MEETING_ID ? meetingFixture : alternateMeetingFixture);
     }
     if (pathname === `/v1/meetings/${MEETING_ID}/diagnostics`) {
       counts.diagnostics += 1;
@@ -163,9 +218,47 @@ function fixtureServer(port) {
       }
       return json(res, 200, diagnosticsFixture);
     }
+    if (pathname === `/v1/recordings/${ALTERNATE_MEETING_ID}/screenshots`) {
+      counts.alternate_screenshots += 1;
+      if (failNextAlternateScreenshots) {
+        failNextAlternateScreenshots = false;
+        return json(res, 503, { detail: 'synthetic screenshot failure' });
+      }
+      return json(res, 200, { items: [{
+        ...screenshotFixture,
+        recording_id: ALTERNATE_MEETING_ID,
+        display_title: 'Pricing screenshot B',
+      }], total: 1 });
+    }
     if (pathname === `/v1/recordings/${MEETING_ID}/screenshots`) {
       counts.screenshots += 1;
+      return json(res, 200, { items: [screenshotFixture], total: 1 });
+    }
+    if (pathname === `/v1/recordings/${MEETING_ID}/notes`) {
+      counts.notes += 1;
       return json(res, 200, { items: [], total: 0 });
+    }
+    if (pathname === `/v1/recordings/${ALTERNATE_MEETING_ID}/notes`) {
+      counts.alternate_notes += 1;
+      if (failNextAlternateNotes) {
+        failNextAlternateNotes = false;
+        return json(res, 503, { detail: 'synthetic note failure' });
+      }
+      return json(res, 200, { items: [], total: 0 });
+    }
+    if (pathname === `/v2/recordings/${ALTERNATE_MEETING_ID}/visual-intelligence`) {
+      counts.alternate_visual_context += 1;
+      return json(res, 200, {
+        schema_version: 2,
+        summary: {},
+        source_validity: { status: 'current', manual_screenshot_count: 1,
+          missing_screenshot_ids: [], unavailable_screenshot_ids: [], changed_screenshot_ids: [] },
+        document: {
+          schema_version: 2, observations: [], manual_screenshot_groups: [], speaker_intervals: [],
+          meeting_state_events: [], share_sessions: [], unassigned_share_keyframes: [],
+          semantic_links: [], routing_summary: {}, model: 'fixture-only', prompt_version: 1,
+        },
+      });
     }
     if (pathname === `/v1/recordings/${MEETING_ID}/visual-frames`) {
       counts.visual_frames += 1;
@@ -505,6 +598,146 @@ try {
   if (counts.diagnostics !== 2 || counts.visual_frames !== 2) {
     throw new Error(`unexpected retry counts: ${JSON.stringify(counts)}`);
   }
+
+  // Same React component, different recordingId prop: late responses from an
+  // earlier Meeting must not overwrite the currently selected Meeting.
+  const setMeetingHash = async (id) => {
+    const changed = await browser.execute(`
+      window.location.hash = ${JSON.stringify('#meeting/')} + ${JSON.stringify(id)};
+      return true;
+    `);
+    if (!changed) throw new Error('could not update the Meeting route');
+  };
+  const expectCurrentMeeting = async (title, forbiddenTitle, forbiddenTranscript) => {
+    await waitText(browser, [title], 5000, true);
+    const visible = await browser.execute(`
+      const body = document.body.innerText;
+      return body.includes(${JSON.stringify(title)})
+        && !body.includes(${JSON.stringify(forbiddenTitle)})
+        && !body.includes(${JSON.stringify(forbiddenTranscript)});
+    `);
+    if (!visible) throw new Error('stale Meeting content leaked into ' + title);
+  };
+
+  // E4: selection is owned by the current list and recording identity.
+  // Both fixtures intentionally share an ID so a stale selection would
+  // accidentally rebind to an unrelated Meeting unless scoped.
+  await browser.clickCss('[data-key-moment-id="synthetic-shared-key"]');
+  const opened = await browser.execute(`
+    return Array.from(document.querySelectorAll('[role="dialog"]')).some((node) =>
+      (node.innerText || '').includes('Launch screenshot A'));
+  `);
+  if (!opened) throw new Error('original Meeting key-moment modal did not open');
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  await waitCount('alternate_screenshots', 1);
+  const leaked = await browser.execute(`
+    return Array.from(document.querySelectorAll('[role="dialog"]')).some((node) =>
+      ['Screenshot della riunione', 'Meeting screenshot'].includes(node.getAttribute('aria-label')));
+  `);
+  if (leaked) throw new Error('stale key-moment modal carried into alternate Meeting');
+  await checkpoint(browser, '07-meeting-key-moment-scope');
+
+  holdNextMeetingId = MEETING_ID;
+  await setMeetingHash(MEETING_ID);
+  await waitCount('held_meeting', 1);
+  const alternateRequestsBeforeReturn = counts.alternate_meeting;
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitCount('alternate_meeting', alternateRequestsBeforeReturn + 1);
+  await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  if (heldMeetingResponses.length !== 1) throw new Error('expected one delayed original Meeting response');
+  heldMeetingResponses.shift()('success');
+  await sleep(500);
+  await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  await checkpoint(browser, '07-late-success-ignored');
+
+  await setMeetingHash(MEETING_ID);
+  await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
+  holdNextMeetingId = ALTERNATE_MEETING_ID;
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitCount('held_meeting', 2);
+  const originalRequestsBeforeReturn = counts.meeting;
+  await setMeetingHash(MEETING_ID);
+  await waitCount('meeting', originalRequestsBeforeReturn + 1);
+  await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
+  if (heldMeetingResponses.length !== 1) throw new Error('expected one delayed alternate Meeting response');
+  heldMeetingResponses.shift()('error');
+  await sleep(500);
+  await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
+  const staleErrorVisible = await browser.execute(`
+    return document.body.innerText.includes('stale_meeting_fetch_failed');
+  `);
+  if (staleErrorVisible) throw new Error('stale Meeting request error leaked into current view');
+  await checkpoint(browser, '08-late-error-ignored');
+
+  // List requests have independent error and retry lifecycles even though
+  // screenshots and notes now share the list-loading implementation.
+  failNextAlternateScreenshots = true;
+  failNextAlternateNotes = true;
+  const screenshotsBeforeFailure = counts.alternate_screenshots;
+  const notesBeforeFailure = counts.alternate_notes;
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  await waitCount('alternate_screenshots', screenshotsBeforeFailure + 1);
+  await waitCount('alternate_notes', notesBeforeFailure + 1);
+  await waitText(browser, ['Screenshots unavailable', 'Screenshot non disponibili'], 5000, true);
+  await waitText(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili'], 5000, true);
+
+  const retryAccessory = async (messages) => {
+    const clicked = await browser.execute(`
+      const messages = ${JSON.stringify(messages)};
+      const heading = Array.from(document.querySelectorAll('section p'))
+        .find((node) => messages.some((message) => (node.textContent || '').trim() === message));
+      const button = Array.from(heading?.closest('section')?.querySelectorAll('button') || [])
+        .find((node) => ['Retry', 'Riprova'].includes((node.textContent || '').trim()));
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    `);
+    if (!clicked) throw new Error('Could not retry ' + messages.join(' / '));
+  };
+  await retryAccessory(['Screenshots unavailable', 'Screenshot non disponibili']);
+  await waitCount('alternate_screenshots', screenshotsBeforeFailure + 2);
+  await waitAbsent(browser, ['Screenshots unavailable', 'Screenshot non disponibili'], 5000);
+  await waitText(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili']);
+
+  await retryAccessory(['Meeting notes unavailable', 'Note del meeting non disponibili']);
+  await waitCount('alternate_notes', notesBeforeFailure + 2);
+  await waitAbsent(browser, ['Meeting notes unavailable', 'Note del meeting non disponibili'], 5000);
+  await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  await checkpoint(browser, '09-independent-list-recovery');
+
+  // E4: visual context fetch belongs to a visible key-moment dialog, not a
+  // sticky boolean that survives closing it. Switch the existing synthetic
+  // meeting to visual V2 only after the previous recovery assertions.
+  await browser.clickCss('#meeting-tab-transcript');
+  alternateMeetingFixture.transcription.stats = {
+    ...alternateMeetingFixture.transcription.stats,
+    visual_intelligence: { version: 2 },
+  };
+  await setMeetingHash(MEETING_ID);
+  await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
+  const alternateLoadsBeforeVisual = counts.alternate_meeting;
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitCount('alternate_meeting', alternateLoadsBeforeVisual + 1);
+  await expectCurrentMeeting('Alternate pricing review', 'Quarterly launch review', meetingFixture.transcription.text);
+  await waitCount('alternate_screenshots', screenshotsBeforeFailure + 3);
+  await sleep(300);
+  if (counts.alternate_visual_context !== 0) {
+    throw new Error('closed key-moment dialog preloaded visual context');
+  }
+  await browser.clickCss('[data-key-moment-id="synthetic-shared-key"]');
+  await waitCount('alternate_visual_context', 1);
+  await browser.clickCss('button[aria-label="Chiudi screenshot"], button[aria-label="Close screenshot"]');
+  const dialogStillOpen = await browser.execute(`
+    return Array.from(document.querySelectorAll('[role="dialog"]')).some((node) =>
+      ['Screenshot della riunione', 'Meeting screenshot'].includes(node.getAttribute('aria-label')));
+  `);
+  if (dialogStillOpen) throw new Error('key-moment dialog did not close');
+  await browser.clickCss('[data-key-moment-id="synthetic-shared-key"]');
+  await waitCount('alternate_visual_context', 2);
+  await checkpoint(browser, '10-visual-context-demand-not-sticky');
+
   video = await renderVideo();
 } catch (caught) {
   error = `${caught?.name || 'Error'}: ${caught?.message || caught}`;
@@ -512,6 +745,7 @@ try {
     try { await checkpoint(browser, '99-failure', 1); } catch {}
   }
 } finally {
+  while (heldMeetingResponses.length) heldMeetingResponses.shift()('error');
   if (browser) await browser.close();
   await stop(driver);
   await stop(vite);
