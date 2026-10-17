@@ -25,7 +25,10 @@ from local_asr_server.audio_intelligence.vad import (
 from local_asr_server.audio_intelligence.vad_benchmark import (
     build_benchmark_report,
     build_case_report,
+    discover_finalized_recording_tracks,
+    reference_segment_windows,
 )
+from local_asr_server.settings import load_settings
 
 
 def _silero(path: Path) -> tuple[list[dict[str, float]], float]:
@@ -60,16 +63,42 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compare Silero VAD and RMS fallback using privacy-safe aggregate evidence."
     )
-    parser.add_argument("--audio", action="append", required=True, help="Local audio path; repeat for multiple tracks.")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--audio", action="append", help="Local audio path; repeat for multiple tracks.")
+    source.add_argument(
+        "--latest-recordings",
+        type=int,
+        metavar="N",
+        help="Benchmark tracks from the N newest finalized ClosedRoom recordings.",
+    )
+    parser.add_argument(
+        "--recordings-root",
+        type=Path,
+        help="Override the configured ClosedRoom recordings directory for --latest-recordings.",
+    )
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error("--repeat must be >= 1")
+    if args.latest_recordings is not None and args.latest_recordings < 1:
+        parser.error("--latest-recordings must be >= 1")
+
+    if args.latest_recordings is not None:
+        configured_root = args.recordings_root
+        if configured_root is None:
+            configured_root = Path(str(load_settings()["recordings_dir"]))
+        audio_paths = discover_finalized_recording_tracks(
+            configured_root,
+            recording_limit=args.latest_recordings,
+        )
+        if not audio_paths:
+            parser.error("No finalized ClosedRoom recording tracks found")
+    else:
+        audio_paths = [Path(raw_path).expanduser().resolve() for raw_path in (args.audio or [])]
 
     cases = []
-    for index, raw_path in enumerate(args.audio):
-        path = Path(raw_path).expanduser().resolve()
+    for index, path in enumerate(audio_paths):
         if not path.is_file():
             raise FileNotFoundError(path)
 
@@ -113,6 +142,7 @@ def main() -> int:
             rms_runs=rms_runs,
             silero_windows=representative_silero,
             rms_windows=representative_rms,
+            reference_windows=reference_segment_windows(path),
         ))
 
     report = build_benchmark_report(cases)

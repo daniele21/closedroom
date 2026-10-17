@@ -23,10 +23,10 @@ Make further ClosedRoom efficiency changes only when measured evidence shows a w
 | --- | --- | --- |
 | SE-1 | Reuse persisted finalized-track SHA-256 for repeated ASR cache lookup | DONE |
 | SE-2 | Privacy-safe Silero-vs-RMS timing/agreement benchmark | DONE |
-| SE-3 | Representative target-Mac VAD quality run and ONNX keep/remove decision | BLOCKED |
+| SE-3 | Representative target-Mac VAD quality run and ONNX keep/remove decision | READY_REAL_ENVIRONMENT |
 | SE-4 | Remove generic video/training VLM dependencies from the packaged image-only path | DONE |
 | SE-5 | Bound SHA-keyed ephemeral ASR JSON cache with LRU retention | DONE |
-| SE-6 | Remove PyTorch from packaged MLX inference surface | ACTIVE |
+| SE-6 | Remove PyTorch from packaged MLX inference surface | DONE |
 
 ## Acceptance
 
@@ -34,7 +34,7 @@ SE-1: first lookup hashes the finalized track exactly as before; subsequent look
 
 SE-2: one command accepts local audio paths and emits only aggregate duration/bytes/timing/window/agreement metrics. It retains no filenames, paths, transcript or audio-derived content.
 
-SE-3: do not remove ONNX Runtime until representative meetings show acceptable speech-boundary quality, not just synthetic agreement. Bundle-size benefit is material (~17 MB arm64 wheel before transitive effects) but quality dominates.
+SE-3: do not remove ONNX Runtime until representative meetings show acceptable speech-boundary quality, not just synthetic agreement. Bundle-size benefit is material (~17 MB arm64 wheel before transitive effects) but quality dominates. On a representative Mac, run `python3 scripts/benchmark_vad_backends.py --latest-recordings 5 --repeat 3 --output /tmp/closedroom-vad.json`; the report contains no recording IDs, titles, paths, filenames, transcript text or audio content. When an existing transcript is present, only segment timestamps/track IDs are used to report temporal speech recall.
 
 SE-4: ClosedRoom passes static screenshots/JPEGs to Qwen3-VL and does not expose video, training or evaluation. The frozen app must complete its image-message smoke with `cv2`, `datasets`, `pyarrow`, `pandas` and `multiprocess` absent.
 
