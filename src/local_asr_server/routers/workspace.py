@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 
 from local_asr_server.app_services import get_services
 from local_asr_server.jobs.models import ACTIVE_JOB_STATUSES
@@ -13,7 +13,10 @@ from local_asr_server.meeting_preparation import MeetingPreparationManager
 from local_asr_server.recordings import RecordingConflict, RecordingNotFound
 from local_asr_server.routers.helpers import _build_meeting, _build_meetings, _build_projects
 from local_asr_server.routers.transcriptions import run_recording_transcription
-from local_asr_server.schemas import AnalysisPipelineRequest, MeetingPreparationRequest, TranscriptionJobRequest
+from local_asr_server.schemas import (
+    AnalysisPipelineRequest, AnalysisRequest, ImportedAudioAnalysisRequest,
+    MeetingPreparationRequest, TranscriptionJobRequest,
+)
 from local_asr_server.visual_intelligence.jobs import start_visual_intelligence_job
 
 
@@ -144,6 +147,7 @@ def prepare_meeting(
     recording_id: str,
     request: Request,
     body: MeetingPreparationRequest | None = None,
+    request_id: str | None = None,
 ):
     services = get_services(request.app)
     preparation = body or MeetingPreparationRequest()
@@ -209,11 +213,79 @@ def prepare_meeting(
             start_pipeline=start_pipeline,
             start_visual=start_visual,
             include_screenshots=preparation.include_screenshots,
+            request_id=request_id,
         )
     except RecordingConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Meeting preparation failed: {exc}") from exc
+
+
+@router.post("/v1/recordings/{recording_id}/audio-analysis-jobs", status_code=202)
+def create_audio_analysis_preparation(
+    recording_id: str,
+    request: Request,
+    body: ImportedAudioAnalysisRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
+    request_id: str | None = None,
+):
+    """Start one durable ASR→chosen-analysis chain using existing job owners.
+
+    The parent does not reserve a heavy worker; each child acquires the shared
+    arbiter independently. A page unmount cannot interrupt the terminal callbacks.
+    """
+    services = get_services(request.app)
+    try:
+        recording = services.recordings.get(recording_id, include_result=False)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    if recording.get("status") in {"recording", "finalizing"}:
+        raise HTTPException(status_code=409, detail="Stop recording before analysis")
+    if body.analysis.text or body.analysis.transcription_id:
+        raise HTTPException(status_code=422, detail="Audio analysis source must be the imported recording")
+    if body.analysis.recording_id and body.analysis.recording_id != recording_id:
+        raise HTTPException(status_code=422, detail="Audio analysis source mismatch")
+
+    asr = body.transcription.model_copy(update={"visual_intelligence_enabled": False})
+    selected_analysis = body.analysis.model_copy(update={"recording_id": recording_id})
+
+    def start_transcription(on_terminal: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+        def runner(job):
+            return run_recording_transcription(request.app, recording_id, asr, job)
+
+        return services.transcription_jobs.create(
+            recording_id, runner,
+            payload={"recording_id": recording_id,
+                     "visual_intelligence_enabled": False,
+                     "transcription_options": asr.model_dump(mode="json"),
+                     "trigger": "audio_analysis"},
+            on_terminal=on_terminal,
+        )
+
+    def start_analysis(
+        transcription_id: str,
+        on_terminal: Callable[[dict[str, Any]], None],
+    ) -> dict[str, Any]:
+        chosen = selected_analysis.model_copy(update={"transcription_id": transcription_id})
+        admitted = services.analysis_jobs.create(chosen, on_terminal=on_terminal)
+        return {"pipeline_run_id": None, "jobs": [admitted]}
+
+    try:
+        return MeetingPreparationManager(
+            services, default_model=request.app.state.default_model,
+        ).create(
+            recording_id,
+            start_transcription=start_transcription,
+            start_pipeline=start_analysis,
+            include_screenshots=False,
+            transcription_request=asr,
+            custom_analysis=selected_analysis,
+            request_id=request_id or idempotency_key,
+        )
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/v1/meetings/{recording_id}/preparation-jobs/{job_id}/cancel")

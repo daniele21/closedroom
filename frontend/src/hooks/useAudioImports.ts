@@ -1,0 +1,143 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ApiClient, type Recording, type TranscriptionJob } from '../api/apiClient';
+
+type TranscriptionOptions = Parameters<typeof ApiClient.createTranscriptionJob>[1];
+type AnalysisOptions = Parameters<typeof ApiClient.createAnalysisJob>[0];
+
+export interface AudioImportTask {
+  id: string;
+  name: string;
+  phase: 'uploading' | 'submitting' | 'submitted' | 'cancelling' | 'cancelled' | 'failed';
+  recordingId?: string;
+  jobId?: string;
+  error?: string;
+}
+
+/**
+ * MainApp owns both the file and the upload->job handoff. Navigating away
+ * unmounts only a page; the submit request and its in-memory key survive.
+ * The backend retains the resulting source and job, not this UI state.
+ */
+export function useAudioImports(enabled = true) {
+  const [items, setItems] = useState<AudioImportTask[]>([]);
+  const mounted = useRef(true);
+  const cancels = useRef(new Set<string>());
+  const uploadControllers = useRef(new Map<string, AbortController>());
+  const update = useCallback((id: string, next: Partial<AudioImportTask>) => {
+    if (!mounted.current) return;
+    setItems((current) => current.map((item) => item.id === id ? { ...item, ...next } : item));
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  // On a real window reload, a File object cannot be reconstructed.
+  // Abort only unfinished transfers; persisted sources/jobs are never
+  // deleted and their status is discovered again from SQLite at bootstrap.
+  useEffect(() => {
+    const onPageHide = () => {
+      for (const [id, controller] of uploadControllers.current) {
+        // keepalive allows cancellation to reach the loopback service after
+        // browser teardown, unlike a normal request cancelled by unloading.
+        void fetch(`/v1/recordings/import-audio/${encodeURIComponent(id)}/cancel`, {
+          method: 'POST', credentials: 'same-origin', keepalive: true,
+        }).catch(() => {});
+        controller.abort();
+      }
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, []);
+
+  const startImport = useCallback((
+    file: File,
+    options: TranscriptionOptions,
+    analysis?: AnalysisOptions,
+  ): string => {
+    if (!enabled) throw new Error('Audio import is unavailable');
+    const id = crypto.randomUUID();
+    setItems((current) => [{ id, name: file.name, phase: 'uploading' as const }, ...current].slice(0, 20));
+
+    const run = async () => {
+      let source: Recording | undefined;
+      const controller = new AbortController();
+      uploadControllers.current.set(id, controller);
+      try {
+        source = await ApiClient.importRecordingAudio(
+          file, { title: file.name.replace(/\.[^.]+$/, ''), language: options.language },
+          id, controller.signal,
+        );
+        update(id, { recordingId: source.id });
+        if (cancels.current.has(id)) {
+          update(id, { phase: 'cancelled' });
+          return;
+        }
+        update(id, { phase: 'submitting' });
+        const job: TranscriptionJob = analysis
+          ? await ApiClient.createAudioAnalysisPreparation(source.id, options, analysis, id)
+          : await ApiClient.createTranscriptionJob(source.id, options, id);
+        if (cancels.current.has(id)) {
+          // A cancellation may race with publication and job admission.
+          // Stop an already-admitted job instead of pretending it never ran.
+          try {
+            await ApiClient.cancelJob(job.id);
+            update(id, { phase: 'cancelled', jobId: job.id });
+          } catch (error) {
+            update(id, {
+              phase: 'failed', jobId: job.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          return;
+        }
+        update(id, { phase: 'submitted', jobId: job.id });
+      } catch (error) {
+        update(id, {
+          phase: cancels.current.has(id) ? 'cancelled' : 'failed',
+          recordingId: source?.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        uploadControllers.current.delete(id);
+        cancels.current.delete(id);
+      }
+    };
+    void run();
+    return id;
+  }, [enabled, update]);
+
+  const startTranscription = useCallback((file: File, options: TranscriptionOptions) =>
+    startImport(file, options), [startImport]);
+  const startAnalysis = useCallback((file: File, transcription: TranscriptionOptions, analysis: AnalysisOptions) =>
+    startImport(file, transcription, analysis), [startImport]);
+
+  const cancel = useCallback(async (id: string) => {
+    const task = items.find((item) => item.id === id);
+    if (!task || !['uploading', 'submitting'].includes(task.phase)) return;
+    if (task.phase === 'submitting') {
+      // A POST may already have been admitted. Never pretend a submission
+      // was cancelled by cancelling only the preceding transfer.
+      return;
+    }
+    cancels.current.add(id);
+    update(id, { phase: 'cancelling' });
+    try {
+      const result = await ApiClient.cancelRecordingAudioImport(id);
+      if (result.cancel_requested) uploadControllers.current.get(id)?.abort();
+      if (!result.cancel_requested) {
+        // The source was committed just before cancellation. The upload
+        // handoff will not submit AI because cancels.current is set.
+        update(id, { phase: 'cancelled' });
+      }
+    } catch (error) {
+      cancels.current.delete(id);
+      update(id, { phase: 'uploading', error: error instanceof Error ? error.message : String(error) });
+    }
+  }, [items, update]);
+
+  return { items, startTranscription, startAnalysis, cancel };
+}
+
+export type AudioImportsState = ReturnType<typeof useAudioImports>;

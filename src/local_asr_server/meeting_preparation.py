@@ -10,7 +10,7 @@ from typing import Any, Callable
 from local_asr_server.app_services import AppServices
 from local_asr_server.asr_provider import ASR_PROVIDER_LOCAL
 from local_asr_server.jobs.models import TERMINAL_JOB_STATUSES
-from local_asr_server.schemas import AnalysisPipelineRequest, TranscriptionJobRequest
+from local_asr_server.schemas import AnalysisPipelineRequest, AnalysisRequest, TranscriptionJobRequest
 from local_asr_server.settings import load_settings
 from local_asr_server.transcription_diarization import DIARIZATION_PROVIDER_DISABLED
 from local_asr_server.transcription_jobs import (
@@ -65,11 +65,15 @@ class MeetingPreparationManager:
         start_pipeline: StartPipeline,
         start_visual: StartVisual | None = None,
         include_screenshots: bool = True,
+        transcription_request: TranscriptionJobRequest | None = None,
+        custom_analysis: AnalysisRequest | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         # Resolve the recording before creating durable work so a bad id cannot
         # leave an orphan parent job.
         self.services.recordings.get(recording_id, include_result=False)
-        transcription_request = TranscriptionJobRequest(visual_intelligence_enabled=False)
+        transcription_request = transcription_request or TranscriptionJobRequest(visual_intelligence_enabled=False)
+        pipeline_id = "audio_analysis" if custom_analysis is not None else MEETING_PREPARATION_PIPELINE
         screenshots = self.services.recordings.list_screenshots(recording_id)
         selected_screenshots = screenshots if include_screenshots else []
         available_screenshots = [item for item in selected_screenshots if item.get("available")]
@@ -112,11 +116,16 @@ class MeetingPreparationManager:
         )
         visual_identity = _hash_json(visual_material)
         asr_identity, asr_material = self._asr_identity(transcription_request)
-        analysis_request = AnalysisPipelineRequest(
-            recording_id=recording_id,
-            pipeline_id=MEETING_PREPARATION_PIPELINE,
-        )
-        analysis_material = self.services.analysis_jobs.pipeline_identity(analysis_request)
+        if custom_analysis is not None:
+            # Only the digest participates in dedupe; do not put custom
+            # prompts, credentials or transcripts in parent result/events.
+            analysis_material = custom_analysis.model_dump(mode="json")
+        else:
+            analysis_request = AnalysisPipelineRequest(
+                recording_id=recording_id,
+                pipeline_id=MEETING_PREPARATION_PIPELINE,
+            )
+            analysis_material = self.services.analysis_jobs.pipeline_identity(analysis_request)
         analysis_identity = _hash_json(analysis_material)
         preparation_key = _hash_json(
             {
@@ -129,6 +138,17 @@ class MeetingPreparationManager:
                 "analysis_identity": analysis_identity,
             }
         )
+
+        # A given submit identity must resolve to its original job even if
+        # it already failed. A *different* identity is a deliberate retry.
+        if request_id is not None:
+            admitted = self.services.jobs.find_submission(
+                job_type=MEETING_PREPARATION_JOB_TYPE, scope_type="recording",
+                scope_id=recording_id, request_id=request_id,
+                request_hash=preparation_key,
+            )
+            if admitted is not None:
+                return {**admitted, "deduplicated": True, "reused_completed": False}
 
         completed = self.services.jobs.find_latest(
             job_type=MEETING_PREPARATION_JOB_TYPE,
@@ -147,23 +167,31 @@ class MeetingPreparationManager:
             dedupe_key=preparation_key,
             statuses=["failed", "interrupted", "cancelled"],
         )
-        parent, created = self.services.jobs.create_or_get_active(
-            job_id=str(uuid.uuid4()),
-            job_type=MEETING_PREPARATION_JOB_TYPE,
-            scope_type="recording",
-            scope_id=recording_id,
-            dedupe_key=preparation_key,
-            payload={
+        parent_payload = {
                 "recording_id": recording_id,
-                "pipeline_id": MEETING_PREPARATION_PIPELINE,
+                "pipeline_id": pipeline_id,
                 "preparation_key": preparation_key,
+                **({"transcription_options": transcription_request.model_dump(mode="json"),
+                    "analysis_options": custom_analysis.model_dump(mode="json")}
+                   if custom_analysis is not None else {}),
                 "include_screenshots": include_screenshots,
                 "screenshot_count": len(selected_screenshots),
                 "user_note_count": len(user_notes),
-            },
-            current_step="preparing_transcript",
-            progress=5,
-        )
+        }
+        if request_id is None:
+            parent, created = self.services.jobs.create_or_get_active(
+                job_id=str(uuid.uuid4()), job_type=MEETING_PREPARATION_JOB_TYPE,
+                scope_type="recording", scope_id=recording_id,
+                dedupe_key=preparation_key, payload=parent_payload,
+                current_step="preparing_transcript", progress=5,
+            )
+        else:
+            parent, created = self.services.jobs.create_or_get_submission(
+                job_id=str(uuid.uuid4()), job_type=MEETING_PREPARATION_JOB_TYPE,
+                scope_type="recording", scope_id=recording_id,
+                request_id=request_id, request_hash=preparation_key,
+                payload=parent_payload,
+            )
         if not created:
             return {**parent, "deduplicated": True, "reused_completed": False}
 
@@ -181,7 +209,7 @@ class MeetingPreparationManager:
             "asr_identity": asr_identity,
             "visual_identity": visual_identity,
             "analysis_identity": analysis_identity,
-            "pipeline_id": MEETING_PREPARATION_PIPELINE,
+            "pipeline_id": pipeline_id,
             "transcription_id": None,
             "transcription_job_id": None,
             "pipeline_run_id": None,
@@ -229,6 +257,32 @@ class MeetingPreparationManager:
         except Exception as exc:
             self._fail_parent(parent["id"], f"Unable to start transcription: {exc}")
         return self.services.jobs.get(parent["id"]) or parent
+
+    def default_retry_compatible(self, previous: dict[str, Any]) -> bool:
+        """Fail closed if the effective default pipeline or ASR has changed."""
+        result = previous.get("result") or {}
+        if not result.get("analysis_identity") or not result.get("asr_identity"):
+            return False
+        original_pipeline = (previous.get("payload") or {}).get("pipeline_id")
+        if original_pipeline != MEETING_PREPARATION_PIPELINE:
+            return False
+        selected = AnalysisPipelineRequest(
+            recording_id=previous.get("scope_id"),
+            pipeline_id=MEETING_PREPARATION_PIPELINE,
+        )
+        try:
+            analysis_identity = _hash_json(
+                self.services.analysis_jobs.pipeline_identity(selected)
+            )
+            asr_identity, _ = self._asr_identity(
+                TranscriptionJobRequest(visual_intelligence_enabled=False)
+            )
+        except Exception:
+            return False
+        return (
+            result["analysis_identity"] == analysis_identity
+            and result["asr_identity"] == asr_identity
+        )
 
     def cancel(self, parent_job_id: str) -> dict[str, Any] | None:
         parent = self.services.jobs.get(parent_job_id)

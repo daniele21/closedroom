@@ -26,7 +26,7 @@ export interface Recording {
   status: RecordingStatus;
   error?: string | null;
   partial?: boolean;
-  capture_backend?: 'browser' | 'native';
+  capture_backend?: 'browser' | 'native' | 'import';
   capture_status?: string;
   quality_report?: any;
   warnings?: string[];
@@ -682,6 +682,39 @@ async function request(url: string, options: RequestInit = {}, retrying = false)
   throw new Error(detail);
 }
 
+export type TranscriptionJobOptions = {
+  model?: string;
+  language?: string;
+  task?: string;
+  response_format?: string;
+  word_timestamps?: boolean;
+  initial_prompt?: string;
+  temperature?: number | null;
+  condition_on_previous_text?: boolean;
+  vad_guided?: boolean;
+  vad_post_filter?: boolean;
+  asr_provider?: string;
+  speechmatics_region?: string;
+  speechmatics_model?: string;
+  speechmatics_diarization?: string;
+  diarization_provider?: string;
+  visual_intelligence_enabled?: boolean;
+};
+
+export type AnalysisJobOptions = AnalysisSetupPayload & {
+  transcription_id?: string;
+  recording_id?: string;
+  text?: string;
+  audio_task?: string;
+  question?: string;
+  prompt?: string;
+  analysis_type?: string;
+  template_id?: string;
+  pipeline_id?: string;
+  pipeline_run_id?: string;
+  source_ids?: string[];
+};
+
 export const ApiClient = {
   async health(): Promise<HealthResponse> {
     return (await request('/health')).json();
@@ -747,6 +780,47 @@ export const ApiClient = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
     })).json();
+  },
+
+  async importRecordingAudio(
+    file: File,
+    options: { title?: string; project_name?: string; language?: string } = {},
+    requestId?: string,
+    signal?: AbortSignal,
+  ): Promise<Recording> {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    for (const [key, value] of Object.entries(options)) {
+      if (value !== undefined) body.append(key, value);
+    }
+    // Multipart boundary is assigned by fetch; never set Content-Type.
+    return (await request('/v1/recordings/import-audio', {
+      method: 'POST',
+      body,
+      signal,
+      headers: requestId ? { 'Idempotency-Key': requestId } : {},
+    })).json();
+  },
+
+  async createAudioAnalysisPreparation(
+    recordingId: string,
+    transcription: TranscriptionJobOptions,
+    analysis: AnalysisJobOptions,
+    requestId?: string,
+  ): Promise<TranscriptionJob> {
+    return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/audio-analysis-jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcription, analysis }),
+      ...(requestId ? { headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId } } : {}),
+    })).json();
+  },
+
+  async cancelRecordingAudioImport(requestId: string): Promise<{ cancel_requested: boolean; already_published: boolean }> {
+    return (await request(
+      '/v1/recordings/import-audio/' + encodeURIComponent(requestId) + '/cancel',
+      { method: 'POST' },
+    )).json();
   },
 
   async listRecordings(): Promise<{ items: Recording[] }> {
@@ -903,27 +977,13 @@ export const ApiClient = {
     }).then((res) => res.json());
   },
 
-  async createTranscriptionJob(recordingId: string, payload: {
-    model?: string;
-    language?: string;
-    task?: string;
-    response_format?: string;
-    word_timestamps?: boolean;
-    initial_prompt?: string;
-    temperature?: number | null;
-    condition_on_previous_text?: boolean;
-    vad_guided?: boolean;
-    vad_post_filter?: boolean;
-    asr_provider?: string;
-    speechmatics_region?: string;
-    speechmatics_model?: string;
-    speechmatics_diarization?: string;
-    diarization_provider?: string;
-    visual_intelligence_enabled?: boolean;
-  }): Promise<TranscriptionJob> {
+  async createTranscriptionJob(recordingId: string, payload: TranscriptionJobOptions, requestId?: string): Promise<TranscriptionJob> {
     return (await request(`/v1/recordings/${recordingId}/transcription-jobs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(requestId ? { 'Idempotency-Key': requestId } : {}),
+      },
       body: JSON.stringify(payload),
     })).json();
   },
@@ -932,10 +992,13 @@ export const ApiClient = {
     provider: 'local' | 'speechmatics' | string;
     speechmatics_region?: string;
     speechmatics_model?: string;
-  }): Promise<TranscriptionJob> {
+  }, requestId?: string): Promise<TranscriptionJob> {
     return (await request(`/v1/transcriptions/${transcriptionId}/diarization-jobs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(requestId ? { 'Idempotency-Key': requestId } : {}),
+      },
       body: JSON.stringify(payload),
     })).json();
   },
@@ -954,6 +1017,13 @@ export const ApiClient = {
 
   async cancelJob(jobId: string): Promise<TranscriptionJob> {
     return (await request(`/v1/jobs/${jobId}/cancel`, { method: 'POST' })).json();
+  },
+
+  async retryJob(jobId: string, requestId: string): Promise<{ job_id: string; retry_of: string; status: string }> {
+    return (await request(`/v1/jobs/${encodeURIComponent(jobId)}/retry`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': requestId },
+    })).json();
   },
 
   async updateRecording(recordingId: string, payload: { title?: string; project_name?: string }): Promise<Recording> {
@@ -1032,10 +1102,13 @@ export const ApiClient = {
     })).json();
   },
 
-  async createAnalysisJob(payload: AnalysisSetupPayload & { transcription_id?: string; recording_id?: string; text?: string; audio_task?: string; question?: string; prompt?: string; analysis_type?: string; template_id?: string; pipeline_id?: string; pipeline_run_id?: string; source_ids?: string[] }): Promise<AnalysisJobCreated> {
+  async createAnalysisJob(payload: AnalysisJobOptions, requestId?: string): Promise<AnalysisJobCreated> {
     return (await request('/v1/analysis-jobs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(requestId ? { 'Idempotency-Key': requestId } : {}),
+      },
       body: JSON.stringify(payload),
     })).json();
   },
@@ -1230,7 +1303,7 @@ export const ApiClient = {
     active: boolean;
     recording_id?: string;
     title?: string;
-    capture_backend?: 'browser' | 'native';
+    capture_backend?: 'browser' | 'native' | 'import';
     capture_mode?: 'both' | 'mic_only' | 'pc_only';
     started_at?: number | string;
     bytes_written?: number;

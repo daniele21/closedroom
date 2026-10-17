@@ -3,6 +3,7 @@ from __future__ import annotations
 from local_asr_server.app_services import get_services
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -10,11 +11,13 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from local_asr_server.recordings import RecordingConflict, RecordingNotFound
+from local_asr_server.analysis_jobs import ANALYSIS_JOB_TYPE
+from local_asr_server.meeting_preparation import MeetingPreparationManager, MEETING_PREPARATION_JOB_TYPE
 from local_asr_server.transcription_jobs import (
     DIARIZATION_JOB_TYPE,
     TRANSCRIPTION_JOB_TYPE,
@@ -44,6 +47,7 @@ from local_asr_server.schemas import (
     DiarizationJobRequest,
     MergeTranscriptionsRequest,
     AnalysisPipelineRequest,
+    AnalysisRequest,
 )
 from local_asr_server.routers.helpers import _build_projects
 from local_asr_server.asr_provider import ASR_PROVIDER_LOCAL
@@ -474,29 +478,66 @@ def transcribe_recording(recording_id: str, request: Request, body: TranscribeRe
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
 
 
-@router.post("/v1/recordings/{recording_id}/transcription-jobs", status_code=202)
-def create_transcription_job(recording_id: str, request: Request, body: TranscriptionJobRequest):
+def _submission_fingerprint(body: BaseModel) -> str:
+    # Fingerprint the explicit options, not mutable server settings.
+    # No prompt, transcript or other request content appears in this digest.
+    raw = json.dumps(body.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _submit_recording_transcription_job(
+    request: Request,
+    recording_id: str,
+    body: TranscriptionJobRequest,
+    *,
+    request_id: str | None,
+    retry_of: str | None = None,
+) -> dict[str, Any]:
+    services = get_services(request.app)
     try:
-        get_services(request.app).recordings.get(recording_id, include_result=False)
+        services.recordings.get(recording_id, include_result=False)
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
 
     def runner(job: TranscriptionJob) -> dict[str, Any]:
-        payload = run_recording_transcription(request.app, recording_id, body, job)
-        pipeline = _maybe_start_meeting_pipeline(request.app, recording_id, payload.get("saved_id"))
+        result = run_recording_transcription(request.app, recording_id, body, job)
+        pipeline = _maybe_start_meeting_pipeline(request.app, recording_id, result.get("saved_id"))
         if pipeline:
-            payload["analysis_pipeline"] = pipeline
-        return payload
+            result["analysis_pipeline"] = pipeline
+        return result
 
-    return get_services(request.app).transcription_jobs.create(
-        recording_id,
-        runner,
-        payload={
-            "recording_id": recording_id,
-            "visual_intelligence_enabled": body.visual_intelligence_enabled,
-        },
+    try:
+        return services.transcription_jobs.create(
+            recording_id,
+            runner,
+            payload={
+                "recording_id": recording_id,
+                # Preserve the existing top-level consumer contract.
+                "visual_intelligence_enabled": body.visual_intelligence_enabled,
+                # Preserve *all* submitted options for explicit retry,
+                # not only the visual toggle. No implicit settings migration.
+                "transcription_options": body.model_dump(mode="json"),
+                **({"retry_of": retry_of} if retry_of is not None else {}),
+            },
+            request_id=request_id,
+            request_hash=_submission_fingerprint(body) if request_id else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/recordings/{recording_id}/transcription-jobs", status_code=202)
+def create_transcription_job(
+    recording_id: str,
+    request: Request,
+    body: TranscriptionJobRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
+):
+    return _submit_recording_transcription_job(
+        request, recording_id, body, request_id=idempotency_key,
     )
-
 
 @router.get("/v1/activities")
 def list_activities(request: Request, recent_limit: int = Query(default=30, ge=1, le=100)):
@@ -532,6 +573,9 @@ def create_diarization_job(
     transcription_id: str,
     request: Request,
     body: DiarizationJobRequest,
+    idempotency_key: str | None = Header(
+        default=None, alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
 ):
     try:
         transcription = get_services(request.app).transcriptions.get(transcription_id)
@@ -568,10 +612,11 @@ def create_diarization_job(
             progress_callback=progress,
         )
 
-    return get_services(request.app).transcription_jobs.create(
-        recording_id,
-        runner,
-        job_type=DIARIZATION_JOB_TYPE,
+    try:
+        return get_services(request.app).transcription_jobs.create(
+            recording_id,
+            runner,
+            job_type=DIARIZATION_JOB_TYPE,
         scope_type="transcription",
         scope_id=transcription_id,
         payload={
@@ -580,8 +625,12 @@ def create_diarization_job(
             "provider": body.provider,
             "speechmatics_region": body.speechmatics_region,
             "speechmatics_model": body.speechmatics_model,
-        },
-    )
+            },
+            request_id=idempotency_key,
+            request_hash=_submission_fingerprint(body) if idempotency_key else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/v1/jobs/{job_id}")
@@ -619,16 +668,133 @@ def cancel_job(job_id: str, request: Request):
     existing = get_services(request.app).jobs.get(job_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    job = (
-        get_services(request.app).transcription_jobs.cancel(job_id)
-        if existing["type"] in {TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE, VISUAL_INTELLIGENCE_JOB_TYPE}
-        else get_services(request.app).analysis_jobs.cancel(job_id)
-        if existing["type"] == "analysis"
-        else get_services(request.app).jobs.request_cancel(job_id)
-    )
+    services = get_services(request.app)
+    if existing["type"] == MEETING_PREPARATION_JOB_TYPE:
+        job = MeetingPreparationManager(
+            services, default_model=request.app.state.default_model,
+        ).cancel(job_id)
+    elif existing["type"] == ANALYSIS_JOB_TYPE:
+        job = services.analysis_jobs.cancel(job_id)
+    elif existing["type"] in {
+        TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE, VISUAL_INTELLIGENCE_JOB_TYPE,
+    }:
+        job = services.transcription_jobs.cancel(job_id)
+    else:
+        job = services.jobs.request_cancel(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@router.post("/v1/jobs/{job_id}/retry", status_code=202)
+def retry_job(
+    job_id: str,
+    request: Request,
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=1, max_length=128,
+    ),
+):
+    """Explicit one-shot retry through the original execution owner.
+
+    No automatic retry on reconnect, and no changed provider/defaults.
+    Parent-owned stages must be retried via their parent workflow.
+    """
+    services = get_services(request.app)
+    previous = services.jobs.get(job_id)
+    if previous is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if previous["status"] not in {"failed", "interrupted"}:
+        raise HTTPException(status_code=409, detail="Only failed or interrupted jobs can be retried")
+    if services.jobs.parent_of(job_id):
+        raise HTTPException(status_code=409, detail="Retry this job from its parent workflow")
+
+    payload = previous.get("payload") or {}
+    if previous["type"] == MEETING_PREPARATION_JOB_TYPE:
+        # Reenter the parent owner: never retry a child in isolation.
+        from local_asr_server.routers.workspace import (
+            create_audio_analysis_preparation, prepare_meeting,
+        )
+        recording_id = str(previous.get("scope_id") or "")
+        if payload.get("analysis_options"):
+            if not isinstance(payload.get("transcription_options"), dict):
+                raise HTTPException(status_code=409, detail="Original ASR options unavailable")
+            from local_asr_server.schemas import ImportedAudioAnalysisRequest, MeetingPreparationRequest
+            resumed = create_audio_analysis_preparation(
+                recording_id, request,
+                ImportedAudioAnalysisRequest(
+                    transcription=TranscriptionJobRequest.model_validate(
+                        payload["transcription_options"]
+                    ),
+                    analysis=AnalysisRequest.model_validate(payload["analysis_options"]),
+                ), request_id=idempotency_key,
+            )
+        else:
+            from local_asr_server.schemas import MeetingPreparationRequest
+            manager = MeetingPreparationManager(
+                services, default_model=request.app.state.default_model,
+            )
+            if not manager.default_retry_compatible(previous):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Original preparation provider/options changed or unavailable; reopen Meeting",
+                )
+            resumed = prepare_meeting(
+                recording_id, request,
+                MeetingPreparationRequest(include_screenshots=bool(
+                    payload.get("include_screenshots", True)
+                )), request_id=idempotency_key,
+            )
+        return {"job_id": resumed["id"], "retry_of": job_id, "status": resumed["status"]}
+
+    if previous["type"] == TRANSCRIPTION_JOB_TYPE:
+        recording_id = previous.get("scope_id")
+        options = payload.get("transcription_options")
+        if not isinstance(options, dict) or not recording_id or payload.get("trigger"):
+            raise HTTPException(status_code=409, detail="Original transcription options unavailable")
+        body = TranscriptionJobRequest.model_validate(options)
+        created = _submit_recording_transcription_job(
+            request, recording_id, body, request_id=idempotency_key, retry_of=job_id,
+        )
+        return {"job_id": created["id"], "retry_of": job_id, "status": created["status"]}
+
+    if previous["type"] == ANALYSIS_JOB_TYPE:
+        if payload.get("pipeline_run_id"):
+            raise HTTPException(status_code=409, detail="Retry analysis from its pipeline")
+        options = {key: value for key, value in payload.items()
+                   if key in AnalysisRequest.model_fields}
+        if not (options.get("text") or options.get("transcription_id") or options.get("recording_id")):
+            raise HTTPException(status_code=409, detail="Original analysis source unavailable")
+        # A retry must not silently switch provider/model/settings if the app
+        # configuration changed after the original job was admitted.
+        effective = payload.get("llm_options")
+        if not isinstance(effective, dict) or not effective.get("provider"):
+            raise HTTPException(status_code=409, detail="Original analysis options unavailable")
+        options.update({
+            "llm_provider": effective["provider"],
+            "gemini_model": effective.get("model") if effective["provider"] == "gemini" else None,
+            "local_llm_model": effective.get("model") if str(effective["provider"]).endswith("_local") else None,
+            "local_llm_mode": effective.get("mode"),
+            "local_llm_url": effective.get("url"),
+            "local_llm_quality_preset": effective.get("quality_preset"),
+            "local_llm_temperature": effective.get("temperature"),
+            "local_llm_reasoning": effective.get("reasoning"),
+            "local_llm_max_output_tokens": effective.get("max_output_tokens"),
+            "local_llm_json_mode": effective.get("json_mode"),
+            "local_llm_backend": effective.get("backend"),
+            "local_llm_model_path": effective.get("model_path"),
+            "local_llm_mmproj_path": effective.get("mmproj_path"),
+            "local_llm_ctx_size": effective.get("ctx_size"),
+        })
+        body = AnalysisRequest.model_validate(options)
+        try:
+            created = services.analysis_jobs.create(
+                body, request_id=idempotency_key, retry_of=job_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"job_id": created["job_id"], "retry_of": job_id, "status": created["status"]}
+
+    raise HTTPException(status_code=409, detail="Use the owning workflow to retry this job")
 
 
 @router.post("/v1/transcriptions/merge")

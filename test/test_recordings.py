@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import tempfile
 import threading
@@ -27,6 +28,167 @@ class RecordingStoreTests(unittest.TestCase):
             model="test-model",
             language="it",
         )
+
+    def test_import_audio_is_published_durably_without_active_capture(self) -> None:
+        source = b"audio bytes" * 128
+        created = self.store.import_audio(
+            io.BytesIO(source), filename="meeting.mp3",
+            model="test-model", language="it",
+        )
+        self.assertEqual(created["status"], "recorded")
+        self.assertEqual(created["capture_backend"], "import")
+        self.assertEqual(created["capture_status"], "stopped")
+        self.assertIsNone(self.store.active_recording())
+        self.assertEqual(self.store.audio_path(created["id"]).read_bytes(), source)
+        tracks = self.store.transcribable_tracks(created["id"])
+        self.assertEqual(len(tracks), 1)
+        self.assertEqual(tracks[0][0]["source"], "mixed")
+        self.assertEqual(tracks[0][0]["chunks"][0]["sha256"], hashlib.sha256(source).hexdigest())
+        reopened = RecordingStore(self.root, use_settings_dir=False)
+        self.assertEqual(reopened.get(created["id"])["status"], "recorded")
+        self.assertEqual(reopened.audio_path(created["id"]).read_bytes(), source)
+
+    def test_import_request_is_idempotent_even_after_restart(self) -> None:
+        data = b"meeting audio"
+        first = self.store.import_audio(
+            io.BytesIO(data), filename="meeting.wav", title="Imported call",
+            model="test-model", request_id="import-001",
+        )
+        restarted = RecordingStore(self.root, use_settings_dir=False)
+        second = restarted.import_audio(
+            io.BytesIO(data), filename="meeting.wav", title="Imported call",
+            model="test-model", request_id="import-001",
+        )
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(len(restarted.list()), 1)
+        with self.assertRaisesRegex(RecordingConflict, "different audio or options"):
+            restarted.import_audio(
+                io.BytesIO(b"other"), filename="meeting.wav",
+                title="Imported call", model="test-model", request_id="import-001",
+            )
+        self.assertEqual(len(restarted.list()), 1)
+
+    def test_import_does_not_occupy_capture_during_upload(self) -> None:
+        release = threading.Event()
+        halfway = threading.Event()
+
+        class SlowInput:
+            def __init__(self):
+                self.calls = 0
+
+            def read(self, _size):
+                self.calls += 1
+                if self.calls == 1:
+                    return b"audio"
+                halfway.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("test stream did not resume")
+                return b""
+
+        outcome = {}
+        def import_in_thread():
+            outcome["recording"] = self.store.import_audio(
+                SlowInput(), filename="call.wav", model="test-model",
+            )
+
+        worker = threading.Thread(target=import_in_thread)
+        worker.start()
+        try:
+            self.assertTrue(halfway.wait(timeout=5))
+            self.assertIsNone(self.store.active_recording())
+            self.assertEqual(self.store.list(), [])
+        finally:
+            release.set()
+            worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(outcome["recording"]["status"], "recorded")
+
+    def test_cancel_inflight_import_prevents_publication(self) -> None:
+        halfway = threading.Event()
+        release = threading.Event()
+        outcome = {}
+
+        class PausedSource:
+            def __init__(self):
+                self.calls = 0
+
+            def read(self, _size):
+                self.calls += 1
+                if self.calls == 1:
+                    return b"partial audio"
+                halfway.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("cancelled upload was not resumed")
+                return b"more audio"
+
+        def import_in_thread():
+            try:
+                self.store.import_audio(
+                    PausedSource(), filename="cancel.wav", model="test-model",
+                    request_id="cancel-upload-1",
+                )
+            except RecordingConflict as exc:
+                outcome["error"] = str(exc)
+
+        worker = threading.Thread(target=import_in_thread)
+        worker.start()
+        try:
+            self.assertTrue(halfway.wait(timeout=5))
+            self.assertTrue(self.store.cancel_audio_import("cancel-upload-1"))
+        finally:
+            release.set()
+            worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(outcome.get("error"), "Audio import cancelled")
+        self.assertEqual(self.store.list(), [])
+        self.assertEqual(list(self.root.glob("*/.import-*")), [])
+
+    def test_concurrent_replays_publish_only_one_source(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def import_once(_index):
+            return self.store.import_audio(
+                io.BytesIO(b"same audio"), filename="same.webm",
+                model="test-model", request_id="concurrent-upload",
+            )["id"]
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            identifiers = list(executor.map(import_once, range(8)))
+        self.assertEqual(len(set(identifiers)), 1)
+        self.assertEqual(len(self.store.list()), 1)
+        self.assertEqual(list(self.root.glob("*/.import-*")), [])
+
+    def test_failed_import_cleans_staging_and_keeps_no_recording(self) -> None:
+        from local_asr_server.recordings import MAX_IMPORTED_AUDIO_BYTES
+
+        with self.assertRaisesRegex(RecordingConflict, "empty"):
+            self.store.import_audio(io.BytesIO(b""), filename="empty.wav", model="test")
+        with self.assertRaisesRegex(RecordingConflict, "Unsupported"):
+            self.store.import_audio(io.BytesIO(b"data"), filename="../not-audio.exe", model="test")
+
+        class SizeOverrunStream:
+            def read(self, _size):
+                return b"oversized"
+
+        # A low test limit exercises the actual bounded-copy path, not only
+        # the early Content-Length check in the API.
+        with patch("local_asr_server.recordings.MAX_IMPORTED_AUDIO_BYTES", 3):
+            with self.assertRaisesRegex(RecordingConflict, "maximum size"):
+                self.store.import_audio(SizeOverrunStream(), filename="too-big.wav", model="test")
+        self.assertEqual(self.store.list(), [])
+        self.assertEqual(list(self.root.glob("*/.import-*")), [])
+
+    def test_startup_discards_only_interrupted_import_staging(self) -> None:
+        date_dir = self.root / "2026-10-14"
+        interrupted = date_dir / ".import-crashed"
+        interrupted.mkdir(parents=True)
+        (interrupted / "recording.wav").write_bytes(b"partial")
+        valid = self.store.import_audio(
+            io.BytesIO(b"valid"), filename="normal.wav", model="test-model",
+        )
+        reopened = RecordingStore(self.root, use_settings_dir=False)
+        self.assertFalse(interrupted.exists())
+        self.assertEqual(reopened.audio_path(valid["id"]).read_bytes(), b"valid")
 
     def test_atomic_json_writes_use_independent_temporary_files(self) -> None:
         target = self.root / "state.json"

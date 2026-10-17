@@ -297,7 +297,7 @@
     },
     {
       "id": "activities-queue-visibility",
-      "claim": "Durable jobs remain visible across navigation with measured or indeterminate progress, truthful waiting/offline states, cancellation and result navigation; preparation children count once.",
+      "claim": "Durable jobs, locally imported audio→ASR→chosen analysis and explicit retries remain visible across navigation and reload with measured or indeterminate progress, truthful waiting/offline states, cancellation and result navigation; preparation children count once.",
       "ui_surface": true,
       "minimum_ui_evidence_mode": "full_media",
       "target_environment_refs": ["closedroom-macos-apple-silicon"],

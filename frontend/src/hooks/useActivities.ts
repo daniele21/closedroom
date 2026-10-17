@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiClient, type ActivitySnapshot } from '../api/apiClient';
-import { TERMINAL_JOB_STATUSES } from '../api/jobEvents';
+import { followJobEvents, TERMINAL_JOB_STATUSES } from '../api/jobEvents';
 
 /** Shell-owned discovery uses lightweight summaries; it never starts or retries work. */
 export function useActivities(enabled = true) {
@@ -25,8 +25,10 @@ export function useActivities(enabled = true) {
       if (mounted.current && generation.current === epoch) setStale(true);
     } finally {
       window.clearTimeout(timeout);
-      requestController.current = null;
-      inFlight.current = false;
+      if (requestController.current === controller) {
+        requestController.current = null;
+        inFlight.current = false;
+      }
       if (mounted.current && generation.current === epoch) setLoading(false);
     }
   }, []);
@@ -44,11 +46,51 @@ export function useActivities(enabled = true) {
       generation.current += 1;
       mounted.current = false;
       requestController.current?.abort();
+      requestController.current = null;
+      inFlight.current = false;
       window.clearInterval(timer);
       window.removeEventListener('focus', onVisible);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [enabled, refresh]);
+  // Discovery stays bounded and handles newly created jobs, but progress
+  // follows the same SSE connection already used by Meeting. A route change
+  // does not close the stream while the shell still observes this job.
+  // WKWebView/Chrome may limit EventSource connections per origin. Observe
+  // running stages first; queued entries remain discoverable via the bounded
+  // canonical snapshot refresh. Meeting shares these followers when opened.
+  const activeIdsKey = snapshot.items
+    .filter((job) => !TERMINAL_JOB_STATUSES.has(job.status))
+    .sort((a, b) => Number(a.status === 'queued') - Number(b.status === 'queued')
+      || b.updated_at - a.updated_at)
+    .slice(0, 3)
+    .map((job) => job.id).sort().join('|');
+
+  useEffect(() => {
+    if (!enabled || !activeIdsKey) return;
+    const cleanups = activeIdsKey.split('|').map((jobId) => followJobEvents(jobId, {
+      onUpdate: (event) => {
+        setSnapshot((current) => {
+          const existing = current.items.find((item) => item.id === jobId);
+          if (!existing || existing.updated_at > event.updated_at) return current;
+          return {
+            ...current,
+            items: current.items.map((item) => item.id !== jobId ? item : {
+              ...item,
+              status: event.status,
+              current_step: event.current_step,
+              progress: event.progress,
+              progress_detail: event.progress_detail,
+              updated_at: event.updated_at,
+            }),
+          };
+        });
+      },
+      onTerminal: () => { void refresh(); },
+    }));
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [enabled, activeIdsKey, refresh]);
+
   const ids = new Set(snapshot.items.map((job) => job.id));
   const jobs = snapshot.items.filter((job) => !job.parent_job_id || !ids.has(job.parent_job_id));
   const activeCount = jobs.filter((job) => !TERMINAL_JOB_STATUSES.has(job.status)).length;

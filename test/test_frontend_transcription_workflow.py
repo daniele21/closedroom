@@ -61,6 +61,60 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertIn("openAnalysisSetup('meeting_deep')", page)
         self.assertIn("<AnalysisSetupModal", page)
 
+    def test_audio_analysis_is_shell_owned_and_server_orchestrated(self) -> None:
+        page = (ROOT / "frontend/src/pages/AnalysisPage.tsx").read_text(encoding="utf-8")
+        hook = (ROOT / "frontend/src/hooks/useAudioImports.ts").read_text(encoding="utf-8")
+        route = (ROOT / "src/local_asr_server/routers/workspace.py").read_text(encoding="utf-8")
+        self.assertIn("audioImports.startAnalysis(importedFile", page)
+        self.assertNotIn("ApiClient.transcribe(formData)", page)
+        self.assertIn("ApiClient.createAudioAnalysisPreparation(source.id, options, analysis)", hook)
+        self.assertIn('"/v1/recordings/{recording_id}/audio-analysis-jobs"', route)
+        self.assertIn("MeetingPreparationManager(", route)
+
+    def test_import_uses_one_shell_owned_upload_to_durable_job_handoff(self) -> None:
+        app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
+        page = (ROOT / "frontend/src/pages/TranscriptionPage.tsx").read_text(encoding="utf-8")
+        hook = (ROOT / "frontend/src/hooks/useAudioImports.ts").read_text(encoding="utf-8")
+        activities = (ROOT / "frontend/src/pages/ActivitiesPage.tsx").read_text(encoding="utf-8")
+        client = (ROOT / "frontend/src/api/apiClient.ts").read_text(encoding="utf-8")
+
+        self.assertIn("const audioImports = useAudioImports(", app)
+        self.assertIn("audioImports={audioImports}", app)
+        self.assertIn("audioImports.startTranscription(selectedFile, options)", page)
+        self.assertNotIn("ApiClient.transcribe(formData", page)
+        self.assertIn("ApiClient.importRecordingAudio(", hook)
+        self.assertIn("ApiClient.createTranscriptionJob(source.id, options, id)", hook)
+        self.assertIn("phase: 'submitting'", hook)
+        self.assertIn("ApiClient.cancelRecordingAudioImport(id)", hook)
+        self.assertIn("data-audio-import={upload.id}", activities)
+        self.assertIn("'/v1/recordings/import-audio'", client)
+        # Request IDs and file objects stay in the shell, never persistent UI storage.
+        self.assertNotIn("localStorage", hook)
+        self.assertNotIn("sessionStorage", hook)
+
+    def test_inline_analysis_open_resolves_persisted_run_not_transcription(self) -> None:
+        activities = (ROOT / "frontend/src/pages/ActivitiesPage.tsx").read_text(encoding="utf-8")
+        analysis = (ROOT / "frontend/src/pages/AnalysisPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("navigateTo('analysis', `run/${job.scope_id}`)", activities)
+        self.assertIn("detailId.startsWith('run/')", analysis)
+        self.assertIn("ApiClient.getAnalysisRun(detailId.slice(4))", analysis)
+
+    def test_real_sse_wire_identity_and_single_stream_owner(self) -> None:
+        events = (ROOT / "frontend/src/api/jobEvents.ts").read_text(encoding="utf-8")
+        activities = (ROOT / "frontend/src/hooks/useActivities.ts").read_text(encoding="utf-8")
+        meeting = (ROOT / "frontend/src/hooks/useMeetingJobEvents.ts").read_text(encoding="utf-8")
+        journey = (ROOT / "scripts/browser_activities_e2e.mjs").read_text(encoding="utf-8")
+
+        self.assertIn("id: jobId", events)
+        self.assertIn("progress_detail: wire.job_id", events)
+        self.assertIn("? wire.event_payload ?? wire.payload ?? wire.progress_detail", events)
+        self.assertIn(": wire.event_payload ?? wire.progress_detail", events)
+        self.assertIn("sharedJobStreams = new Map", events)
+        self.assertIn("followJobEvents(jobId, {", activities)
+        self.assertIn("followJobEvents(jobId, {", meeting)
+        self.assertIn("job_id: id, sequence", journey)
+        self.assertIn("duplicate EventSource", journey)
+
     def test_recording_route_contract_is_centralized(self) -> None:
         route_helper = (ROOT / "frontend/src/utils/transcriptionRoute.ts").read_text(encoding="utf-8")
         transcription_page = (ROOT / "frontend/src/pages/TranscriptionPage.tsx").read_text(encoding="utf-8")

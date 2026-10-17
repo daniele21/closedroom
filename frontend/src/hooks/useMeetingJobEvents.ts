@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
-import type { Meeting, TranscriptionJob } from '../api/apiClient';
-import { followJobEvents } from '../api/jobEvents';
+import type { Meeting } from '../api/apiClient';
+import { followJobEvents, type JobEventSnapshot } from '../api/jobEvents';
 
 import { ACTIVE_JOB_STATUSES } from '../utils/jobs';
 
@@ -24,8 +24,15 @@ function activeMeetingJobIds(meeting: Meeting | null): string[] {
   return Array.from(ids).sort();
 }
 
-function applyJobUpdate(meeting: Meeting, job: TranscriptionJob): Meeting {
-  const jobs = (meeting.jobs || []).map((current) => current.id === job.id ? { ...current, ...job } : current);
+function applyJobUpdate(meeting: Meeting, job: JobEventSnapshot): Meeting {
+  const jobs = (meeting.jobs || []).map((current) => current.id !== job.id ? current : {
+    ...current,
+    status: job.status,
+    current_step: job.current_step,
+    progress: job.progress,
+    progress_detail: job.progress_detail,
+    updated_at: job.updated_at || current.updated_at,
+  });
   const analysisRuns = (meeting.analysis_runs || []).map((run) => (
     run.job_id === job.id ? { ...run, status: job.status } : run
   ));
@@ -43,9 +50,11 @@ export function useMeetingJobEvents(
   reload: () => Promise<void>,
 ): void {
   const setMeetingRef = useRef(setMeeting);
+  const meetingRef = useRef(meeting);
   const reloadRef = useRef(reload);
   const milestoneReloadsRef = useRef(new Set<string>());
   setMeetingRef.current = setMeeting;
+  meetingRef.current = meeting;
   reloadRef.current = reload;
 
   const jobIdsKey = useMemo(() => activeMeetingJobIds(meeting).join('|'), [meeting]);
@@ -56,7 +65,9 @@ export function useMeetingJobEvents(
     const cleanups = jobIds.map((jobId) => followJobEvents(jobId, {
       onUpdate: (job) => {
         setMeetingRef.current((current) => current ? applyJobUpdate(current, job) : current);
-        if (job.type === 'meeting_preparation' && job.current_step === 'preparing_notes') {
+        if (meetingRef.current?.jobs?.some((item) => (
+          item.id === job.id && item.type === 'meeting_preparation'
+        )) && job.current_step === 'preparing_notes') {
           const milestoneKey = `${job.id}:transcript_ready`;
           if (!milestoneReloadsRef.current.has(milestoneKey)) {
             milestoneReloadsRef.current.add(milestoneKey);

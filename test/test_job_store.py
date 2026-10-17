@@ -10,6 +10,16 @@ from local_asr_server.transcription_jobs import TranscriptionJobManager
 
 
 class JobStoreTests(unittest.TestCase):
+    def test_job_parent_lookup_is_storage_owned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "closedroom.db")
+            store.create(job_id="parent", job_type="meeting_preparation")
+            store.create(job_id="child", job_type="analysis")
+            self.assertIsNone(store.parent_of("child"))
+            store.link_child("parent", "child", stage="analysis")
+            self.assertEqual(store.parent_of("child"), "parent")
+            self.assertEqual(JobStore(Path(tmp) / "closedroom.db").parent_of("child"), "parent")
+
     def test_create_update_and_reopen_job(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "closedroom.db"
@@ -112,6 +122,81 @@ class JobStoreTests(unittest.TestCase):
 
             recording_jobs = store.list_jobs(scope_type="recording", scope_id="rec-1")
             self.assertEqual({job["id"] for job in recording_jobs}, {"job-1", "job-2"})
+
+    def test_submission_identity_is_atomic_and_survives_terminal_restart(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "closedroom.db")
+
+            def submit(index: int):
+                return store.create_or_get_submission(
+                    job_id=f"job-{index}",
+                    job_type="transcription",
+                    scope_type="recording",
+                    scope_id="recording-1",
+                    request_id="same-click",
+                    request_hash="unchanged-options",
+                    payload={"recording_id": "recording-1"},
+                )
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                admitted = list(pool.map(submit, range(16)))
+            self.assertEqual(sum(int(created) for _, created in admitted), 1)
+            self.assertEqual(len({job["id"] for job, _ in admitted}), 1)
+            job_id = admitted[0][0]["id"]
+            store.update(job_id, status="completed", result={"text": "private"})
+            reopened = JobStore(store.db_path)
+            same, created = reopened.create_or_get_submission(
+                job_id="should-not-create",
+                job_type="transcription",
+                scope_type="recording",
+                scope_id="recording-1",
+                request_id="same-click",
+                request_hash="unchanged-options",
+            )
+            self.assertFalse(created)
+            self.assertEqual(same["id"], job_id)
+            self.assertEqual(same["status"], "completed")
+            with self.assertRaisesRegex(ValueError, "different options"):
+                reopened.create_or_get_submission(
+                    job_id="invalid-collision",
+                    job_type="transcription",
+                    scope_type="recording",
+                    scope_id="recording-1",
+                    request_id="same-click",
+                    request_hash="changed-options",
+                )
+            retry, created = reopened.create_or_get_submission(
+                job_id="explicit-retry",
+                job_type="transcription",
+                scope_type="recording",
+                scope_id="recording-1",
+                request_id="new-click",
+                request_hash="unchanged-options",
+            )
+            self.assertTrue(created)
+            self.assertEqual(retry["id"], "explicit-retry")
+
+    def test_restart_interrupts_old_active_jobs_beyond_recent_500(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "closedroom.db")
+            with store.connection() as conn:
+                for index in range(510):
+                    conn.execute(
+                        "INSERT INTO jobs (id, type, status, current_step, "
+                        "progress, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+                        (
+                            f"job-{index}", "analysis",
+                            "queued" if index == 0 else "completed",
+                            "queued" if index == 0 else "completed",
+                            float(index), float(index),
+                        ),
+                    )
+            interrupted = store.interrupt_incomplete()
+            self.assertEqual([item["id"] for item in interrupted], ["job-0"])
+            self.assertEqual(store.get("job-0")["status"], "interrupted")
+            self.assertEqual(store.interrupt_incomplete(), [])
 
     def test_has_active_job_avoids_materializing_job_results(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

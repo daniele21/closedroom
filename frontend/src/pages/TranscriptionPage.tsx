@@ -1,3 +1,5 @@
+import { TERMINAL_JOB_STATUSES } from '../api/jobEvents';
+import type { AudioImportsState } from '../hooks/useAudioImports';
 import React, { useState, useEffect, useRef } from 'react';
 import { ApiClient, ASRTrackProgress, Recording, Transcription, VisualProcessingProgress } from '../api/apiClient';
 import { DEFAULTS } from '../api/config';
@@ -26,9 +28,10 @@ interface TranscriptionPageProps {
   detailPath: string | null;
   navigateTo: (page: string, detail?: string | null) => void;
   demoMode?: boolean;
+  audioImports: AudioImportsState;
 }
 
-export default function TranscriptionPage({ detailPath, navigateTo, demoMode = false }: TranscriptionPageProps) {
+export default function TranscriptionPage({ detailPath, navigateTo, audioImports, demoMode = false }: TranscriptionPageProps) {
   const { t, lang } = useTranslation();
   const { showToast } = useToast();
   const showTranscriptionOutcome = (result: Transcription) => {
@@ -153,7 +156,6 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
   const [progressStatus, setProgressStatus] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressStep, setProgressStep] = useState('queued');
-  const [audioDuration, setAudioDuration] = useState<number>(0);
   const [liveConsoleLines, setLiveConsoleLines] = useState<string[]>([]);
   const [livePreviewText, setLivePreviewText] = useState('');
   const [elapsedTime, setElapsedTime] = useState('0.0s');
@@ -174,6 +176,7 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
   const lastASRProgressRef = useRef('');
   const lastJobStepRef = useRef('');
   const activeJobIdRef = useRef<string | null>(null);
+  const pendingSubmissionRef = useRef<{ signature: string; id: string } | null>(null);
 
   const loadRecordings = async () => {
     try {
@@ -300,14 +303,6 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
     const objectUrl = URL.createObjectURL(file);
     setSelectedObjectUrl(objectUrl);
     
-    // Load duration dynamically using a temporary Audio element
-    const tempAudio = new Audio(objectUrl);
-    tempAudio.addEventListener('loadedmetadata', () => {
-      if (!isNaN(tempAudio.duration) && isFinite(tempAudio.duration)) {
-        setAudioDuration(tempAudio.duration);
-      }
-    });
-
     if (audioRef.current) {
       audioRef.current.src = objectUrl;
     }
@@ -376,7 +371,6 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
     setSelectedFile(null);
     setSelectedRecordingId(null);
     setTranscriptionResult(null);
-    setAudioDuration(0);
     if (selectedObjectUrl) {
       URL.revokeObjectURL(selectedObjectUrl);
       setSelectedObjectUrl(null);
@@ -422,32 +416,52 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
     abortControllerRef.current = new AbortController();
 
     try {
-      if (selectedRecordingId) {
-        setProgressStatus(lang === 'it' ? 'Trascrizione tracce della registrazione...' : 'Transcribing recording tracks...');
-        setProgressPercent(10);
-        const job = await ApiClient.createTranscriptionJob(selectedRecordingId, {
-          model: asrProvider === 'local' ? targetModel || undefined : undefined,
-          language: targetLanguage || undefined,
-          task: targetTask,
-          response_format: 'verbose_json',
-          word_timestamps: wordTimestamps,
-          condition_on_previous_text: conditionOnPrevious,
-          temperature: temperature ? Number(temperature) : null,
-          vad_guided: vadGuided,
-          asr_provider: asrProvider,
-          speechmatics_region: speechmaticsRegion,
-          speechmatics_model: speechmaticsModel,
-          speechmatics_diarization: (
-            asrProvider === 'speechmatics' && diarizationProvider === 'speechmatics'
-              ? 'speaker'
-              : 'none'
-          ),
-          diarization_provider: diarizationProvider,
-          visual_intelligence_enabled: visualIntelligenceEnabled,
-        });
+      const options = {
+        model: asrProvider === 'local' ? targetModel || undefined : undefined,
+        language: targetLanguage || undefined,
+        task: targetTask,
+        response_format: 'verbose_json',
+        word_timestamps: wordTimestamps,
+        condition_on_previous_text: conditionOnPrevious,
+        temperature: temperature ? Number(temperature) : null,
+        vad_guided: vadGuided,
+        asr_provider: asrProvider,
+        speechmatics_region: speechmaticsRegion,
+        speechmatics_model: speechmaticsModel,
+        speechmatics_diarization: (
+          asrProvider === 'speechmatics' && diarizationProvider === 'speechmatics'
+            ? 'speaker'
+            : 'none'
+        ),
+        diarization_provider: diarizationProvider,
+        visual_intelligence_enabled: visualIntelligenceEnabled,
+      };
+      if (!selectedRecordingId) {
+        audioImports.startTranscription(selectedFile, options);
+        showToast(lang === 'it'
+          ? 'Importazione avviata. Puoi continuare a usare ClosedRoom e seguire l\'attività.'
+          : 'Import started. You can keep using ClosedRoom and follow progress in Activities.', 'info');
+        navigateTo('activities');
+        return;
+      }
+      setProgressStatus(lang === 'it' ? 'Trascrizione tracce della registrazione...' : 'Transcribing recording tracks...');
+      setProgressPercent(10);
+        // Preserve this identity if the POST fails before its response arrives.
+        // A new deliberate run after an acknowledged submit uses a new ID.
+        const signature = JSON.stringify([selectedRecordingId, options]);
+        const requestId = (
+          pendingSubmissionRef.current?.signature === signature
+            ? pendingSubmissionRef.current.id
+            : crypto.randomUUID()
+        );
+        pendingSubmissionRef.current = { signature, id: requestId };
+        const job = await ApiClient.createTranscriptionJob(
+          selectedRecordingId, options, requestId,
+        );
+        pendingSubmissionRef.current = null;
         activeJobIdRef.current = job.id;
         let currentJob = job;
-        while (!['completed', 'failed', 'cancelled'].includes(currentJob.status)) {
+        while (!TERMINAL_JOB_STATUSES.has(currentJob.status)) {
           setProgressPercent(currentJob.progress || 10);
           setProgressStep(currentJob.current_step || currentJob.status);
           const currentStepName = currentJob.current_step || currentJob.status;
@@ -521,93 +535,6 @@ export default function TranscriptionPage({ detailPath, navigateTo, demoMode = f
         showTranscriptionOutcome(result);
         openCompletedTranscription(result, selectedRecordingId);
         return;
-      }
-
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('stream', 'true');
-      if (asrProvider === 'local' && targetModel) formData.append('model', targetModel);
-      // Send an empty value explicitly so the server can preserve the
-      // automatic language-detection choice (including for Nemotron).
-      formData.append('language', targetLanguage);
-      formData.append('task', targetTask);
-      formData.append('response_format', 'verbose_json');
-      formData.append('word_timestamps', String(wordTimestamps));
-      formData.append('condition_on_previous_text', String(conditionOnPrevious));
-      formData.append('vad_guided', String(vadGuided));
-      formData.append('asr_provider', asrProvider);
-      formData.append('speechmatics_region', speechmaticsRegion);
-      formData.append('speechmatics_model', speechmaticsModel);
-      formData.append(
-        'speechmatics_diarization',
-        asrProvider === 'speechmatics' && diarizationProvider === 'speechmatics'
-          ? 'speaker'
-          : 'none',
-      );
-      formData.append('diarization_provider', diarizationProvider);
-      if (temperature) formData.append('temperature', temperature);
-
-      const duration = audioDuration || audioRef.current?.duration || 0;
-      const response = await ApiClient.transcribe(formData, abortControllerRef.current.signal);
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-
-      if (!reader) throw new Error('Streaming response is empty.');
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // keep incomplete last line
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const sanitized = line.replace(/:\s*NaN\b/g, ': null');
-            const event = JSON.parse(sanitized);
-
-            if (event.type === 'progress') {
-              setProgressStatus(event.message);
-              setProgressStep(event.step || 'transcribing');
-
-              if (event.step === 'downloading' && event.percent !== undefined) {
-                setProgressPercent(Math.round(event.percent));
-              } else if (event.step === 'transcribing') {
-                setLiveConsoleLines((prev) => [...prev, event.message]);
-                
-                const textMatch = event.message.match(/\]\s*(.*)$/);
-                if (textMatch && textMatch[1].trim()) {
-                  setLivePreviewText((prev) => prev + (prev ? ' ' : '') + textMatch[1].trim());
-                }
-
-                const match = event.message.match(/\[(\d{2}):(\d{2})\.(\d{2,3})\s*-->\s*(\d{2}):(\d{2})\.(\d{2,3})\]/);
-                if (match && duration > 0) {
-                  const endMin = parseInt(match[4], 10);
-                  const endSec = parseInt(match[5], 10);
-                  const endMs  = parseInt(match[6], 10);
-                  const seconds = (endMin * 60) + endSec + (endMs / (match[6].length === 2 ? 100 : 1000));
-                  const percent = Math.min(Math.round((seconds / duration) * 100), 100);
-                  setProgressPercent(percent);
-                }
-              }
-            } else if (event.type === 'error') {
-              throw new Error(event.message || event.error);
-            } else if (event.type === 'completed') {
-              setProgressPercent(100);
-              setTranscriptionResult(event.data);
-              setStep('results');
-              setResultTab('text');
-              showTranscriptionOutcome(event.data);
-              openCompletedTranscription(event.data, selectedRecordingId);
-            }
-          } catch (err) {
-            console.error('Line parse error:', err, line);
-          }
-        }
-      }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         showToast(`${t('transcription.toastTranscriptionError')}: ${err.message}`, 'error');

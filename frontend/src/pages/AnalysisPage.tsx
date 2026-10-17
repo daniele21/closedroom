@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import type { AudioImportsState } from '../hooks/useAudioImports';
+import { asrConfigFromSettings } from '../features/config/asrConfig';
 import { ApiClient, AnalysisTemplate, Transcription } from '../api/apiClient';
 import { useTranslation } from '../i18n/i18n';
 import { useToast } from '../context/ToastContext';
@@ -33,6 +35,7 @@ interface AnalysisPageProps {
   detailId: string | null;
   navigateTo: (page: string, detail?: string | null) => void;
   demoMode?: boolean;
+  audioImports: AudioImportsState;
 }
 
 interface AnalysisResult {
@@ -45,7 +48,7 @@ interface AnalysisResult {
   [key: string]: any;
 }
 
-export default function AnalysisPage({ detailId, navigateTo: _navigateTo, demoMode = false }: AnalysisPageProps) {
+export default function AnalysisPage({ detailId, navigateTo, audioImports, demoMode = false }: AnalysisPageProps) {
   const { t, lang } = useTranslation();
   const { showToast } = useToast();
 
@@ -56,6 +59,9 @@ export default function AnalysisPage({ detailId, navigateTo: _navigateTo, demoMo
   // File Import State
   const [importedFile, setImportedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Only preserve the identity of an unacknowledged POST in the mounted page.
+  // Global/route recovery belongs to BG-3, not local persistent storage.
+  const pendingAnalysisSubmitRef = useRef<{ signature: string; id: string } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Settings & Provider State
@@ -142,21 +148,29 @@ export default function AnalysisPage({ detailId, navigateTo: _navigateTo, demoMo
     loadSettings();
   }, [demoMode]);
 
-  // Preselected transcription from URL/Router Detail
+  // Route to a persisted result by its canonical run ID. Inline analyses
+  // have no transcription, so never feed their run ID to getTranscription.
   useEffect(() => {
-    if (demoMode) return;
-    if (detailId) {
-      // Find if we have loaded it
+    if (demoMode || !detailId) return;
+    let cancelled = false;
+    if (detailId.startsWith('run/')) {
+      setSelectedTranscriptionId('');
+      ApiClient.getAnalysisRun(detailId.slice(4)).then((run) => {
+        if (!cancelled && run.result) setAnalysisResult(run.result);
+      }).catch(() => {
+        if (!cancelled) showToast(
+          lang === 'it' ? 'Risultato analisi non disponibile.' : 'Analysis result unavailable.',
+          'error',
+        );
+      });
+    } else {
       setSelectedTranscriptionId(detailId);
-      
-      // Proactively fetch and check if it already has an analysis
       ApiClient.getTranscription(detailId).then((tr) => {
-        if (tr.analysis) {
-          setAnalysisResult(tr.analysis.result || tr.analysis);
-        }
+        if (!cancelled && tr.analysis) setAnalysisResult(tr.analysis.result || tr.analysis);
       }).catch(() => {});
     }
-  }, [demoMode, detailId, transcriptions]);
+    return () => { cancelled = true; };
+  }, [demoMode, detailId]);
 
 
 
@@ -235,23 +249,39 @@ export default function AnalysisPage({ detailId, navigateTo: _navigateTo, demoMo
             payload.text = text;
           }
         } else {
-          // It's an audio file, must transcribe it first!
-          setStatusText(t('transcription.transcribingStatus'));
-          const formData = new FormData();
-          formData.append('file', importedFile);
-          formData.append('stream', 'false');
-
-          const response = await ApiClient.transcribe(formData);
-          const data = await response.json();
-          if (!data.text) {
-            throw new Error(t('analysis.selectSourceError'));
-          }
-          payload.text = data.text;
+          // Shell owns the upload; the backend parent coordinates ASR→LLM.
+          // Preserve the explicit LLM selection and the user's ASR defaults.
+          const settings = await ApiClient.getSettings();
+          const asr = asrConfigFromSettings(settings);
+          audioImports.startAnalysis(importedFile, {
+            model: asr.provider === 'local' ? asr.model || undefined : undefined,
+            language: asr.language,
+            task: asr.task,
+            word_timestamps: asr.wordTimestamps,
+            condition_on_previous_text: asr.conditionOnPrevious,
+            temperature: asr.temperature ? Number(asr.temperature) : null,
+            asr_provider: asr.provider,
+            speechmatics_region: asr.speechmaticsRegion,
+            speechmatics_model: asr.speechmaticsModel,
+            speechmatics_diarization: asr.speechmaticsDiarization,
+            visual_intelligence_enabled: false,
+          }, payload);
+          showToast(lang === 'it'
+            ? 'Importazione e analisi avviate. Segui il lavoro in Attività.'
+            : 'Import and analysis started. Follow progress in Activities.', 'info');
+          navigateTo('activities');
+          return;
         }
         setStatusText(t('analysis.analyzingStatus'));
       }
 
-      const created = await ApiClient.createAnalysisJob(payload);
+      const signature = JSON.stringify(payload);
+      const requestId = pendingAnalysisSubmitRef.current?.signature === signature
+        ? pendingAnalysisSubmitRef.current.id
+        : crypto.randomUUID();
+      pendingAnalysisSubmitRef.current = { signature, id: requestId };
+      const created = await ApiClient.createAnalysisJob(payload, requestId);
+      pendingAnalysisSubmitRef.current = null;
       let job = await ApiClient.getJob(created.job_id);
       while (!['completed', 'failed', 'cancelled', 'interrupted'].includes(job.status)) {
         await new Promise((resolve) => window.setTimeout(resolve, 500));

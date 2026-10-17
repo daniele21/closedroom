@@ -134,6 +134,63 @@ class AnalysisApiTests(unittest.TestCase):
 
     @patch("local_asr_server.analysis_jobs.AnalysisJobManager._run", return_value=None)
     @patch("local_asr_server.analysis_jobs.load_settings")
+    def test_explicit_analysis_retry_preserves_provider_prompt_and_parent_boundary(self, settings, _run) -> None:
+        settings.return_value = {"llm_provider": "mock"}
+        jobs = self.app.state.job_store
+        previous = jobs.create(
+            job_id="failed-analysis", job_type="analysis", scope_type="inline_text",
+            scope_id="source-1", status="failed", current_step="failed",
+            payload={"text": "local review", "prompt": "Custom brief",
+                     "llm_options": {"provider": "mock", "model": "",
+                                     "quality_preset": "balanced", "json_mode": True},
+                     "template_id": "custom_question", "analysis_type": "custom_question"},
+        )
+        url = "/v1/jobs/failed-analysis/retry"
+        headers = {"Idempotency-Key": "analysis-explicit-retry"}
+        first = self.client.post(url, headers=headers)
+        second = self.client.post(url, headers=headers)
+        self.assertEqual(first.status_code, 202, first.text)
+        self.assertEqual(first.json()["job_id"], second.json()["job_id"])
+        current = jobs.get(first.json()["job_id"])
+        self.assertNotEqual(current["id"], previous["id"])
+        self.assertEqual(current["payload"]["text"], "local review")
+        self.assertEqual(current["payload"]["prompt"], "Custom brief")
+        self.assertEqual(current["payload"]["llm_provider"], "mock")
+        self.assertEqual(current["payload"]["retry_of"], "failed-analysis")
+
+        parent = jobs.create(job_id="parent", job_type="meeting_preparation")
+        jobs.link_child("parent", "failed-analysis", stage="analysis")
+        blocked = self.client.post(url, headers={"Idempotency-Key": "new-id"})
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(jobs.parent_of("failed-analysis"), "parent")
+
+    @patch("local_asr_server.analysis_jobs.AnalysisJobManager._run", return_value=None)
+    @patch("local_asr_server.analysis_jobs.load_settings")
+    def test_direct_analysis_submission_recovers_after_ambiguous_response(self, mock_load, _run) -> None:
+        mock_load.return_value = {"llm_provider": "mock"}
+        payload = {"text": "private review", "llm_provider": "mock"}
+        headers = {"Idempotency-Key": "analysis-submit-1"}
+        first = self.client.post("/v1/analysis-jobs", json=payload, headers=headers)
+        second = self.client.post("/v1/analysis-jobs", json=payload, headers=headers)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(first.json()["job_id"], second.json()["job_id"])
+        self.assertEqual(first.json()["analysis_run_id"], second.json()["analysis_run_id"])
+        self.assertEqual(len(self.app.state.job_store.list_jobs(job_type="analysis")), 1)
+        different = self.client.post(
+            "/v1/analysis-jobs",
+            json={"text": "different review", "llm_provider": "mock"},
+            headers=headers,
+        )
+        self.assertEqual(different.status_code, 409)
+        another = self.client.post(
+            "/v1/analysis-jobs", json=payload,
+            headers={"Idempotency-Key": "analysis-retry-2"},
+        )
+        self.assertEqual(another.status_code, 202)
+        self.assertNotEqual(another.json()["job_id"], first.json()["job_id"])
+
+    @patch("local_asr_server.analysis_jobs.AnalysisJobManager._run", return_value=None)
+    @patch("local_asr_server.analysis_jobs.load_settings")
     def test_source_scoped_analysis_job_does_not_expand_to_full_recording_transcript(self, mock_load, _mock_run) -> None:
         mock_load.return_value = {
             "llm_provider": "mock",

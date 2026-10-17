@@ -243,6 +243,11 @@ class TranscriptionJobRequest(TranscribeRecordingRequest):
     pass
 
 
+class ImportedAudioAnalysisRequest(BaseModel):
+    transcription: TranscriptionJobRequest = Field(default_factory=TranscriptionJobRequest)
+    analysis: AnalysisRequest
+
+
 class DiarizationJobRequest(BaseModel):
     provider: str = "local"
     speechmatics_region: Optional[str] = None

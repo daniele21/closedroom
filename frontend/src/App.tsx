@@ -1,4 +1,5 @@
 import { useActivities } from './hooks/useActivities';
+import { useAudioImports } from './hooks/useAudioImports';
 import { lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
 import {
   AudioWaveform,
@@ -59,6 +60,15 @@ function MainApp() {
   });
   const isDemoActive = demoMode || Boolean(tourStep);
   const activities = useActivities(!isDemoActive && activePage !== 'overlay');
+  const audioImports = useAudioImports(!isDemoActive);
+  const importedJobIds = audioImports.items.filter((item) => item.phase === 'submitted')
+    .map((item) => item.jobId).join('|');
+  useEffect(() => {
+    if (importedJobIds) void activities.refresh();
+  }, [importedJobIds, activities.refresh]);
+  const activeImportsCount = audioImports.items.filter((item) =>
+    ['uploading', 'submitting', 'cancelling'].includes(item.phase),
+  ).length;
 
   const navigateTo = (page: string, detail: string | null = null) => {
     const pageRouteMap: Record<string, string> = {
@@ -261,7 +271,7 @@ function MainApp() {
           />
         );
       case 'activities':
-        return <ActivitiesPage activities={activities} navigateTo={navigateTo} />;
+        return <ActivitiesPage activities={activities} audioImports={audioImports} navigateTo={navigateTo} />;
       case 'meeting':
         return <MeetingDetailPage recordingId={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'recording':
@@ -272,11 +282,11 @@ function MainApp() {
             ? <RecordingPage detailId={routeDetail} navigateTo={navigateTo} />
             : <NewRecordingPage navigateTo={navigateTo} />;
       case 'transcription':
-        return <TranscriptionPage detailPath={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
+        return <TranscriptionPage detailPath={routeDetail} navigateTo={navigateTo} audioImports={audioImports} demoMode={isDemoActive} />;
       case 'projects':
         return <ProjectsPage navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'analysis':
-        return <AnalysisPage detailId={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
+        return <AnalysisPage detailId={routeDetail} navigateTo={navigateTo} audioImports={audioImports} demoMode={isDemoActive} />;
       case 'settings':
         return <SettingsPage />;
       default:
@@ -368,7 +378,7 @@ function MainApp() {
               >
                 <item.icon className="h-[18px] w-[18px]" aria-hidden="true" />
                 <span>{item.label}</span>
-                {item.id === 'activities' && activities.activeCount > 0 && <Badge>{activities.activeCount}</Badge>}
+                {item.id === 'activities' && activities.activeCount + activeImportsCount > 0 && <Badge>{activities.activeCount + activeImportsCount}</Badge>}
               </button>
             ))}
           </nav>

@@ -252,7 +252,7 @@ export default function RecordingOverlayPage() {
       if (activeData.active && activeData.recording_id) {
         setRecordingId(activeData.recording_id);
         setTitle(activeData.title || 'Registrazione');
-        setCaptureBackend(activeData.capture_backend || 'browser');
+        setCaptureBackend(activeData.capture_backend === 'native' ? 'native' : 'browser');
         setCaptureMode(activeData.capture_mode || 'both');
         const backendDisplayId = activeData.screenshot_display_id ?? null;
         const pendingSelection = pendingDisplayIdRef.current;
