@@ -789,6 +789,8 @@ try {
   if (counts.benchmark_start !== 0) {
     throw new Error('meeting speaker comparison started without user consent');
   }
+  await setMeetingHash(MEETING_ID);
+  await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
   await browser.clickCss('#meeting-tab-speakers');
   await waitText(browser, ['Compare diarization engines', 'Confronta motori di diarizzazione']);
   await browser.clickButton(['Compare engines', 'Confronta motori']);
