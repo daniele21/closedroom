@@ -7,11 +7,16 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from pathlib import Path
+import subprocess
 import tempfile
 import time
 from typing import Any, Callable
 
 from local_asr_server.recordings import RecordingConflict, RecordingStore
+from local_asr_server.audio_intelligence.audio_io import (
+    canonical_wav_info, write_canonical_wav_slice,
+)
+from local_asr_server.paths import get_ffmpeg_path
 from local_asr_server.speaker_diarization import (
     DIARIZATION_ENGINE, NEMOTRON3_ENGINE, LocalSpeakerDiarizationService,
 )
@@ -44,28 +49,64 @@ def _duration(path: Path) -> float:
         return 0.0
 
 
-def _sample_wav(source: Path, destination: Path) -> float:
-    """Stream only the first five minutes into run-owned temporary PCM WAV."""
-    import soundfile as sf
-    try:
-        with sf.SoundFile(str(source), mode="r") as reader:
-            total_frames = min(len(reader), int(reader.samplerate * SAMPLE_SECONDS))
-            if total_frames <= 0:
-                raise ValueError("Recording contains no audio samples")
-            with sf.SoundFile(
-                str(destination), mode="w", samplerate=reader.samplerate,
-                channels=reader.channels, format="WAV", subtype="PCM_16",
-            ) as writer:
-                remaining = total_frames
-                while remaining > 0:
-                    block = reader.read(min(32768, remaining), dtype="float32", always_2d=True)
-                    if len(block) == 0:
-                        raise ValueError("Recording audio ended unexpectedly")
-                    writer.write(block)
-                    remaining -= len(block)
-            return total_frames / reader.samplerate
-    except (OSError, RuntimeError) as exc:
-        raise ValueError("Quick comparison requires a readable WAV/PCM recording; try the full meeting") from exc
+def _convert_to_wav(
+    source: Path, destination: Path, *,
+    seconds: int | None, cancel_requested: Callable[[], bool],
+) -> float:
+    """Decode a noncanonical local recording without loading the audio into RAM.
+
+    Uses the application's own ffmpeg resolver; no remote processing. The run
+    owns and deletes the output file. Cancellation kills and reaps ffmpeg.
+    """
+    command = [
+        str(get_ffmpeg_path()), "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-i", str(source),
+    ]
+    if seconds is not None:
+        command.extend(["-t", str(seconds)])
+    command.extend(["-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(destination)])
+    if cancel_requested():
+        raise RuntimeError("Comparison cancelled")
+    with subprocess.Popen(
+        command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    ) as child:
+        while True:
+            if cancel_requested():
+                child.kill()
+                child.communicate()
+                raise RuntimeError("Comparison cancelled")
+            try:
+                _, _stderr = child.communicate(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        if child.returncode != 0:
+            raise ValueError("Recording audio could not be decoded locally")
+    info = canonical_wav_info(destination)
+    if info is None or info.sample_count <= 0:
+        raise ValueError("Recording audio contains no decodable samples")
+    return info.duration_seconds
+
+
+def _sample_wav(
+    source: Path, destination: Path, *,
+    cancel_requested: Callable[[], bool] = lambda: False,
+) -> float:
+    """Write at most five minutes of the selected track to a local temp WAV."""
+    info = canonical_wav_info(source)
+    if info is not None:
+        if info.sample_count == 0:
+            raise ValueError("Recording contains no audio samples")
+        if cancel_requested():
+            raise RuntimeError("Comparison cancelled")
+        duration = min(info.duration_seconds, SAMPLE_SECONDS)
+        write_canonical_wav_slice(
+            source, destination, start_seconds=0.0, end_seconds=duration,
+        )
+        return duration
+    return _convert_to_wav(
+        source, destination, seconds=SAMPLE_SECONDS, cancel_requested=cancel_requested,
+    )
 
 
 def _preview_segments(segments: list[dict[str, Any]], limit_seconds: float) -> tuple[list[dict[str, Any]], bool]:
@@ -111,12 +152,22 @@ def run_benchmark(
     track_id = str(track["id"])
     service = service or LocalSpeakerDiarizationService()
 
-    with tempfile.TemporaryDirectory(prefix="closedroom-diarization-benchmark-") if scope == "sample" else nullcontext(None) as tmp:
+    # Canonical PCM WAV can run directly in full mode. Other codecs, including
+    # browser WebM, are decoded only into this job's temporary workspace.
+    is_canonical = canonical_wav_info(path) is not None
+    needs_temp = scope == "sample" or not is_canonical
+    workspace = tempfile.TemporaryDirectory(prefix="closedroom-diarization-benchmark-") if needs_temp else nullcontext(None)
+    with workspace as tmp:
         if cancel_requested():
             raise RuntimeError("Comparison cancelled")
         if scope == "sample":
-            duration = _sample_wav(path, Path(tmp) / "sample.wav")
             input_path = Path(tmp) / "sample.wav"
+            duration = _sample_wav(path, input_path, cancel_requested=cancel_requested)
+        elif not is_canonical:
+            input_path = Path(tmp) / "normalized.wav"
+            duration = _convert_to_wav(
+                path, input_path, seconds=None, cancel_requested=cancel_requested,
+            )
         else:
             duration = _duration(path)
             input_path = path
