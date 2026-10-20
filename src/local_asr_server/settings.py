@@ -71,6 +71,8 @@ DEFAULT_SETTINGS: dict[str, any] = {
     "meeting_detection_enabled": False,
     "meeting_default_pipeline": "meeting_default",
     "speaker_diarization_enabled": False,
+    "speaker_diarization_engine": "fluidaudio-community-1",
+    "speaker_diarization_nemotron_preset": "fast128",
     "speaker_diarization_minimum_overlap": 0.25,
     "visual_intelligence_enabled": False,
     "visual_llm_model": "qwen3-vl-4b",

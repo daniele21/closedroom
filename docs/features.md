@@ -160,3 +160,42 @@ restano fuori dalla coda durevole; conversione e retry uniformi sono nel piano
 `workstreams/background-processing.md`. Prove: suite job/capture, browser
 `scripts/browser_activities_e2e.mjs` con screenshot/video sintetici. Restano
 `DEFERRED_TO_RELEASE` TCC/audio fisico, MLX/Metal e interazione WKWebView.
+
+
+## Esperimento Nemotron 3 (opt-in)
+
+La scelta avanzata del motore locale include Community-1 (default invariato) e NVIDIA Nemotron 3 CoreML con i preset `fast128` e `c128-split-w8a8`. Sono entrambi nello stesso helper Swift e usano la stessa timeline e i contratti di cluster. Il primo utilizzo di Nemotron scarica **solo i pesi pubblici** in una cache dedicata; nessun audio viene inviato a un servizio esterno. Senza i pesi in modalità offline il passaggio fallisce esplicitamente, non passa al cloud. Il modello viene eseguito soltanto dopo il meeting, sotto la lease runtime esistente.
+
+Test A/B su Mac con un identico WAV finalizzato e RTTM annotato (opzionale):
+
+```bash
+UV_CACHE_DIR=.cache/uv uv run python scripts/benchmark_speaker_diarization.py \
+  --audio /path/to/local-meeting.wav --reference-rttm /path/to/annotation.rttm \
+  --output /tmp/closedroom-diarization-aggregate.json
+```
+
+Il report contiene solo misure aggregate, non percorsi, timeline o testi. Il DER riportato dal tool è **un'approssimazione con frame 100 ms, senza collar**, non direttamente comparabile con i numeri DIHARD/AMI ufficiali. Ripetere dopo che i pesi sono stati scaricati per misurare la velocità warm; misurare RSS, termiche e qualità word-to-speaker sul Mac reale prima di cambiare il default. Community-1 resta il fallback *selezionabile manualmente*; non è previsto fallback cloud o cambio automatico silenzioso di backend.
+
+
+**Confronto dall'interfaccia**: in un Meeting già registrato, la scheda **Speaker**
+offre `Confronta motori` e pre-seleziona Community-1 e i due preset Nemotron.
+L'utente sceglie il campione iniziale di 5 minuti oppure la traccia
+completa. I WAV canonici usano la traccia esistente o una slice senza decodifica
+completa; gli altri formati (incluso WebM) sono normalizzati via ffmpeg locale
+nella sola directory temporanea del job, ripulita anche dopo errore/annullamento. Nelle registrazioni dual-track è confrontata `system`, perché `mic`
+è già uno speaker noto; altrimenti si usa `mixed` oppure `mic`.
+`/v1/recordings/{id}/diarization-benchmarks` crea/legge job con avanzamento,
+annullamento nativo entro il poll del helper e scheduling del
+`HeavyWorkloadArbiter`. I risultati sono persistiti nel JobStore **solo
+localmente**, con tempi, numero di cluster e al massimo 300 intervalli temporali
+per motore per la preview dei primi cinque minuti. Nessun file audio, nome,
+testo del meeting o path è incluso nel risultato. La UI riproduce la traccia
+originale e mostra timeline sincronizzate; non sovrascrive transcript,
+speaker names o impostazioni. La UI **non** attribuisce accuratezza/DER ai
+numeri di cluster. `test/test_diarization_benchmark.py`, test API e browser
+`saved-meeting-fast-open` con evidenza FULL_MEDIA sintetica verificano
+selezione esplicita, protezione dati e flusso job/UI; restano necessari test
+di inferenza e qualità su Mac reale.
+
+Modello: https://huggingface.co/FluidInference/nemotron-3-diarization-coreml (OpenMDW 1.1, commercial use consentito secondo model card; verificare obblighi di attribuzione in sede di release). FluidAudio è fissato alla release `v0.17.7`; la compilazione Swift, il bundle firmato e l'inferenza reale su Apple Silicon costituiscono prove ancora da completare prima dell'integrazione/release.
+

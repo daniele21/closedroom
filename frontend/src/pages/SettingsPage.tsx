@@ -82,6 +82,8 @@ export default function SettingsPage() {
   const [meetingDetectionWasEnabled, setMeetingDetectionWasEnabled] = useState(false);
   const [meetingDefaultPipeline, setMeetingDefaultPipeline] = useState('meeting_default');
   const [speakerDiarizationEnabled, setSpeakerDiarizationEnabled] = useState(false);
+  const [diarizationEngine, setDiarizationEngine] = useState<"fluidaudio-community-1" | "nemotron3-coreml">("fluidaudio-community-1");
+  const [nemotronPreset, setNemotronPreset] = useState<"fast128" | "c128-split-w8a8">("fast128");
   const [visualIntelligenceEnabled, setVisualIntelligenceEnabled] = useState(false);
   const [accessibility, setAccessibility] = useState<AccessibilityStatus | null>(null);
   const [menuBarStatus, setMenuBarStatus] = useState<MenuBarStatus | null>(null);
@@ -218,6 +220,8 @@ export default function SettingsPage() {
       setMeetingDetectionWasEnabled(Boolean(settings.meeting_detection_enabled));
       setMeetingDefaultPipeline(settings.meeting_default_pipeline || 'meeting_default');
       setSpeakerDiarizationEnabled(Boolean(settings.speaker_diarization_enabled));
+      setDiarizationEngine(settings.speaker_diarization_engine || "fluidaudio-community-1");
+      setNemotronPreset(settings.speaker_diarization_nemotron_preset || "fast128");
       setVisualIntelligenceEnabled(Boolean(settings.visual_intelligence_enabled));
 
       void refreshLlmService();
@@ -321,6 +325,8 @@ export default function SettingsPage() {
         meeting_detection_enabled: meetingDetectionEnabled,
         meeting_default_pipeline: meetingDefaultPipeline,
         speaker_diarization_enabled: speakerDiarizationEnabled,
+        speaker_diarization_engine: diarizationEngine,
+        speaker_diarization_nemotron_preset: nemotronPreset,
         visual_intelligence_enabled: visualIntelligenceEnabled,
       };
       if (geminiApiKey.trim()) payload.gemini_api_key = geminiApiKey.trim();
@@ -747,6 +753,35 @@ export default function SettingsPage() {
                   </p>
                 </div>
                 <Checkbox variant="toggle" label={t('settings.speakerDiarization')} checked={speakerDiarizationEnabled} onChange={(event) => setSpeakerDiarizationEnabled(event.target.checked)} />
+                {speakerDiarizationEnabled && (
+                  <div className="space-y-3" data-settings-diarization-engine="true">
+                    <Select
+                      label={lang === 'it' ? 'Motore diarizzazione locale' : 'Local diarization engine'}
+                      value={diarizationEngine}
+                      onChange={(event) => setDiarizationEngine(event.target.value as typeof diarizationEngine)}
+                    >
+                      <option value="fluidaudio-community-1">FluidAudio Community-1 · {lang === 'it' ? 'Stabile' : 'Stable'}</option>
+                      <option value="nemotron3-coreml">NVIDIA Nemotron 3 · {lang === 'it' ? 'Sperimentale' : 'Experimental'}</option>
+                    </Select>
+                    {diarizationEngine === 'nemotron3-coreml' && (
+                      <>
+                        <Select
+                          label={lang === 'it' ? 'Preset Nemotron 3' : 'Nemotron 3 preset'}
+                          value={nemotronPreset}
+                          onChange={(event) => setNemotronPreset(event.target.value as typeof nemotronPreset)}
+                        >
+                          <option value="fast128">fast128 · {lang === 'it' ? 'Precisione' : 'Accuracy'}</option>
+                          <option value="c128-split-w8a8">c128-split-w8a8 · {lang === 'it' ? 'Peso ridotto' : 'Smaller model'}</option>
+                        </Select>
+                        <p className="text-xs text-text-muted">
+                          {lang === 'it'
+                            ? 'Sperimentale: il primo utilizzo scarica solo i pesi del preset scelto. La registrazione non viene inviata online. Senza modello disponibile offline, la diarizzazione fallisce senza cambiare il transcript.'
+                            : 'Experimental: first use downloads only the selected model weights. No recording is uploaded. If the model is unavailable offline, diarization fails without changing the transcript.'}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
                 <Checkbox variant="toggle" label={t('settings.visualIntelligence')} checked={visualIntelligenceEnabled} onChange={(event) => setVisualIntelligenceEnabled(event.target.checked)} />
                 <Select label={t('settings.meetingDefaultPipeline')} value={meetingDefaultPipeline} onChange={(event) => setMeetingDefaultPipeline(event.target.value)}>
                   <option value="meeting_default">{t('settings.meetingPipelineDefault')}</option>

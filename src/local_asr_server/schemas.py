@@ -164,6 +164,8 @@ class SettingsRequest(BaseModel):
     meeting_detection_enabled: Optional[bool] = None
     meeting_default_pipeline: Optional[str] = None
     speaker_diarization_enabled: Optional[bool] = None
+    speaker_diarization_engine: Optional[str] = None
+    speaker_diarization_nemotron_preset: Optional[str] = None
     speaker_diarization_minimum_overlap: Optional[float] = None
     visual_intelligence_enabled: Optional[bool] = None
     visual_llm_model: Optional[str] = None

@@ -150,6 +150,31 @@ export interface TranscriptionJob {
   updated_at: number;
 }
 
+export type DiarizationBenchmarkEngine = 'community-1' | 'nemotron3-fast128' | 'nemotron3-compact';
+
+export interface DiarizationBenchmarkRun {
+  key: DiarizationBenchmarkEngine;
+  engine: string;
+  preset: string | null;
+  status: 'completed' | 'failed';
+  elapsed_seconds?: number;
+  speed_vs_realtime?: number | null;
+  clusters?: number;
+  error_type?: string;
+  preview?: Array<{ speaker: string; start: number; end: number }>;
+  preview_truncated?: boolean;
+}
+
+export interface DiarizationBenchmarkResult {
+  schema_version: number;
+  scope: 'sample' | 'full';
+  track_id: string;
+  audio_seconds: number | null;
+  preview_seconds: number;
+  runs: DiarizationBenchmarkRun[];
+  reference_scored: boolean;
+}
+
 export interface ActivityJob extends TranscriptionJob {
   source_label?: string | null;
   parent_job_id?: string | null;
@@ -597,6 +622,8 @@ export interface Settings {
   meeting_auto_analysis?: boolean;
   meeting_default_pipeline?: string;
   speaker_diarization_enabled?: boolean;
+  speaker_diarization_engine?: "fluidaudio-community-1" | "nemotron3-coreml";
+  speaker_diarization_nemotron_preset?: "fast128" | "c128-split-w8a8";
   speaker_diarization_minimum_overlap?: number;
   visual_intelligence_enabled?: boolean;
   visual_llm_model?: string;
@@ -926,6 +953,21 @@ export const ApiClient = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })).json();
+  },
+
+  async createDiarizationBenchmark(
+    recordingId: string,
+    payload: { engines: DiarizationBenchmarkEngine[]; scope: 'sample' | 'full' },
+  ): Promise<TranscriptionJob> {
+    return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/diarization-benchmarks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })).json();
+  },
+
+  async listDiarizationBenchmarks(recordingId: string): Promise<{ items: TranscriptionJob[] }> {
+    return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/diarization-benchmarks`)).json();
   },
 
   async createDiarizationJob(transcriptionId: string, payload: {

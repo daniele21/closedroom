@@ -46,6 +46,7 @@ import { useMeetingJobEvents } from '../hooks/useMeetingJobEvents';
 import { useVisualIntelligence } from '../hooks/useVisualIntelligence';
 import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
 import { SpeakerDiarizationEditor } from '../components/meeting/SpeakerDiarizationEditor';
+import { DiarizationBenchmarkPanel } from '../components/meeting/DiarizationBenchmarkPanel';
 import TranscriptTextView from '../components/transcription/TranscriptTextView';
 import { useMeetingAccessories } from '../hooks/useMeetingAccessories';
 
@@ -1612,6 +1613,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     <Users className="w-8 h-8 mx-auto text-text-muted mb-3" aria-hidden="true" />
                     <p className="text-sm text-text-secondary">{t('meeting.noSpeakerClusters')}</p>
                   </div>
+                )}
+                {!demoMode && meeting.recording.status !== 'recording' && (
+                  <DiarizationBenchmarkPanel recordingId={meeting.id} />
                 )}
               </div>
             )}
