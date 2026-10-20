@@ -164,17 +164,17 @@ restano fuori dalla coda durevole; conversione e retry uniformi sono nel piano
 
 ## Esperimento Nemotron 3 (opt-in)
 
-La scelta avanzata del motore locale include Community-1 (default invariato) e NVIDIA Nemotron 3 CoreML con i preset \`fast128\` e \`c128-split-w8a8\`. Sono entrambi nello stesso helper Swift e usano la stessa timeline e i contratti di cluster. Il primo utilizzo di Nemotron scarica **solo i pesi pubblici** in una cache dedicata; nessun audio viene inviato a un servizio esterno. Senza i pesi in modalità offline il passaggio fallisce esplicitamente, non passa al cloud. Il modello viene eseguito soltanto dopo il meeting, sotto la lease runtime esistente.
+La scelta avanzata del motore locale include Community-1 (default invariato) e NVIDIA Nemotron 3 CoreML con i preset `fast128` e `c128-split-w8a8`. Sono entrambi nello stesso helper Swift e usano la stessa timeline e i contratti di cluster. Il primo utilizzo di Nemotron scarica **solo i pesi pubblici** in una cache dedicata; nessun audio viene inviato a un servizio esterno. Senza i pesi in modalità offline il passaggio fallisce esplicitamente, non passa al cloud. Il modello viene eseguito soltanto dopo il meeting, sotto la lease runtime esistente.
 
 Test A/B su Mac con un identico WAV finalizzato e RTTM annotato (opzionale):
 
-\`\`\`bash
+```bash
 UV_CACHE_DIR=.cache/uv uv run python scripts/benchmark_speaker_diarization.py \
   --audio /path/to/local-meeting.wav --reference-rttm /path/to/annotation.rttm \
   --output /tmp/closedroom-diarization-aggregate.json
-\`\`\`
+```
 
 Il report contiene solo misure aggregate, non percorsi, timeline o testi. Il DER riportato dal tool è **un'approssimazione con frame 100 ms, senza collar**, non direttamente comparabile con i numeri DIHARD/AMI ufficiali. Ripetere dopo che i pesi sono stati scaricati per misurare la velocità warm; misurare RSS, termiche e qualità word-to-speaker sul Mac reale prima di cambiare il default. Community-1 resta il fallback *selezionabile manualmente*; non è previsto fallback cloud o cambio automatico silenzioso di backend.
 
-Modello: https://huggingface.co/FluidInference/nemotron-3-diarization-coreml (OpenMDW 1.1, commercial use consentito secondo model card; verificare obblighi di attribuzione in sede di release). FluidAudio è fissato alla release \`v0.17.7\`; la compilazione Swift, il bundle firmato e l'inferenza reale su Apple Silicon costituiscono prove ancora da completare prima dell'integrazione/release.
+Modello: https://huggingface.co/FluidInference/nemotron-3-diarization-coreml (OpenMDW 1.1, commercial use consentito secondo model card; verificare obblighi di attribuzione in sede di release). FluidAudio è fissato alla release `v0.17.7`; la compilazione Swift, il bundle firmato e l'inferenza reale su Apple Silicon costituiscono prove ancora da completare prima dell'integrazione/release.
 
