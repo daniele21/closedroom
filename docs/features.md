@@ -179,8 +179,10 @@ Il report contiene solo misure aggregate, non percorsi, timeline o testi. Il DER
 
 **Confronto dall'interfaccia**: in un Meeting già registrato, la scheda **Speaker**
 offre `Confronta motori` e pre-seleziona Community-1 e i due preset Nemotron.
-L'utente sceglie il campione iniziale di 5 minuti (WAV/PCM) oppure la traccia
-completa. Nelle registrazioni dual-track è confrontata `system`, perché `mic`
+L'utente sceglie il campione iniziale di 5 minuti oppure la traccia
+completa. I WAV canonici usano la traccia esistente o una slice senza decodifica
+completa; gli altri formati (incluso WebM) sono normalizzati via ffmpeg locale
+nella sola directory temporanea del job, ripulita anche dopo errore/annullamento. Nelle registrazioni dual-track è confrontata `system`, perché `mic`
 è già uno speaker noto; altrimenti si usa `mixed` oppure `mic`.
 `/v1/recordings/{id}/diarization-benchmarks` crea/legge job con avanzamento,
 annullamento nativo entro il poll del helper e scheduling del

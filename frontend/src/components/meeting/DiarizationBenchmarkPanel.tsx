@@ -137,7 +137,7 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
             </legend>
             <label className="flex items-center gap-2 text-xs text-text-secondary">
               <input type="radio" checked={scope === 'sample'} onChange={() => setScope('sample')} />
-              {it ? 'Primi 5 minuti · prova rapida (WAV/PCM)' : 'First 5 minutes · quick test (WAV/PCM)'}
+              {it ? 'Primi 5 minuti · prova rapida' : 'First 5 minutes · quick test'}
             </label>
             <label className="flex items-center gap-2 text-xs text-text-secondary">
               <input type="radio" checked={scope === 'full'} onChange={() => setScope('full')} />

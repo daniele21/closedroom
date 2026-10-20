@@ -124,6 +124,55 @@ class DiarizationBenchmarkTests(unittest.TestCase):
                 )
             self.assertEqual(len(diarizer.inputs), 1)
 
+    def test_browser_recording_is_decoded_into_run_scoped_local_wav(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "browser.webm"
+            source.write_bytes(b"synthetic container data")
+            diarizer = FakeDiarizer()
+
+            def fake_local_decode(path, destination, *, seconds, cancel_requested):
+                self.assertEqual(path, source)
+                self.assertEqual(seconds, 300)
+                self.assertFalse(cancel_requested())
+                make_wav(destination)
+                return 1.0
+
+            with patch(
+                "local_asr_server.speaker_diarization_benchmark._convert_to_wav",
+                side_effect=fake_local_decode,
+            ) as convert:
+                result = run_benchmark(
+                    FakeRecordingStore(source), "recording",
+                    engines=["community-1", "nemotron3-fast128"],
+                    scope="sample", service=diarizer,
+                    cancel_requested=lambda: False,
+                    on_progress=lambda *_args: None,
+                )
+                self.assertEqual(convert.call_count, 1)
+            self.assertEqual(result["outcome_status"], "completed")
+            self.assertEqual(len(diarizer.inputs), 2)
+            self.assertTrue(all(p != source and not p.exists() for p, _, _ in diarizer.inputs))
+            self.assertEqual(source.read_bytes(), b"synthetic container data")
+
+    def test_cancelled_conversion_does_not_launch_decoder(self):
+        from unittest.mock import patch
+        from local_asr_server.speaker_diarization_benchmark import _convert_to_wav
+
+        with patch(
+            "local_asr_server.speaker_diarization_benchmark.get_ffmpeg_path",
+            return_value="ffmpeg",
+        ), patch(
+            "local_asr_server.speaker_diarization_benchmark.subprocess.Popen",
+        ) as process:
+            with self.assertRaisesRegex(RuntimeError, "cancelled"):
+                _convert_to_wav(
+                    Path("private.webm"), Path("temp.wav"), seconds=300,
+                    cancel_requested=lambda: True,
+                )
+            process.assert_not_called()
+
     def test_preview_preserves_overlap_and_bounds_results(self):
         timeline = [{"speaker": "S1", "start": 0, "end": 4},
                     {"speaker": "S2", "start": 2, "end": 7},
