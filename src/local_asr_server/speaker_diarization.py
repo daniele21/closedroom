@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 import subprocess
+import time
 from typing import Any, Callable
 
 from local_asr_server.settings import load_settings
@@ -158,6 +159,7 @@ class LocalSpeakerDiarizationService:
         *,
         engine: str | None = None,
         preset: str | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         """Run local native diarization. Overrides support isolated A/B runs."""
         settings = load_settings()
@@ -171,7 +173,10 @@ class LocalSpeakerDiarizationService:
         try:
             if self._runner is not None:
                 return self._runner(inputs)
-            return self._run_helper(inputs, engine=selected, preset=selected_preset)
+            return self._run_helper(
+                inputs, engine=selected, preset=selected_preset,
+                cancel_requested=cancel_requested,
+            )
         finally:
             self.model_phases.release_lease("diarization")
 
@@ -210,7 +215,8 @@ class LocalSpeakerDiarizationService:
 
     @staticmethod
     def _run_helper(
-        inputs: dict[str, Path], *, engine: str = DIARIZATION_ENGINE, preset: str = "fast128"
+        inputs: dict[str, Path], *, engine: str = DIARIZATION_ENGINE, preset: str = "fast128",
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         models_dir = get_models_dir() / (
             "nemotron3-speaker-diarization"
@@ -223,10 +229,37 @@ class LocalSpeakerDiarizationService:
         ]
         for track_id, path in inputs.items():
             command.extend(["--input", f"{track_id}={path}"])
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
-        if completed.returncode != 0:
-            raise RuntimeError(completed.stderr.strip() or "FluidAudio helper failed")
-        result = json.loads(completed.stdout)
+        if cancel_requested is None:
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+            stdout, stderr, returncode = completed.stdout, completed.stderr, completed.returncode
+        else:
+            # Benchmark subprocesses are run-owned: cancellation stops inference
+            # and reaps the child rather than waiting for a model to finish.
+            if cancel_requested():
+                raise RuntimeError("Diarization cancelled")
+            with subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            ) as child:
+                deadline = time.monotonic() + 1800
+                while True:
+                    if cancel_requested():
+                        child.kill()
+                        child.communicate()
+                        raise RuntimeError("Diarization cancelled")
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        child.kill()
+                        child.communicate()
+                        raise RuntimeError("Native diarization timed out")
+                    try:
+                        stdout, stderr = child.communicate(timeout=min(0.25, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+                returncode = child.returncode
+        if returncode != 0:
+            raise RuntimeError(stderr.strip() or "FluidAudio helper failed")
+        result = json.loads(stdout)
         if result.get("engine") != engine or not isinstance(result.get("tracks"), dict):
             raise RuntimeError("Diarization helper returned an unexpected engine or output shape")
         return result
