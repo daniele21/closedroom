@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -22,6 +22,9 @@ from local_asr_server.transcription_jobs import (
     TranscriptionJob,
 )
 from local_asr_server.settings import load_settings
+from local_asr_server.speaker_diarization_benchmark import (
+    BENCHMARK_JOB_TYPE, run_benchmark, validate_options,
+)
 from local_asr_server.env import get_env_var
 from local_asr_server.services.transcription_service import TranscriptionService
 from local_asr_server.services.transcription_application import (
@@ -59,6 +62,14 @@ router = APIRouter()
 
 class SpeakerNamesRequest(BaseModel):
     names: dict[str, str] = Field(default_factory=dict)
+
+
+class DiarizationBenchmarkRequest(BaseModel):
+    engines: list[Literal["community-1", "nemotron3-fast128", "nemotron3-compact"]] = Field(
+        default_factory=lambda: ["community-1", "nemotron3-fast128", "nemotron3-compact"],
+        min_length=2, max_length=3,
+    )
+    scope: Literal["sample", "full"] = "sample"
 
 
 def _get_transcribe_file_sync():
@@ -498,6 +509,65 @@ def create_transcription_job(recording_id: str, request: Request, body: Transcri
     )
 
 
+@router.post("/v1/recordings/{recording_id}/diarization-benchmarks", status_code=202)
+def create_diarization_benchmark(
+    recording_id: str, request: Request, body: DiarizationBenchmarkRequest,
+):
+    try:
+        validate_options(body.engines, body.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    services = get_services(request.app)
+    try:
+        recording = services.recordings.get(recording_id, include_result=False)
+        if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
+            raise RecordingConflict("Finish the recording before comparing speakers")
+        if not services.recordings.transcribable_tracks(recording_id):
+            raise RecordingConflict("Recording has no transcribable audio")
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    existing = services.transcription_jobs.list(
+        job_type=BENCHMARK_JOB_TYPE, scope_type="recording", scope_id=recording_id, limit=10,
+    )
+    active = next((item for item in existing if item["status"] not in {
+        "completed", "failed", "cancelled", "interrupted",
+    }), None)
+    if active:
+        raise HTTPException(status_code=409, detail="A comparison is already running for this meeting")
+
+    def runner(job: TranscriptionJob) -> dict[str, Any]:
+        def progress(percent: int, step: str, detail: dict[str, Any]) -> None:
+            services.transcription_jobs.update_progress(
+                job.id, "running", percent, step, event_payload=detail,
+            )
+
+        return run_benchmark(
+            services.recordings, recording_id, engines=list(body.engines), scope=body.scope,
+            cancel_requested=lambda: job.cancel_requested,
+            on_progress=progress,
+        )
+
+    return services.transcription_jobs.create(
+        recording_id, runner, job_type=BENCHMARK_JOB_TYPE,
+        scope_type="recording", scope_id=recording_id,
+        payload={"recording_id": recording_id, "engines": list(body.engines), "scope": body.scope},
+    )
+
+
+@router.get("/v1/recordings/{recording_id}/diarization-benchmarks")
+def list_diarization_benchmarks(recording_id: str, request: Request):
+    try:
+        get_services(request.app).recordings.get(recording_id, include_result=False)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    return {"items": get_services(request.app).transcription_jobs.list(
+        job_type=BENCHMARK_JOB_TYPE, scope_type="recording", scope_id=recording_id, limit=10,
+    )}
+
+
 @router.get("/v1/activities")
 def list_activities(request: Request, recent_limit: int = Query(default=30, ge=1, le=100)):
     arbiter = request.app.state.heavy_workload_arbiter.snapshot()
@@ -621,7 +691,7 @@ def cancel_job(job_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Job not found")
     job = (
         get_services(request.app).transcription_jobs.cancel(job_id)
-        if existing["type"] in {TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE, VISUAL_INTELLIGENCE_JOB_TYPE}
+        if existing["type"] in {TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE, VISUAL_INTELLIGENCE_JOB_TYPE, BENCHMARK_JOB_TYPE}
         else get_services(request.app).analysis_jobs.cancel(job_id)
         if existing["type"] == "analysis"
         else get_services(request.app).jobs.request_cancel(job_id)
