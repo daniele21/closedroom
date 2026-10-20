@@ -50,7 +50,7 @@ class DiarizationBenchmarkApiTests(unittest.TestCase):
             title="Private recording", mime_type="audio/wav", model="test-model",
             language="it", capture_mode="pc_only",
         )
-        self.store.append_chunk(item["id"], 0, _wav())
+        self.store.append_track_chunk(item["id"], "system", 0, _wav())
         if finalize:
             self.store.finalize(item["id"])
         return item["id"]
