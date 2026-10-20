@@ -116,7 +116,9 @@ const counts = {
   session: 0, health: 0, meeting: 0, alternate_meeting: 0, held_meeting: 0,
   diagnostics: 0, visual_frames: 0, screenshots: 0, alternate_screenshots: 0, notes: 0, alternate_notes: 0,
   alternate_visual_context: 0,
+  benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0,
 };
+let benchmarkJob = null;
 let failNextAlternateScreenshots = false;
 let failNextAlternateNotes = false;
 let holdNextMeetingId = null;
@@ -233,6 +235,49 @@ function fixtureServer(port) {
     if (pathname === `/v1/recordings/${MEETING_ID}/screenshots`) {
       counts.screenshots += 1;
       return json(res, 200, { items: [screenshotFixture], total: 1 });
+    }
+
+    if (pathname === `/v1/recordings/${MEETING_ID}/diarization-benchmarks`) {
+      if (req.method === 'GET') {
+        counts.benchmark_list += 1;
+        return json(res, 200, { items: benchmarkJob ? [benchmarkJob] : [] });
+      }
+      if (req.method === 'POST') {
+        counts.benchmark_start += 1;
+        benchmarkJob = {
+          id: 'e2e-diarization-benchmark', type: 'diarization_benchmark',
+          recording_id: MEETING_ID, scope_type: 'recording', scope_id: MEETING_ID,
+          status: 'running', current_step: 'comparing', progress: 10,
+          progress_detail: { engine: 'community-1', index: 1, total: 3 },
+        };
+        return json(res, 202, benchmarkJob);
+      }
+    }
+    if (pathname === '/v1/jobs/e2e-diarization-benchmark' && req.method === 'GET') {
+      counts.benchmark_poll += 1;
+      if (counts.benchmark_poll === 1) {
+        return json(res, 200, { ...benchmarkJob, progress: 55,
+          progress_detail: { engine: 'nemotron3-fast128', index: 2, total: 3 } });
+      }
+      benchmarkJob = {
+        ...benchmarkJob, status: 'completed', current_step: 'completed', progress: 100,
+        result: {
+          schema_version: 1, scope: 'sample', track_id: 'system',
+          audio_seconds: 300, preview_seconds: 300, reference_scored: false,
+          runs: [
+            { key: 'community-1', engine: 'fluidaudio-community-1', preset: null, status: 'completed',
+              elapsed_seconds: 15, speed_vs_realtime: 20, clusters: 2,
+              preview: [{ speaker: 'A', start: 0, end: 65 }, { speaker: 'B', start: 61, end: 170 }] },
+            { key: 'nemotron3-fast128', engine: 'nemotron3-coreml', preset: 'fast128', status: 'completed',
+              elapsed_seconds: 12, speed_vs_realtime: 25, clusters: 2,
+              preview: [{ speaker: '0', start: 0, end: 55 }, { speaker: '1', start: 50, end: 150 }] },
+            { key: 'nemotron3-compact', engine: 'nemotron3-coreml', preset: 'c128-split-w8a8', status: 'completed',
+              elapsed_seconds: 10, speed_vs_realtime: 30, clusters: 2,
+              preview: [{ speaker: '0', start: 0, end: 70 }] },
+          ],
+        },
+      };
+      return json(res, 200, benchmarkJob);
     }
     if (pathname === `/v1/recordings/${MEETING_ID}/notes`) {
       counts.notes += 1;
@@ -737,6 +782,26 @@ try {
   await browser.clickCss('[data-key-moment-id="synthetic-shared-key"]');
   await waitCount('alternate_visual_context', 2);
   await checkpoint(browser, '10-visual-context-demand-not-sticky');
+
+
+  // Comparison is an explicit advanced action on a saved meeting. It must
+  // not run during the normal read/analysis flows, or mutate transcript text.
+  if (counts.benchmark_start !== 0) {
+    throw new Error('meeting speaker comparison started without user consent');
+  }
+  await browser.clickCss('#meeting-tab-speakers');
+  await waitText(browser, ['Compare diarization engines', 'Confronta motori di diarizzazione']);
+  await browser.clickButton(['Compare engines', 'Confronta motori']);
+  await waitText(browser, ['Start comparison', 'Avvia confronto']);
+  await checkpoint(browser, '11-comparison-opt-in');
+  await browser.clickButton(['Start comparison', 'Avvia confronto']);
+  await waitText(browser, ['Comparison finished', 'Confronto completato'], 20000, true);
+  if (counts.benchmark_start !== 1 || counts.benchmark_poll < 2) {
+    throw new Error(`benchmark request/poll mismatch: ${JSON.stringify(counts)}`);
+  }
+  await waitText(browser, ['FluidAudio Community-1']);
+  await waitText(browser, ['Nemotron 3 · fast128']);
+  await checkpoint(browser, '12-comparison-results');
 
   video = await renderVideo();
 } catch (caught) {

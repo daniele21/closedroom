@@ -251,7 +251,7 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
                         style={{ left: `${Math.min(100, playbackTime / previewSeconds * 100)}%` }} />
                     </div>
                     <p className="text-[10px] text-text-muted">
-                      {speakers.map((speaker, index) => `● ${speaker}`).join(' · ')}
+                      {speakers.map((speaker) => `● ${speaker}`).join(' · ')}
                       {run.preview_truncated && (it ? ' · Timeline parziale' : ' · Partial timeline')}
                     </p>
                   </div>
