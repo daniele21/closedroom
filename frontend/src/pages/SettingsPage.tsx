@@ -781,7 +781,7 @@ export default function SettingsPage() {
                       </>
                     )}
                   </div>
-                )
+                )}
                 <Checkbox variant="toggle" label={t('settings.visualIntelligence')} checked={visualIntelligenceEnabled} onChange={(event) => setVisualIntelligenceEnabled(event.target.checked)} />
                 <Select label={t('settings.meetingDefaultPipeline')} value={meetingDefaultPipeline} onChange={(event) => setMeetingDefaultPipeline(event.target.value)}>
                   <option value="meeting_default">{t('settings.meetingPipelineDefault')}</option>
