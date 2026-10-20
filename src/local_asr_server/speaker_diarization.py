@@ -173,6 +173,8 @@ class LocalSpeakerDiarizationService:
         try:
             if self._runner is not None:
                 return self._runner(inputs)
+            if cancel_requested is None:
+                return self._run_helper(inputs, engine=selected, preset=selected_preset)
             return self._run_helper(
                 inputs, engine=selected, preset=selected_preset,
                 cancel_requested=cancel_requested,
