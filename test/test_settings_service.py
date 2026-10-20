@@ -20,6 +20,8 @@ class SettingsServiceTests(unittest.TestCase):
             SettingsRequest(default_task="summarize"),
             SettingsRequest(speechmatics_timeout_seconds=0),
             SettingsRequest(speaker_diarization_minimum_overlap=1.5),
+            SettingsRequest(speaker_diarization_engine="unknown"),
+            SettingsRequest(speaker_diarization_nemotron_preset="unvalidated"),
             SettingsRequest(visual_frame_similarity_threshold=-1),
             SettingsRequest(visual_frame_similarity_threshold=65),
         )
@@ -30,6 +32,24 @@ class SettingsServiceTests(unittest.TestCase):
             ):
                 with self.assertRaises(InvalidSettings):
                     SettingsService().update(body)
+
+    def test_nemotron_engine_and_preset_are_persisted(self):
+        current = DEFAULT_SETTINGS.copy()
+        modified = {
+            **current,
+            "speaker_diarization_engine": "nemotron3-coreml",
+            "speaker_diarization_nemotron_preset": "c128-split-w8a8",
+        }
+        with (
+            patch("local_asr_server.services.settings_service.load_settings", side_effect=[current, modified]),
+            patch("local_asr_server.services.settings_service.save_settings") as save,
+        ):
+            SettingsService().update(SettingsRequest(
+                speaker_diarization_engine="nemotron3-coreml",
+                speaker_diarization_nemotron_preset="c128-split-w8a8",
+            ))
+        self.assertEqual(save.call_args.args[0]["speaker_diarization_engine"], "nemotron3-coreml")
+        self.assertEqual(save.call_args.args[0]["speaker_diarization_nemotron_preset"], "c128-split-w8a8")
 
     def test_default_temperature_is_persisted_as_number(self):
         current = DEFAULT_SETTINGS.copy()
