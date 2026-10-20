@@ -8,6 +8,7 @@ from local_asr_server.asr_provider import normalize_asr_provider, speechmatics_o
 from local_asr_server.env import get_env_var
 from local_asr_server.schemas import SettingsRequest
 from local_asr_server.settings import DEFAULT_SETTINGS, load_settings, save_settings
+from local_asr_server.speaker_diarization import DIARIZATION_ENGINES, NEMOTRON3_PRESETS
 from local_asr_server.analysis_templates import PIPELINES
 from local_asr_server.llm import LLM_PROVIDER_NAMES
 from local_asr_server.runtime.models import (
@@ -114,6 +115,8 @@ class SettingsService:
             "local_llm_quality_preset": LLM_QUALITY_PRESETS,
             "local_llm_reasoning": LLM_REASONING_POLICIES,
             "meeting_default_pipeline": frozenset(PIPELINES),
+            "speaker_diarization_engine": DIARIZATION_ENGINES,
+            "speaker_diarization_nemotron_preset": NEMOTRON3_PRESETS,
             "default_task": frozenset({"transcribe", "translate"}),
             "visual_routing_mode": frozenset({"v1", "shadow", "v2"}),
         }

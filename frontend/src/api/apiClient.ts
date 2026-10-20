@@ -597,6 +597,8 @@ export interface Settings {
   meeting_auto_analysis?: boolean;
   meeting_default_pipeline?: string;
   speaker_diarization_enabled?: boolean;
+  speaker_diarization_engine?: "fluidaudio-community-1" | "nemotron3-coreml";
+  speaker_diarization_nemotron_preset?: "fast128" | "c128-split-w8a8";
   speaker_diarization_minimum_overlap?: number;
   visual_intelligence_enabled?: boolean;
   visual_llm_model?: string;
