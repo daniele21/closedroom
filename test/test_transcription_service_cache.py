@@ -37,6 +37,21 @@ class TranscriptionServiceCacheTests(unittest.TestCase):
                 )
         self.assertEqual(len(key), 64)
 
+    def test_changing_diarization_engine_or_preset_invalidates_pipeline_cache(self) -> None:
+        base = {"speaker_diarization_enabled": True, "speaker_diarization_engine": "fluidaudio-community-1",
+                "speaker_diarization_nemotron_preset": "fast128"}
+        def key(settings):
+            return TranscriptionService.recording_pipeline_cache_key(
+                recording_id="r1", track_results=[{"track": {"id": "system"}, "result": {"segments": []}}],
+                settings=settings, visual_input_fingerprint="", diarization_provider="local",
+            )
+        original = key(base)
+        nemotron = key({**base, "speaker_diarization_engine": "nemotron3-coreml"})
+        split = key({**base, "speaker_diarization_engine": "nemotron3-coreml",
+                     "speaker_diarization_nemotron_preset": "c128-split-w8a8"})
+        self.assertNotEqual(original, nemotron)
+        self.assertNotEqual(nemotron, split)
+
 
 if __name__ == "__main__":
     unittest.main()
