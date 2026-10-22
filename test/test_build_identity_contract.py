@@ -12,14 +12,11 @@ class BuildIdentityContractTests(unittest.TestCase):
         build = (ROOT / "build.sh").read_text(encoding="utf-8")
         spec = (ROOT / "ClosedRoom.spec").read_text(encoding="utf-8")
 
-        self.assertIn(
-            'APP_BUNDLE_NAME="${CLOSEDROOM_APP_BUNDLE_NAME:-${APP_NAME}.app}"',
-            build,
-        )
-        self.assertIn(
-            'APP_DISPLAY_NAME="${CLOSEDROOM_APP_DISPLAY_NAME:-$APP_NAME}"',
-            build,
-        )
+        # Canonical owner now provides both stable and test build identities.
+        self.assertIn('scripts/build_identity.py', build)
+        self.assertIn('--variant "$BUILD_VARIANT" --identity-tsv', build)
+        self.assertIn('APP_BUNDLE_NAME', build)
+        self.assertIn('APP_DISPLAY_NAME', build)
         self.assertIn('APP_PATH="$DIST_DIR/$APP_BUNDLE_NAME"', build)
         self.assertIn('CLOSEDROOM_APP_DISPLAY_NAME="$APP_DISPLAY_NAME"', build)
         self.assertNotIn('APP_BUNDLE_BASENAME="${APP_NAME}-${APP_VERSION}"', build)
@@ -33,7 +30,8 @@ class BuildIdentityContractTests(unittest.TestCase):
             spec,
         )
         self.assertIn('"CFBundleShortVersionString": APP_VERSION', spec)
-        self.assertIn('"CFBundleVersion": APP_VERSION', spec)
+        self.assertIn('BUILD_NUMBER = os.environ.get("CLOSEDROOM_BUILD_NUMBER", APP_VERSION)', spec)
+        self.assertIn('"CFBundleVersion": BUILD_NUMBER', spec)
 
     def test_distribution_names_are_versioned_without_versioning_inner_app(self) -> None:
         build = (ROOT / "build.sh").read_text(encoding="utf-8")
@@ -42,14 +40,13 @@ class BuildIdentityContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('DMG_BASENAME="${APP_NAME}-${APP_VERSION}"', build)
-        self.assertIn(
-            'APP_BUNDLE_NAME="${CLOSEDROOM_APP_BUNDLE_NAME:-${APP_NAME}.app}"',
-            artifact,
-        )
+        self.assertIn('DMG_BASENAME="${APP_DISPLAY_NAME// /-}-${APP_VERSION}"', build)
+        self.assertIn('scripts/build_identity.py', artifact)
+        self.assertIn('--variant "$BUILD_VARIANT" --identity-tsv', artifact)
+        self.assertIn('[[ "$BUILD_VARIANT" != "test" ]]', artifact)
         self.assertIn('STAGING_APP="$ROOT/dist/$APP_BUNDLE_NAME"', artifact)
         self.assertIn(
-            'FINAL_BASENAME="${APP_NAME}-${APP_VERSION}-${BUILD_ID}-${SOURCE_REVISION}"',
+            'FINAL_BASENAME="${APP_DISPLAY_NAME// /-}-${APP_VERSION}-${BUILD_ID}-${SOURCE_REVISION}"',
             artifact,
         )
         self.assertIn(

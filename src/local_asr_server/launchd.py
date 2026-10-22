@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from local_asr_server.paths import APP_BUNDLE_ID
+from local_asr_server.paths import get_logs_dir
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -48,26 +48,37 @@ def _find_app_binary() -> Path | None:
         if current_binary.exists():
             return current_binary
 
-    app_paths: list[Path] = []
-    for root in _APP_ROOTS:
-        app_paths.extend(sorted(root.glob("ClosedRoom*.app")))
+    # Legacy versioned production bundles remain supported, but the CLI must
+    # not launch ClosedRoom Test when looking for the stable app.
+    import plistlib
 
-    for app in app_paths:
-        binary = app / "Contents" / "MacOS" / "ClosedRoom"
-        if binary.exists():
-            return binary
+    for root in _APP_ROOTS:
+        for app in sorted(root.glob("ClosedRoom*.app")):
+            binary = app / "Contents" / "MacOS" / "ClosedRoom"
+            if not binary.is_file():
+                continue
+            try:
+                with (app / "Contents" / "Info.plist").open("rb") as handle:
+                    info = plistlib.load(handle)
+            except (OSError, ValueError, plistlib.InvalidFileException):
+                continue
+            if info.get("CFBundleIdentifier") == "com.closedroom.app":
+                return binary
     return None
 
 
 def _generate_plist(binary_path: Path) -> str:
     """Generate the launchd plist XML content."""
+    from local_asr_server.app_identity import get_app_identity
+    bundle_id = get_app_identity().bundle_identifier
+    logs = get_logs_dir()
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>{APP_BUNDLE_ID}</string>
+    <string>{bundle_id}</string>
     <key>ProgramArguments</key>
     <array>
         <string>{binary_path}</string>
@@ -77,9 +88,9 @@ def _generate_plist(binary_path: Path) -> str:
     <key>KeepAlive</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>{Path.home()}/Library/Logs/ClosedRoom/stdout.log</string>
+    <string>{logs}/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>{Path.home()}/Library/Logs/ClosedRoom/stderr.log</string>
+    <string>{logs}/stderr.log</string>
 </dict>
 </plist>
 """
@@ -87,8 +98,7 @@ def _generate_plist(binary_path: Path) -> str:
 
 def _ensure_log_dir() -> None:
     """Create the log directory used by the LaunchAgent."""
-    log_dir = Path.home() / "Library" / "Logs" / "ClosedRoom"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    get_logs_dir(create=True)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

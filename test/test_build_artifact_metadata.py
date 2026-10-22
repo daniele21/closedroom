@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import plistlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -15,6 +16,28 @@ spec.loader.exec_module(mod)
 
 
 class BuildArtifactMetadataTests(unittest.TestCase):
+    def test_bundle_build_and_product_versions_are_independent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            contents = Path(temp) / "ClosedRoom Test.app" / "Contents"
+            contents.mkdir(parents=True)
+            data = {
+                "CFBundleIdentifier": "com.closedroom.app.test",
+                "CFBundleShortVersionString": "0.2.0",
+                "CFBundleVersion": "42",
+            }
+            with (contents / "Info.plist").open("wb") as stream:
+                plistlib.dump(data, stream)
+            self.assertEqual(mod.read_bundle_identity(contents.parent, "0.2.0", "com.closedroom.app.test"), 42)
+            with self.assertRaisesRegex(ValueError, "product version"):
+                mod.read_bundle_identity(contents.parent, "0.3.0", "com.closedroom.app.test")
+            with self.assertRaisesRegex(ValueError, "bundle identifier"):
+                mod.read_bundle_identity(contents.parent, "0.2.0", "com.closedroom.app")
+            data["CFBundleVersion"] = "0.2.0"
+            with (contents / "Info.plist").open("wb") as stream:
+                plistlib.dump(data, stream)
+            with self.assertRaisesRegex(ValueError, "positive numeric"):
+                mod.read_bundle_identity(contents.parent, "0.2.0", "com.closedroom.app.test")
+
     def test_tree_fingerprint_changes_with_content(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

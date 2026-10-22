@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import shutil
+import plistlib
 from pathlib import Path
 
 # ── App identity ──────────────────────────────────────────────────────────────
@@ -65,6 +66,28 @@ def get_app_contents_dir() -> Path | None:
 
 # ── macOS standard directories ─────────────────────────────────────────────────
 
+def _data_directory_name() -> str:
+    """Keep experimental bundles out of the installed application's data.
+
+    Read the signed bundle identity instead of trusting mutable process env.
+    Plain Python/dev and the stable bundle retain their existing paths.
+    """
+    if not is_bundled():
+        return APP_NAME
+    contents = get_app_contents_dir()
+    if contents is None:
+        return APP_NAME
+    try:
+        with (contents / "Info.plist").open("rb") as handle:
+            bundle = plistlib.load(handle)
+        if bundle.get("CFBundleIdentifier") == "com.closedroom.app.test":
+            return "ClosedRoom Test"
+    except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
+        pass
+    return APP_NAME
+
+
+
 def get_app_support_dir() -> Path:
     """
     Return ``~/Library/Application Support/ClosedRoom/``, creating it if needed.
@@ -72,7 +95,7 @@ def get_app_support_dir() -> Path:
     This is the canonical location for user data on macOS (settings, models,
     cache).  We create the directory on first access.
     """
-    base = Path.home() / "Library" / "Application Support" / APP_NAME
+    base = Path.home() / "Library" / "Application Support" / _data_directory_name()
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -85,7 +108,7 @@ def get_cache_dir() -> Path:
     - **Dev mode**: ``.cache/`` at the project root (preserves existing behavior).
     """
     if is_bundled():
-        cache = Path.home() / "Library" / "Caches" / APP_NAME
+        cache = Path.home() / "Library" / "Caches" / _data_directory_name()
     else:
         # Keep existing dev-mode location: <project-root>/.cache/
         cache = Path(__file__).parent.parent.parent / ".cache"
@@ -129,7 +152,7 @@ def get_runtime_state_file() -> Path:
 
 def get_logs_dir(create: bool = True) -> Path:
     """Return ``~/Library/Logs/ClosedRoom/``, creating it by default."""
-    logs = Path.home() / "Library" / "Logs" / APP_NAME
+    logs = Path.home() / "Library" / "Logs" / _data_directory_name()
     if create:
         logs.mkdir(parents=True, exist_ok=True)
     return logs
