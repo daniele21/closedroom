@@ -179,23 +179,36 @@ Il report contiene solo misure aggregate, non percorsi, timeline o testi. Il DER
 
 **Confronto dall'interfaccia**: in un Meeting già registrato, la scheda **Speaker**
 offre `Confronta motori` e pre-seleziona Community-1 e i due preset Nemotron.
-L'utente sceglie il campione iniziale di 5 minuti oppure la traccia
-completa. I WAV canonici usano la traccia esistente o una slice senza decodifica
-completa; gli altri formati (incluso WebM) sono normalizzati via ffmpeg locale
-nella sola directory temporanea del job, ripulita anche dopo errore/annullamento. Nelle registrazioni dual-track è confrontata `system`, perché `mic`
-è già uno speaker noto; altrimenti si usa `mixed` oppure `mic`.
-`/v1/recordings/{id}/diarization-benchmarks` crea/legge job con avanzamento,
-annullamento nativo entro il poll del helper e scheduling del
-`HeavyWorkloadArbiter`. I risultati sono persistiti nel JobStore **solo
-localmente**, con tempi, numero di cluster e al massimo 300 intervalli temporali
-per motore per la preview dei primi cinque minuti. Nessun file audio, nome,
-testo del meeting o path è incluso nel risultato. La UI riproduce la traccia
-originale e mostra timeline sincronizzate; non sovrascrive transcript,
-speaker names o impostazioni. La UI **non** attribuisce accuratezza/DER ai
-numeri di cluster. `test/test_diarization_benchmark.py`, test API e browser
-`saved-meeting-fast-open` con evidenza FULL_MEDIA sintetica verificano
-selezione esplicita, protezione dati e flusso job/UI; restano necessari test
-di inferenza e qualità su Mac reale.
+L'utente sceglie i primi 5 minuti, l'intero meeting oppure un intervallo
+personalizzato in tempo assoluto (ad esempio 15:00–25:00). Il backend valida
+`scope=range` e `start_seconds/end_seconds`; i WAV canonici vengono
+ritagliati a livello di frame senza decodifica completa, mentre WebM e altri
+formati vengono convertiti localmente da ffmpeg nella sola directory temporanea
+del job, ripulita dopo successo, errore o cancellazione. La timeline del modello
+è traslata sul clock originale del meeting. Nelle registrazioni dual-track è
+confrontata `system` (il `mic` locale è già uno speaker noto), altrimenti
+`mixed` oppure `mic`.
+
+`/v1/recordings/{id}/diarization-benchmarks` usa i job canonici con
+avanzamento, cancellazione e `HeavyWorkloadArbiter`. Ogni run nuovo conserva
+nel JobStore locale anche la timeline speaker completa, senza transcript,
+nomi, audio o path; questo aumenta la dimensione del risultato persistito.
+I normali endpoint job/list escludono la timeline intera e mantengono
+le metriche e la preview legacy. L'endpoint autenticato
+`/v1/recordings/{id}/diarization-benchmarks/{job_id}/timeline?start_seconds=...&end_seconds=...`
+restituisce i soli intervalli speaker sovrapposti alla finestra richiesta
+(fino a 30 minuti per richiesta), verificando la ownership del meeting/job.
+La UI può scorrere l'intero meeting con slider, pagine precedenti/successive,
+finestre di 1/5/10/30 minuti e playback sincronizzato. I confronti creati
+prima dell'aggiornamento espongono onestamente solo la vecchia preview dei
+primi 5 minuti: per recuperare altri istanti serve un nuovo run.
+
+Non si modificano trascrizione, speaker name o settings. La UI **non**
+interpreta il numero dei cluster come accuratezza/DER. `test/test_diarization_benchmark.py`,
+test API e journey browser `saved-meeting-fast-open` con FULL_MEDIA sintetico
+verificano intervalli, isolamento, recupero finestre, controllo di accesso e
+non modifica delle fonti. Inferenza, termiche e qualità su Mac reale restano
+prove indipendenti e necessarie prima della release.
 
 Modello: https://huggingface.co/FluidInference/nemotron-3-diarization-coreml (OpenMDW 1.1, commercial use consentito secondo model card; verificare obblighi di attribuzione in sede di release). FluidAudio è fissato alla release `v0.17.7`; la compilazione Swift, il bundle firmato e l'inferenza reale su Apple Silicon costituiscono prove ancora da completare prima dell'integrazione/release.
 
