@@ -321,7 +321,7 @@ export function DiarizationBenchmarkPanel({ recordingId, durationSeconds, readOn
                 {it ? 'Timeline speaker navigabile' : 'Navigable speaker timeline'}
                 {' · '}{timeLabel(viewedStart)}–{timeLabel(viewedEnd)}
               </p>
-              <audio ref={audioRef} controls preload="metadata"
+              <audio key={`${recordingId}-${job?.id}`} ref={audioRef} controls preload="metadata"
                 onLoadedMetadata={(event) => {
                   if (rangeFrom > 0 && event.currentTarget.currentTime === 0) event.currentTarget.currentTime = rangeFrom;
                 }}
