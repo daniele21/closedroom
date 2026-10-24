@@ -201,6 +201,8 @@ def run_benchmark(
                 )
             if duration <= 0:
                 raise ValueError("Selected range contains no audio")
+            if duration + 0.1 < float(end_seconds) - offset:
+                raise ValueError("Selected range exceeds the available audio")
         elif not is_canonical:
             input_path = Path(tmp) / "normalized.wav"
             duration = _convert_to_wav(
