@@ -23,7 +23,7 @@ function timeLabel(seconds: number): string {
 
 function parseTime(value: string): number | null {
   const parts = value.trim().split(':');
-  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !/^\\d+$/.test(part))) return null;
+  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) return null;
   const digits = parts.map(Number);
   if (digits.slice(1).some((part) => part >= 60)) return null;
   return digits.reduce((acc, digit) => acc * 60 + digit, 0);
@@ -115,6 +115,7 @@ export function DiarizationBenchmarkPanel({ recordingId, durationSeconds, readOn
   useEffect(() => {
     if (!job || job.status !== 'completed' || !result || viewedEnd <= viewedStart) return;
     let alive = true;
+    setTimeline(null);
     setTimelineLoading(true);
     setTimelineError('');
     ApiClient.getDiarizationBenchmarkTimeline(recordingId, job.id, viewedStart, viewedEnd)
