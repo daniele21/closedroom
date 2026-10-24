@@ -173,8 +173,9 @@ def run_benchmark(
 
     # Canonical PCM WAV can run directly in full mode. Other codecs, including
     # browser WebM, are decoded only into this job's temporary workspace.
-    is_canonical = canonical_wav_info(path) is not None
-    source_duration = _duration(path) if is_canonical else None
+    source_info = canonical_wav_info(path)
+    is_canonical = source_info is not None
+    source_duration = source_info.duration_seconds if source_info else None
     if scope == "range" and source_duration is not None and end_seconds > source_duration + 0.01:
         raise ValueError("Range exceeds the recording duration")
     needs_temp = scope in {"sample", "range"} or not is_canonical
