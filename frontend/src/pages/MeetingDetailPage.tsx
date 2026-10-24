@@ -1615,7 +1615,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                   </div>
                 )}
                 {!demoMode && meeting.recording.status !== 'recording' && (
-                  <DiarizationBenchmarkPanel recordingId={meeting.id} />
+                  <DiarizationBenchmarkPanel recordingId={meeting.id} durationSeconds={recordingDuration} />
                 )}
               </div>
             )}
