@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiClient, DiarizationBenchmarkEngine, DiarizationBenchmarkResult, TranscriptionJob } from '../../api/apiClient';
+import { ApiClient, DiarizationBenchmarkEngine, DiarizationBenchmarkResult, DiarizationTimelineWindow, TranscriptionJob } from '../../api/apiClient';
 import { useTranslation } from '../../i18n/i18n';
 import { Button } from '../ui/Button';
 
@@ -11,14 +11,37 @@ const ENGINE_OPTIONS: Array<{ key: DiarizationBenchmarkEngine; title: string }> 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 const BAR_COLORS = ['bg-accent', 'bg-warning', 'bg-success', 'bg-info', 'bg-text-secondary'];
 
-type Scope = 'sample' | 'full';
+type Scope = 'sample' | 'range' | 'full';
+
+function timeLabel(seconds: number): string {
+  const value = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(value / 3600);
+  const m = Math.floor(value / 60) % 60;
+  const s = value % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function parseTime(value: string): number | null {
+  const parts = value.trim().split(':');
+  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !/^\\d+$/.test(part))) return null;
+  const digits = parts.map(Number);
+  if (digits.slice(1).some((part) => part >= 60)) return null;
+  return digits.reduce((acc, digit) => acc * 60 + digit, 0);
+}
+
+function speakerColor(speaker: string): number {
+  let hash = 0;
+  for (const char of speaker) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+  return hash % BAR_COLORS.length;
+}
 
 interface Props {
   recordingId: string;
+  durationSeconds?: number;
   readOnly?: boolean;
 }
 
-export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Props) {
+export function DiarizationBenchmarkPanel({ recordingId, durationSeconds, readOnly = false }: Props) {
   const { lang } = useTranslation();
   const it = lang === 'it';
   const [expanded, setExpanded] = useState(false);
@@ -26,6 +49,13 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
     ENGINE_OPTIONS.map((option) => option.key),
   );
   const [scope, setScope] = useState<Scope>('sample');
+  const [rangeStart, setRangeStart] = useState('15:00');
+  const [rangeEnd, setRangeEnd] = useState('25:00');
+  const [windowStart, setWindowStart] = useState(0);
+  const [windowMinutes, setWindowMinutes] = useState(5);
+  const [timeline, setTimeline] = useState<DiarizationTimelineWindow | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState('');
   const [job, setJob] = useState<TranscriptionJob | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -35,6 +65,7 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
   useEffect(() => {
     let alive = true;
     setJob(null);
+    setTimeline(null);
     setError('');
     ApiClient.listDiarizationBenchmarks(recordingId).then(({ items }) => {
       if (!alive || !items.length) return;
@@ -62,11 +93,39 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
   const busy = submitting || Boolean(job && !TERMINAL.has(job.status));
   const result = (job?.result || null) as DiarizationBenchmarkResult | null;
   const runs = result?.runs || [];
-  const previewSeconds = Math.max(1, result?.preview_seconds || 300);
+  const rangeFrom = result?.range_start_seconds ?? 0;
+  const rangeTo = result?.range_end_seconds ?? ((result?.scope === 'sample' ? result?.preview_seconds : result?.audio_seconds) || 300);
+  const viewedSeconds = Math.max(1, Math.min(windowMinutes * 60, rangeTo - rangeFrom));
+  const maxWindowStart = Math.max(rangeFrom, rangeTo - viewedSeconds);
+  const viewedStart = Math.max(rangeFrom, Math.min(maxWindowStart, windowStart));
+  const viewedEnd = Math.min(rangeTo, viewedStart + viewedSeconds);
+  const parsedStart = parseTime(rangeStart);
+  const parsedEnd = parseTime(rangeEnd);
+  const rangeValid = parsedStart !== null && parsedEnd !== null && parsedStart >= 0 && parsedEnd > parsedStart
+    && (!durationSeconds || parsedEnd <= durationSeconds + 0.01);
   const detail = job?.progress_detail as { engine?: string; index?: number; total?: number } | null;
 
+  useEffect(() => {
+    if (job?.status === 'completed' && result) {
+      setWindowStart(result.range_start_seconds ?? 0);
+      setTimeline(null);
+    }
+  }, [job?.id, job?.status]);
+
+  useEffect(() => {
+    if (!job || job.status !== 'completed' || !result || viewedEnd <= viewedStart) return;
+    let alive = true;
+    setTimelineLoading(true);
+    setTimelineError('');
+    ApiClient.getDiarizationBenchmarkTimeline(recordingId, job.id, viewedStart, viewedEnd)
+      .then((value) => { if (alive) setTimeline(value); })
+      .catch((exc) => { if (alive) { setTimeline(null); setTimelineError(String(exc)); } })
+      .finally(() => { if (alive) setTimelineLoading(false); });
+    return () => { alive = false; };
+  }, [recordingId, job?.id, job?.status, viewedStart, viewedEnd]);
+
   const start = async () => {
-    if (selected.length < 2 || busy || readOnly) return;
+    if (selected.length < 2 || busy || readOnly || (scope === 'range' && !rangeValid)) return;
     setError('');
     setSubmitting(true);
     setPlaybackTime(0);
@@ -74,6 +133,7 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
       setJob(await ApiClient.createDiarizationBenchmark(recordingId, {
         engines: ENGINE_OPTIONS.map((option) => option.key).filter((key) => selected.includes(key)),
         scope,
+        ...(scope === 'range' ? { start_seconds: parsedStart!, end_seconds: parsedEnd! } : {}),
       }));
       setExpanded(true);
     } catch (exc) {
