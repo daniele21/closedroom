@@ -837,6 +837,11 @@ try {
         (node.textContent || '').includes('Intervallo personalizzato'));
     if (!label) return false;
     label.querySelector('input[type="radio"]')?.click();
+    return true;
+  `);
+  if (!rangeReady) throw new Error('range selector unavailable in speaker comparison');
+  await sleep(150);
+  const inputsReady = await browser.execute(`
     const from = document.querySelector('input[aria-label="Range start"], input[aria-label="Inizio intervallo"]');
     const to = document.querySelector('input[aria-label="Range end"], input[aria-label="Fine intervallo"]');
     if (!from || !to) return false;
@@ -845,7 +850,7 @@ try {
     setter.call(to, '4:00'); to.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
   `);
-  if (!rangeReady) throw new Error('range inputs unavailable in speaker comparison');
+  if (!inputsReady) throw new Error('range inputs unavailable in speaker comparison');
   await sleep(100);
   await browser.clickButton(['Start comparison', 'Avvia confronto']);
   await waitCount('benchmark_start', 2);
