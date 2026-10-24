@@ -69,6 +69,13 @@ class DiarizationBenchmarkApiTests(unittest.TestCase):
             "community-1", "untrusted-remote",
         ]}).status_code, 422)
         self.assertEqual(self.client.get(f"/v1/recordings/not-a-uuid/diarization-benchmarks").status_code, 404)
+        for bad_range in (
+            {"scope": "range"},
+            {"scope": "range", "start_seconds": 900, "end_seconds": 900},
+            {"scope": "full", "start_seconds": 900, "end_seconds": 1500},
+        ):
+            payload = {"engines": ["community-1", "nemotron3-fast128"], **bad_range}
+            self.assertEqual(self.client.post(url, json=payload).status_code, 422)
 
     def test_job_api_persists_isolated_results_and_allows_lookup(self):
         recording_id = self.recording()
@@ -76,7 +83,9 @@ class DiarizationBenchmarkApiTests(unittest.TestCase):
         result = {
             "schema_version": 1, "scope": "sample", "track_id": "system",
             "preview_seconds": 1, "audio_seconds": 1, "reference_scored": False,
-            "runs": [{"key": "community-1", "status": "completed", "preview": []}],
+            "range_start_seconds": 0, "range_end_seconds": 1,
+            "runs": [{"key": "community-1", "status": "completed", "preview": [],
+                      "timeline": [{"speaker": "A", "start": 0.1, "end": 0.8}]}],
             "outcome_status": "completed",
         }
         with patch(
@@ -100,6 +109,24 @@ class DiarizationBenchmarkApiTests(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(listed.json()["items"][0]["id"], job_id)
         self.assertEqual(listed.json()["items"][0]["result"]["track_id"], "system")
+        self.assertNotIn("timeline", listed.json()["items"][0]["result"]["runs"][0])
+        self.assertNotIn("timeline", stored["result"]["runs"][0])
+        timeline_url = f"{url}/{job_id}/timeline"
+        response = self.client.get(timeline_url, params={"start_seconds": 0.5, "end_seconds": 1})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["runs"][0]["segments"][0]["speaker"], "A")
+        self.assertFalse(response.json()["runs"][0]["partial"])
+        self.assertEqual(self.client.get(timeline_url, params={
+            "start_seconds": 0, "end_seconds": 2000,
+        }).status_code, 422)
+        self.assertEqual(self.client.get(timeline_url, params={
+            "start_seconds": 1, "end_seconds": 1,
+        }).status_code, 422)
+        another_id = self.recording()
+        self.assertEqual(self.client.get(
+            f"/v1/recordings/{another_id}/diarization-benchmarks/{job_id}/timeline",
+            params={"start_seconds": 0, "end_seconds": 1},
+        ).status_code, 404)
         self.assertNotIn("speaker_diarization", self.store.get(recording_id))
         self.assertEqual(self.store.get(recording_id)["title"], "Private recording")
 
