@@ -116,9 +116,10 @@ const counts = {
   session: 0, health: 0, meeting: 0, alternate_meeting: 0, held_meeting: 0,
   diagnostics: 0, visual_frames: 0, screenshots: 0, alternate_screenshots: 0, notes: 0, alternate_notes: 0,
   alternate_visual_context: 0,
-  benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0,
+  benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0, benchmark_window: 0,
 };
 let benchmarkJob = null;
+let benchmarkRequest = null;
 let failNextAlternateScreenshots = false;
 let failNextAlternateNotes = false;
 let holdNextMeetingId = null;
@@ -243,7 +244,11 @@ function fixtureServer(port) {
         return json(res, 200, { items: benchmarkJob ? [benchmarkJob] : [] });
       }
       if (req.method === 'POST') {
+        const chunks = [];
+        for await (const part of req) chunks.push(part);
+        benchmarkRequest = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         counts.benchmark_start += 1;
+        counts.benchmark_poll = 0;
         benchmarkJob = {
           id: 'e2e-diarization-benchmark', type: 'diarization_benchmark',
           recording_id: MEETING_ID, scope_type: 'recording', scope_id: MEETING_ID,
@@ -252,6 +257,21 @@ function fixtureServer(port) {
         };
         return json(res, 202, benchmarkJob);
       }
+    }
+    if (pathname === `/v1/recordings/${MEETING_ID}/diarization-benchmarks/e2e-diarization-benchmark/timeline`) {
+      counts.benchmark_window += 1;
+      const params = new URL(req.url, `http://127.0.0.1:${port}`).searchParams;
+      const start = Number(params.get('start_seconds'));
+      const end = Number(params.get('end_seconds'));
+      const sourceStart = benchmarkRequest.scope === 'range' ? benchmarkRequest.start_seconds : 0;
+      const sourceEnd = benchmarkRequest.scope === 'range' ? benchmarkRequest.end_seconds : 300;
+      const event = { speaker: 'A', start: sourceStart + 30, end: sourceStart + 60 };
+      return json(res, 200, {
+        schema_version: 1, start_seconds: start, end_seconds: end,
+        range_start_seconds: sourceStart, range_end_seconds: sourceEnd,
+        runs: [{ key: 'community-1', status: 'completed', partial: false,
+          segments: event.end > start && event.start < end ? [event] : [] }],
+      });
     }
     if (pathname === '/v1/jobs/e2e-diarization-benchmark' && req.method === 'GET') {
       counts.benchmark_poll += 1;
@@ -262,8 +282,12 @@ function fixtureServer(port) {
       benchmarkJob = {
         ...benchmarkJob, status: 'completed', current_step: 'completed', progress: 100,
         result: {
-          schema_version: 1, scope: 'sample', track_id: 'system',
-          audio_seconds: 300, preview_seconds: 300, reference_scored: false,
+          schema_version: 1, scope: benchmarkRequest.scope, track_id: 'system',
+          range_start_seconds: benchmarkRequest.scope === 'range' ? benchmarkRequest.start_seconds : 0,
+          range_end_seconds: benchmarkRequest.scope === 'range' ? benchmarkRequest.end_seconds : 300,
+          audio_seconds: benchmarkRequest.scope === 'range' ?
+            benchmarkRequest.end_seconds - benchmarkRequest.start_seconds : 300,
+          preview_seconds: 300, reference_scored: false,
           runs: [
             { key: 'community-1', engine: 'fluidaudio-community-1', preset: null, status: 'completed',
               elapsed_seconds: 15, speed_vs_realtime: 20, clusters: 2,
@@ -803,7 +827,35 @@ try {
   }
   await waitText(browser, ['FluidAudio Community-1']);
   await waitText(browser, ['Nemotron 3 · fast128']);
+  await waitCount('benchmark_window', 1);
   await checkpoint(browser, '12-comparison-results');
+
+  // Exercise a nonzero original-media range from the saved Meeting UI.
+  const rangeReady = await browser.execute(`
+    const label = Array.from(document.querySelectorAll('[data-diarization-benchmark] label'))
+      .find((node) => (node.textContent || '').includes('Custom time range') ||
+        (node.textContent || '').includes('Intervallo personalizzato'));
+    if (!label) return false;
+    label.querySelector('input[type="radio"]')?.click();
+    const from = document.querySelector('input[aria-label="Range start"], input[aria-label="Inizio intervallo"]');
+    const to = document.querySelector('input[aria-label="Range end"], input[aria-label="Fine intervallo"]');
+    if (!from || !to) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(from, '2:00'); from.dispatchEvent(new Event('input', { bubbles: true }));
+    setter.call(to, '4:00'); to.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  if (!rangeReady) throw new Error('range inputs unavailable in speaker comparison');
+  await sleep(100);
+  await browser.clickButton(['Start comparison', 'Avvia confronto']);
+  await waitCount('benchmark_start', 2);
+  if (benchmarkRequest.scope !== 'range' || benchmarkRequest.start_seconds !== 120 ||
+      benchmarkRequest.end_seconds !== 240) {
+    throw new Error('range selection was not submitted with absolute meeting offsets');
+  }
+  await waitText(browser, ['Comparison finished', 'Confronto completato'], 20000, true);
+  await waitCount('benchmark_window', 2);
+  await checkpoint(browser, '13-comparison-range-and-window');
 
   video = await renderVideo();
 } catch (caught) {
