@@ -6,6 +6,7 @@ Only bounded speaker/time intervals are persisted for UI preview. Meeting audio 
 from __future__ import annotations
 
 from contextlib import nullcontext
+import math
 from pathlib import Path
 import subprocess
 import tempfile
@@ -29,11 +30,23 @@ ENGINE_OPTIONS = {
 }
 SAMPLE_SECONDS = 300
 MAX_PREVIEW_SEGMENTS = 300
+# Paginated UI windows; there is no fixed cap on processed meeting duration.
+MAX_TIMELINE_WINDOW_SECONDS = 30 * 60
 
 
-def validate_options(engines: list[str], scope: str) -> None:
-    if scope not in {"sample", "full"}:
+def validate_options(
+    engines: list[str], scope: str, *,
+    start_seconds: float | None = None, end_seconds: float | None = None,
+) -> None:
+    if scope not in {"sample", "full", "range"}:
         raise ValueError("Unsupported comparison scope")
+    if scope == "range":
+        if (start_seconds is None or end_seconds is None
+                or not all(math.isfinite(float(x)) for x in (start_seconds, end_seconds))
+                or start_seconds < 0 or end_seconds <= start_seconds):
+            raise ValueError("Range must have finite start/end seconds with 0 <= start < end")
+    elif start_seconds is not None or end_seconds is not None:
+        raise ValueError("Start/end seconds are allowed only for a range comparison")
     if not 2 <= len(engines) <= len(ENGINE_OPTIONS):
         raise ValueError("Select two or three diarization engines")
     if len(set(engines)) != len(engines) or any(engine not in ENGINE_OPTIONS for engine in engines):
@@ -51,7 +64,8 @@ def _duration(path: Path) -> float:
 
 def _convert_to_wav(
     source: Path, destination: Path, *,
-    seconds: int | None, cancel_requested: Callable[[], bool],
+    seconds: float | None, cancel_requested: Callable[[], bool],
+    start_seconds: float = 0,
 ) -> float:
     """Decode a noncanonical local recording without loading the audio into RAM.
 
@@ -60,8 +74,10 @@ def _convert_to_wav(
     """
     command = [
         str(get_ffmpeg_path()), "-nostdin", "-hide_banner", "-loglevel", "error",
-        "-i", str(source),
     ]
+    if start_seconds:
+        command.extend(["-ss", str(start_seconds)])
+    command.extend(["-i", str(source)])
     if seconds is not None:
         command.extend(["-t", str(seconds)])
     command.extend(["-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(destination)])
@@ -109,12 +125,13 @@ def _sample_wav(
     )
 
 
-def _preview_segments(segments: list[dict[str, Any]], limit_seconds: float) -> tuple[list[dict[str, Any]], bool]:
+def _preview_segments(segments: list[dict[str, Any]], limit_seconds: float, *,
+                      window_start: float = 0) -> tuple[list[dict[str, Any]], bool]:
     preview = []
     for segment in sorted(segments, key=lambda item: (float(item["start"]), float(item["end"]))):
-        start = max(0.0, float(segment["start"]))
-        end = min(limit_seconds, float(segment["end"]))
-        if end <= start or start >= limit_seconds:
+        start = max(window_start, float(segment["start"]))
+        end = min(window_start + limit_seconds, float(segment["end"]))
+        if end <= start or start >= window_start + limit_seconds:
             continue
         preview.append({
             "speaker": str(segment["speaker"])[:64],
@@ -133,10 +150,12 @@ def run_benchmark(
     engines: list[str],
     scope: str,
     cancel_requested: Callable[[], bool],
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
     on_progress: Callable[[int, str, dict[str, Any]], None],
     service: LocalSpeakerDiarizationService | None = None,
 ) -> dict[str, Any]:
-    validate_options(engines, scope)
+    validate_options(engines, scope, start_seconds=start_seconds, end_seconds=end_seconds)
     recording = store.get(recording_id, include_result=False)
     if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
         raise RecordingConflict("Finish the recording before comparing speakers")
@@ -155,14 +174,32 @@ def run_benchmark(
     # Canonical PCM WAV can run directly in full mode. Other codecs, including
     # browser WebM, are decoded only into this job's temporary workspace.
     is_canonical = canonical_wav_info(path) is not None
-    needs_temp = scope == "sample" or not is_canonical
+    source_duration = _duration(path) if is_canonical else None
+    if scope == "range" and source_duration is not None and end_seconds > source_duration + 0.01:
+        raise ValueError("Range exceeds the recording duration")
+    needs_temp = scope in {"sample", "range"} or not is_canonical
     workspace = tempfile.TemporaryDirectory(prefix="closedroom-diarization-benchmark-") if needs_temp else nullcontext(None)
     with workspace as tmp:
         if cancel_requested():
             raise RuntimeError("Comparison cancelled")
+        offset = float(start_seconds) if scope == "range" else 0.0
         if scope == "sample":
             input_path = Path(tmp) / "sample.wav"
             duration = _sample_wav(path, input_path, cancel_requested=cancel_requested)
+        elif scope == "range":
+            input_path = Path(tmp) / "range.wav"
+            if is_canonical:
+                write_canonical_wav_slice(
+                    path, input_path, start_seconds=offset, end_seconds=float(end_seconds),
+                )
+                duration = _duration(input_path)
+            else:
+                duration = _convert_to_wav(
+                    path, input_path, start_seconds=offset,
+                    seconds=float(end_seconds) - offset, cancel_requested=cancel_requested,
+                )
+            if duration <= 0:
+                raise ValueError("Selected range contains no audio")
         elif not is_canonical:
             input_path = Path(tmp) / "normalized.wav"
             duration = _convert_to_wav(
@@ -190,11 +227,23 @@ def run_benchmark(
                     {"benchmark": input_path}, engine=engine, preset=preset,
                     cancel_requested=cancel_requested,
                 )
-                timeline = output["tracks"]["benchmark"]["segments"]
+                local_timeline = output["tracks"]["benchmark"]["segments"]
+                # A sliced model reports relative times. Persist original meeting positions.
+                timeline = [
+                    {
+                        "speaker": str(part["speaker"])[:64],
+                        "start": round(max(offset, offset + float(part["start"])), 2),
+                        "end": round(min(offset + duration, offset + float(part["end"])), 2),
+                    }
+                    for part in local_timeline
+                    if float(part["end"]) > float(part["start"])
+                ]
+                timeline = [part for part in timeline if part["end"] > part["start"]]
                 elapsed = max(0.001, time.perf_counter() - started)
                 preview_limit = min(SAMPLE_SECONDS, duration) if duration > 0 else SAMPLE_SECONDS
-                preview, truncated = _preview_segments(timeline, preview_limit)
+                preview, truncated = _preview_segments(timeline, preview_limit, window_start=offset)
                 item.update(
+                    timeline=timeline,  # Durable local JobStore result; UI fetches windows.
                     status="completed",
                     elapsed_seconds=round(elapsed, 2),
                     speed_vs_realtime=round(duration / elapsed, 2) if duration else None,
@@ -220,7 +269,56 @@ def run_benchmark(
             "scope": scope,
             "track_id": track_id,
             "audio_seconds": round(duration, 2) if duration else None,
+            "range_start_seconds": round(offset, 2),
+            "range_end_seconds": round(offset + duration, 2),
             "preview_seconds": round(min(SAMPLE_SECONDS, duration), 2) if duration else SAMPLE_SECONDS,
             "runs": runs,
             "reference_scored": False,
         }
+
+
+def public_benchmark_job(job: dict[str, Any]) -> dict[str, Any]:
+    """Keep full local timelines out of ordinary job/list responses."""
+    if job.get("type") != BENCHMARK_JOB_TYPE or not isinstance(job.get("result"), dict):
+        return job
+    result = dict(job["result"])
+    result["runs"] = [
+        {key: value for key, value in run.items() if key != "timeline"}
+        for run in result.get("runs", [])
+    ]
+    return {**job, "result": result}
+
+
+def benchmark_timeline_window(
+    job: dict[str, Any], *, start_seconds: float, end_seconds: float,
+) -> dict[str, Any]:
+    """Project a time-filtered speaker window without touching the transcript."""
+    if (not math.isfinite(start_seconds) or not math.isfinite(end_seconds)
+            or start_seconds < 0 or end_seconds <= start_seconds
+            or end_seconds - start_seconds > MAX_TIMELINE_WINDOW_SECONDS):
+        raise ValueError("Invalid timeline window (maximum 30 minutes)")
+    result = job.get("result")
+    if job.get("type") != BENCHMARK_JOB_TYPE or not isinstance(result, dict):
+        raise ValueError("Job is not a completed diarization comparison")
+    runs = []
+    for run in result.get("runs", []):
+        whole = run.get("timeline")
+        source = whole if whole is not None else run.get("preview", [])
+        runs.append({
+            "key": run.get("key"),
+            "status": run.get("status"),
+            "partial": whole is None,
+            "segments": [
+                {"speaker": item["speaker"], "start": item["start"], "end": item["end"]}
+                for item in source
+                if float(item["end"]) > start_seconds and float(item["start"]) < end_seconds
+            ],
+        })
+    return {
+        "schema_version": 1,
+        "start_seconds": start_seconds,
+        "end_seconds": end_seconds,
+        "range_start_seconds": result.get("range_start_seconds", 0),
+        "range_end_seconds": result.get("range_end_seconds", result.get("audio_seconds", 0)),
+        "runs": runs,
+    }
