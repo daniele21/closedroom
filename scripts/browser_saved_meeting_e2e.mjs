@@ -120,6 +120,7 @@ const counts = {
 };
 let benchmarkJob = null;
 let benchmarkRequest = null;
+let lastBenchmarkWindowStart = null;
 let failNextAlternateScreenshots = false;
 let failNextAlternateNotes = false;
 let holdNextMeetingId = null;
@@ -263,9 +264,13 @@ function fixtureServer(port) {
       const params = new URL(req.url, `http://127.0.0.1:${port}`).searchParams;
       const start = Number(params.get('start_seconds'));
       const end = Number(params.get('end_seconds'));
+      lastBenchmarkWindowStart = start;
       const sourceStart = benchmarkRequest.scope === 'range' ? benchmarkRequest.start_seconds : 0;
-      const sourceEnd = benchmarkRequest.scope === 'range' ? benchmarkRequest.end_seconds : 300;
-      const event = { speaker: 'A', start: sourceStart + 30, end: sourceStart + 60 };
+      const sourceEnd = benchmarkRequest.scope === 'range' ? benchmarkRequest.end_seconds
+        : benchmarkRequest.scope === 'full' ? 600 : 300;
+      const event = benchmarkRequest.scope === 'full'
+        ? { speaker: 'B', start: 450, end: 470 }
+        : { speaker: 'A', start: sourceStart + 30, end: sourceStart + 60 };
       return json(res, 200, {
         schema_version: 1, start_seconds: start, end_seconds: end,
         range_start_seconds: sourceStart, range_end_seconds: sourceEnd,
@@ -284,9 +289,11 @@ function fixtureServer(port) {
         result: {
           schema_version: 1, scope: benchmarkRequest.scope, track_id: 'system',
           range_start_seconds: benchmarkRequest.scope === 'range' ? benchmarkRequest.start_seconds : 0,
-          range_end_seconds: benchmarkRequest.scope === 'range' ? benchmarkRequest.end_seconds : 300,
+          range_end_seconds: benchmarkRequest.scope === 'range' ? benchmarkRequest.end_seconds :
+            benchmarkRequest.scope === 'full' ? 600 : 300,
           audio_seconds: benchmarkRequest.scope === 'range' ?
-            benchmarkRequest.end_seconds - benchmarkRequest.start_seconds : 300,
+            benchmarkRequest.end_seconds - benchmarkRequest.start_seconds :
+            benchmarkRequest.scope === 'full' ? 600 : 300,
           preview_seconds: 300, reference_scored: false,
           runs: [
             { key: 'community-1', engine: 'fluidaudio-community-1', preset: null, status: 'completed',
@@ -861,6 +868,28 @@ try {
   await waitText(browser, ['Comparison finished', 'Confronto completato'], 20000, true);
   await waitCount('benchmark_window', 2);
   await checkpoint(browser, '13-comparison-range-and-window');
+
+  // A completed full run must navigate beyond five minutes without rerunning AI.
+  const fullSelected = await browser.execute(`
+    const label = Array.from(document.querySelectorAll('[data-diarization-benchmark] label'))
+      .find((node) => (node.textContent || '').includes('Full meeting') ||
+        (node.textContent || '').includes('Meeting completo'));
+    if (!label) return false;
+    label.querySelector('input[type="radio"]')?.click();
+    return true;
+  `);
+  if (!fullSelected) throw new Error('full-meeting comparison scope unavailable');
+  await sleep(100);
+  await browser.clickButton(['Start comparison', 'Avvia confronto']);
+  await waitCount('benchmark_start', 3);
+  await waitText(browser, ['Comparison finished', 'Confronto completato'], 20000, true);
+  await waitCount('benchmark_window', 3);
+  await browser.clickButton(['Next', 'Successiva']);
+  await waitCount('benchmark_window', 4);
+  if (lastBenchmarkWindowStart < 300) {
+    throw new Error('full-meeting navigation did not fetch a window beyond minute five');
+  }
+  await checkpoint(browser, '14-comparison-full-timeline-next');
 
   video = await renderVideo();
 } catch (caught) {
