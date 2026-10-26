@@ -199,7 +199,12 @@ le metriche e la preview legacy. L'endpoint autenticato
 restituisce i soli intervalli speaker sovrapposti alla finestra richiesta
 (fino a 30 minuti per richiesta), verificando la ownership del meeting/job.
 La UI può scorrere l'intero meeting con slider, pagine precedenti/successive,
-finestre di 1/5/10/30 minuti e playback sincronizzato. I confronti creati
+finestre di 1/5/10/30 minuti e playback sincronizzato. Per ogni finestra
+l'endpoint restituisce anche le identità dei cluster dell'intero intervallo
+con la posizione del primo intervento; la UI distingue quindi esplicitamente
+cluster totali e visibili, mostra una legenda con colori differenti e consente
+di saltare a uno speaker assente dalla finestra. I cluster restano indipendenti
+fra modelli e non sono un conteggio certificato di persone. I confronti creati
 prima dell'aggiornamento espongono onestamente solo la vecchia preview dei
 primi 5 minuti: per recuperare altri istanti serve un nuovo run.
 

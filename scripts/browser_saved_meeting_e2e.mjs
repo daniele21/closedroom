@@ -275,7 +275,12 @@ function fixtureServer(port) {
         schema_version: 1, start_seconds: start, end_seconds: end,
         range_start_seconds: sourceStart, range_end_seconds: sourceEnd,
         runs: [{ key: 'community-1', status: 'completed', partial: false,
-          segments: event.end > start && event.start < end ? [event] : [] }],
+          segments: event.end > start && event.start < end ? [event] : [],
+          speakers: benchmarkRequest.scope === 'full'
+            ? [{ speaker: 'A', first_start: 30, in_window: start <= 30 && end > 30 },
+               { speaker: 'B', first_start: 450, in_window: start <= 450 && end > 450 }]
+            : [{ speaker: 'A', first_start: sourceStart + 30,
+                 in_window: event.end > start && event.start < end }] }],
       });
     }
     if (pathname === '/v1/jobs/e2e-diarization-benchmark' && req.method === 'GET') {
@@ -890,6 +895,15 @@ try {
     throw new Error('full-meeting navigation did not fetch a window beyond minute five');
   }
   await checkpoint(browser, '14-comparison-full-timeline-next');
+  const canFindSpeaker = await browser.execute(`
+    const button = document.querySelector('[data-benchmark-jump="B"]');
+    return Boolean(button && button.getAttribute('aria-label')?.includes('450'));
+  `);
+  if (!canFindSpeaker) throw new Error('whole-meeting speaker locator missing for off-window cluster');
+  await browser.clickCss('[data-benchmark-jump="B"]');
+  await waitCount('benchmark_window', 5);
+  if (lastBenchmarkWindowStart < 300) throw new Error('speaker locator did not navigate to its first occurrence');
+  await checkpoint(browser, '15-comparison-locate-speaker');
 
   video = await renderVideo();
 } catch (caught) {

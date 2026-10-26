@@ -234,6 +234,9 @@ class DiarizationBenchmarkTests(unittest.TestCase):
         window = benchmark_timeline_window(job, start_seconds=1190, end_seconds=1230)
         self.assertEqual([s["speaker"] for s in window["runs"][0]["segments"]], ["B"])
         self.assertFalse(window["runs"][0]["partial"])
+        self.assertEqual([item["speaker"] for item in window["runs"][0]["speakers"]], ["A", "B", "C"])
+        self.assertEqual([item["in_window"] for item in window["runs"][0]["speakers"]], [False, True, False])
+        self.assertEqual([item["first_start"] for item in window["runs"][0]["speakers"]], [10, 1200, 5050])
         public = public_benchmark_job(job)
         self.assertNotIn("timeline", public["result"]["runs"][0])
         self.assertIn("timeline", job["result"]["runs"][0])
@@ -245,8 +248,11 @@ class DiarizationBenchmarkTests(unittest.TestCase):
             "audio_seconds": 5309, "runs": [{"key": "community-1", "status": "completed",
                                           "preview": [{"speaker": "A", "start": 10, "end": 16}]}],
         }}
-        self.assertTrue(benchmark_timeline_window(legacy, start_seconds=800,
-                                                 end_seconds=900)["runs"][0]["partial"])
+        legacy_window = benchmark_timeline_window(legacy, start_seconds=800, end_seconds=900)
+        self.assertTrue(legacy_window["runs"][0]["partial"])
+        self.assertEqual(legacy_window["runs"][0]["speakers"], [
+            {"speaker": "A", "first_start": 10, "in_window": False},
+        ])
 
     def test_preview_preserves_overlap_and_bounds_results(self):
         timeline = [{"speaker": "S1", "start": 0, "end": 4},

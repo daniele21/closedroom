@@ -9,7 +9,9 @@ const ENGINE_OPTIONS: Array<{ key: DiarizationBenchmarkEngine; title: string }> 
   { key: 'nemotron3-compact', title: 'Nemotron 3 · c128-split-w8a8' },
 ];
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
-const BAR_COLORS = ['bg-accent', 'bg-warning', 'bg-success', 'bg-info', 'bg-text-secondary'];
+// Data palette, not status colors. Each engine has its own independent IDs.
+// Keep categories visibly distinct on the dark speaker timeline.
+const SPEAKER_COLORS = ['#63A6FF', '#FFBC69', '#73D5A1', '#CE9AFF', '#FF8698', '#E9D568', '#71D6E0', '#B7B4F5'];
 
 type Scope = 'sample' | 'range' | 'full';
 
@@ -27,12 +29,6 @@ function parseTime(value: string): number | null {
   const digits = parts.map(Number);
   if (digits.slice(1).some((part) => part >= 60)) return null;
   return digits.reduce((acc, digit) => acc * 60 + digit, 0);
-}
-
-function speakerColor(speaker: string): number {
-  let hash = 0;
-  for (const char of speaker) hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
-  return hash % BAR_COLORS.length;
 }
 
 interface Props {
@@ -151,6 +147,14 @@ export function DiarizationBenchmarkPanel({ recordingId, durationSeconds, readOn
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     }
+  };
+
+  const locateSpeaker = (seconds: number) => {
+    // Seeking never starts playback, and stays in the selected comparison scope.
+    const position = Math.max(rangeFrom, Math.min(rangeTo, seconds));
+    setWindowStart(Math.max(rangeFrom, Math.min(maxWindowStart, position - viewedSeconds / 2)));
+    setPlaybackTime(position);
+    if (audioRef.current) audioRef.current.currentTime = position;
   };
 
   const toggleEngine = (key: DiarizationBenchmarkEngine, checked: boolean) => {
@@ -363,23 +367,37 @@ export function DiarizationBenchmarkPanel({ recordingId, durationSeconds, readOn
               {timelineLoading && <p role="status" className="text-xs text-text-muted">{it ? 'Caricamento segmenti…' : 'Loading segments…'}</p>}
               {timelineError && <p role="alert" className="text-xs text-warning">{timelineError}</p>}
               {timeline?.runs.filter((run) => run.status === 'completed').map((run) => {
-                const speakers = [...new Set(run.segments.map((segment) => segment.speaker))];
+                const visibleIds = new Set(run.segments.map((segment) => segment.speaker));
+                const allSpeakers = run.speakers?.length
+                  ? run.speakers
+                  : [...visibleIds].map((speaker) => ({
+                      speaker, first_start: viewedStart, in_window: true,
+                    }));
+                const speakerIndex = new Map(allSpeakers.map((item, index) => [item.speaker, index]));
+                const visibleCount = allSpeakers.filter((item) => visibleIds.has(item.speaker)).length;
                 return (
                   <div key={run.key} className="space-y-1">
-                    <p className="text-[11px] font-medium text-text-secondary">
-                      {ENGINE_OPTIONS.find((item) => item.key === run.key)?.title}
-                    </p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] font-medium text-text-secondary">
+                        {ENGINE_OPTIONS.find((item) => item.key === run.key)?.title}
+                      </p>
+                      <span className="text-[11px] text-text-muted" data-benchmark-visible-count={run.key}>
+                        {it ? `${visibleCount} di ${run.partial ? '?' : allSpeakers.length} cluster in questa finestra`
+                          : `${visibleCount} of ${run.partial ? '?' : allSpeakers.length} clusters in this window`}
+                      </span>
+                    </div>
                     <div className="relative h-12 overflow-hidden rounded-md border border-border-subtle bg-bg-surface"
                       aria-label={it ? 'Speaker nella finestra temporale' : 'Speakers in time window'}>
                       {run.segments.map((segment, index) => {
                         const start = Math.max(segment.start, viewedStart);
                         const end = Math.min(segment.end, viewedEnd);
-                        const color = speakerColor(segment.speaker);
+                        const color = speakerIndex.get(segment.speaker) ?? 0;
                         return (
                           <span key={index}
                             title={`${segment.speaker}: ${timeLabel(segment.start)}–${timeLabel(segment.end)}`}
-                            className={`absolute h-2.5 rounded-sm ${BAR_COLORS[color]}`}
+                            className="absolute h-2.5 rounded-sm"
                             style={{
+                              backgroundColor: SPEAKER_COLORS[color % SPEAKER_COLORS.length],
                               left: `${(start - viewedStart) / viewedSeconds * 100}%`,
                               width: `${Math.max(0.15, (end - start) / viewedSeconds * 100)}%`,
                               top: `${4 + color % 3 * 13}px`,
@@ -392,11 +410,27 @@ export function DiarizationBenchmarkPanel({ recordingId, durationSeconds, readOn
                           style={{ left: `${(playbackTime - viewedStart) / viewedSeconds * 100}%` }} />
                       )}
                     </div>
-                    <p className="text-[10px] text-text-muted">
-                      {speakers.length ? speakers.map((speaker) => `● ${speaker}`).join(' · ')
-                        : (it ? 'Nessun intervento in questa finestra' : 'No detected speech in this window')}
-                      {run.partial && (it ? ' · Confronto precedente: disponibili solo i primi 5 minuti' : ' · Older run: only first 5 minutes saved')}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-text-muted">
+                      {allSpeakers.length ? allSpeakers.map((item, index) => {
+                        const visible = visibleIds.has(item.speaker);
+                        return (
+                          <button key={item.speaker} type="button"
+                            data-benchmark-jump={item.speaker}
+                            aria-label={it
+                              ? `Speaker ${item.speaker}, ${visible ? 'presente qui' : 'non presente qui'}, vai a ${timeLabel(item.first_start)}`
+                              : `Speaker ${item.speaker}, ${visible ? 'present here' : 'not in this window'}, jump to ${timeLabel(item.first_start)}`}
+                            title={it ? `Vai al primo intervento: ${timeLabel(item.first_start)}` : `Jump to first speech: ${timeLabel(item.first_start)}`}
+                            onClick={() => locateSpeaker(item.first_start)}
+                            className={`inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${visible ? 'text-text-primary' : 'text-text-muted'}`}>
+                            <span aria-hidden="true" className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: SPEAKER_COLORS[index % SPEAKER_COLORS.length] }} />
+                            <span>{item.speaker}</span>
+                            {!visible && !run.partial && <span>({it ? 'altrove' : 'elsewhere'})</span>}
+                          </button>
+                        );
+                      }) : <span>{it ? 'Nessun intervento in questa finestra' : 'No detected speech in this window'}</span>}
+                      {run.partial && <span>{it ? 'Confronto precedente: disponibili solo i primi 5 minuti' : 'Older run: only first 5 minutes saved'}</span>}
+                    </div>
                   </div>
                 );
               })}

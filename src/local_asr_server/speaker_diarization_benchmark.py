@@ -307,14 +307,41 @@ def benchmark_timeline_window(
     for run in result.get("runs", []):
         whole = run.get("timeline")
         source = whole if whole is not None else run.get("preview", [])
+        # The table reports clusters across the entire processed scope while
+        # the chart only displays the requested window. Include all cluster
+        # labels with their first occurrence, so a missing speaker can be
+        # located without retranscribing or requesting the whole timeline.
+        speaker_starts: dict[str, float] = {}
+        visible_speakers: set[str] = set()
+        window_segments = []
+        for item in source:
+            speaker = str(item["speaker"])
+            onset = float(item["start"])
+            offset = float(item["end"])
+            if not math.isfinite(onset) or not math.isfinite(offset) or offset <= onset:
+                continue
+            if speaker not in speaker_starts or onset < speaker_starts[speaker]:
+                speaker_starts[speaker] = onset
+            if offset > start_seconds and onset < end_seconds:
+                window_segments.append({
+                    "speaker": speaker, "start": onset, "end": offset,
+                })
+                visible_speakers.add(speaker)
+        all_speakers = sorted(
+            speaker_starts, key=lambda speaker: (speaker_starts[speaker], speaker),
+        )
         runs.append({
             "key": run.get("key"),
             "status": run.get("status"),
             "partial": whole is None,
-            "segments": [
-                {"speaker": item["speaker"], "start": item["start"], "end": item["end"]}
-                for item in source
-                if float(item["end"]) > start_seconds and float(item["start"]) < end_seconds
+            "segments": window_segments,
+            "speakers": [
+                {
+                    "speaker": speaker,
+                    "first_start": round(speaker_starts[speaker], 2),
+                    "in_window": speaker in visible_speakers,
+                }
+                for speaker in all_speakers
             ],
         })
     return {

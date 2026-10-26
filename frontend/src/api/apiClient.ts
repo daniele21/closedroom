@@ -176,6 +176,7 @@ export interface DiarizationTimelineWindow {
     status: 'completed' | 'failed';
     partial: boolean;
     segments: Array<{ speaker: string; start: number; end: number }>;
+    speakers?: Array<{ speaker: string; first_start: number; in_window: boolean }>;
   }>;
 }
 
