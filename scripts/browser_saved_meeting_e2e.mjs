@@ -900,9 +900,14 @@ try {
     return Boolean(button && button.getAttribute('aria-label')?.includes('450'));
   `);
   if (!canFindSpeaker) throw new Error('whole-meeting speaker locator missing for off-window cluster');
-  await browser.clickCss('[data-benchmark-jump="B"]');
+  // After Next, the window is 5:00–10:00: A is absent there.
+  await browser.clickCss('[data-benchmark-jump="A"]');
   await waitCount('benchmark_window', 5);
-  if (lastBenchmarkWindowStart < 300) throw new Error('speaker locator did not navigate to its first occurrence');
+  if (lastBenchmarkWindowStart !== 0) throw new Error('speaker locator did not return to first occurrence');
+  // B is now absent from the first five minutes.
+  await browser.clickCss('[data-benchmark-jump="B"]');
+  await waitCount('benchmark_window', 6);
+  if (lastBenchmarkWindowStart < 300) throw new Error('speaker locator did not find the later cluster');
   await checkpoint(browser, '15-comparison-locate-speaker');
 
   video = await renderVideo();
