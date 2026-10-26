@@ -23,17 +23,10 @@ MAX_REVIEW_EXAMPLES = 12
 
 def fingerprint(transcription: dict[str, Any]) -> str:
     """Optimistic lock over source text, all segments and speaker metadata."""
-    stats = transcription.get("stats") or {}
-    material = {
-        "id": transcription.get("id"),
-        "recording_id": transcription.get("recording_id"),
-        "text": transcription.get("text"),
-        "segments": transcription.get("segments"),
-        "speaker_attribution": transcription.get("speaker_attribution"),
-        "speaker_diarization": transcription.get("speaker_diarization"),
-        "stats_attribution": stats.get("speaker_attribution"),
-        "stats_diarization": stats.get("speaker_diarization"),
-    }
+    # Covers every currently visible field (including analysis and source
+    # metadata) to reject stale application rather than overwriting a newer
+    # edit unrelated to the speaker names.
+    material = transcription
     return hashlib.sha256(json.dumps(material, sort_keys=True, ensure_ascii=False,
                                     separators=(",", ":")).encode("utf-8")).hexdigest()
 

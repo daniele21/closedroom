@@ -230,36 +230,38 @@ class TranscriptionStore:
         return data
 
     def update_speaker_names(self, transcription_id: str, names: dict[str, str]) -> dict[str, Any]:
-        file_name = self._file_name_for(transcription_id)
-        if not file_name:
-            raise FileNotFoundError("Transcription not found")
-        json_path = self.root / file_name
-        if not json_path.exists():
-            raise FileNotFoundError("Transcription export not found")
-        data = json.loads(json_path.read_text(encoding="utf-8"))
-        updated = apply_speaker_labels(data, names)
-        self._write_export_files(json_path.stem, updated)
-        self.catalog.upsert_transcription(updated, file_name=file_name)
-        return updated
+        with self._review_lock:
+            file_name = self._file_name_for(transcription_id)
+            if not file_name:
+                raise FileNotFoundError("Transcription not found")
+            json_path = self.root / file_name
+            if not json_path.exists():
+                raise FileNotFoundError("Transcription export not found")
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            updated = apply_speaker_labels(data, names)
+            self._write_export_files(json_path.stem, updated)
+            self.catalog.upsert_transcription(updated, file_name=file_name)
+            return updated
 
     def replace_diarization(
         self,
         transcription_id: str,
         updated: dict[str, Any],
     ) -> dict[str, Any]:
-        """Persist a speaker-only transcript revision without creating a new ASR result."""
-        file_name = self._file_name_for(transcription_id)
-        if not file_name:
-            raise FileNotFoundError("Transcription not found")
-        json_path = self.root / file_name
-        if not json_path.exists():
-            raise FileNotFoundError("Transcription export not found")
-        if str(updated.get("id") or "") != transcription_id:
-            raise ValueError("Diarization update does not match the target transcription")
+        with self._review_lock:
+            """Persist a speaker-only transcript revision without creating a new ASR result."""
+            file_name = self._file_name_for(transcription_id)
+            if not file_name:
+                raise FileNotFoundError("Transcription not found")
+            json_path = self.root / file_name
+            if not json_path.exists():
+                raise FileNotFoundError("Transcription export not found")
+            if str(updated.get("id") or "") != transcription_id:
+                raise ValueError("Diarization update does not match the target transcription")
 
-        self._write_export_files(json_path.stem, updated)
-        self.catalog.upsert_transcription(updated, file_name=file_name)
-        return updated
+            self._write_export_files(json_path.stem, updated)
+            self.catalog.upsert_transcription(updated, file_name=file_name)
+            return updated
 
     def _review_undo_path(self, transcription_id: str) -> Path:
         safe_id = str(uuid.UUID(transcription_id))
@@ -388,5 +390,7 @@ class TranscriptionStore:
         if txt_path.exists():
             txt_path.unlink()
 
+        # A deleted transcript must never leave a full private undo snapshot.
+        self._review_undo_path(transcription_id).unlink(missing_ok=True)
         self.catalog.delete_transcription(transcription_id)
         return True
