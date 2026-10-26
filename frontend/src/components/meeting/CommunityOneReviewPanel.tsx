@@ -69,6 +69,7 @@ export function CommunityOneReviewPanel({ transcriptionId, onUpdated, lang }: Pr
   }, [transcriptionId, job?.id, job?.status, undoRevision]);
 
   const busy = pending || Boolean(job && !TERMINAL.has(job.status));
+  const canStart = !busy && !undoRevision;
   const start = async () => {
     if (busy) return;
     setPending(true);
@@ -170,7 +171,7 @@ export function CommunityOneReviewPanel({ transcriptionId, onUpdated, lang }: Pr
               ? 'Il motore analizza l’intero meeting solo sul Mac. Il calcolo dell’anteprima non modifica la trascrizione né le impostazioni.'
               : 'The engine analyzes the full meeting on this Mac only. Preview does not modify the transcript or global settings.'}
           </p>
-          <Button size="sm" onClick={() => void start()} disabled={busy} isLoading={pending}>
+          <Button size="sm" onClick={() => void start()} disabled={!canStart} isLoading={pending}>
             {it ? 'Calcola anteprima' : 'Calculate preview'}
           </Button>
           {job && !TERMINAL.has(job.status) && (

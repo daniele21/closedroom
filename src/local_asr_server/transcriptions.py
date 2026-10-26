@@ -248,8 +248,8 @@ class TranscriptionStore:
         transcription_id: str,
         updated: dict[str, Any],
     ) -> dict[str, Any]:
+        """Persist a speaker-only transcript revision without creating a new ASR result."""
         with self._review_lock:
-            """Persist a speaker-only transcript revision without creating a new ASR result."""
             file_name = self._file_name_for(transcription_id)
             if not file_name:
                 raise FileNotFoundError("Transcription not found")

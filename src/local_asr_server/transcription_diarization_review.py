@@ -89,6 +89,12 @@ def project_review(
     )
     if assigned == 0:
         raise ValueError("No transcript segments match the detected speakers")
+    # Never carry the generic source-track display name ("Computer") into a
+    # newly identified speaker cluster. Otherwise every remote speaker gets
+    # the same name despite distinct provider_speaker identifiers.
+    for segment in target_segments:
+        if segment.get("provider_speaker"):
+            segment.pop("speaker_label", None)
 
     clusters = clusters_from_timeline(track_id, raw_timeline)
     if any(str(segment.get("track_id")) == "mic" for segment in segments):
