@@ -975,7 +975,9 @@ try {
   let speakerReady = false;
   for (let attempt = 0; attempt < 50; attempt += 1) {
     speakerReady = await browser.execute(`
-      return Boolean(document.querySelector('[data-benchmark-jump="B"]'));
+      const button = document.querySelector('[data-benchmark-jump="B"]');
+      const label = button?.getAttribute('aria-label') || '';
+      return label.includes('not in this window') || label.includes('non presente qui');
     `);
     if (speakerReady) break;
     await sleep(100);
