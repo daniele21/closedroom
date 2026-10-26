@@ -19,11 +19,11 @@ def _payload(recording_id="recording-id"):
         "text": "The original transcript. It must stay exactly as written.",
         "segments": [
             {"id": 0, "start": 0.0, "end": 2.0, "text": "Hello team",
-             "track_id": "mic", "source": "mic", "words": [{"word": "Hello", "start": 0.0, "end": 0.6}]},
+             "track_id": "mic", "source": "mic", "provider_speaker": "mic:old", "speaker_label": "Old mic", "words": [{"word": "Hello", "start": 0.0, "end": 0.6}]},
             {"id": 1, "start": 2.0, "end": 4.0, "text": "Next topic",
-             "track_id": "system", "source": "system", "words": [{"word": "Next", "start": 2.0, "end": 2.6}]},
+             "track_id": "system", "source": "system", "provider_speaker": "system:old", "speaker_label": "Old remote", "words": [{"word": "Next", "start": 2.0, "end": 2.6}]},
             {"id": 2, "start": 4.0, "end": 6.0, "text": "I agree",
-             "track_id": "system", "source": "system"},
+             "track_id": "system", "source": "system", "provider_speaker": "system:old", "speaker_label": "Old remote"},
         ],
         "source_tracks": [
             {"id": "mic", "label": "Local mic", "source": "mic"},
@@ -85,7 +85,7 @@ class CommunityReviewTests(unittest.TestCase):
         self.assertEqual(review["candidate"]["text"], old["text"])
         self.assertEqual(review["assigned_segments"], 2)
         self.assertEqual(review["cluster_count"], 3)  # two remote speakers plus mic
-        self.assertEqual(review["changed_segments"], 2)
+        self.assertEqual(review["changed_segments"], 3)
         self.assertEqual(review["candidate"]["segments"][0]["provider_speaker"], "mic:S1")
         self.assertEqual([seg["provider_speaker"] for seg in review["candidate"]["segments"][1:]],
                          ["system:S1", "system:S2"])
@@ -116,7 +116,7 @@ class CommunityReviewTests(unittest.TestCase):
     def test_stale_preview_and_stale_undo_never_overwrite_newer_user_edits(self):
         original = self.store.get(self.transcription_id)
         review = project_review(original, _job(original))
-        self.store.update_speaker_names(self.transcription_id, {"Local mic": "My name"})
+        self.store.update_speaker_names(self.transcription_id, {"mic:old": "My name"})
         with self.assertRaisesRegex(ValueError, "changed"):
             self.store.apply_reviewed_diarization(
                 self.transcription_id,
