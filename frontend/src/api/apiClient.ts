@@ -996,6 +996,48 @@ export const ApiClient = {
     return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/diarization-benchmarks`)).json();
   },
 
+  async createCommunityOneReview(transcriptionId: string): Promise<TranscriptionJob> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews`, {
+      method: 'POST',
+    })).json();
+  },
+
+  async listCommunityOneReviews(transcriptionId: string): Promise<{
+    items: TranscriptionJob[];
+    undo: { revision_id: string } | null;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews`)).json();
+  },
+
+  async previewCommunityOneReview(transcriptionId: string, jobId: string): Promise<{
+    engine: string;
+    assigned_segments: number;
+    changed_segments: number;
+    cluster_count: number;
+    examples: Array<{
+      start: number; end: number; text: string; before: string; after: string;
+    }>;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews/${encodeURIComponent(jobId)}/preview`)).json();
+  },
+
+  async applyCommunityOneReview(transcriptionId: string, jobId: string): Promise<{
+    transcription: Transcription; revision_id: string;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews/${encodeURIComponent(jobId)}/apply`, {
+      method: 'POST',
+    })).json();
+  },
+
+  async undoCommunityOneReview(transcriptionId: string, revisionId: string): Promise<{
+    transcription: Transcription;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews/undo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision_id: revisionId }),
+    })).json();
+  },
+
   async createDiarizationJob(transcriptionId: string, payload: {
     provider: 'local' | 'speechmatics' | string;
     speechmatics_region?: string;
