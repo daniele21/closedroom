@@ -177,6 +177,24 @@ UV_CACHE_DIR=.cache/uv uv run python scripts/benchmark_speaker_diarization.py \
 Il report contiene solo misure aggregate, non percorsi, timeline o testi. Il DER riportato dal tool è **un'approssimazione con frame 100 ms, senza collar**, non direttamente comparabile con i numeri DIHARD/AMI ufficiali. Ripetere dopo che i pesi sono stati scaricati per misurare la velocità warm; misurare RSS, termiche e qualità word-to-speaker sul Mac reale prima di cambiare il default. Community-1 resta il fallback *selezionabile manualmente*; non è previsto fallback cloud o cambio automatico silenzioso di backend.
 
 
+**Applicazione Community-1 alla trascrizione (per meeting)**:
+nella scheda **Speaker** l'utente può avviare un job locale di **anteprima
+sull'intera traccia** con Community-1, senza cambiare il motore globale né
+ricalcolare il testo ASR. Il job `diarization_review` conserva solo i segmenti
+speaker/tempo nel JobStore canonico; la preview attribuisce temporaneamente
+i cluster ai segmenti del transcript, mostra un campione limitato e non scrive
+registrazione o trascrizione. La conferma esplicita
+`/v1/transcriptions/{id}/diarization-reviews/{job_id}/apply` ricontrolla
+identità del meeting, modello, durata completa e fingerprint del transcript;
+rifiuta un candidato obsoleto. `TranscriptionStore` salva lo snapshot
+precedente nel percorso locale privato `.diarization-review-undo` con token
+opaco, ripristinabile dall'interfaccia anche dopo la riapertura. Il rollback
+rifiuta revisioni obsolescenti o nomi speaker modificati dopo l'applicazione.
+Il percorso applica esclusivamente i campi speaker, preservando il `text`
+canonico, i timestamp, le parole e gli artefatti di analisi; i normali percorsi
+ASR e A/B restano separati. I risultati del modello non vengono caricati nel cloud.
+La preview e il rollback non sostituiscono verifiche di qualità su Apple Silicon.
+
 **Confronto dall'interfaccia**: in un Meeting già registrato, la scheda **Speaker**
 offre `Confronta motori` e pre-seleziona Community-1 e i due preset Nemotron.
 L'utente sceglie i primi 5 minuti, l'intero meeting oppure un intervallo
