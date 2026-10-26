@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +18,7 @@ class TranscriptionStore:
     def __init__(self, catalog: CatalogStore | None = None):
         self.catalog = catalog or CatalogStore()
         self.catalog.import_transcriptions_dir(self.root)
+        self._review_lock = threading.RLock()
 
     @property
     def root(self) -> Path:
@@ -256,6 +260,93 @@ class TranscriptionStore:
         self._write_export_files(json_path.stem, updated)
         self.catalog.upsert_transcription(updated, file_name=file_name)
         return updated
+
+    def _review_undo_path(self, transcription_id: str) -> Path:
+        safe_id = str(uuid.UUID(transcription_id))
+        folder = self.root / ".diarization-review-undo"
+        folder.mkdir(mode=0o700, exist_ok=True)
+        return folder / f"{safe_id}.json"
+
+    def _write_review_undo(self, path: Path, data: dict[str, Any]) -> None:
+        fd, tmp = tempfile.mkstemp(prefix=".review-", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                os.fchmod(output.fileno(), 0o600)
+                json.dump(data, output, ensure_ascii=False)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+
+    def reviewed_diarization_undo(self, transcription_id: str) -> dict[str, Any] | None:
+        """Expose only an opaque undo ID; never export the transcript snapshot."""
+        from local_asr_server.transcription_diarization_review import fingerprint
+        with self._review_lock:
+            path = self._review_undo_path(transcription_id)
+            if not path.exists():
+                return None
+            state = json.loads(path.read_text(encoding="utf-8"))
+            if state.get("after_fingerprint") != fingerprint(self.get(transcription_id)):
+                return None
+            return {"revision_id": state["revision_id"]}
+
+    def apply_reviewed_diarization(
+        self, transcription_id: str, *,
+        candidate: dict[str, Any], expected_fingerprint: str,
+    ) -> dict[str, Any]:
+        """One confirmation creates exactly one local, durable rollback point."""
+        from local_asr_server.transcription_diarization_review import fingerprint
+        with self._review_lock:
+            current = self.get(transcription_id)
+            if fingerprint(current) != expected_fingerprint:
+                raise ValueError("Transcription changed since preview; recalculate before applying")
+            if candidate.get("id") != transcription_id or candidate.get("recording_id") != current.get("recording_id"):
+                raise ValueError("Reviewed candidate belongs to a different transcription")
+            if candidate.get("text") != current.get("text"):
+                raise ValueError("Applying diarization must preserve the original text")
+            old_segments = current.get("segments") or []
+            new_segments = candidate.get("segments") or []
+            if len(old_segments) != len(new_segments) or any(
+                (old.get("text"), old.get("start"), old.get("end"), old.get("words"))
+                != (new.get("text"), new.get("start"), new.get("end"), new.get("words"))
+                for old, new in zip(old_segments, new_segments)
+            ):
+                raise ValueError("Applying diarization must preserve segment text and timestamps")
+
+            export_name = self._file_name_for(transcription_id)
+            if not export_name:
+                raise FileNotFoundError("Transcription not found")
+            raw_before = json.loads((self.root / export_name).read_text(encoding="utf-8"))
+            revision_id = str(uuid.uuid4())
+            undo_path = self._review_undo_path(transcription_id)
+            before_state = {
+                "revision_id": revision_id, "before": raw_before,
+                "after_fingerprint": fingerprint(candidate),
+            }
+            self._write_review_undo(undo_path, before_state)
+            updated = self.replace_diarization(transcription_id, candidate)
+            before_state["after_fingerprint"] = fingerprint(self.get(transcription_id))
+            self._write_review_undo(undo_path, before_state)
+            return {"transcription": updated, "revision_id": revision_id}
+
+    def undo_reviewed_diarization(
+        self, transcription_id: str, revision_id: str,
+    ) -> dict[str, Any]:
+        from local_asr_server.transcription_diarization_review import fingerprint
+        with self._review_lock:
+            path = self._review_undo_path(transcription_id)
+            if not path.is_file():
+                raise ValueError("There is no reviewed diarization to undo")
+            state = json.loads(path.read_text(encoding="utf-8"))
+            if state.get("revision_id") != revision_id:
+                raise ValueError("This rollback token is no longer current")
+            if fingerprint(self.get(transcription_id)) != state.get("after_fingerprint"):
+                raise ValueError("Transcription changed after applying; rollback is no longer safe")
+            restored = self.replace_diarization(transcription_id, state["before"])
+            path.unlink()
+            return restored
 
     def replace_visual_intelligence(
         self,
