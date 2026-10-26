@@ -101,7 +101,7 @@ def apply_speaker_labels(
     # segments to label. Text-only/imported transcriptions may legitimately have
     # no segments; replacing their canonical text with an empty reconstruction
     # would be destructive and breaks merge/export workflows.
-    if segments:
+    if segments and not payload.get("stats", {}).get("review_preserve_canonical_text"):
         payload["text"] = "\n".join(text_lines)
     payload["speaker_attribution"] = attribution
     payload.setdefault("stats", {})["speaker_attribution"] = attribution

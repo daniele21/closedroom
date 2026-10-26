@@ -114,6 +114,7 @@ def project_review(
     stats = dict(candidate.get("stats") or {})
     stats.pop("speaker_attribution", None)
     stats["speaker_diarization"] = summary
+    stats["review_preserve_canonical_text"] = True
     candidate["stats"] = stats
     candidate["speaker_diarization"] = summary
     candidate["segments"] = segments
