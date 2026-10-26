@@ -319,6 +319,15 @@ class TranscriptionStore:
             if not export_name:
                 raise FileNotFoundError("Transcription not found")
             raw_before = json.loads((self.root / export_name).read_text(encoding="utf-8"))
+            # Match the canonical transcript returned to the user (the catalog
+            # applies resolved speaker labels on read), while retaining fields
+            # that are only present in the original export for exact recovery.
+            raw_before.update({
+                "text": current.get("text"),
+                "segments": current.get("segments"),
+                "stats": current.get("stats"),
+                "speaker_attribution": current.get("speaker_attribution"),
+            })
             revision_id = str(uuid.uuid4())
             undo_path = self._review_undo_path(transcription_id)
             before_state = {
