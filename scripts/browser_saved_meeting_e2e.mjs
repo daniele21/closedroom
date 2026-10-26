@@ -117,9 +117,13 @@ const counts = {
   diagnostics: 0, visual_frames: 0, screenshots: 0, alternate_screenshots: 0, notes: 0, alternate_notes: 0,
   alternate_visual_context: 0,
   benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0, benchmark_window: 0,
+  review_list: 0, review_start: 0, review_poll: 0, review_preview: 0,
+  review_apply: 0, review_undo: 0,
 };
 let benchmarkJob = null;
 let benchmarkRequest = null;
+let communityReviewJob = null;
+let communityReviewApplied = false;
 let lastBenchmarkWindowStart = null;
 let failNextAlternateScreenshots = false;
 let failNextAlternateNotes = false;
@@ -237,6 +241,68 @@ function fixtureServer(port) {
     if (pathname === `/v1/recordings/${MEETING_ID}/screenshots`) {
       counts.screenshots += 1;
       return json(res, 200, { items: [screenshotFixture], total: 1 });
+    }
+
+    if (pathname === '/v1/transcriptions/e2e-transcription/diarization-reviews') {
+      if (req.method === 'GET') {
+        counts.review_list += 1;
+        return json(res, 200, {
+          items: communityReviewJob ? [communityReviewJob] : [],
+          undo: communityReviewApplied ? { revision_id: 'synthetic-undo-token' } : null,
+        });
+      }
+      if (req.method === 'POST') {
+        counts.review_start += 1;
+        counts.review_poll = 0;
+        communityReviewJob = {
+          id: 'e2e-community-review', type: 'diarization_review',
+          recording_id: MEETING_ID, scope_type: 'transcription', scope_id: 'e2e-transcription',
+          status: 'running', current_step: 'comparing', progress: 15,
+        };
+        return json(res, 202, communityReviewJob);
+      }
+    }
+    if (pathname === '/v1/jobs/e2e-community-review' && req.method === 'GET') {
+      counts.review_poll += 1;
+      if (counts.review_poll === 1) {
+        return json(res, 200, { ...communityReviewJob, status: 'running', progress: 65 });
+      }
+      communityReviewJob = {
+        ...communityReviewJob, status: 'completed', progress: 100, current_step: 'completed',
+      };
+      return json(res, 200, communityReviewJob);
+    }
+    if (pathname === '/v1/transcriptions/e2e-transcription/diarization-reviews/e2e-community-review/preview') {
+      counts.review_preview += 1;
+      return json(res, 200, {
+        engine: 'fluidaudio-community-1', assigned_segments: 1,
+        changed_segments: 1, cluster_count: 1,
+        examples: [{
+          start: 0, end: 3.5,
+          text: meetingFixture.transcription.segments[0].text,
+          before: 'SPEAKER_00', after: 'Speaker 1',
+        }],
+      });
+    }
+    if (pathname === '/v1/transcriptions/e2e-transcription/diarization-reviews/e2e-community-review/apply'
+        && req.method === 'POST') {
+      counts.review_apply += 1;
+      communityReviewApplied = true;
+      return json(res, 200, {
+        revision_id: 'synthetic-undo-token',
+        transcription: {
+          ...meetingFixture.transcription,
+          segments: [{ ...meetingFixture.transcription.segments[0],
+            provider_speaker: 'system:S1', speaker_label: 'Speaker 1',
+            speaker_name: 'Speaker 1' }],
+        },
+      });
+    }
+    if (pathname === '/v1/transcriptions/e2e-transcription/diarization-reviews/undo'
+        && req.method === 'POST') {
+      counts.review_undo += 1;
+      communityReviewApplied = false;
+      return json(res, 200, { transcription: meetingFixture.transcription });
     }
 
     if (pathname === `/v1/recordings/${MEETING_ID}/diarization-benchmarks`) {
@@ -904,11 +970,45 @@ try {
   await browser.clickCss('[data-benchmark-jump="A"]');
   await waitCount('benchmark_window', 5);
   if (lastBenchmarkWindowStart !== 0) throw new Error('speaker locator did not return to first occurrence');
+  // The HTTP fixture counter increments before React renders the next
+  // window. Wait for the actual UI control, not merely the response request.
+  let speakerReady = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    speakerReady = await browser.execute(`
+      const button = document.querySelector('[data-benchmark-jump="B"]');
+      const label = button?.getAttribute('aria-label') || '';
+      return label.includes('not in this window') || label.includes('non presente qui');
+    `);
+    if (speakerReady) break;
+    await sleep(100);
+  }
+  if (!speakerReady) throw new Error('speaker jump control did not reappear after changing windows');
   // B is now absent from the first five minutes.
   await browser.clickCss('[data-benchmark-jump="B"]');
   await waitCount('benchmark_window', 6);
   if (lastBenchmarkWindowStart < 300) throw new Error('speaker locator did not find the later cluster');
   await checkpoint(browser, '15-comparison-locate-speaker');
+
+  // Review may only start from an explicit user action. The synthetic
+  // result must show attribution changes before a separate Apply confirmation.
+  if (counts.review_start || counts.review_apply) {
+    throw new Error('speaker review or apply ran without user consent');
+  }
+  await browser.clickButton(['Choose engine', 'Scegli motore']);
+  await waitText(browser, ['Calculate preview', 'Calcola anteprima']);
+  await browser.clickButton(['Calculate preview', 'Calcola anteprima']);
+  await waitCount('review_start', 1);
+  await waitCount('review_preview', 1);
+  await waitText(browser, ['Preview ready', 'Anteprima pronta'], 20000, true);
+  if (counts.review_apply !== 0) throw new Error('review applied without confirmation');
+  await checkpoint(browser, '16-community-review-preview');
+  await browser.clickButton(['Confirm and apply to transcript', 'Conferma e applica alla trascrizione']);
+  await waitCount('review_apply', 1);
+  await waitText(browser, ['Restore previous speakers', 'Ripristina speaker precedenti'], 5000, true);
+  await checkpoint(browser, '17-community-review-applied');
+  await browser.clickButton(['Restore previous speakers', 'Ripristina speaker precedenti']);
+  await waitCount('review_undo', 1);
+  await checkpoint(browser, '18-community-review-undo');
 
   video = await renderVideo();
 } catch (caught) {

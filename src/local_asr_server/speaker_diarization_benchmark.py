@@ -37,6 +37,7 @@ MAX_TIMELINE_WINDOW_SECONDS = 30 * 60
 def validate_options(
     engines: list[str], scope: str, *,
     start_seconds: float | None = None, end_seconds: float | None = None,
+    allow_single: bool = False,
 ) -> None:
     if scope not in {"sample", "full", "range"}:
         raise ValueError("Unsupported comparison scope")
@@ -47,8 +48,8 @@ def validate_options(
             raise ValueError("Range must have finite start/end seconds with 0 <= start < end")
     elif start_seconds is not None or end_seconds is not None:
         raise ValueError("Start/end seconds are allowed only for a range comparison")
-    if not 2 <= len(engines) <= len(ENGINE_OPTIONS):
-        raise ValueError("Select two or three diarization engines")
+    if not (1 if allow_single else 2) <= len(engines) <= len(ENGINE_OPTIONS):
+        raise ValueError("Select the required number of diarization engines")
     if len(set(engines)) != len(engines) or any(engine not in ENGINE_OPTIONS for engine in engines):
         raise ValueError("Invalid or repeated diarization engine")
 
@@ -154,8 +155,10 @@ def run_benchmark(
     end_seconds: float | None = None,
     on_progress: Callable[[int, str, dict[str, Any]], None],
     service: LocalSpeakerDiarizationService | None = None,
+    allow_single: bool = False,
 ) -> dict[str, Any]:
-    validate_options(engines, scope, start_seconds=start_seconds, end_seconds=end_seconds)
+    validate_options(engines, scope, start_seconds=start_seconds, end_seconds=end_seconds,
+                     allow_single=allow_single)
     recording = store.get(recording_id, include_result=False)
     if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
         raise RecordingConflict("Finish the recording before comparing speakers")
@@ -282,7 +285,7 @@ def run_benchmark(
 
 def public_benchmark_job(job: dict[str, Any]) -> dict[str, Any]:
     """Keep full local timelines out of ordinary job/list responses."""
-    if job.get("type") != BENCHMARK_JOB_TYPE or not isinstance(job.get("result"), dict):
+    if job.get("type") not in {BENCHMARK_JOB_TYPE, "diarization_review"} or not isinstance(job.get("result"), dict):
         return job
     result = dict(job["result"])
     result["runs"] = [

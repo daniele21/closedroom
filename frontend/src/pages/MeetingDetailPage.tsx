@@ -46,6 +46,7 @@ import { useMeetingJobEvents } from '../hooks/useMeetingJobEvents';
 import { useVisualIntelligence } from '../hooks/useVisualIntelligence';
 import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
 import { SpeakerDiarizationEditor } from '../components/meeting/SpeakerDiarizationEditor';
+import { CommunityOneReviewPanel } from '../components/meeting/CommunityOneReviewPanel';
 import { DiarizationBenchmarkPanel } from '../components/meeting/DiarizationBenchmarkPanel';
 import TranscriptTextView from '../components/transcription/TranscriptTextView';
 import { useMeetingAccessories } from '../hooks/useMeetingAccessories';
@@ -1601,13 +1602,25 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 className="animate-in fade-in duration-200"
               >
                 {meeting.transcription ? (
-                  <SpeakerDiarizationEditor
-                    transcription={meeting.transcription}
-                    readOnly={demoMode}
-                    onUpdated={(transcription) => setMeeting((current) => (
-                      current ? { ...current, transcription } : current
-                    ))}
-                  />
+                  <>
+                    <SpeakerDiarizationEditor
+                      transcription={meeting.transcription}
+                      readOnly={demoMode}
+                      onUpdated={(transcription) => setMeeting((current) => (
+                        current ? { ...current, transcription } : current
+                      ))}
+                    />
+                    {!demoMode && !meeting.transcription.merged_sources?.length && (
+                      <CommunityOneReviewPanel
+                        key={meeting.transcription.id || meeting.transcription.saved_id}
+                        transcriptionId={(meeting.transcription.id || meeting.transcription.saved_id)!}
+                        lang={lang}
+                        onUpdated={(transcription) => setMeeting((current) => (
+                          current ? { ...current, transcription } : current
+                        ))}
+                      />
+                    )}
+                  </>
                 ) : (
                   <div className="text-center py-16 bg-bg-elevated rounded-xl border border-border-subtle">
                     <Users className="w-8 h-8 mx-auto text-text-muted mb-3" aria-hidden="true" />
