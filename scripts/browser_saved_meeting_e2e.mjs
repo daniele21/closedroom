@@ -970,6 +970,17 @@ try {
   await browser.clickCss('[data-benchmark-jump="A"]');
   await waitCount('benchmark_window', 5);
   if (lastBenchmarkWindowStart !== 0) throw new Error('speaker locator did not return to first occurrence');
+  // The HTTP fixture counter increments before React renders the next
+  // window. Wait for the actual UI control, not merely the response request.
+  let speakerReady = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    speakerReady = await browser.execute(`
+      return Boolean(document.querySelector('[data-benchmark-jump="B"]'));
+    `);
+    if (speakerReady) break;
+    await sleep(100);
+  }
+  if (!speakerReady) throw new Error('speaker jump control did not reappear after changing windows');
   // B is now absent from the first five minutes.
   await browser.clickCss('[data-benchmark-jump="B"]');
   await waitCount('benchmark_window', 6);
