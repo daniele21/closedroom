@@ -21,7 +21,7 @@ from local_asr_server.jobs import JobStore
 from local_asr_server.native_capture import NativeCaptureManager
 from local_asr_server.recordings import RecordingStore
 from local_asr_server.transcription_jobs import TranscriptionJobManager
-from local_asr_server.paths import get_brand_assets_dir, get_static_dir
+from local_asr_server.paths import APP_NAME, get_brand_assets_dir, get_static_dir
 from local_asr_server.runtime.resource_policy import ResourcePolicy, recording_has_active_capture
 from local_asr_server.runtime.service_manager import RuntimeServiceManager
 from local_asr_server.runtime.workload_arbiter import HeavyWorkloadArbiter
@@ -104,12 +104,10 @@ def create_app(
     transcriptions_root = Path(
         transcriptions_module.load_settings()["transcriptions_dir"]
     ).expanduser().resolve()
-    if temp_root in transcriptions_root.parents or transcriptions_root == temp_root:
-        catalog_path = transcriptions_root / "closedroom.db"
-    elif recordings_dir is not None and temp_root in recordings_dir.expanduser().resolve().parents:
-        catalog_path = recordings_dir.expanduser().resolve() / "closedroom.db"
-    else:
-        catalog_path = CatalogStore.default_db_path()
+    catalog_path = CatalogStore.default_db_path(
+        recordings_dir=recordings_dir,
+        transcriptions_dir=transcriptions_root,
+    )
     app.state.app_log_file = configure_application_logging(fallback_dir=catalog_path.parent)
 
     catalog_store = CatalogStore(catalog_path)
@@ -121,7 +119,7 @@ def create_app(
         reason="Interrupted by server restart",
     )
     recording_store = RecordingStore(
-        recordings_dir or Path("~/Recordings/local-asr"),
+        recordings_dir or Path(f"~/ClosedRoom/Recordings/{APP_NAME}"),
         use_settings_dir=recordings_dir is None,
         catalog=catalog_store,
     )
@@ -154,7 +152,8 @@ def create_app(
         RESET = "\033[0m"
 
         # Show ClosedRoom Web UI URL
-        print(f"\n{BOLD}{GREEN}[★] ClosedRoom Web UI: {RESET}{BOLD}http://127.0.0.1:1236/{RESET}\n")
+        port = getattr(app.state, "port", os.environ.get("CLOSEDROOM_API_PORT", "1236"))
+        print(f"\n{BOLD}{GREEN}[★] ClosedRoom Web UI: {RESET}{BOLD}http://127.0.0.1:{port}/{RESET}\n")
 
         if llm_mode == "auto":
             # Managed local AI is intentionally cold at application startup.

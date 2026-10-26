@@ -13,7 +13,7 @@ from local_asr_server.speaker_labels import apply_speaker_labels
 
 class TranscriptionStore:
     def __init__(self, catalog: CatalogStore | None = None):
-        self.catalog = catalog or CatalogStore(self.root / "closedroom.db")
+        self.catalog = catalog or CatalogStore()
         self.catalog.import_transcriptions_dir(self.root)
 
     @property

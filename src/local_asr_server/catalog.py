@@ -8,7 +8,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from local_asr_server.paths import get_app_support_dir
+import os
+from local_asr_server.paths import APP_NAME, get_app_support_dir
 from local_asr_server.settings import load_settings
 
 
@@ -49,15 +50,62 @@ class CatalogStore:
             self._init_db(conn)
 
     @staticmethod
-    def default_db_path() -> Path:
+    def default_db_path(
+        recordings_dir: Path | None = None,
+        transcriptions_dir: Path | None = None,
+    ) -> Path:
         settings = load_settings()
-        transcriptions_dir = Path(settings["transcriptions_dir"]).expanduser().resolve()
-        recordings_dir = Path(settings["recordings_dir"]).expanduser().resolve()
+        resolved_transcriptions = (
+            transcriptions_dir.expanduser().resolve()
+            if transcriptions_dir is not None
+            else Path(settings.get("transcriptions_dir", "")).expanduser().resolve()
+        )
+        resolved_recordings = (
+            recordings_dir.expanduser().resolve()
+            if recordings_dir is not None
+            else Path(settings.get("recordings_dir", "")).expanduser().resolve()
+        )
         temp_root = Path(tempfile.gettempdir()).resolve()
-        if temp_root in transcriptions_dir.parents or temp_root in recordings_dir.parents:
-            transcriptions_dir.mkdir(parents=True, exist_ok=True)
-            return transcriptions_dir / "closedroom.db"
-        return get_app_support_dir() / "closedroom.db"
+        if temp_root in resolved_transcriptions.parents or resolved_transcriptions == temp_root:
+            resolved_transcriptions.mkdir(parents=True, exist_ok=True)
+            return resolved_transcriptions / "closedroom.db"
+        if temp_root in resolved_recordings.parents or resolved_recordings == temp_root:
+            resolved_recordings.mkdir(parents=True, exist_ok=True)
+            return resolved_recordings / "closedroom.db"
+
+        # Explicit environment variable override
+        env_db = os.environ.get("CLOSEDROOM_CATALOG_DB")
+        if env_db:
+            return Path(env_db).expanduser().resolve()
+
+        # Explicit setting override if defined
+        setting_db = settings.get("catalog_db_path")
+        if setting_db:
+            candidate = Path(setting_db).expanduser().resolve()
+            if candidate.exists() or not candidate.parent.exists():
+                return candidate
+
+        # Workspace search: check candidate locations for existing closedroom.db
+        candidates: list[Path] = [
+            Path.home() / APP_NAME / "closedroom.db",
+            Path.home() / "ClosedRoom" / "closedroom.db",
+            resolved_recordings.parent.parent / "closedroom.db",
+            resolved_transcriptions.parent.parent / "closedroom.db",
+            resolved_recordings.parent / "closedroom.db",
+            resolved_transcriptions.parent / "closedroom.db",
+            resolved_transcriptions / "closedroom.db",
+            resolved_recordings / "closedroom.db",
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate.resolve()
+
+        # If ~/ClosedRoom directory exists, place catalog DB there by default
+        app_home = Path.home() / APP_NAME
+        if app_home.is_dir():
+            return (app_home / "closedroom.db").resolve()
+
+        return (get_app_support_dir() / "closedroom.db").resolve()
 
     @contextlib.contextmanager
     def connection(self):

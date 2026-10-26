@@ -33,8 +33,9 @@ DEFAULT_VISUAL_FRAME_SIMILARITY_THRESHOLD = 12
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
 DEFAULT_SETTINGS: dict[str, any] = {
-    "transcriptions_dir": str(Path(f"~/Transcriptions/{APP_NAME}").expanduser()),
-    "recordings_dir": str(Path(f"~/Recordings/{APP_NAME}").expanduser()),
+    "transcriptions_dir": str(Path(f"~/ClosedRoom/Transcriptions/{APP_NAME}").expanduser()),
+    "recordings_dir": str(Path(f"~/ClosedRoom/Recordings/{APP_NAME}").expanduser()),
+    "catalog_db_path": str(Path(f"~/ClosedRoom/closedroom.db").expanduser()),
     "asr_provider": ASR_PROVIDER_LOCAL,
     "speechmatics_api_key": "",
     "speechmatics_region": DEFAULT_SPEECHMATICS_REGION,

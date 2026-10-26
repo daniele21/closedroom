@@ -711,7 +711,7 @@ macOS usa Python 3.10 e fissa `mlx 0.31.2` per la regressione GPU verificata in
 | Dato | Posizione | Owner | Garanzia |
 | --- | --- | --- | --- |
 | Settings | `~/Library/Application Support/ClosedRoom/settings.json` | `settings.py`, `SettingsService` | Scrittura atomica e validazione prima del commit |
-| Catalogo | `~/Library/Application Support/ClosedRoom/closedroom.db` | `CatalogStore`, `JobStore` | SQLite WAL, transazioni e indici |
+| Catalogo | `~/ClosedRoom/closedroom.db` (o fallback in Application Support) | `CatalogStore`, `JobStore` | SQLite WAL, transazioni e indici |
 | Registrazioni | setting `recordings_dir` | `RecordingStore` | Lock per sessione, chunk monotoni, metadata atomici |
 | Transcript | setting `transcriptions_dir` | `TranscriptionStore` | JSON/TXT più indice SQLite; visual on-demand aggiorna la stessa entità in place |
 | Cache ASR | cache app/dev | transcription layer | Chiave SHA-256 sugli input effettivi |

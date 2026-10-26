@@ -357,10 +357,12 @@ def main() -> None:
     port = _resolve_serve_port(args)
     prepare_api_port(port, host=args.host)
     register_api_runtime(port, host=args.host)
+    os.environ["CLOSEDROOM_API_PORT"] = str(port)
     app = create_app(
         default_model=args.model,
         recordings_dir=Path(args.recordings_dir).expanduser() if args.recordings_dir else None,
     )
+    app.state.port = port
 
     llm_process = None
     if args.llm_port:
@@ -401,7 +403,6 @@ def main() -> None:
 
     try:
         if args.reload:
-            import os
             if args.model:
                 os.environ["CLOSEDROOM_DEFAULT_MODEL"] = args.model
             if args.recordings_dir:
