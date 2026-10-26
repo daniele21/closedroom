@@ -897,7 +897,7 @@ try {
   await checkpoint(browser, '14-comparison-full-timeline-next');
   const canFindSpeaker = await browser.execute(`
     const button = document.querySelector('[data-benchmark-jump="B"]');
-    return Boolean(button && button.getAttribute('aria-label')?.includes('450'));
+    return Boolean(button && button.getAttribute('aria-label')?.includes('7:30'));
   `);
   if (!canFindSpeaker) throw new Error('whole-meeting speaker locator missing for off-window cluster');
   // After Next, the window is 5:00–10:00: A is absent there.
