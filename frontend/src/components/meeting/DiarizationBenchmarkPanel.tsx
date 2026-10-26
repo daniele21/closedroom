@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiClient, DiarizationBenchmarkEngine, DiarizationBenchmarkResult, TranscriptionJob } from '../../api/apiClient';
+import { ApiClient, DiarizationBenchmarkEngine, DiarizationBenchmarkResult, DiarizationTimelineWindow, TranscriptionJob } from '../../api/apiClient';
 import { useTranslation } from '../../i18n/i18n';
 import { Button } from '../ui/Button';
 
@@ -9,16 +9,35 @@ const ENGINE_OPTIONS: Array<{ key: DiarizationBenchmarkEngine; title: string }> 
   { key: 'nemotron3-compact', title: 'Nemotron 3 · c128-split-w8a8' },
 ];
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
-const BAR_COLORS = ['bg-accent', 'bg-warning', 'bg-success', 'bg-info', 'bg-text-secondary'];
+// Data palette, not status colors. Each engine has its own independent IDs.
+// Keep categories visibly distinct on the dark speaker timeline.
+const SPEAKER_COLORS = ['#63A6FF', '#FFBC69', '#73D5A1', '#CE9AFF', '#FF8698', '#E9D568', '#71D6E0', '#B7B4F5'];
 
-type Scope = 'sample' | 'full';
+type Scope = 'sample' | 'range' | 'full';
+
+function timeLabel(seconds: number): string {
+  const value = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(value / 3600);
+  const m = Math.floor(value / 60) % 60;
+  const s = value % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function parseTime(value: string): number | null {
+  const parts = value.trim().split(':');
+  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) return null;
+  const digits = parts.map(Number);
+  if (digits.slice(1).some((part) => part >= 60)) return null;
+  return digits.reduce((acc, digit) => acc * 60 + digit, 0);
+}
 
 interface Props {
   recordingId: string;
+  durationSeconds?: number;
   readOnly?: boolean;
 }
 
-export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Props) {
+export function DiarizationBenchmarkPanel({ recordingId, durationSeconds, readOnly = false }: Props) {
   const { lang } = useTranslation();
   const it = lang === 'it';
   const [expanded, setExpanded] = useState(false);
@@ -26,6 +45,13 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
     ENGINE_OPTIONS.map((option) => option.key),
   );
   const [scope, setScope] = useState<Scope>('sample');
+  const [rangeStart, setRangeStart] = useState('15:00');
+  const [rangeEnd, setRangeEnd] = useState('25:00');
+  const [windowStart, setWindowStart] = useState(0);
+  const [windowMinutes, setWindowMinutes] = useState(5);
+  const [timeline, setTimeline] = useState<DiarizationTimelineWindow | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState('');
   const [job, setJob] = useState<TranscriptionJob | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -35,6 +61,7 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
   useEffect(() => {
     let alive = true;
     setJob(null);
+    setTimeline(null);
     setError('');
     ApiClient.listDiarizationBenchmarks(recordingId).then(({ items }) => {
       if (!alive || !items.length) return;
@@ -62,11 +89,40 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
   const busy = submitting || Boolean(job && !TERMINAL.has(job.status));
   const result = (job?.result || null) as DiarizationBenchmarkResult | null;
   const runs = result?.runs || [];
-  const previewSeconds = Math.max(1, result?.preview_seconds || 300);
+  const rangeFrom = result?.range_start_seconds ?? 0;
+  const rangeTo = result?.range_end_seconds ?? ((result?.scope === 'sample' ? result?.preview_seconds : result?.audio_seconds) || 300);
+  const viewedSeconds = Math.max(1, Math.min(windowMinutes * 60, rangeTo - rangeFrom));
+  const maxWindowStart = Math.max(rangeFrom, rangeTo - viewedSeconds);
+  const viewedStart = Math.max(rangeFrom, Math.min(maxWindowStart, windowStart));
+  const viewedEnd = Math.min(rangeTo, viewedStart + viewedSeconds);
+  const parsedStart = parseTime(rangeStart);
+  const parsedEnd = parseTime(rangeEnd);
+  const rangeValid = parsedStart !== null && parsedEnd !== null && parsedStart >= 0 && parsedEnd > parsedStart
+    && (!durationSeconds || parsedEnd <= durationSeconds + 0.01);
   const detail = job?.progress_detail as { engine?: string; index?: number; total?: number } | null;
 
+  useEffect(() => {
+    if (job?.status === 'completed' && result) {
+      setWindowStart(result.range_start_seconds ?? 0);
+      setTimeline(null);
+    }
+  }, [job?.id, job?.status]);
+
+  useEffect(() => {
+    if (!job || job.status !== 'completed' || !result || viewedEnd <= viewedStart) return;
+    let alive = true;
+    setTimeline(null);
+    setTimelineLoading(true);
+    setTimelineError('');
+    ApiClient.getDiarizationBenchmarkTimeline(recordingId, job.id, viewedStart, viewedEnd)
+      .then((value) => { if (alive) setTimeline(value); })
+      .catch((exc) => { if (alive) { setTimeline(null); setTimelineError(String(exc)); } })
+      .finally(() => { if (alive) setTimelineLoading(false); });
+    return () => { alive = false; };
+  }, [recordingId, job?.id, job?.status, viewedStart, viewedEnd]);
+
   const start = async () => {
-    if (selected.length < 2 || busy || readOnly) return;
+    if (selected.length < 2 || busy || readOnly || (scope === 'range' && !rangeValid)) return;
     setError('');
     setSubmitting(true);
     setPlaybackTime(0);
@@ -74,6 +130,7 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
       setJob(await ApiClient.createDiarizationBenchmark(recordingId, {
         engines: ENGINE_OPTIONS.map((option) => option.key).filter((key) => selected.includes(key)),
         scope,
+        ...(scope === 'range' ? { start_seconds: parsedStart!, end_seconds: parsedEnd! } : {}),
       }));
       setExpanded(true);
     } catch (exc) {
@@ -90,6 +147,14 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     }
+  };
+
+  const locateSpeaker = (seconds: number) => {
+    // Seeking never starts playback, and stays in the selected comparison scope.
+    const position = Math.max(rangeFrom, Math.min(rangeTo, seconds));
+    setWindowStart(Math.max(rangeFrom, Math.min(maxWindowStart, position - viewedSeconds / 2)));
+    setPlaybackTime(position);
+    if (audioRef.current) audioRef.current.currentTime = position;
   };
 
   const toggleEngine = (key: DiarizationBenchmarkEngine, checked: boolean) => {
@@ -140,6 +205,38 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
               {it ? 'Primi 5 minuti · prova rapida' : 'First 5 minutes · quick test'}
             </label>
             <label className="flex items-center gap-2 text-xs text-text-secondary">
+              <input type="radio" checked={scope === 'range'} onChange={() => {
+                if (durationSeconds && durationSeconds < 1500) {
+                  setRangeStart('0:00');
+                  setRangeEnd(timeLabel(Math.min(300, Math.floor(durationSeconds))));
+                }
+                setScope('range');
+              }} />
+              {it ? 'Intervallo personalizzato' : 'Custom time range'}
+            </label>
+            {scope === 'range' && (
+              <div className="grid grid-cols-1 gap-3 rounded-lg border border-border-subtle p-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  {it ? 'Da (mm:ss o hh:mm:ss)' : 'From (mm:ss or hh:mm:ss)'}
+                  <input type="text" value={rangeStart} onChange={(event) => setRangeStart(event.target.value)}
+                    aria-label={it ? 'Inizio intervallo' : 'Range start'}
+                    className="rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 text-text-primary" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  {it ? 'A (mm:ss o hh:mm:ss)' : 'To (mm:ss or hh:mm:ss)'}
+                  <input type="text" value={rangeEnd} onChange={(event) => setRangeEnd(event.target.value)}
+                    aria-label={it ? 'Fine intervallo' : 'Range end'}
+                    className="rounded-md border border-border-subtle bg-bg-elevated px-3 py-2 text-text-primary" />
+                </label>
+                {!rangeValid && <p role="alert" className="text-xs text-warning sm:col-span-2">
+                  {it ? 'Inserisci un intervallo valido entro la durata del meeting.' : 'Enter a valid range within the meeting duration.'}
+                </p>}
+                {durationSeconds ? <p className="text-xs text-text-muted sm:col-span-2">
+                  {it ? 'Durata meeting: ' : 'Meeting duration: '}{timeLabel(durationSeconds)}
+                </p> : null}
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
               <input type="radio" checked={scope === 'full'} onChange={() => setScope('full')} />
               {it ? 'Meeting completo' : 'Full meeting'}
             </label>
@@ -150,7 +247,7 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
               : 'For dual-track meetings, the system track is compared; your microphone remains a known speaker. The first Nemotron run may download public weights. No audio is uploaded.'}
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={() => void start()} isLoading={submitting} disabled={busy || selected.length < 2}>
+            <Button size="sm" onClick={() => void start()} isLoading={submitting} disabled={busy || selected.length < 2 || (scope === 'range' && !rangeValid)}>
               {it ? 'Avvia confronto' : 'Start comparison'}
             </Button>
             {selected.length < 2 && (
@@ -191,7 +288,10 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
         <div className="mt-4 space-y-3">
           <p className="text-[11px] text-text-muted">
             {it ? 'Confronto completato · ' : 'Comparison finished · '}
-            {result.scope === 'sample' ? (it ? 'campione iniziale' : 'opening sample') : (it ? 'meeting completo' : 'full meeting')}
+            {result.scope === 'sample' ? (it ? 'campione iniziale' : 'opening sample')
+              : result.scope === 'range' ? (it ? 'intervallo selezionato' : 'selected range')
+              : (it ? 'meeting completo' : 'full meeting')}
+            {' · '}{timeLabel(rangeFrom)}–{timeLabel(rangeTo)}
             {' · '}{it ? 'traccia' : 'track'}: {result.track_id}
           </p>
           <div className="overflow-x-auto">
@@ -222,45 +322,122 @@ export function DiarizationBenchmarkPanel({ recordingId, readOnly = false }: Pro
           {runs.some((run) => run.status === 'completed') && (
             <div className="space-y-3">
               <p className="text-xs font-medium text-text-primary">
-                {it ? 'Confronto visivo dei parlanti · primi 5 minuti' : 'Speaker timeline comparison · first 5 minutes'}
+                {it ? 'Timeline speaker navigabile' : 'Navigable speaker timeline'}
+                {' · '}{timeLabel(viewedStart)}–{timeLabel(viewedEnd)}
               </p>
-              <audio ref={audioRef} controls preload="none" onTimeUpdate={(event) => setPlaybackTime(event.currentTarget.currentTime)}
+              <audio key={`${recordingId}-${job?.id}`} ref={audioRef} controls preload="metadata"
+                onLoadedMetadata={(event) => {
+                  if (rangeFrom > 0 && event.currentTarget.currentTime === 0) event.currentTarget.currentTime = rangeFrom;
+                }}
+                onTimeUpdate={(event) => {
+                  const time = event.currentTarget.currentTime;
+                  setPlaybackTime(time);
+                  if (time >= rangeFrom && time < rangeTo && (time < viewedStart || time >= viewedEnd)) {
+                    setWindowStart(Math.min(maxWindowStart, rangeFrom +
+                      Math.floor((time - rangeFrom) / (windowMinutes * 60)) * windowMinutes * 60));
+                  }
+                }}
                 src={`/v1/recordings/${encodeURIComponent(recordingId)}/tracks/${encodeURIComponent(result.track_id)}/audio`}
                 aria-label={it ? 'Ascolta traccia confrontata' : 'Play compared track'} className="h-9 w-full" />
-              {runs.filter((run) => run.status === 'completed').map((run) => {
-                const speakers = [...new Set((run.preview || []).map((segment) => segment.speaker))];
+              <div className="flex flex-wrap items-center gap-3">
+                <Button size="sm" variant="secondary" disabled={viewedStart <= rangeFrom}
+                  onClick={() => setWindowStart(Math.max(rangeFrom, viewedStart - viewedSeconds))}>
+                  {it ? 'Precedente' : 'Previous'}
+                </Button>
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  {it ? 'Zoom' : 'Zoom'}
+                  <select value={windowMinutes} onChange={(event) => setWindowMinutes(Number(event.target.value))}
+                    aria-label={it ? 'Ampiezza della finestra temporale' : 'Timeline window duration'}
+                    className="rounded-md border border-border-subtle bg-bg-elevated px-2 py-1 text-text-primary">
+                    {[1, 5, 10, 30].map((minutes) => <option key={minutes} value={minutes}>{minutes} min</option>)}
+                  </select>
+                </label>
+                <Button size="sm" variant="secondary" disabled={viewedEnd >= rangeTo}
+                  onClick={() => setWindowStart(Math.min(maxWindowStart, viewedStart + viewedSeconds))}>
+                  {it ? 'Successiva' : 'Next'}
+                </Button>
+              </div>
+              <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                {it ? 'Sposta la finestra nel meeting' : 'Navigate the meeting'}
+                <input type="range" min={rangeFrom} max={maxWindowStart} step="1" value={viewedStart}
+                  onChange={(event) => setWindowStart(Number(event.target.value))}
+                  aria-label={it ? 'Posizione della timeline' : 'Timeline position'}
+                  disabled={maxWindowStart <= rangeFrom} />
+              </label>
+              {timelineLoading && <p role="status" className="text-xs text-text-muted">{it ? 'Caricamento segmenti…' : 'Loading segments…'}</p>}
+              {timelineError && <p role="alert" className="text-xs text-warning">{timelineError}</p>}
+              {timeline?.runs.filter((run) => run.status === 'completed').map((run) => {
+                const visibleIds = new Set(run.segments.map((segment) => segment.speaker));
+                const allSpeakers = run.speakers?.length
+                  ? run.speakers
+                  : [...visibleIds].map((speaker) => ({
+                      speaker, first_start: viewedStart, in_window: true,
+                    }));
+                const speakerIndex = new Map(allSpeakers.map((item, index) => [item.speaker, index]));
+                const visibleCount = allSpeakers.filter((item) => visibleIds.has(item.speaker)).length;
                 return (
                   <div key={run.key} className="space-y-1">
-                    <p className="text-[11px] font-medium text-text-secondary">
-                      {ENGINE_OPTIONS.find((item) => item.key === run.key)?.title}
-                    </p>
-                    <div className="relative h-12 overflow-hidden rounded-md border border-border-subtle bg-bg-surface"
-                      aria-label={it ? 'Segmenti parlanti nel campione' : 'Speaker segments in the sample'}>
-                      {(run.preview || []).map((segment, index) => (
-                        <span key={index}
-                          title={`${segment.speaker}: ${segment.start}s–${segment.end}s`}
-                          className={`absolute h-2.5 rounded-sm ${BAR_COLORS[speakers.indexOf(segment.speaker) % BAR_COLORS.length]}`}
-                          style={{
-                            left: `${Math.min(100, segment.start / previewSeconds * 100)}%`,
-                            width: `${Math.max(0.15, (segment.end - segment.start) / previewSeconds * 100)}%`,
-                            top: `${4 + (speakers.indexOf(segment.speaker) % 3) * 13}px`,
-                          }}
-                        />
-                      ))}
-                      <span className="absolute bottom-0 top-0 w-px bg-text-primary"
-                        style={{ left: `${Math.min(100, playbackTime / previewSeconds * 100)}%` }} />
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] font-medium text-text-secondary">
+                        {ENGINE_OPTIONS.find((item) => item.key === run.key)?.title}
+                      </p>
+                      <span className="text-[11px] text-text-muted" data-benchmark-visible-count={run.key}>
+                        {it ? `${visibleCount} di ${run.partial ? '?' : allSpeakers.length} cluster in questa finestra`
+                          : `${visibleCount} of ${run.partial ? '?' : allSpeakers.length} clusters in this window`}
+                      </span>
                     </div>
-                    <p className="text-[10px] text-text-muted">
-                      {speakers.map((speaker) => `● ${speaker}`).join(' · ')}
-                      {run.preview_truncated && (it ? ' · Timeline parziale' : ' · Partial timeline')}
-                    </p>
+                    <div className="relative h-12 overflow-hidden rounded-md border border-border-subtle bg-bg-surface"
+                      aria-label={it ? 'Speaker nella finestra temporale' : 'Speakers in time window'}>
+                      {run.segments.map((segment, index) => {
+                        const start = Math.max(segment.start, viewedStart);
+                        const end = Math.min(segment.end, viewedEnd);
+                        const color = speakerIndex.get(segment.speaker) ?? 0;
+                        return (
+                          <span key={index}
+                            title={`${segment.speaker}: ${timeLabel(segment.start)}–${timeLabel(segment.end)}`}
+                            className="absolute h-2.5 rounded-sm"
+                            style={{
+                              backgroundColor: SPEAKER_COLORS[color % SPEAKER_COLORS.length],
+                              left: `${(start - viewedStart) / viewedSeconds * 100}%`,
+                              width: `${Math.max(0.15, (end - start) / viewedSeconds * 100)}%`,
+                              top: `${4 + color % 3 * 13}px`,
+                            }}
+                          />
+                        );
+                      })}
+                      {playbackTime >= viewedStart && playbackTime <= viewedEnd && (
+                        <span className="absolute bottom-0 top-0 w-px bg-text-primary"
+                          style={{ left: `${(playbackTime - viewedStart) / viewedSeconds * 100}%` }} />
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-text-muted">
+                      {allSpeakers.length ? allSpeakers.map((item, index) => {
+                        const visible = visibleIds.has(item.speaker);
+                        return (
+                          <button key={item.speaker} type="button"
+                            data-benchmark-jump={item.speaker}
+                            aria-label={it
+                              ? `Speaker ${item.speaker}, ${visible ? 'presente qui' : 'non presente qui'}, vai a ${timeLabel(item.first_start)}`
+                              : `Speaker ${item.speaker}, ${visible ? 'present here' : 'not in this window'}, jump to ${timeLabel(item.first_start)}`}
+                            title={it ? `Vai al primo intervento: ${timeLabel(item.first_start)}` : `Jump to first speech: ${timeLabel(item.first_start)}`}
+                            onClick={() => locateSpeaker(item.first_start)}
+                            className={`inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${visible ? 'text-text-primary' : 'text-text-muted'}`}>
+                            <span aria-hidden="true" className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: SPEAKER_COLORS[index % SPEAKER_COLORS.length] }} />
+                            <span>{item.speaker}</span>
+                            {!visible && !run.partial && <span>({it ? 'altrove' : 'elsewhere'})</span>}
+                          </button>
+                        );
+                      }) : <span>{it ? 'Nessun intervento in questa finestra' : 'No detected speech in this window'}</span>}
+                      {run.partial && <span>{it ? 'Confronto precedente: disponibili solo i primi 5 minuti' : 'Older run: only first 5 minutes saved'}</span>}
+                    </div>
                   </div>
                 );
               })}
               <p className="text-[11px] text-text-muted">
                 {it
-                  ? 'Il numero di speaker non misura la precisione. Senza annotazioni umane non è disponibile un DER affidabile. I colori rappresentano cluster indipendenti, non identità corrispondenti fra motori.'
-                  : 'Speaker count does not measure accuracy. Reliable DER needs human annotations. Colors indicate independent clusters, not matched identities between engines.'}
+                  ? 'I colori indicano cluster indipendenti e non identità corrispondenti tra motori. Il numero di speaker non misura la precisione.'
+                  : 'Colors are independent speaker clusters, not aligned identities across engines. Speaker count is not an accuracy metric.'}
               </p>
             </div>
           )}

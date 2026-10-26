@@ -24,6 +24,7 @@ from local_asr_server.transcription_jobs import (
 from local_asr_server.settings import load_settings
 from local_asr_server.speaker_diarization_benchmark import (
     BENCHMARK_JOB_TYPE, run_benchmark, validate_options,
+    public_benchmark_job, benchmark_timeline_window,
 )
 from local_asr_server.env import get_env_var
 from local_asr_server.services.transcription_service import TranscriptionService
@@ -69,7 +70,9 @@ class DiarizationBenchmarkRequest(BaseModel):
         default_factory=lambda: ["community-1", "nemotron3-fast128", "nemotron3-compact"],
         min_length=2, max_length=3,
     )
-    scope: Literal["sample", "full"] = "sample"
+    scope: Literal["sample", "full", "range"] = "sample"
+    start_seconds: Optional[float] = None
+    end_seconds: Optional[float] = None
 
 
 def _get_transcribe_file_sync():
@@ -514,7 +517,10 @@ def create_diarization_benchmark(
     recording_id: str, request: Request, body: DiarizationBenchmarkRequest,
 ):
     try:
-        validate_options(body.engines, body.scope)
+        validate_options(
+            body.engines, body.scope, start_seconds=body.start_seconds,
+            end_seconds=body.end_seconds,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     services = get_services(request.app)
@@ -546,6 +552,7 @@ def create_diarization_benchmark(
 
         return run_benchmark(
             services.recordings, recording_id, engines=list(body.engines), scope=body.scope,
+            start_seconds=body.start_seconds, end_seconds=body.end_seconds,
             cancel_requested=lambda: job.cancel_requested,
             on_progress=progress,
         )
@@ -553,7 +560,11 @@ def create_diarization_benchmark(
     return services.transcription_jobs.create(
         recording_id, runner, job_type=BENCHMARK_JOB_TYPE,
         scope_type="recording", scope_id=recording_id,
-        payload={"recording_id": recording_id, "engines": list(body.engines), "scope": body.scope},
+        payload={
+            "recording_id": recording_id, "engines": list(body.engines),
+            "scope": body.scope, "start_seconds": body.start_seconds,
+            "end_seconds": body.end_seconds,
+        },
     )
 
 
@@ -563,9 +574,32 @@ def list_diarization_benchmarks(recording_id: str, request: Request):
         get_services(request.app).recordings.get(recording_id, include_result=False)
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
-    return {"items": get_services(request.app).transcription_jobs.list(
+    return {"items": [public_benchmark_job(job) for job in get_services(request.app).transcription_jobs.list(
         job_type=BENCHMARK_JOB_TYPE, scope_type="recording", scope_id=recording_id, limit=10,
-    )}
+    )]}
+
+
+@router.get("/v1/recordings/{recording_id}/diarization-benchmarks/{job_id}/timeline")
+def get_diarization_benchmark_timeline(
+    recording_id: str, job_id: str, request: Request,
+    start_seconds: float = Query(ge=0), end_seconds: float = Query(gt=0),
+):
+    services = get_services(request.app)
+    try:
+        services.recordings.get(recording_id, include_result=False)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    job = services.transcription_jobs.get(job_id)
+    if not job or job.get("type") != BENCHMARK_JOB_TYPE or job.get("scope_id") != recording_id:
+        raise HTTPException(status_code=404, detail="Benchmark not found for this recording")
+    if job.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="Benchmark is not completed")
+    try:
+        return benchmark_timeline_window(
+            job, start_seconds=start_seconds, end_seconds=end_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/v1/activities")
@@ -659,7 +693,7 @@ def get_job(job_id: str, request: Request):
     job = get_services(request.app).transcription_jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return public_benchmark_job(job)
 
 
 @router.get("/v1/jobs/{job_id}/events")

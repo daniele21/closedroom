@@ -8,6 +8,7 @@ import wave
 
 from local_asr_server.speaker_diarization_benchmark import (
     _preview_segments, run_benchmark, validate_options,
+    public_benchmark_job, benchmark_timeline_window,
 )
 
 
@@ -172,6 +173,86 @@ class DiarizationBenchmarkTests(unittest.TestCase):
                     cancel_requested=lambda: True,
                 )
             process.assert_not_called()
+
+    def test_range_uses_only_selected_seconds_and_original_timestamps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "original.wav"
+            make_wav(path, frames=16_000 * 30)
+            original = path.read_bytes()
+            diarizer = FakeDiarizer()
+            result = run_benchmark(
+                FakeRecordingStore(path), "recording",
+                engines=["community-1", "nemotron3-fast128"],
+                scope="range", start_seconds=15, end_seconds=25,
+                service=diarizer, cancel_requested=lambda: False,
+                on_progress=lambda *_args: None,
+            )
+            self.assertEqual(result["range_start_seconds"], 15)
+            self.assertEqual(result["range_end_seconds"], 25)
+            self.assertEqual(result["audio_seconds"], 10)
+            self.assertEqual(result["track_id"], "system")
+            self.assertEqual(result["runs"][0]["timeline"][0]["start"], 15.1)
+            self.assertEqual(result["runs"][0]["timeline"][1]["start"], 15.4)
+            self.assertEqual(result["runs"][0]["preview"][0]["start"], 15.1)
+            self.assertEqual(path.read_bytes(), original)
+            self.assertTrue(all(not selected.exists() for selected, _, _ in diarizer.inputs))
+            self.assertNotIn(str(path), str(result))
+
+    def test_range_validation_and_bounds(self):
+        for first, last in [(-1, 3), (2, 2), (3, 1), (float("nan"), 5), (0, float("inf"))]:
+            with self.subTest(first=first, last=last):
+                with self.assertRaises(ValueError):
+                    validate_options(["community-1", "nemotron3-fast128"], "range",
+                                     start_seconds=first, end_seconds=last)
+        with self.assertRaises(ValueError):
+            validate_options(["community-1", "nemotron3-fast128"], "range")
+        with self.assertRaises(ValueError):
+            validate_options(["community-1", "nemotron3-fast128"], "full",
+                             start_seconds=0, end_seconds=10)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "original.wav"
+            make_wav(path)
+            with self.assertRaisesRegex(ValueError, "duration"):
+                run_benchmark(
+                    FakeRecordingStore(path), "recording",
+                    engines=["community-1", "nemotron3-fast128"], scope="range",
+                    start_seconds=0, end_seconds=100,
+                    service=FakeDiarizer(), cancel_requested=lambda: False,
+                    on_progress=lambda *_args: None,
+                )
+
+    def test_complete_timeline_is_windowed_and_legacy_preview_is_explicit(self):
+        result = {"range_start_seconds": 0, "range_end_seconds": 5309, "runs": [
+            {"key": "community-1", "status": "completed", "preview": [],
+             "timeline": [
+                 {"speaker": "A", "start": 10, "end": 16},
+                 {"speaker": "B", "start": 1200, "end": 1210},
+                 {"speaker": "C", "start": 5050, "end": 5060},
+             ]},
+        ]}
+        job = {"id": "job", "type": "diarization_benchmark", "result": result}
+        window = benchmark_timeline_window(job, start_seconds=1190, end_seconds=1230)
+        self.assertEqual([s["speaker"] for s in window["runs"][0]["segments"]], ["B"])
+        self.assertFalse(window["runs"][0]["partial"])
+        self.assertEqual([item["speaker"] for item in window["runs"][0]["speakers"]], ["A", "B", "C"])
+        self.assertEqual([item["in_window"] for item in window["runs"][0]["speakers"]], [False, True, False])
+        self.assertEqual([item["first_start"] for item in window["runs"][0]["speakers"]], [10, 1200, 5050])
+        public = public_benchmark_job(job)
+        self.assertNotIn("timeline", public["result"]["runs"][0])
+        self.assertIn("timeline", job["result"]["runs"][0])
+        with self.assertRaisesRegex(ValueError, "30 minutes"):
+            benchmark_timeline_window(job, start_seconds=0, end_seconds=2000)
+        with self.assertRaises(ValueError):
+            benchmark_timeline_window(job, start_seconds=10, end_seconds=10)
+        legacy = {"type": "diarization_benchmark", "result": {
+            "audio_seconds": 5309, "runs": [{"key": "community-1", "status": "completed",
+                                          "preview": [{"speaker": "A", "start": 10, "end": 16}]}],
+        }}
+        legacy_window = benchmark_timeline_window(legacy, start_seconds=800, end_seconds=900)
+        self.assertTrue(legacy_window["runs"][0]["partial"])
+        self.assertEqual(legacy_window["runs"][0]["speakers"], [
+            {"speaker": "A", "first_start": 10, "in_window": False},
+        ])
 
     def test_preview_preserves_overlap_and_bounds_results(self):
         timeline = [{"speaker": "S1", "start": 0, "end": 4},

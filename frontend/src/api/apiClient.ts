@@ -165,9 +165,26 @@ export interface DiarizationBenchmarkRun {
   preview_truncated?: boolean;
 }
 
+export interface DiarizationTimelineWindow {
+  schema_version: number;
+  start_seconds: number;
+  end_seconds: number;
+  range_start_seconds: number;
+  range_end_seconds: number;
+  runs: Array<{
+    key: DiarizationBenchmarkEngine;
+    status: 'completed' | 'failed';
+    partial: boolean;
+    segments: Array<{ speaker: string; start: number; end: number }>;
+    speakers?: Array<{ speaker: string; first_start: number; in_window: boolean }>;
+  }>;
+}
+
 export interface DiarizationBenchmarkResult {
   schema_version: number;
-  scope: 'sample' | 'full';
+  scope: 'sample' | 'full' | 'range';
+  range_start_seconds?: number;
+  range_end_seconds?: number;
   track_id: string;
   audio_seconds: number | null;
   preview_seconds: number;
@@ -957,13 +974,22 @@ export const ApiClient = {
 
   async createDiarizationBenchmark(
     recordingId: string,
-    payload: { engines: DiarizationBenchmarkEngine[]; scope: 'sample' | 'full' },
+    payload: { engines: DiarizationBenchmarkEngine[]; scope: 'sample' | 'full' | 'range'; start_seconds?: number; end_seconds?: number },
   ): Promise<TranscriptionJob> {
     return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/diarization-benchmarks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })).json();
+  },
+
+  async getDiarizationBenchmarkTimeline(
+    recordingId: string, jobId: string, startSeconds: number, endSeconds: number,
+  ): Promise<DiarizationTimelineWindow> {
+    const params = new URLSearchParams({
+      start_seconds: String(startSeconds), end_seconds: String(endSeconds),
+    });
+    return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/diarization-benchmarks/${encodeURIComponent(jobId)}/timeline?${params}`)).json();
   },
 
   async listDiarizationBenchmarks(recordingId: string): Promise<{ items: TranscriptionJob[] }> {
