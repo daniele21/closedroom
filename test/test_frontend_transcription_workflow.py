@@ -67,6 +67,7 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertIn("if (recordingId) navigateTo('meeting', recordingId);", results)
         self.assertIn("else navigateTo('analysis', transcriptionResult.id || transcriptionResult.saved_id);", results)
         self.assertIn("variant={recordingId ? 'secondary' : 'primary'}", results)
+        self.assertIn("Prepare notes in Meeting", results)
 
     def test_recording_route_contract_is_centralized(self) -> None:
         route_helper = (ROOT / "frontend/src/utils/transcriptionRoute.ts").read_text(encoding="utf-8")
