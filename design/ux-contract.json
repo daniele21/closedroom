@@ -123,7 +123,7 @@
       "today",
       "projects"
     ],
-    "meeting_parent": "today",
+    "meeting_parent": "originating_today_or_project_view",
     "persistent_primary_action": "new_meeting",
     "utility_destinations": [
       "settings",
@@ -135,7 +135,7 @@
     ],
     "desktop_pattern": "one stable left workspace rail",
     "compact_pattern": "the same destinations and action hierarchy reflow into one sticky top toolbar; compact width must not introduce a second navigation model",
-    "rule": "Today, Meeting and Projects share one workspace chrome. Meeting is opened from Today/search/project context but does not become a third peer destination. During recording, the macOS menu bar is a contextual companion for Add note, Screenshot, recording controls and Stop; it projects canonical state and never becomes a second state owner. Advanced transcription, analysis and diagnostics remain contextual or utility routes. Optional meeting detection presents a native suggestion and menu-bar action only after opt-in; it never auto-starts recording and delegates to the canonical New Meeting start."
+    "rule": "Today, Meeting and Projects share one workspace chrome. Meeting is opened from Today/search/project context but does not become a third peer destination; its Back action returns to the originating Today or Project view and restores that view's selected project and filters. During recording, the macOS menu bar is a contextual companion for Add note, Screenshot, recording controls and Stop; it projects canonical state and never becomes a second state owner. Advanced transcription, analysis and diagnostics remain contextual or utility routes. Optional meeting detection presents a native suggestion and menu-bar action only after opt-in; it never auto-starts recording and delegates to the canonical New Meeting start."
   },
   "golden_path": {
     "steps": [

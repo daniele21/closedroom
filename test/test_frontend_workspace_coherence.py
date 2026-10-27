@@ -25,7 +25,7 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertNotIn('className="app-nav', self.app)
 
     def test_meeting_stays_a_child_of_today_in_navigation(self) -> None:
-        self.assertIn("activePage === 'home' || activePage === 'meeting'", self.app)
+        self.assertIn("const todayActive = activePage === 'home' || (activePage === 'meeting' && !meetingFromProject)", self.app)
         self.assertIn("aria-current={item.active ? 'page' : undefined}", self.app)
         self.assertNotIn("{ id: 'meeting'", self.app)
 
@@ -36,6 +36,15 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertIn("!detail.startsWith('auto/')", self.app)
         self.assertIn("window.history.replaceState(null, '', `#meeting/${detail}`)", self.app)
         self.assertIn("navigateTo('meeting', recording.id);", recording_page)
+
+    def test_meeting_back_retains_project_origin(self) -> None:
+        meeting = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("meetingOriginRef", self.app)
+        self.assertIn("meetingFromProject", self.app)
+        self.assertIn("onBack={() => navigateTo(meetingOriginRef.current)}", self.app)
+        self.assertIn("onBack?: () => void", meeting)
+        self.assertIn("const goBack = () =>", meeting)
+        self.assertIn("onClick={() => goBack()}", meeting)
 
     def test_advanced_and_runtime_controls_are_utilities_not_primary_navigation(self) -> None:
         nav_start = self.app.index('const navItems = [')
