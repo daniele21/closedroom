@@ -1554,7 +1554,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     })}
                 </div>
 
-                <div className="p-5 sm:p-6 bg-bg-elevated min-h-[220px]">
+                <div className={meeting.transcription ? 'grid grid-cols-1 xl:grid-cols-2' : ''} data-meeting-notes-workspace="true">
+                  <div className="min-w-0 p-5 sm:p-6 bg-bg-elevated min-h-[220px]">
                   {selectedRun ? (
                     selectedRun.result?.schema?.id === 'closedroom.meeting_notes' && selectedRun.result?.schema?.version === 2 ? (
                       <StructuredNotesEditor
@@ -1588,6 +1589,43 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                         </Button>
                       )}
                     </div>
+                  )}
+                  </div>
+                  {meeting.transcription && (
+                    <section
+                      aria-label={lang === 'it' ? 'Trascrizione di riferimento' : 'Reference transcript'}
+                      data-meeting-transcript-companion="true"
+                      className="min-w-0 border-t border-border-subtle bg-bg-surface/40 xl:border-l xl:border-t-0"
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-4 py-3">
+                        <span className="inline-flex items-center gap-2 text-xs font-semibold text-text-primary">
+                          <FileText className="h-4 w-4 text-accent" aria-hidden="true" />
+                          {lang === 'it' ? 'Trascrizione' : 'Transcript'}
+                        </span>
+                        <Button size="sm" variant="ghost" onClick={() => selectTab('transcript')}>
+                          {lang === 'it' ? 'Apri completa' : 'Open full'}
+                        </Button>
+                      </div>
+                      <div className="max-h-[640px] overflow-y-auto p-4" data-meeting-transcript-companion-content="true">
+                        {meeting.transcription.segments?.length ? (
+                          <TranscriptTextView
+                            segments={meeting.transcription.segments}
+                            speakerMappings={speakerMappings}
+                            onTimestampClick={handleTimestampClick}
+                            currentTime={currentTime}
+                            screenshots={screenshots}
+                            onOpenScreenshot={openKeyMoment}
+                            notes={notes}
+                            onUpdateNote={handleUpdateNote}
+                            onDeleteNote={handleDeleteNote}
+                          />
+                        ) : (
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
+                            {meeting.transcription.text}
+                          </p>
+                        )}
+                      </div>
+                    </section>
                   )}
                 </div>
               </div>

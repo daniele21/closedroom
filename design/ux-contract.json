@@ -149,7 +149,7 @@
     ],
     "normal_path_rule": "A configured user completes the golden path without choosing capture backend, source device, diarization, visual enrichment, provider, model, runtime, helper, process, port, model path or routing concepts.",
     "surface_hierarchy": {
-      "today": "understand what happened, what needs attention and what to open or do next",
+      "today": "understand what happened, what needs attention and what to open or do next; all-period meeting search and archived filtering share one bounded server-backed library dialog, not duplicate list and search surfaces",
       "new_meeting": "optionally add meeting context, see readiness and start recording; if managed AI is already active, show truthful cancellable preparation rather than pretending recording has started",
       "record": "understand capture status, deliberately mark important moments with a quick user note or a screenshot of the selected display, briefly undo the latest persisted marker when needed, and safely Stop; marker feedback is secondary to audio health and never implies persistence before backend confirmation",
       "meeting": "use the saved meeting as the canonical workspace, review user notes and deliberately marked screenshots at their original transcript/audio timestamps, edit user-authored notes without changing their anchors, optionally enrich screenshots through local visual analysis. A recorded meeting has one primary Transcribe call action and secondary Transcribe and summarize option. Show the readable transcript first, then optionally offer Create summary and actions. Avoid duplicate empty-state actions and preserve explicit preparation resume",

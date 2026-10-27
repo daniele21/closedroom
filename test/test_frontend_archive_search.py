@@ -27,6 +27,17 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
         self.assertIn("<MeetingSearchDialog", self.dashboard)
         self.assertIn("onOpenMeeting={(id) => navigateTo('meeting', id)}", self.dashboard)
 
+    def test_one_library_dialog_owns_full_search_and_archive(self) -> None:
+        self.assertNotIn("<MeetingListDialog", self.dashboard)
+        self.assertIn("const openLibrary = () =>", self.dashboard)
+        self.assertIn("onClick={openLibrary}", self.dashboard)
+        self.assertIn("initialView={libraryView}", self.dashboard)
+        self.assertIn("data-archived-meetings=\"true\"", self.dialog)
+        self.assertIn("setShowArchived(true)", self.dialog)
+        self.assertIn("searchMeetingArchive(query, 1, PAGE_SIZE, controller.signal, showArchived)", self.dialog)
+        self.assertIn("searchMeetingArchive(query, page + 1, PAGE_SIZE, undefined, showArchived)", self.dialog)
+        self.assertIn("if (archived) params.set('archived', 'true')", self.api)
+
     def test_search_is_server_side_bounded_and_paged(self) -> None:
         self.assertIn("const PAGE_SIZE = 25", self.dialog)
         self.assertIn("searchMeetingArchive(query, 1, PAGE_SIZE", self.dialog)
