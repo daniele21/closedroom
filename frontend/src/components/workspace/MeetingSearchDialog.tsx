@@ -24,7 +24,7 @@ interface MeetingSearchDialogProps {
 type MeetingArchiveExplorerProps = Pick<
   MeetingSearchDialogProps,
   'open' | 'onOpenMeeting' | 'lang' | 'initialView' | 'demoMeetings'
->;
+> & { onOpenChange?: (open: boolean) => void };
 
 /** Cmd+K remains a quick-search modal; the library page reuses the exact same local query owner. */
 export function MeetingSearchDialog(props: MeetingSearchDialogProps) {
@@ -47,6 +47,7 @@ export function MeetingSearchDialog(props: MeetingSearchDialogProps) {
 /** One bounded, abortable paged search surface shared by modal and full-page library. */
 export function MeetingArchiveExplorer({
   open,
+  onOpenChange,
   onOpenMeeting,
   lang,
   initialView,
@@ -247,7 +248,7 @@ export function MeetingArchiveExplorer({
                   type="button"
                   onClick={() => {
                     onOpenMeeting(meeting.id);
-                    onOpenChange(false);
+                    onOpenChange?.(false);
                   }}
                   className="group flex w-full items-center justify-between rounded-xl border border-transparent p-3 text-left transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 >
