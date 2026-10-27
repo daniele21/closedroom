@@ -387,7 +387,7 @@ function MainApp() {
               >
                 <item.icon className="h-[18px] w-[18px]" aria-hidden="true" />
                 <span>{item.label}</span>
-                {item.id === 'activities' && activities.activeCount > 0 && <Badge>{activities.activeCount}</Badge>}
+                {item.id === 'activities' && activities.activeCount > 0 && <Badge className="workspace-activity-count">{activities.activeCount}</Badge>}
               </button>
             ))}
           </nav>
