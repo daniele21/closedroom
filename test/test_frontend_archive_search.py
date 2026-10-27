@@ -47,6 +47,10 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
         self.assertIn("onOpenMeeting={(id) => navigateTo('meeting', id)}", page)
         self.assertIn("onClick={() => navigateTo('meetings')}", self.dashboard)
 
+    def test_obsolete_competing_meeting_list_component_is_gone(self) -> None:
+        self.assertFalse((ROOT / "frontend/src/components/workspace/MeetingListDialog.tsx").exists())
+        self.assertNotIn("MeetingListDialog", self.dashboard)
+
     def test_search_is_server_side_bounded_and_paged(self) -> None:
         self.assertIn("const PAGE_SIZE = 25", self.dialog)
         self.assertIn("searchMeetingArchive(query, 1, PAGE_SIZE", self.dialog)
