@@ -1786,28 +1786,28 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                 <div id="meeting-audio-intelligence-panel" hidden={!audioIntelligenceOpen} className="border-t border-border-subtle p-3" aria-live="polite">
                   {audioIntelligenceOpen && (
                     <>
-                  {audioIntelligenceState === 'loading' && (
-                    <p role="status" className="flex items-center gap-2 text-xs text-text-muted">
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      {lang === 'it' ? 'Caricamento delle metriche audio locali…' : 'Loading local audio metrics…'}
-                    </p>
-                  )}
-                  {audioIntelligenceState === 'error' && (
-                    <div role="alert" className="rounded-lg border border-warning/30 p-3 text-xs text-text-secondary">
-                      <p>{audioIntelligenceError || (lang === 'it' ? 'Metriche non disponibili' : 'Metrics unavailable')}</p>
-                      <Button variant="secondary" size="sm" className="mt-2" onClick={() => void loadAudioIntelligence()}>
-                        {lang === 'it' ? 'Riprova' : 'Retry'}
-                      </Button>
-                    </div>
-                  )}
-                  {audioIntelligenceState === 'ready' && (
-                    <AudioIntelligencePanel
-                      compact
-                      intelligence={audioIntelligence}
-                      hasTranscription={Boolean(meeting.transcription)}
-                      onTranscribe={startDefaultTranscription}
-                    />
-                  )}
+                      {audioIntelligenceState === 'loading' && (
+                        <p role="status" className="flex items-center gap-2 text-xs text-text-muted">
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          {lang === 'it' ? 'Caricamento delle metriche audio locali…' : 'Loading local audio metrics…'}
+                        </p>
+                      )}
+                      {audioIntelligenceState === 'error' && (
+                        <div role="alert" className="rounded-lg border border-warning/30 p-3 text-xs text-text-secondary">
+                          <p>{audioIntelligenceError || (lang === 'it' ? 'Metriche non disponibili' : 'Metrics unavailable')}</p>
+                          <Button variant="secondary" size="sm" className="mt-2" onClick={() => void loadAudioIntelligence()}>
+                            {lang === 'it' ? 'Riprova' : 'Retry'}
+                          </Button>
+                        </div>
+                      )}
+                      {audioIntelligenceState === 'ready' && (
+                        <AudioIntelligencePanel
+                          compact
+                          intelligence={audioIntelligence}
+                          hasTranscription={Boolean(meeting.transcription)}
+                          onTranscribe={startDefaultTranscription}
+                        />
+                      )}
                     </>
                   )}
                 </div>
