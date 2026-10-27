@@ -1785,6 +1785,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                 </button>
                 <div id="meeting-audio-intelligence-panel" hidden={!audioIntelligenceOpen} className="border-t border-border-subtle p-3" aria-live="polite">
                   {audioIntelligenceOpen && (
+                    <>
                   {audioIntelligenceState === 'loading' && (
                     <p role="status" className="flex items-center gap-2 text-xs text-text-muted">
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -1807,7 +1808,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                       onTranscribe={startDefaultTranscription}
                     />
                   )}
-
+                    </>
                   )}
                 </div>
               </section>
