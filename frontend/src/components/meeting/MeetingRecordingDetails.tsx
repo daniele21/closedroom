@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { ChevronDown, Headphones } from 'lucide-react';
 import type { Recording } from '../../api/apiClient';
 import { useTranslation } from '../../i18n/i18n';
@@ -6,6 +7,8 @@ import { formatBytes } from '../../utils/formatters';
 /** Read-only projection of canonical recording metadata; no audio or API preload. */
 export function MeetingRecordingDetails({ recording }: { recording: Recording }) {
   const { t, lang } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { setExpanded(false); }, [recording.id]);
   const additionalTracks = (recording.audio_tracks || []).filter((track) => !track.primary);
   const warnings = (recording.warnings || [])
     .filter((warning) => !/^track_.*_invalid$/.test(warning)
@@ -26,15 +29,17 @@ export function MeetingRecordingDetails({ recording }: { recording: Recording })
   if (!additionalTracks.length && !hasQuality) return null;
 
   return (
-    <details className="surface-advanced group rounded-xl overflow-hidden" data-meeting-recording-details="true">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus">
+    <section className="surface-advanced rounded-xl overflow-hidden" data-meeting-recording-details="true">
+      <button type="button" aria-expanded={expanded} aria-controls="meeting-recording-tracks-panel"
+        onClick={() => setExpanded((current) => !current)}
+        className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-text-primary hover:bg-bg-hover/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus">
         <span className="flex items-center gap-2">
           <Headphones className="h-4 w-4 text-accent" aria-hidden="true" />
           {lang === 'it' ? 'Tracce e qualità audio' : 'Audio tracks and quality'}
         </span>
-        <ChevronDown className="h-4 w-4 text-text-muted group-open:rotate-180" aria-hidden="true" />
-      </summary>
-      <div className="space-y-3 border-t border-border-subtle p-4">
+        <ChevronDown className={`h-4 w-4 text-text-muted transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+      </button>
+      <div id="meeting-recording-tracks-panel" hidden={!expanded} className="space-y-3 border-t border-border-subtle p-4">
         {additionalTracks.map((track) => (
           <div key={track.id} className="rounded-lg border border-border-subtle bg-bg-surface p-3">
             <div className="mb-2 flex items-center justify-between gap-3 text-xs">
@@ -68,6 +73,6 @@ export function MeetingRecordingDetails({ recording }: { recording: Recording })
           </div>
         )}
       </div>
-    </details>
+    </section>
   );
 }
