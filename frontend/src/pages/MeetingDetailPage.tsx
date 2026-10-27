@@ -41,6 +41,8 @@ import { cn } from '../utils/cn';
 import { MeetingProcessingStatus } from '../components/meeting/MeetingProcessingStatus';
 import { VisualIntelligencePanel } from '../components/meeting/VisualIntelligencePanel';
 import { VisualDebugPanel } from '../components/meeting/VisualDebugPanel';
+import { MeetingRecordingDetails } from '../components/meeting/MeetingRecordingDetails';
+import AudioIntelligencePanel from './recording/AudioIntelligencePanel';
 import { StructuredNotesEditor } from '../components/meeting/StructuredNotesEditor';
 import { useMeetingJobEvents } from '../hooks/useMeetingJobEvents';
 import { useVisualIntelligence } from '../hooks/useVisualIntelligence';
@@ -213,6 +215,10 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
   const [activeTab, setActiveTab] = useState<MeetingTab>('transcript');
   const [currentTime, setCurrentTime] = useState(0);
   const {
+    audioIntelligence,
+    audioIntelligenceState,
+    audioIntelligenceError,
+    loadAudioIntelligence,
     diagnosticReport,
     diagnosticsLoading,
     diagnosticsError,
@@ -1750,6 +1756,52 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                   <p className="text-xs text-text-muted">{t('meeting.noSpeakerAttribution')}</p>
                 )}
               </div>
+            )}
+
+            <MeetingRecordingDetails recording={meeting.recording} />
+
+            {meeting.transcription && !demoMode && (
+              <details
+                className="surface-advanced group rounded-xl overflow-hidden"
+                data-meeting-audio-intelligence="true"
+                onToggle={(event) => {
+                  if (event.currentTarget.open && audioIntelligenceState === 'idle') {
+                    void loadAudioIntelligence();
+                  }
+                }}
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus">
+                  <span>
+                    {t('audioIntelligence.title')}
+                    <span className="block text-xs font-normal text-text-muted">{t('audioIntelligence.description')}</span>
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-text-muted group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <div className="border-t border-border-subtle p-3" aria-live="polite">
+                  {audioIntelligenceState === 'loading' && (
+                    <p role="status" className="flex items-center gap-2 text-xs text-text-muted">
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      {lang === 'it' ? 'Caricamento delle metriche audio locali…' : 'Loading local audio metrics…'}
+                    </p>
+                  )}
+                  {audioIntelligenceState === 'error' && (
+                    <div role="alert" className="rounded-lg border border-warning/30 p-3 text-xs text-text-secondary">
+                      <p>{audioIntelligenceError || (lang === 'it' ? 'Metriche non disponibili' : 'Metrics unavailable')}</p>
+                      <Button variant="secondary" size="sm" className="mt-2" onClick={() => void loadAudioIntelligence()}>
+                        {lang === 'it' ? 'Riprova' : 'Retry'}
+                      </Button>
+                    </div>
+                  )}
+                  {audioIntelligenceState === 'ready' && (
+                    <AudioIntelligencePanel
+                      compact
+                      intelligence={audioIntelligence}
+                      hasTranscription={Boolean(meeting.transcription)}
+                      onTranscribe={startDefaultTranscription}
+                    />
+                  )}
+                </div>
+              </details>
             )}
 
             {diagnosticsLoading && (
