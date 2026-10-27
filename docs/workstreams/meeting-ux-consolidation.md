@@ -1,7 +1,7 @@
 # Meeting-first UX consolidation — navigation, library and saved Meeting
 
-Status: ACTIVE — UX-0/1/2/5/6 integrated, UX-3 destination and recovery implemented, UX-4 notes/source refinement and UX-7 canonical expert return under integration; physical macOS usability and legacy Audio Intelligence parity still pending.
-Latest integration checkpoint: `dev` @ `88e00ce7568f7e9e423806ab243fdcef7547dfef` (2026-10-27, PR #155).
+Status: ACTIVE — UX-0/1/2/3/5/6 integrated; UX-4/7 remaining: canonical Recording parity and target-Mac usability. Wave 3 adds source tracks/quality and optional local Audio Intelligence to Meeting.
+Latest integration checkpoint: `dev` @ `83d70c7c1102fc44662d9e9a1bc1d19d60c5a89e` (2026-10-27, PR #156).
 Product / delivery / validation / execution: PRODUCT_FEATURE / ITERATION; risk-selected SCOPED for isolated routes, STRONG when shared navigation/meeting contracts or recovery changes; REMOTE_AUTOMATED for unavailable deterministic Mac/browser gates, REAL_ENVIRONMENT for subjective macOS usability/TCC when materially affected. Integration always uses repository selector, affected FULL_MEDIA UX journeys, exact head/base evidence.
 
 ## User job and scope
@@ -27,7 +27,7 @@ Non-goals: brand rework, changing ASR/LLM/diarization engines, replacing storage
 
 ## Canonical ownership
 
-`App.tsx` owns routes and compatibility. `MeetingDetailPage.tsx` owns saved Meeting and advanced tools. `MeetingsPage.tsx`, `DashboardPage.tsx` and `MeetingSearchDialog.tsx` share bounded local FTS5. `ProjectsPage.tsx` scopes the same Meeting. `AnalysisPage.tsx`/`TranscriptionPage.tsx` retain independent imports. `useActivities` projects one canonical job store. Legacy `RecordingPage.tsx` still hosts Audio Intelligence and requires parity before deletion.
+`App.tsx` owns routes and compatibility. `MeetingDetailPage.tsx` owns saved Meeting and advanced tools. `MeetingsPage.tsx`, `DashboardPage.tsx` and `MeetingSearchDialog.tsx` share bounded local FTS5. `ProjectsPage.tsx` scopes the same Meeting. `AnalysisPage.tsx`/`TranscriptionPage.tsx` retain independent imports. `useActivities` projects one canonical job store. Legacy `RecordingPage.tsx` still owns editable title/project and redundant capture form; verify remaining route/consumer parity before deletion.
 
 ## Target information architecture and critical journey
 
@@ -81,8 +81,8 @@ Outcome measurement, proposed baseline+comparison: attempts/clicks and elapsed t
 
 Base: `dev` `88e00ce` (UX-3 library destination, UX-6 activity utility, unused list removal) integrated with exact-head source/browser FULL_MEDIA in PR #155. UX-3: bounded full-page library and quick-search share the same query owner. Wave 2 improves compact full-page list sizing, retry on search failure, non-destructive pagination-error feedback and avoids stealing focus on page entry. UX-4: ready notes get clearer tab naming; opening full transcript transfers keyboard focus and retains source/seek semantics (browser check). UX-7: linked transcriptions in expert Analysis expose a canonical Meeting return without removing imported-text analysis. The former Recording detail still hosts an Audio Intelligence panel; **do not delete** until parity and consumers are proven. Old `MeetingListDialog` is already deleted; `docs/features.md` owner corrected.
 
-Still required: complete exact-head integration gates on this wave, review Meeting content density/adaptive interaction on installed target macOS, keyboard/VoiceOver and manual usability; verify and eventually retire old Recording page only with Audio Intelligence parity. No new cloud flow, persistence owner or silent capture.
+Wave 2 integrated in PR #156 with exact-head source/browser FULL_MEDIA PASS. Wave 3 moves recording audio metadata and Audio Intelligence into Meeting as read-only optional details; before deleting old Recording verify title/project and route consumers. macOS/VoiceOver/user-outcome evidence remains open.
 
 ## Resume checkpoint — 2026-10-27
 
-Base: `dev` `88e00ce`. Wave 2 on `ux/meeting-consolidation-wave2`; see acceptance and gaps above.
+Base: `dev` `83d70c7`. Wave 3 branch `ux/meeting-recording-details-parity`: source tracks, quality and lazily loaded Audio Intelligence. Integration pending; real target-Mac usability/VoiceOver and legacy Recording removal still open.
