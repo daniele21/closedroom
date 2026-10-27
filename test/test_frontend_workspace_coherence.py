@@ -58,6 +58,16 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertIn('workspace-runtime-status', self.app)
         self.assertIn('workspace-settings-trigger', self.app)
 
+    def test_activities_are_a_secondary_utility_not_primary_destination(self) -> None:
+        nav_start = self.app.index("const navItems = [")
+        nav_end = self.app.index("];", nav_start)
+        self.assertNotIn("id: 'activities'", self.app[nav_start:nav_end])
+        self.assertIn('data-tour="utility-activities"', self.app)
+        self.assertIn("activities.activeCount > 0", self.app)
+        self.assertIn("navigateTo('activities')", self.app)
+        self.assertIn("case 'activities':", self.app)
+        self.assertIn(".workspace-activity-trigger", self.css)
+
     def test_shell_has_explicit_wide_compact_narrow_and_reduced_motion_behavior(self) -> None:
         self.assertIn('grid-template-columns: 236px minmax(0, 1fr)', self.css)
         self.assertIn('@media (max-width: 980px)', self.css)
