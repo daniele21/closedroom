@@ -24,7 +24,7 @@ interface MeetingSearchDialogProps {
 type MeetingArchiveExplorerProps = Pick<
   MeetingSearchDialogProps,
   'open' | 'onOpenMeeting' | 'lang' | 'initialView' | 'demoMeetings'
-> & { onOpenChange?: (open: boolean) => void };
+> & { onOpenChange?: (open: boolean) => void; fullPage?: boolean };
 
 /** Cmd+K remains a quick-search modal; the library page reuses the exact same local query owner. */
 export function MeetingSearchDialog(props: MeetingSearchDialogProps) {
@@ -52,6 +52,7 @@ export function MeetingArchiveExplorer({
   lang,
   initialView,
   demoMeetings,
+  fullPage = false,
 }: MeetingArchiveExplorerProps) {
   const [query, setQuery] = useState(() => sessionStorage.getItem(QUERY_STORAGE_KEY) || '');
   const [showArchived, setShowArchived] = useState(() => initialView ? initialView === 'archived' : sessionStorage.getItem(VIEW_STORAGE_KEY) === 'archived');
@@ -61,6 +62,8 @@ export function MeetingArchiveExplorer({
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const generationRef = useRef(0);
 
@@ -80,9 +83,10 @@ export function MeetingArchiveExplorer({
     if (!open) return;
     const generation = ++generationRef.current;
     const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    setLoadMoreError(null);
     const timer = window.setTimeout(async () => {
-      setLoading(true);
-      setError(null);
       try {
         if (demoMeetings) {
           const needle = query.trim().toLocaleLowerCase(lang);
@@ -124,7 +128,7 @@ export function MeetingArchiveExplorer({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, query, demoMeetings, lang, showArchived]);
+  }, [open, query, demoMeetings, lang, showArchived, retryKey]);
 
   const loadMore = async () => {
     if (loadingMore || !hasMore) return;
@@ -148,7 +152,7 @@ export function MeetingArchiveExplorer({
 
     const generation = generationRef.current;
     setLoadingMore(true);
-    setError(null);
+    setLoadMoreError(null);
     try {
       const response = await searchMeetingArchive(query, page + 1, PAGE_SIZE, undefined, showArchived);
       if (generation !== generationRef.current) return;
@@ -161,7 +165,7 @@ export function MeetingArchiveExplorer({
       setHasMore(response.has_more);
     } catch (err) {
       if (generation === generationRef.current) {
-        setError(err instanceof Error ? err.message : String(err));
+        setLoadMoreError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       if (generation === generationRef.current) setLoadingMore(false);
@@ -196,7 +200,7 @@ export function MeetingArchiveExplorer({
           </label>
           <input
             id="dashboard-meeting-search"
-            autoFocus
+            autoFocus={!fullPage}
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -214,7 +218,7 @@ export function MeetingArchiveExplorer({
             </button>
           )}
         </div>
-        <DialogBody noScroll className="max-h-[58vh] overflow-y-auto p-2">
+        <DialogBody noScroll className={fullPage ? 'max-h-[min(70vh,760px)] min-h-[240px] overflow-y-auto p-2' : 'max-h-[58vh] overflow-y-auto p-2'}>
           <div aria-live="polite" className="sr-only">
             {loading
               ? (lang === 'it' ? 'Ricerca in corso' : 'Searching')
@@ -232,6 +236,9 @@ export function MeetingArchiveExplorer({
                 {lang === 'it' ? 'Ricerca non disponibile' : 'Search unavailable'}
               </p>
               <p className="mt-1 text-xs text-text-muted">{error}</p>
+              <Button variant="secondary" size="sm" onClick={() => setRetryKey((previous) => previous + 1)} className="mt-3">
+                {lang === 'it' ? 'Riprova ricerca' : 'Retry search'}
+              </Button>
             </div>
           ) : items.length === 0 ? (
             <div className="py-8 text-center text-sm text-text-muted">
@@ -266,6 +273,11 @@ export function MeetingArchiveExplorer({
                   </div>
                 </button>
               ))}
+              {loadMoreError && (
+                <p role="alert" className="mx-3 rounded-lg border border-danger/30 p-3 text-xs text-danger">
+                  {lang === 'it' ? 'Impossibile caricare altri meeting' : 'Could not load more meetings'}: {loadMoreError}
+                </p>
+              )}
               {hasMore && (
                 <div className="flex justify-center p-3">
                   <Button variant="secondary" onClick={loadMore} disabled={loadingMore}>

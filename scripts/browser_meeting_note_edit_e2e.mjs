@@ -576,6 +576,24 @@ try {
   }
   await checkpoint(browser, '01-evidence-ready');
 
+  await browser.clickButton(['Open full', 'Apri completa']);
+  let sourceFocus = false;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    sourceFocus = await browser.execute(`
+      const tab = document.querySelector('#meeting-tab-transcript');
+      return tab?.getAttribute('aria-selected') === 'true' && document.activeElement === tab;
+    `);
+    if (sourceFocus) break;
+    await sleep(100);
+  }
+  if (!sourceFocus) throw new Error('Notes companion did not transfer keyboard focus to the full transcript tab');
+  await checkpoint(browser, '01a-full-transcript-focus');
+  await browser.execute(`
+    document.querySelector('#meeting-tab-analysis')?.click();
+    return true;
+  `);
+  await waitText(browser, ['Alex validates the release'], 5000, true);
+
   await browser.clickButton(['00:05 · Alex']);
   await waitText(browser, ['Audio']);
   await checkpoint(browser, '02-evidence-opens-audio');

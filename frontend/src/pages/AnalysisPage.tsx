@@ -45,7 +45,7 @@ interface AnalysisResult {
   [key: string]: any;
 }
 
-export default function AnalysisPage({ detailId, navigateTo: _navigateTo, demoMode = false }: AnalysisPageProps) {
+export default function AnalysisPage({ detailId, navigateTo, demoMode = false }: AnalysisPageProps) {
   const { t, lang } = useTranslation();
   const { showToast } = useToast();
 
@@ -398,6 +398,16 @@ export default function AnalysisPage({ detailId, navigateTo: _navigateTo, demoMo
                         <span className="font-medium text-text-muted">{t('analysis.selectedTokens') || 'Token stimati:'}</span>
                         <strong className="text-accent font-bold">{tokenCount}</strong>
                       </div>
+                      {selectedTr.recording_id && (
+                        <button
+                          type="button"
+                          onClick={() => navigateTo('meeting', selectedTr.recording_id)}
+                          data-analysis-open-meeting="true"
+                          className="mt-2 inline-flex items-center justify-center rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-xs font-semibold text-text-primary transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                        >
+                          {lang === 'it' ? 'Apri il meeting completo' : 'Open full meeting'}
+                        </button>
+                      )}
                     </div>
                   );
                 })()}

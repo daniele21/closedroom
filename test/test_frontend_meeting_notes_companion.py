@@ -19,7 +19,10 @@ class MeetingNotesTranscriptCompanionTests(unittest.TestCase):
         self.assertIn("onTimestampClick={handleTimestampClick}", page)
         self.assertIn("onUpdateNote={handleUpdateNote}", page)
         self.assertIn("onDeleteNote={handleDeleteNote}", page)
-        self.assertIn("onClick={() => selectTab('transcript')}", page)
+        self.assertIn("onClick={() => focusTab('transcript')}", page)
+        self.assertIn("aria-controls={panelId('transcript')}", page)
+        self.assertIn('data-meeting-primary-notes="true"', page)
+        self.assertIn("hasCurrentNotes ? (lang === 'it' ? 'Note e azioni'", page)
 
     def test_browser_journey_covers_saved_notes_and_source_together(self) -> None:
         browser = BROWSER.read_text(encoding="utf-8")

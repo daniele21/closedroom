@@ -1346,7 +1346,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
               )}
             >
               <Sparkles className="w-4 h-4" aria-hidden="true" />
-              <span>{t('meeting.tabAnalysis')}</span>
+              <span>{hasCurrentNotes ? (lang === 'it' ? 'Note e azioni' : 'Notes & actions') : t('meeting.tabAnalysis')}</span>
               {meeting.analysis_runs.length > 0 && (
                 <span className={cn(
                   'ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border',
@@ -1559,7 +1559,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                 </div>
 
                 <div className={meeting.transcription ? 'grid grid-cols-1 xl:grid-cols-2' : ''} data-meeting-notes-workspace="true">
-                  <div className="min-w-0 p-5 sm:p-6 bg-bg-elevated min-h-[220px]">
+                  <div className="min-w-0 p-4 sm:p-6 bg-bg-elevated min-h-[220px]" data-meeting-primary-notes="true">
                   {selectedRun ? (
                     selectedRun.result?.schema?.id === 'closedroom.meeting_notes' && selectedRun.result?.schema?.version === 2 ? (
                       <StructuredNotesEditor
@@ -1606,11 +1606,17 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                           <FileText className="h-4 w-4 text-accent" aria-hidden="true" />
                           {lang === 'it' ? 'Trascrizione' : 'Transcript'}
                         </span>
-                        <Button size="sm" variant="ghost" onClick={() => selectTab('transcript')}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => focusTab('transcript')}
+                          aria-controls={panelId('transcript')}
+                          aria-label={lang === 'it' ? 'Apri la trascrizione completa' : 'Open full transcript'}
+                        >
                           {lang === 'it' ? 'Apri completa' : 'Open full'}
                         </Button>
                       </div>
-                      <div className="max-h-[640px] overflow-y-auto p-4" data-meeting-transcript-companion-content="true">
+                      <div className="max-h-[min(60vh,640px)] overflow-y-auto p-4 focus-within:ring-2 focus-within:ring-inset focus-within:ring-border-focus" data-meeting-transcript-companion-content="true">
                         {meeting.transcription.segments?.length ? (
                           <TranscriptTextView
                             segments={meeting.transcription.segments}

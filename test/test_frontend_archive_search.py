@@ -51,6 +51,15 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
         self.assertFalse((ROOT / "frontend/src/components/workspace/MeetingListDialog.tsx").exists())
         self.assertNotIn("MeetingListDialog", self.dashboard)
 
+    def test_full_library_has_adaptive_height_without_dialog_autofocus(self) -> None:
+        page = (ROOT / "frontend/src/pages/MeetingsPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("<MeetingArchiveExplorer", page)
+        self.assertIn("fullPage", page)
+        self.assertIn("autoFocus={!fullPage}", self.dialog)
+        self.assertIn("min-h-[240px]", self.dialog)
+        self.assertIn("setRetryKey((previous) => previous + 1)", self.dialog)
+        self.assertIn("setLoadMoreError", self.dialog)
+
     def test_search_is_server_side_bounded_and_paged(self) -> None:
         self.assertIn("const PAGE_SIZE = 25", self.dialog)
         self.assertIn("searchMeetingArchive(query, 1, PAGE_SIZE", self.dialog)
