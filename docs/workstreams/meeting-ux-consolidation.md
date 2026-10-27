@@ -25,14 +25,9 @@ Non-goals: brand rework, changing ASR/LLM/diarization engines, replacing storage
 - PRIVACY/RELIABILITY: no remote fallback, new telemetry, implicit capture, leaked transcripts or hidden errors; the existing local FTS5 owner stays canonical.
 - IA decision: `Meetings + Projects` is now the integrated primary navigation; Today is a quick view, All is the library destination, and Activities is a secondary utility in `design/ux-contract.json`.
 
-## Current verified ownership (audit @ base)
+## Canonical ownership
 
-- Navigation + legacy `recording/:id` route: `App.tsx`; canonical saved Meeting: `MeetingDetailPage.tsx`; old detail also lives in `RecordingPage.tsx`. Preserve `recording/auto/:token` capture handoff.
-- Today/list/search/archive entry points: `DashboardPage.tsx`, `MeetingsPage.tsx`, `MeetingSearchDialog.tsx`; the retired `MeetingListDialog.tsx` is deleted. Preserve bounded local FTS5 paging/cancellation.
-- Projects + insights: `ProjectsPage.tsx` and workspace components; project filters differ legitimately from global notes, but must not create another meeting detail.
-- Expert input/results: `TranscriptionPage.tsx`, `ResultsStep.tsx`, `AnalysisPage.tsx`. Preserve independent import, export, merge/split, advanced rerun and unlinked-text analysis.
-- Canonical notes, timestamps and diarization: `TranscriptTextView`, `StructuredNotesEditor`, `SpeakerDiarizationEditor`, `CommunityOneReviewPanel`; protect snapshot undo, source anchors and speaker provenance.
-- Progress: `ActivitiesPage.tsx`, `MeetingProcessingStatus.tsx`; display distinct global/contextual views of the same jobs.
+`App.tsx` owns routes and compatibility. `MeetingDetailPage.tsx` owns saved Meeting and advanced tools. `MeetingsPage.tsx`, `DashboardPage.tsx` and `MeetingSearchDialog.tsx` share bounded local FTS5. `ProjectsPage.tsx` scopes the same Meeting. `AnalysisPage.tsx`/`TranscriptionPage.tsx` retain independent imports. `useActivities` projects one canonical job store. Legacy `RecordingPage.tsx` still hosts Audio Intelligence and requires parity before deletion.
 
 ## Target information architecture and critical journey
 
