@@ -38,6 +38,11 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
         self.assertIn("searchMeetingArchive(query, page + 1, PAGE_SIZE, undefined, showArchived)", self.dialog)
         self.assertIn("if (archived) params.set('archived', 'true')", self.api)
 
+    def test_obsolete_duplicate_meeting_list_surface_is_retired(self) -> None:
+        self.assertFalse((ROOT / "frontend/src/components/workspace/MeetingListDialog.tsx").exists())
+        self.assertIn("<MeetingSearchDialog", self.dashboard)
+        self.assertNotIn("MeetingListDialog", self.dashboard)
+
     def test_search_is_server_side_bounded_and_paged(self) -> None:
         self.assertIn("const PAGE_SIZE = 25", self.dialog)
         self.assertIn("searchMeetingArchive(query, 1, PAGE_SIZE", self.dialog)
