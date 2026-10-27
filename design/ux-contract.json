@@ -131,7 +131,8 @@
       "language",
       "tour",
       "demo",
-      "runtime_status"
+      "runtime_status",
+      "activity_status"
     ],
     "desktop_pattern": "one stable left workspace rail",
     "compact_pattern": "the same destinations and action hierarchy reflow into one sticky top toolbar; compact width must not introduce a second navigation model",
@@ -178,7 +179,7 @@
     "diarization_review_apply": "On a saved Meeting with a timed transcript, the Speaker tab offers an opt-in single-engine Community-1 review. Computing a full-track preview uses a cancellable local job and never edits the transcript. Show bounded before/after speaker labels, require a separate explicit Apply action, preserve exact canonical ASR text and word/segment times, and expose a persistently available one-step rollback. Compare source identity and revision fingerprints; reject stale previews and undo requests rather than overwriting subsequent edits. Keep engine selection local to the Meeting, independent of global settings and A/B benchmarks.",
     "diarization_comparison": "The saved Meeting Speaker tab offers a deliberate A/B task: select at least two local engines, use the opening sample, validated absolute start/end range or full track, and start one canonical cancellable job. Review metrics without treating cluster counts as accuracy. Full results retain original-time speaker coverage locally while UI navigates only bounded 1/5/10/30-minute windows via accessible time slider, previous/next controls and synchronized audio; legacy runs state that only their original five-minute preview exists. Never modify original transcript or named speakers or silently choose a remote provider.",
     "model_residency": "Managed AI residency is phase-scoped and reclaimed after work; external runtimes remain caller-owned.",
-    "meeting_processing_feedback": "Meeting and Activities distinguish queued, service wait, retry, active work and cancellation. Legacy ASR phase statuses remain active. Waiting never renders percentage fill; unknown active progress is indeterminate without aria-valuenow. ASR percentages refer to the current track and show processed audio, duration and ETA only when measured; visual progress uses completed work units. Stage markers are never presented as measured progress. Preparation owns one visible row with measured child feedback. Activities provides source, wait reason when known, cancel, result navigation and bounded recent history; offline keeps the last state explicitly stale. Motion respects reduced motion.",
+    "meeting_processing_feedback": "Meeting and Activities distinguish queued, service wait, retry, active work and cancellation. Legacy ASR phase statuses remain active. Waiting never renders percentage fill; unknown active progress is indeterminate without aria-valuenow. ASR percentages refer to the current track and show processed audio, duration and ETA only when measured; visual progress uses completed work units. Stage markers are never presented as measured progress. Preparation owns one visible row with measured child feedback. Activities is reached through a secondary global status utility (never a third primary destination); it provides source, wait reason when known, cancel, result navigation and bounded recent history; offline keeps the last state explicitly stale. Motion respects reduced motion.",
     "background_activity": "Stable UI state must not require display-rate React updates or avoidable polling loops; bounded short-interval polling is allowed only for the transient capture-reservation handshake and stops when it grants, cancels or fails."
   },
   "critical_states": [
