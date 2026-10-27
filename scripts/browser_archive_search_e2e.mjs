@@ -459,6 +459,32 @@ try {
   }
   await checkpoint(browser, '05-unified-archive-filter');
 
+  // Full library is a stable destination, powered by exactly the same search component.
+  await browser.navigate(`http://127.0.0.1:${vitePort}/#meetings`);
+  await waitText(browser, ['Archive source meeting'], 8000, true);
+  const library = await browser.execute(`
+    return {
+      path: window.location.hash,
+      present: Boolean(document.querySelector('[data-meetings-page="true"]')),
+      explorer: Boolean(document.querySelector('[data-meeting-library-explorer="true"]')),
+      query: document.querySelector('#dashboard-meeting-search')?.value || '',
+      activeNavigation: document.querySelector('[data-tour="nav-home"]')?.getAttribute('aria-current')
+    };
+  `);
+  if (library.path !== '#meetings' || !library.present || !library.explorer
+      || library.query !== 'sequoia' || library.activeNavigation !== 'page') {
+    throw new Error(`Full library does not reuse complete local search: ${JSON.stringify(library)}`);
+  }
+  await checkpoint(browser, '06-full-library-destination');
+  await browser.clickButton(['Archive source meeting']);
+  await waitText(browser, ['historical decision used the unique keyword sequoia'], 10000, true);
+  await browser.execute('window.history.back(); return true;');
+  await waitText(browser, ['Archive source meeting'], 8000, true);
+  if (!(await browser.execute("return Boolean(document.querySelector('[data-meetings-page=true]'));"))) {
+    throw new Error('Back from saved meeting did not restore the library destination');
+  }
+  await checkpoint(browser, '07-library-roundtrip');
+
   video = await renderVideo();
 } catch (caught) {
   error = `${caught?.name || 'Error'}: ${caught?.message || caught}`;

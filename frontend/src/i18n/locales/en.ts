@@ -54,6 +54,7 @@ const en = {
   nav: {
     activities: "Activities",
     home: 'Today',
+    meetings: 'Meetings',
     projects: 'Projects',
     recording: 'Recording',
     transcription: 'Transcription',

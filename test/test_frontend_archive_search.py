@@ -38,6 +38,15 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
         self.assertIn("searchMeetingArchive(query, page + 1, PAGE_SIZE, undefined, showArchived)", self.dialog)
         self.assertIn("if (archived) params.set('archived', 'true')", self.api)
 
+    def test_full_meeting_page_and_quick_search_share_one_query_owner(self) -> None:
+        page = (ROOT / "frontend/src/pages/MeetingsPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("<MeetingArchiveExplorer", page)
+        self.assertIn("getDemoMeetings(lang)", page)
+        self.assertIn("export function MeetingArchiveExplorer", self.dialog)
+        self.assertIn("<MeetingArchiveExplorer {...props} />", self.dialog)
+        self.assertIn("onOpenMeeting={(id) => navigateTo('meeting', id)}", page)
+        self.assertIn("onClick={() => navigateTo('meetings')}", self.dashboard)
+
     def test_search_is_server_side_bounded_and_paged(self) -> None:
         self.assertIn("const PAGE_SIZE = 25", self.dialog)
         self.assertIn("searchMeetingArchive(query, 1, PAGE_SIZE", self.dialog)

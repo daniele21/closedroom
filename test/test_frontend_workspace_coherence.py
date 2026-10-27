@@ -24,8 +24,17 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertNotIn('className="app-header', self.app)
         self.assertNotIn('className="app-nav', self.app)
 
+    def test_meetings_is_a_durable_destination_and_today_remains_reachable(self) -> None:
+        meeting_page = (ROOT / "frontend/src/pages/MeetingsPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("case 'meetings':", self.app)
+        self.assertIn("id === 'home' ? 'meetings' : item.id", self.app)
+        self.assertIn("label: t('nav.meetings')", self.app)
+        self.assertIn("<MeetingArchiveExplorer", meeting_page)
+        self.assertIn("navigateTo('home')", meeting_page)
+        self.assertIn("activePage === 'meetings'", self.app)
+
     def test_meeting_stays_a_child_of_today_in_navigation(self) -> None:
-        self.assertIn("const todayActive = activePage === 'home' || (activePage === 'meeting' && !meetingFromProject)", self.app)
+        self.assertIn("const todayActive = activePage === 'home' || activePage === 'meetings' || (activePage === 'meeting' && !meetingFromProject)", self.app)
         self.assertIn("aria-current={item.active ? 'page' : undefined}", self.app)
         self.assertNotIn("{ id: 'meeting'", self.app)
 
