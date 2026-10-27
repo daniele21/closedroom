@@ -20,6 +20,7 @@ import { ToastProvider, useToast } from './context/ToastContext';
 import { ApiClient } from './api/apiClient';
 import { HEALTH_CHECK_INTERVAL_MS } from './api/config';
 import DashboardPage from './pages/DashboardPage';
+import MeetingsPage from './pages/MeetingsPage';
 import NewRecordingPage from './pages/NewRecordingPage';
 import { Badge } from './components/ui/Badge';
 import { Button } from './components/ui/Button';
@@ -49,7 +50,7 @@ function MainApp() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [brandLogoFailed, setBrandLogoFailed] = useState(false);
   const [routeDetail, setRouteDetail] = useState<string | null>(null);
-  const meetingOriginRef = useRef<'home' | 'projects'>('home');
+  const meetingOriginRef = useRef<'home' | 'meetings' | 'projects'>('home');
   const [tourStep, setTourStep] = useState<TourStepId | null>(null);
   const [tourReturnHash, setTourReturnHash] = useState('');
   const moreTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -64,6 +65,7 @@ function MainApp() {
   const navigateTo = (page: string, detail: string | null = null) => {
     const pageRouteMap: Record<string, string> = {
       home: 'home',
+      meetings: 'meetings',
       recording: 'recording',
       transcription: 'transcription',
       projects: 'projects',
@@ -76,7 +78,7 @@ function MainApp() {
     const legacyRecordingDetail = page === 'recording' && detail !== null && !detail.startsWith('auto/');
     const route = legacyRecordingDetail ? 'meeting' : (pageRouteMap[page] || page);
     if (route === 'meeting' && activePage !== 'meeting') {
-      meetingOriginRef.current = activePage === 'projects' ? 'projects' : 'home';
+      meetingOriginRef.current = activePage === 'projects' ? 'projects' : activePage === 'meetings' ? 'meetings' : 'home';
     }
     window.location.hash = detail ? `${route}/${detail}` : route;
     if (tourStep === 'today-to-projects' && route === 'projects') {
@@ -119,6 +121,7 @@ function MainApp() {
       const detail = parts.slice(1).join('/');
       const pageMap: Record<string, string> = {
         home: 'home',
+        meetings: 'meetings',
         record: 'recording',
         recording: 'recording',
         transcribe: 'transcription',
@@ -272,6 +275,8 @@ function MainApp() {
             onActivateDemo={!isDemoActive ? activateDemo : undefined}
           />
         );
+      case 'meetings':
+        return <MeetingsPage navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'activities':
         return <ActivitiesPage activities={activities} navigateTo={navigateTo} />;
       case 'meeting':
@@ -279,7 +284,7 @@ function MainApp() {
           recordingId={routeDetail}
           navigateTo={navigateTo}
           onBack={() => navigateTo(meetingOriginRef.current)}
-          backLabel={meetingOriginRef.current === 'projects' ? t('nav.projects') : t('nav.home')}
+          backLabel={meetingOriginRef.current === 'projects' ? t('nav.projects') : meetingOriginRef.current === 'meetings' ? t('nav.meetings') : t('nav.home')}
           demoMode={isDemoActive}
         />;
       case 'recording':
@@ -317,9 +322,9 @@ function MainApp() {
   }
 
   const meetingFromProject = activePage === 'meeting' && meetingOriginRef.current === 'projects';
-  const todayActive = activePage === 'home' || (activePage === 'meeting' && !meetingFromProject);
+  const todayActive = activePage === 'home' || activePage === 'meetings' || (activePage === 'meeting' && !meetingFromProject);
   const navItems = [
-    { id: 'home', label: t('nav.home'), icon: BarChart3, active: todayActive },
+    { id: 'home', label: t('nav.meetings'), icon: BarChart3, active: todayActive },
     { id: 'projects', label: t('nav.projects'), icon: FolderKanban, active: activePage === 'projects' || meetingFromProject },
     { id: 'activities', label: t('nav.activities'), icon: ListTodo, active: activePage === 'activities' },
   ];
@@ -381,7 +386,7 @@ function MainApp() {
                 key={item.id}
                 type="button"
                 data-tour={`nav-${item.id}`}
-                onClick={() => navigateTo(item.id)}
+                onClick={() => navigateTo(item.id === 'home' ? 'meetings' : item.id)}
                 className={`workspace-nav-item ${item.active ? 'is-active' : ''}`}
                 aria-current={item.active ? 'page' : undefined}
               >
