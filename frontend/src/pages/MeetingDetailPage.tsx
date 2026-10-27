@@ -54,6 +54,8 @@ import { useMeetingAccessories } from '../hooks/useMeetingAccessories';
 interface MeetingDetailPageProps {
   recordingId: string | null;
   navigateTo: (page: string, detail?: string | null) => void;
+  onBack?: () => void;
+  backLabel?: string;
   demoMode?: boolean;
 }
 
@@ -183,8 +185,10 @@ function keyMomentContext(
   };
 }
 
-export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = false }: MeetingDetailPageProps) {
+export default function MeetingDetailPage({ recordingId, navigateTo, onBack, backLabel, demoMode = false }: MeetingDetailPageProps) {
   const { t, lang } = useTranslation();
+  const goBack = () => (onBack ? onBack() : navigateTo('home'));
+
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
   // The screenshot list owns current content; selection retains only its meeting-scoped identity.
@@ -583,7 +587,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     try {
       if (archived) {
         await ApiClient.archiveMeeting(meeting.id);
-        navigateTo('home');
+        goBack();
       } else {
         await ApiClient.restoreMeeting(meeting.id);
         await load();
@@ -602,7 +606,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     try {
       await ApiClient.deleteMeeting(meeting.id);
       setDeleteConfirmOpen(false);
-      navigateTo('home');
+      goBack();
     } catch (err: any) {
       setDeleteError(err?.message || (lang === 'it' ? 'Impossibile eliminare il meeting' : 'Could not delete meeting'));
     } finally {
@@ -749,7 +753,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     return (
       <div className="border border-border-subtle rounded-lg p-8 text-center">
         <p className="text-text-secondary">{t('meeting.selectMeetingFromToday')}</p>
-        <Button className="mt-4" variant="secondary" onClick={() => navigateTo('home')}>{t('meeting.backToToday')}</Button>
+        <Button className="mt-4" variant="secondary" onClick={() => goBack()}>{t('meeting.backToToday')}</Button>
       </div>
     );
   }
@@ -767,7 +771,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     return (
       <div className="border border-border-subtle rounded-lg p-8 text-center" role="alert">
         <p className="text-danger">{error || t('meeting.errorNotFound')}</p>
-        <Button className="mt-4" variant="secondary" onClick={() => navigateTo('home')}>{t('meeting.backToToday')}</Button>
+        <Button className="mt-4" variant="secondary" onClick={() => goBack()}>{t('meeting.backToToday')}</Button>
       </div>
     );
   }
@@ -820,11 +824,11 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         <div className="flex items-center justify-between gap-4">
           <button
             type="button"
-            onClick={() => navigateTo('home')}
+            onClick={() => goBack()}
             className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>{t('dashboard.title')}</span>
+            <span>{backLabel || t('dashboard.title')}</span>
           </button>
         </div>
 
