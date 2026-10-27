@@ -497,6 +497,53 @@ try {
   }
   await checkpoint(browser, '03-projects-container');
 
+  const openedProjectMeeting = await browser.execute(`
+    const timeline = document.querySelector('[data-tour="project-timeline"]');
+    const open = Array.from(timeline?.querySelectorAll('button') || []).find((button) =>
+      /^(Open|Apri)$/i.test((button.textContent || '').trim())
+    );
+    if (!open) return false;
+    open.click();
+    return true;
+  `);
+  if (!openedProjectMeeting) throw new Error('Project meeting timeline lacked an Open action');
+  await waitUntil(
+    browser,
+    'Meeting from project preserves project hierarchy',
+    `return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'meeting'
+      && document.querySelector('[data-tour="nav-projects"]')?.getAttribute('aria-current') === 'page';`,
+    10000,
+    true,
+  );
+  observations.meetingFromProjects = await browser.execute(`
+    const workspace = document.querySelector('[data-workspace-page="meeting"]');
+    const back = workspace?.querySelector('section button');
+    return {
+      projectsCurrent: document.querySelector('[data-tour="nav-projects"]')?.getAttribute('aria-current'),
+      backLabel: back?.textContent?.trim() || '',
+    };
+  `);
+  if (!/Projects|Progetti/.test(observations.meetingFromProjects.backLabel)) {
+    throw new Error(`Meeting did not offer return to its project: ${JSON.stringify(observations.meetingFromProjects)}`);
+  }
+  await checkpoint(browser, '03a-project-meeting-context');
+
+  await browser.execute(`
+    const back = document.querySelector('[data-workspace-page="meeting"] section button');
+    if (back) back.click();
+    return Boolean(back);
+  `);
+  await waitUntil(
+    browser,
+    'Return to selected Project',
+    `return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'projects'
+      && document.querySelector('[data-tour="nav-projects"]')?.getAttribute('aria-current') === 'page'
+      && document.querySelector('[data-tour="project-situation"]')?.textContent?.includes('ClosedRoom Beta Launch');`,
+    10000,
+    true,
+  );
+  await checkpoint(browser, '03b-project-return-preserved');
+
   const themeBefore = await browser.execute("return document.documentElement.getAttribute('data-theme');");
   await browser.click('.workspace-settings-trigger');
   await waitUntil(browser, 'workspace utility menu', "return Boolean(document.querySelector('#app-settings-menu'));", 5000);
