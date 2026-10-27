@@ -58,8 +58,8 @@ export default function RecordingPage({ detailId, navigateTo }: RecordingPagePro
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
   const onRecordingSaved = (recording: Recording) => {
-    // Navigate directly to the project view
-    navigateTo('recording', recording.id);
+    // A saved recording is reviewed in the canonical Meeting workspace.
+    navigateTo('meeting', recording.id);
   };
 
   const recorder = useRecorder(onRecordingSaved);
