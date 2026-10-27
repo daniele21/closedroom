@@ -46,7 +46,6 @@ export function MeetingSearchDialog(props: MeetingSearchDialogProps) {
 /** One bounded, abortable paged search surface shared by modal and full-page library. */
 export function MeetingArchiveExplorer({
   open,
-  onOpenChange,
   onOpenMeeting,
   lang,
   initialView = 'active',
