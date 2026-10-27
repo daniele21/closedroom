@@ -313,6 +313,18 @@ export default function DashboardPage({
 
   return (
     <div className="flex flex-col gap-5">
+      <nav className="flex flex-wrap items-center gap-2" aria-label={t('nav.meetings')} data-meetings-view-tabs="true">
+        <span aria-current="page" className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs font-semibold text-text-primary">
+          {t('nav.home')}
+        </span>
+        <button
+          type="button"
+          className="rounded-lg border border-border-subtle px-3 py-2 text-xs font-semibold text-text-secondary hover:bg-bg-hover"
+          onClick={() => navigateTo('meetings')}
+        >
+          {lang === 'it' ? 'Tutte le riunioni' : 'All meetings'}
+        </button>
+      </nav>
       <section
         data-tour="today-summary"
         className="premium-hero page-hero rounded-2xl p-5 sm:p-6"
