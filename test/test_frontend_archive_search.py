@@ -74,6 +74,8 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
 
     def test_query_survives_navigation_without_loading_entire_archive(self) -> None:
         self.assertIn("sessionStorage.setItem(QUERY_STORAGE_KEY, query)", self.dialog)
+        self.assertIn("sessionStorage.setItem(VIEW_STORAGE_KEY, showArchived ? 'archived' : 'active')", self.dialog)
+        self.assertIn("sessionStorage.getItem(VIEW_STORAGE_KEY) === 'archived'", self.dialog)
         self.assertNotIn("ApiClient.listMeetings", self.dialog)
         self.assertNotIn("setMeetings", self.dialog)
 
