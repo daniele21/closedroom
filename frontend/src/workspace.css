@@ -179,7 +179,7 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-.workspace-activity-trigger .ui-badge {
+.workspace-activity-count {
   margin-left: auto;
 }
 
@@ -430,6 +430,7 @@
   }
 
   .workspace-activity-trigger {
+    position: relative;
     width: 38px;
     min-height: 36px;
     justify-content: center;
@@ -440,7 +441,7 @@
     display: none;
   }
 
-  .workspace-activity-trigger .ui-badge {
+  .workspace-activity-count {
     position: absolute;
     margin: 0;
     top: -4px;
