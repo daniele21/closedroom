@@ -209,6 +209,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
   const [analysisSetupOpen, setAnalysisSetupOpen] = useState(false);
   const [analysisPipelineTarget, setAnalysisPipelineTarget] = useState('meeting_default');
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [audioIntelligenceOpen, setAudioIntelligenceOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
@@ -234,6 +235,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
     notesState,
     loadNotes,
   } = useMeetingAccessories({ recordingId, demoMode, lang });
+  // The optional audio disclosure belongs to the selected Meeting, never its predecessor.
+  useEffect(() => { setAudioIntelligenceOpen(false); }, [recordingId]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabListRef = useRef<HTMLDivElement | null>(null);
   const analysisMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1761,23 +1765,26 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
             <MeetingRecordingDetails recording={meeting.recording} />
 
             {meeting.transcription && !demoMode && (
-              <details
-                className="surface-advanced group rounded-xl overflow-hidden"
-                data-meeting-audio-intelligence="true"
-                onToggle={(event) => {
-                  if (event.currentTarget.open && audioIntelligenceState === 'idle') {
-                    void loadAudioIntelligence();
-                  }
-                }}
-              >
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus">
+              <section className="surface-advanced rounded-xl overflow-hidden" data-meeting-audio-intelligence="true">
+                <button
+                  type="button"
+                  aria-expanded={audioIntelligenceOpen}
+                  aria-controls="meeting-audio-intelligence-panel"
+                  onClick={() => {
+                    const opening = !audioIntelligenceOpen;
+                    setAudioIntelligenceOpen(opening);
+                    if (opening && audioIntelligenceState === 'idle') void loadAudioIntelligence();
+                  }}
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-text-primary hover:bg-bg-hover/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                >
                   <span>
                     {t('audioIntelligence.title')}
                     <span className="block text-xs font-normal text-text-muted">{t('audioIntelligence.description')}</span>
                   </span>
-                  <ChevronDown className="h-4 w-4 shrink-0 text-text-muted group-open:rotate-180" aria-hidden="true" />
-                </summary>
-                <div className="border-t border-border-subtle p-3" aria-live="polite">
+                  <ChevronDown className={cn('h-4 w-4 shrink-0 text-text-muted transition-transform', audioIntelligenceOpen && 'rotate-180')} aria-hidden="true" />
+                </button>
+                <div id="meeting-audio-intelligence-panel" hidden={!audioIntelligenceOpen} className="border-t border-border-subtle p-3" aria-live="polite">
+                  {audioIntelligenceOpen && (
                   {audioIntelligenceState === 'loading' && (
                     <p role="status" className="flex items-center gap-2 text-xs text-text-muted">
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -1800,8 +1807,10 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                       onTranscribe={startDefaultTranscription}
                     />
                   )}
+
+                  )}
                 </div>
-              </details>
+              </section>
             )}
 
             {diagnosticsLoading && (
