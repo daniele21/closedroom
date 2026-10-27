@@ -41,7 +41,7 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
     def test_search_is_server_side_bounded_and_paged(self) -> None:
         self.assertIn("const PAGE_SIZE = 25", self.dialog)
         self.assertIn("searchMeetingArchive(query, 1, PAGE_SIZE", self.dialog)
-        self.assertIn("searchMeetingArchive(query, page + 1, PAGE_SIZE)", self.dialog)
+        self.assertIn("searchMeetingArchive(query, page + 1, PAGE_SIZE, undefined, showArchived)", self.dialog)
         self.assertIn("response.has_more", self.dialog)
         self.assertIn("Math.min(limit, 50)", self.api)
         self.assertIn("q: query", self.api)
