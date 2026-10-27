@@ -461,21 +461,29 @@ try {
 
   // Full library is a stable destination, powered by exactly the same search component.
   await browser.navigate(`http://127.0.0.1:${vitePort}/#meetings`);
-  await waitText(browser, ['Archive source meeting'], 8000, true);
+  await waitText(browser, ['Archived client call'], 8000, true);
   const library = await browser.execute(`
     return {
       path: window.location.hash,
       present: Boolean(document.querySelector('[data-meetings-page="true"]')),
       explorer: Boolean(document.querySelector('[data-meeting-library-explorer="true"]')),
       query: document.querySelector('#dashboard-meeting-search')?.value || '',
-      activeNavigation: document.querySelector('[data-tour="nav-home"]')?.getAttribute('aria-current')
+      activeNavigation: document.querySelector('[data-tour="nav-home"]')?.getAttribute('aria-current'),
+      archivedSelected: document.querySelector('[data-archived-meetings="true"]')?.getAttribute('aria-pressed')
     };
   `);
   if (library.path !== '#meetings' || !library.present || !library.explorer
-      || library.query !== 'sequoia' || library.activeNavigation !== 'page') {
+      || library.query !== 'sequoia' || library.activeNavigation !== 'page' || library.archivedSelected !== 'true') {
     throw new Error(`Full library does not reuse complete local search: ${JSON.stringify(library)}`);
   }
-  await checkpoint(browser, '06-full-library-destination');
+  await checkpoint(browser, '06-full-library-archived-view-restored');
+  await browser.execute(`
+    const active = document.querySelector('[data-archived-meetings="true"]')?.previousElementSibling;
+    if (active) active.click();
+    return Boolean(active);
+  `);
+  await waitText(browser, ['Archive source meeting'], 8000, true);
+  await checkpoint(browser, '06a-full-library-active-view');
   await browser.clickButton(['Archive source meeting']);
   await waitText(browser, ['historical decision used the unique keyword sequoia'], 10000, true);
   await browser.execute('window.history.back(); return true;');
