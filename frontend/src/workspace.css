@@ -172,8 +172,15 @@
 .workspace-utility-wrap {
   position: relative;
   z-index: var(--z-nav);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   padding-top: 6px;
   border-top: 1px solid var(--border-subtle);
+}
+
+.workspace-activity-trigger .ui-badge {
+  margin-left: auto;
 }
 
 .workspace-settings-trigger .workspace-settings-chevron {
@@ -416,8 +423,28 @@
   .workspace-utility-wrap {
     grid-column: 4;
     grid-row: 1;
+    flex-direction: row;
+    gap: 2px;
     padding: 0;
     border: 0;
+  }
+
+  .workspace-activity-trigger {
+    width: 38px;
+    min-height: 36px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .workspace-activity-trigger > span {
+    display: none;
+  }
+
+  .workspace-activity-trigger .ui-badge {
+    position: absolute;
+    margin: 0;
+    top: -4px;
+    left: 27px;
   }
 
   .workspace-settings-trigger {
