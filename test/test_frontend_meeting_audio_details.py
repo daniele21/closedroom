@@ -18,7 +18,9 @@ class MeetingAudioDetailsContractTests(unittest.TestCase):
         self.assertIn("audioIntelligenceGenerationRef", ACCESSORIES)
         self.assertIn("audioIntelligenceGenerationRef.current += 1", ACCESSORIES)
         self.assertIn("audioIntelligenceState === 'idle'", MEETING)
-        self.assertIn("event.currentTarget.open", MEETING)
+        self.assertIn("aria-expanded={audioIntelligenceOpen}", MEETING)
+        self.assertIn("setAudioIntelligenceOpen(opening)", MEETING)
+        self.assertIn("aria-controls=\"meeting-audio-intelligence-panel\"", MEETING)
         self.assertIn("void loadAudioIntelligence()", MEETING)
         self.assertIn('data-meeting-audio-intelligence="true"', MEETING)
         self.assertIn("onClick={() => void loadAudioIntelligence()}", MEETING)
@@ -26,6 +28,7 @@ class MeetingAudioDetailsContractTests(unittest.TestCase):
     def test_source_audio_tracks_and_quality_warnings_are_not_lost(self) -> None:
         self.assertIn("<MeetingRecordingDetails recording={meeting.recording} />", MEETING)
         self.assertIn('data-meeting-recording-details="true"', RECORDING_DETAILS)
+        self.assertIn("aria-expanded={expanded}", RECORDING_DETAILS)
         self.assertIn("track.primary", RECORDING_DETAILS)
         self.assertIn("preload=\"none\"", RECORDING_DETAILS)
         self.assertIn("recording.quality_report", RECORDING_DETAILS)
