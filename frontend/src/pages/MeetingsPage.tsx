@@ -46,6 +46,7 @@ export default function MeetingsPage({ navigateTo, demoMode = false }: MeetingsP
       </header>
       <section className="surface-primary overflow-hidden rounded-2xl border border-border-subtle" aria-label={t('nav.meetings')}>
         <MeetingArchiveExplorer
+          fullPage
           open
           lang={lang}
           onOpenMeeting={(id) => navigateTo('meeting', id)}
