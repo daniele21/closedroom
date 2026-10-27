@@ -83,7 +83,7 @@ function restoreProjectView(): { name: string; range: TimeRangeState; actionScop
     if (!saved || typeof saved !== 'object') return fallback;
     const data = saved as Record<string, unknown>;
     const range = data.range && typeof data.range === 'object' ? data.range as Record<string, unknown> : null;
-    const mode = range && ['last7', 'last30', 'all', 'custom'].includes(String(range.mode)) ? range.mode : 'last7';
+    const mode = range && ['last7', 'last30', 'all', 'custom'].includes(String(range.mode)) ? String(range.mode) : 'last7';
     const validRange = {
       mode,
       ...(range?.startDate && typeof range.startDate === 'string' ? { startDate: range.startDate } : {}),
