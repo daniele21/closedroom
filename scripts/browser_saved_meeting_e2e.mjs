@@ -30,6 +30,12 @@ const meetingFixture = {
     created_at: '2026-09-05T10:00:00Z',
     stopped_at: '2026-09-05T10:10:00Z',
     duration_seconds: 600,
+    audio_tracks: [
+      { id: 'mixed', source: 'mixed', label: 'Mixed', bytes_written: 524288, primary: true },
+      { id: 'system', source: 'system', label: 'System track', bytes_written: 262144, primary: false },
+    ],
+    warnings: ['sync_duration_warning'],
+    quality_report: { sync: { duration_delta_ms: 135 } },
   },
   transcription: {
     id: 'e2e-transcription',
@@ -115,6 +121,7 @@ const diagnosticsFixture = {
 const counts = {
   session: 0, health: 0, meeting: 0, alternate_meeting: 0, held_meeting: 0,
   diagnostics: 0, visual_frames: 0, screenshots: 0, alternate_screenshots: 0, notes: 0, alternate_notes: 0,
+  audio_intelligence: 0,
   alternate_visual_context: 0,
   benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0, benchmark_window: 0,
   review_list: 0, review_start: 0, review_poll: 0, review_preview: 0,
@@ -218,6 +225,19 @@ function fixtureServer(port) {
         if (gate === 'error') return json(res, 503, { detail: 'stale_meeting_fetch_failed' });
       }
       return json(res, 200, requestedId === MEETING_ID ? meetingFixture : alternateMeetingFixture);
+    }
+    if (pathname === `/v1/recordings/${MEETING_ID}/intelligence`) {
+      counts.audio_intelligence += 1;
+      return json(res, 200, {
+        version: 1, backend: 'synthetic', mode: 'shadow', mock: true,
+        channels: {}, conversation_metrics: {
+          speaking_time_pct: { mic: 48, system: 36 },
+          speaking_time_seconds: { mic: 288, system: 216 },
+          speech_rate_wpm: { mic: 118, system: 105 },
+          long_pauses: [], overlaps: [], high_energy_moments: [],
+        },
+        insight_candidates: [],
+      });
     }
     if (pathname === `/v1/meetings/${MEETING_ID}/diagnostics`) {
       counts.diagnostics += 1;
@@ -708,13 +728,23 @@ try {
   await browser.navigate(`http://127.0.0.1:${vitePort}/#meeting/${MEETING_ID}`);
   await waitText(browser, ['Quarterly launch review'], 30000, true);
   await waitText(browser, ['Decision: ship the release after validation.']);
-  if (counts.diagnostics !== 0 || counts.visual_frames !== 0) {
+  if (counts.diagnostics !== 0 || counts.visual_frames !== 0 || counts.audio_intelligence !== 0) {
     throw new Error(`normal open fetched disclosure-driven accessories: ${JSON.stringify(counts)}`);
   }
   await waitCount('screenshots', 1);
   await checkpoint(browser, '01-ready-core-only');
 
   await browser.clickButton(['Details', 'Dettagli']);
+  if (counts.audio_intelligence !== 0) throw new Error('Opening Meeting Details fetched audio metrics without user disclosure');
+  const audioControls = await browser.execute(`
+    const section = document.querySelector('[data-meeting-recording-details="true"]');
+    return Boolean(section && /Tracce e qualità audio|Audio tracks and quality/.test(section.querySelector('summary')?.textContent || ''));
+  `);
+  if (!audioControls) throw new Error('Canonical Meeting lost recording quality and source track access');
+  await browser.clickCss('[data-meeting-audio-intelligence="true"] summary');
+  await waitCount('audio_intelligence', 1);
+  await waitText(browser, ['48%'], 5000, true);
+  await checkpoint(browser, '01a-audio-metrics-on-demand');
   await waitCount('diagnostics', 1);
   await waitText(
     browser,
