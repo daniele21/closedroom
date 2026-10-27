@@ -19,11 +19,11 @@ Non-goals: brand rework, changing ASR/LLM/diarization engines, replacing storage
 
 ## Product assumptions and risks
 
-- VALUE: redundant routes increase hesitation and hide notes. Falsify with time-to-find and time-to-evidence comparisons, not screenshot aesthetics.
-- USABILITY: `Today` and `Meetings` represent the same core collection at different filters; confirm people retain quick daily review. Proposed navigation is `Meetings` + `Projects` with persistent New Meeting, global search and secondary activity indicator; **this is a proposal** until a tested implementation reconciles `design/ux-contract.json`'s current Today/Projects contract.
-- FEASIBILITY: legacy `recording/:id`, transcript-result views and meeting tab panes use different state/routes. Keep IDs and back/forward/deep-link compatibility; do not reinterpret arbitrary imported text as a saved Meeting.
-- VIABILITY: preserve discoverability of all paid/useful power-user capabilities and macOS-native workflow. No migration/data loss.
-- PRIVACY/RELIABILITY: no remote fallback, new telemetry, transcript in logs/URLs, hidden capture, status fiction, stale write or rollback regression. Search stays in canonical local FTS5/archive owner. Never claim representative target-Mac validation from a browser fixture.
+- VALUE/USABILITY: duplicate views obscure meeting notes and old decisions; compare find-meeting/seek-source completion with the current flow. Retain fast Today access.
+- FEASIBILITY: preserve recording/transcription IDs, independent imports, deep links, browser history, complete-text local search, note revisions, timestamps, audio seek and Community-1 rollback.
+- VIABILITY: preserve expert tools without imposing technical choices on ordinary recording.
+- PRIVACY/RELIABILITY: no remote fallback, new telemetry, implicit capture, leaked transcripts or hidden errors; the existing local FTS5 owner stays canonical.
+- IA decision: propose `Meetings + Projects` with global New Meeting/search/secondary activities; the current `design/ux-contract.json` still declares Today/Projects until user-facing validation and integration.
 
 ## Current verified ownership (audit @ base)
 
