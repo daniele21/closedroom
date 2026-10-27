@@ -449,6 +449,34 @@ try {
   }
   await checkpoint(browser, '02-meeting-child-of-today');
 
+  // Historical recording-detail bookmarks must show the same saved Meeting.
+  const canonicalMeetingHash = await browser.execute("return window.location.hash;");
+  const savedMeetingId = String(canonicalMeetingHash).startsWith('#meeting/')
+    ? String(canonicalMeetingHash).slice('#meeting/'.length)
+    : '';
+  if (!savedMeetingId) throw new Error(`Unable to identify canonical Meeting route: ${canonicalMeetingHash}`);
+  await browser.navigate(`http://127.0.0.1:${vitePort}/?demo=true#recording/${savedMeetingId}`);
+  await waitUntil(
+    browser,
+    'legacy saved recording redirects to Meeting',
+    `return window.location.hash === '#meeting/${savedMeetingId}'
+      && document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'meeting'
+      && Boolean(document.querySelector('#meeting-tab-transcript'));`,
+    10000,
+    true,
+  );
+  observations.legacyRecordingAlias = await browser.execute(`
+    return {
+      hash: window.location.hash,
+      page: document.querySelector('.workspace-content')?.getAttribute('data-workspace-page'),
+      primaryNavCurrent: document.querySelector('[data-tour="nav-home"]')?.getAttribute('aria-current'),
+    };
+  `);
+  if (observations.legacyRecordingAlias.primaryNavCurrent !== 'page') {
+    throw new Error(`Legacy saved recording left the canonical Meeting hierarchy: ${JSON.stringify(observations.legacyRecordingAlias)}`);
+  }
+  await checkpoint(browser, '02a-legacy-recording-alias');
+
   await browser.click('[data-tour="nav-projects"]');
   await waitUntil(
     browser,
