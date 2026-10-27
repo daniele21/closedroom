@@ -430,7 +430,7 @@ export default function ResultsStep({
                   else navigateTo('analysis', transcriptionResult.id || transcriptionResult.saved_id);
                 }}
               >
-                🧠 {t('transcription.ctaAnalyze')}
+                🧠 {recordingId ? (lang === 'it' ? 'Prepara note nel meeting' : 'Prepare notes in Meeting') : t('transcription.ctaAnalyze')}
               </Button>
             </div>
           )}
