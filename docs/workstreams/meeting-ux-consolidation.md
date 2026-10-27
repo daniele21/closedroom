@@ -1,7 +1,7 @@
 # Meeting-first UX consolidation — navigation, library and saved Meeting
 
-Status: ACTIVE (planning baseline; implementation slices not yet integrated)
-Base: `dev` @ `20795b9e440efaf8b4d9817c3a13c9e2916acdda` (2026-10-26)
+Status: ACTIVE — canonical Meeting routing, unified search first slice, notes/transcript companion and origin-preserving Projects return integrated; remaining UX-3/4 refinements, UX-6/7 pending.
+Latest integration checkpoint: `dev` @ `f9ff980dcdbcc1083a8a4dc50b023b7f5c0e61b1` (2026-10-27).
 Product / delivery / validation / execution: PRODUCT_FEATURE / ITERATION; risk-selected SCOPED for isolated routes, STRONG when shared navigation/meeting contracts or recovery changes; REMOTE_AUTOMATED for unavailable deterministic Mac/browser gates, REAL_ENVIRONMENT for subjective macOS usability/TCC when materially affected. Integration always uses repository selector, affected FULL_MEDIA UX journeys, exact head/base evidence.
 
 ## User job and scope
@@ -53,16 +53,16 @@ States: READY / ACTIVE / BLOCKED / DONE. Parallel means non-overlapping **write 
 
 | ID | State | Independently observable deliverable | Owning files (write boundary) | Dependency |
 | --- | --- | --- | --- | --- |
-| UX-0 | ACTIVE | Audited plan, acceptance and sequencing in this document | `docs/workstreams/meeting-ux-consolidation.md` | Base dev |
-| UX-1 | ACTIVE | Legacy saved-recording route resolves to Meeting while `recording/auto` stays canonical New Meeting; saved output opens Meeting | `frontend/src/App.tsx`, `frontend/src/pages/RecordingPage.tsx`, route contract tests | Base dev |
-| UX-2 | ACTIVE | Recording-linked transcription results prominently return to saved Meeting, including optional notes CTA; unlinked input retains expert analysis | `frontend/src/pages/transcription/components/ResultsStep.tsx`, transcript workflow tests | Base dev |
-| UX-3 | READY | A single full-archive library surface for local search/filter/archive, including today/recent; no full transcript loading in UI | `DashboardPage.tsx`, `MeetingListDialog.tsx`, `MeetingSearchDialog.tsx`, archive search tests | UX-0 product decision; coordinate navigation contract with UX-5 |
-| UX-4 | READY | Unified saved Meeting content hierarchy, synced audio/note/transcript/moments and speaker tools via progressive disclosure | `MeetingDetailPage.tsx`, meeting semantic components, relevant browser journeys | UX-1 and explicit responsive/content decision |
-| UX-5 | READY | Stable project-origin return, selected project and filter/deep-link restoration; avoid per-page improvised history state | canonical shell route owner (`App.tsx`) + `ProjectsPage.tsx`, targeted tests | UX-1; serialize with UX-3 shell integration |
+| UX-0 | DONE | Audited plan, acceptance and sequencing in this document | `docs/workstreams/meeting-ux-consolidation.md` | Base dev |
+| UX-1 | DONE | Legacy saved-recording route resolves to Meeting while `recording/auto` stays canonical New Meeting; saved output opens Meeting | `frontend/src/App.tsx`, `frontend/src/pages/RecordingPage.tsx`, route contract tests | Base dev |
+| UX-2 | DONE | Recording-linked transcription results prominently return to saved Meeting, including optional notes CTA; unlinked input retains expert analysis | `frontend/src/pages/transcription/components/ResultsStep.tsx`, transcript workflow tests | Base dev |
+| UX-3 | ACTIVE | A single full-archive library surface for local search/filter/archive, including today/recent; no full transcript loading in UI | `DashboardPage.tsx`, `MeetingListDialog.tsx`, `MeetingSearchDialog.tsx`, archive search tests | UX-0 product decision; coordinate navigation contract with UX-5 |
+| UX-4 | ACTIVE | Unified saved Meeting content hierarchy, synced audio/note/transcript/moments and speaker tools via progressive disclosure | `MeetingDetailPage.tsx`, meeting semantic components, relevant browser journeys | UX-1 and explicit responsive/content decision |
+| UX-5 | DONE | Stable project-origin return, selected project and filter/deep-link restoration; avoid per-page improvised history state | canonical shell route owner (`App.tsx`) + `ProjectsPage.tsx`, targeted tests | UX-1; serialize with UX-3 shell integration |
 | UX-6 | READY | Global activity status as secondary utility and accessible in-context progress, without a second job store | `ActivitiesPage.tsx`, `MeetingProcessingStatus.tsx`, `App.tsx` after UX-5 | UX-5 (shared shell owner) |
 | UX-7 | READY | Retire remaining duplicate legacy entry points **only after** use-site census; unify notes/analysis/transcript defaults and finish documentation | `RecordingPage.tsx`, `AnalysisPage.tsx`, `TranscriptionPage.tsx`, `design/ux-contract.json`, `docs/features.md`, README usage, e2e | UX-3..6 |
 
-Early-convergence rule: UX-1 and UX-2 start in parallel directly from exact `dev`. Merge/rebase only after required evidence. UX-3 and UX-4 can run concurrently with disjoint files after UX-1 stabilizes; UX-5/6 own shell changes sequentially to avoid hidden coupling. Do not stack every feature PR or refactor backend to solve UI duplication.
+Converge early on disjoint owners; the shell and shared Meeting component are serialized. UX-6 and UX-7 must preserve exact-head validation.
 
 ## Incremental checkpoints and acceptance
 
@@ -82,6 +82,6 @@ Outcome measurement, proposed baseline+comparison: attempts/clicks and elapsed t
 - Keep individual slices reviewable and revertible; do not migrate transcript/recording IDs, rename persistent owners or delete finalized artifacts. Protect original texts/times, screenshot provenance and version-checked speaker rollback.
 - Owner for resume checkpoint: **this file only**. Before resuming refresh head/tree/base, branch/PR outcomes, failures and next proof. Transfer final UX rules into `design/ux-contract.json` and affected canonical owners before deleting the workstream plan.
 
-## Resume checkpoint — initial
+## Resume checkpoint — 2026-10-27
 
-Source: `dev` @ `20795b9e`; UI code owns routes in `App.tsx`, detailed Meeting in `MeetingDetailPage.tsx`, and `ResultStep` still has independent linked-recording results. Files and tests inspected: workspace-coherence, archive search, transcription workflow. No exact-head deterministic or representative Mac evidence from this planning baseline. Initial parallel tasks UX-1 / UX-2 are implementation candidates; merge readiness and usability are **not established**.
+Latest: `dev` `f9ff980d`. UX-1: PR #145, UX-2/3/4 first slices: PR #149, UX-5: PR #150 merged with exact-head INTEGRATION/SCOPED source and browser FULL_MEDIA evidence. PR #146–148 superseded by #149. Remaining: UX-3 destination-level library IA, UX-4 content/adaptive refinement, UX-6 global activity utility and UX-7 legacy cleanup. Packaged target-Mac/VoiceOver usability and product-success evidence remain unclaimed. Next: converge library destination and contextual Activities without duplicating canonical owners.
