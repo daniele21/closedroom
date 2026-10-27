@@ -326,7 +326,7 @@ function MainApp() {
   const navItems = [
     { id: 'home', label: t('nav.meetings'), icon: BarChart3, active: todayActive },
     { id: 'projects', label: t('nav.projects'), icon: FolderKanban, active: activePage === 'projects' || meetingFromProject },
-    { id: 'activities', label: t('nav.activities'), icon: ListTodo, active: activePage === 'activities' },
+
   ];
 
   return (
@@ -409,6 +409,19 @@ function MainApp() {
           )}
 
           <div className="more-menu-container workspace-utility-wrap">
+            <button
+              type="button"
+              data-tour="utility-activities"
+              onClick={() => navigateTo('activities')}
+              className={`workspace-nav-item workspace-activity-trigger ${activePage === 'activities' ? 'is-active' : ''}`}
+              aria-label={t('nav.activities')}
+              aria-current={activePage === 'activities' ? 'page' : undefined}
+              title={t('nav.activities')}
+            >
+              <ListTodo className="h-[18px] w-[18px]" aria-hidden="true" />
+              <span className="workspace-activity-label">{t('nav.activities')}</span>
+              {activities.activeCount > 0 && <Badge className="workspace-activity-count">{activities.activeCount}</Badge>}
+            </button>
             <button
               ref={moreTriggerRef}
               type="button"
