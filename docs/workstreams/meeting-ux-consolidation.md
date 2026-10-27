@@ -1,7 +1,7 @@
 # Meeting-first UX consolidation — navigation, library and saved Meeting
 
-Status: ACTIVE — canonical Meeting routing, unified search first slice, notes/transcript companion and origin-preserving Projects return integrated; remaining UX-3/4 refinements, UX-6/7 pending.
-Latest integration checkpoint: `dev` @ `f9ff980dcdbcc1083a8a4dc50b023b7f5c0e61b1` (2026-10-27).
+Status: ACTIVE — UX-0/1/2/5/6 integrated, UX-3 destination and recovery implemented, UX-4 notes/source refinement and UX-7 canonical expert return under integration; physical macOS usability and legacy Audio Intelligence parity still pending.
+Latest integration checkpoint: `dev` @ `88e00ce7568f7e9e423806ab243fdcef7547dfef` (2026-10-27, PR #155).
 Product / delivery / validation / execution: PRODUCT_FEATURE / ITERATION; risk-selected SCOPED for isolated routes, STRONG when shared navigation/meeting contracts or recovery changes; REMOTE_AUTOMATED for unavailable deterministic Mac/browser gates, REAL_ENVIRONMENT for subjective macOS usability/TCC when materially affected. Integration always uses repository selector, affected FULL_MEDIA UX journeys, exact head/base evidence.
 
 ## User job and scope
@@ -23,12 +23,12 @@ Non-goals: brand rework, changing ASR/LLM/diarization engines, replacing storage
 - FEASIBILITY: preserve recording/transcription IDs, independent imports, deep links, browser history, complete-text local search, note revisions, timestamps, audio seek and Community-1 rollback.
 - VIABILITY: preserve expert tools without imposing technical choices on ordinary recording.
 - PRIVACY/RELIABILITY: no remote fallback, new telemetry, implicit capture, leaked transcripts or hidden errors; the existing local FTS5 owner stays canonical.
-- IA decision: propose `Meetings + Projects` with global New Meeting/search/secondary activities; the current `design/ux-contract.json` still declares Today/Projects until user-facing validation and integration.
+- IA decision: `Meetings + Projects` is now the integrated primary navigation; Today is a quick view, All is the library destination, and Activities is a secondary utility in `design/ux-contract.json`.
 
 ## Current verified ownership (audit @ base)
 
 - Navigation + legacy `recording/:id` route: `App.tsx`; canonical saved Meeting: `MeetingDetailPage.tsx`; old detail also lives in `RecordingPage.tsx`. Preserve `recording/auto/:token` capture handoff.
-- Today/list/search/archive entry points: `DashboardPage.tsx`, `MeetingListDialog.tsx`, `MeetingSearchDialog.tsx`; retain bounded local server-side FTS5 paging, cancellation and archive recovery.
+- Today/list/search/archive entry points: `DashboardPage.tsx`, `MeetingsPage.tsx`, `MeetingSearchDialog.tsx`; the retired `MeetingListDialog.tsx` is deleted. Preserve bounded local FTS5 paging/cancellation.
 - Projects + insights: `ProjectsPage.tsx` and workspace components; project filters differ legitimately from global notes, but must not create another meeting detail.
 - Expert input/results: `TranscriptionPage.tsx`, `ResultsStep.tsx`, `AnalysisPage.tsx`. Preserve independent import, export, merge/split, advanced rerun and unlinked-text analysis.
 - Canonical notes, timestamps and diarization: `TranscriptTextView`, `StructuredNotesEditor`, `SpeakerDiarizationEditor`, `CommunityOneReviewPanel`; protect snapshot undo, source anchors and speaker provenance.
@@ -56,11 +56,11 @@ States: READY / ACTIVE / BLOCKED / DONE. Parallel means non-overlapping **write 
 | UX-0 | DONE | Audited plan, acceptance and sequencing in this document | `docs/workstreams/meeting-ux-consolidation.md` | Base dev |
 | UX-1 | DONE | Legacy saved-recording route resolves to Meeting while `recording/auto` stays canonical New Meeting; saved output opens Meeting | `frontend/src/App.tsx`, `frontend/src/pages/RecordingPage.tsx`, route contract tests | Base dev |
 | UX-2 | DONE | Recording-linked transcription results prominently return to saved Meeting, including optional notes CTA; unlinked input retains expert analysis | `frontend/src/pages/transcription/components/ResultsStep.tsx`, transcript workflow tests | Base dev |
-| UX-3 | ACTIVE | A single full-archive library surface for local search/filter/archive, including today/recent; no full transcript loading in UI | `DashboardPage.tsx`, `MeetingListDialog.tsx`, `MeetingSearchDialog.tsx`, archive search tests | UX-0 product decision; coordinate navigation contract with UX-5 |
+| UX-3 | DONE | A single full-archive library surface for local search/filter/archive, including today/recent; no full transcript loading in UI | `DashboardPage.tsx`, `MeetingListDialog.tsx`, `MeetingSearchDialog.tsx`, archive search tests | UX-0 product decision; coordinate navigation contract with UX-5 |
 | UX-4 | ACTIVE | Unified saved Meeting content hierarchy, synced audio/note/transcript/moments and speaker tools via progressive disclosure | `MeetingDetailPage.tsx`, meeting semantic components, relevant browser journeys | UX-1 and explicit responsive/content decision |
 | UX-5 | DONE | Stable project-origin return, selected project and filter/deep-link restoration; avoid per-page improvised history state | canonical shell route owner (`App.tsx`) + `ProjectsPage.tsx`, targeted tests | UX-1; serialize with UX-3 shell integration |
-| UX-6 | READY | Global activity status as secondary utility and accessible in-context progress, without a second job store | `ActivitiesPage.tsx`, `MeetingProcessingStatus.tsx`, `App.tsx` after UX-5 | UX-5 (shared shell owner) |
-| UX-7 | READY | Retire remaining duplicate legacy entry points **only after** use-site census; unify notes/analysis/transcript defaults and finish documentation | `RecordingPage.tsx`, `AnalysisPage.tsx`, `TranscriptionPage.tsx`, `design/ux-contract.json`, `docs/features.md`, README usage, e2e | UX-3..6 |
+| UX-6 | DONE | Global activity status as secondary utility and accessible in-context progress, without a second job store | `ActivitiesPage.tsx`, `MeetingProcessingStatus.tsx`, `App.tsx` after UX-5 | UX-5 (shared shell owner) |
+| UX-7 | ACTIVE | Retire remaining duplicate legacy entry points **only after** use-site census; unify notes/analysis/transcript defaults and finish documentation | `RecordingPage.tsx`, `AnalysisPage.tsx`, `TranscriptionPage.tsx`, `design/ux-contract.json`, `docs/features.md`, README usage, e2e | UX-3..6 |
 
 Converge early on disjoint owners; the shell and shared Meeting component are serialized. UX-6 and UX-7 must preserve exact-head validation.
 
@@ -82,6 +82,12 @@ Outcome measurement, proposed baseline+comparison: attempts/clicks and elapsed t
 - Keep individual slices reviewable and revertible; do not migrate transcript/recording IDs, rename persistent owners or delete finalized artifacts. Protect original texts/times, screenshot provenance and version-checked speaker rollback.
 - Owner for resume checkpoint: **this file only**. Before resuming refresh head/tree/base, branch/PR outcomes, failures and next proof. Transfer final UX rules into `design/ux-contract.json` and affected canonical owners before deleting the workstream plan.
 
+## Wave 2 acceptance checkpoint — 2026-10-27
+
+Base: `dev` `88e00ce` (UX-3 library destination, UX-6 activity utility, unused list removal) integrated with exact-head source/browser FULL_MEDIA in PR #155. UX-3: bounded full-page library and quick-search share the same query owner. Wave 2 improves compact full-page list sizing, retry on search failure, non-destructive pagination-error feedback and avoids stealing focus on page entry. UX-4: ready notes get clearer tab naming; opening full transcript transfers keyboard focus and retains source/seek semantics (browser check). UX-7: linked transcriptions in expert Analysis expose a canonical Meeting return without removing imported-text analysis. The former Recording detail still hosts an Audio Intelligence panel; **do not delete** until parity and consumers are proven. Old `MeetingListDialog` is already deleted; `docs/features.md` owner corrected.
+
+Still required: complete exact-head integration gates on this wave, review Meeting content density/adaptive interaction on installed target macOS, keyboard/VoiceOver and manual usability; verify and eventually retire old Recording page only with Audio Intelligence parity. No new cloud flow, persistence owner or silent capture.
+
 ## Resume checkpoint — 2026-10-27
 
-Latest: `dev` `f9ff980d`. UX-1: PR #145, UX-2/3/4 first slices: PR #149, UX-5: PR #150 merged with exact-head INTEGRATION/SCOPED source and browser FULL_MEDIA evidence. PR #146–148 superseded by #149. Remaining: UX-3 destination-level library IA, UX-4 content/adaptive refinement, UX-6 global activity utility and UX-7 legacy cleanup. Packaged target-Mac/VoiceOver usability and product-success evidence remain unclaimed. Next: converge library destination and contextual Activities without duplicating canonical owners.
+Latest integrated: PR #155 on `dev` `88e00ce`. Wave 2 branch `ux/meeting-consolidation-wave2` (base `88e00ce`) is under exact-head integration validation. UX-0/1/2/3/5/6 implemented; UX-4/7 require remaining adaptive/legacy and target-Mac evidence. No packaging, runtime or persistence changes.
