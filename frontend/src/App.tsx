@@ -414,7 +414,7 @@ function MainApp() {
               title={t('nav.activities')}
             >
               <ListTodo className="h-[18px] w-[18px]" aria-hidden="true" />
-              <span>{t('nav.activities')}</span>
+              <span className="workspace-activity-label">{t('nav.activities')}</span>
               {activities.activeCount > 0 && <Badge>{activities.activeCount}</Badge>}
             </button>
             <button
