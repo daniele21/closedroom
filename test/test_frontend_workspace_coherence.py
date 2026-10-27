@@ -34,7 +34,7 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertIn("activePage === 'meetings'", self.app)
 
     def test_meeting_stays_a_child_of_today_in_navigation(self) -> None:
-        self.assertIn("const todayActive = activePage === 'home' || (activePage === 'meeting' && !meetingFromProject)", self.app)
+        self.assertIn("const todayActive = activePage === 'home' || activePage === 'meetings' || (activePage === 'meeting' && !meetingFromProject)", self.app)
         self.assertIn("aria-current={item.active ? 'page' : undefined}", self.app)
         self.assertNotIn("{ id: 'meeting'", self.app)
 
