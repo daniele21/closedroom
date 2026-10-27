@@ -25,18 +25,14 @@ Non-goals: brand rework, changing ASR/LLM/diarization engines, replacing storage
 - VIABILITY: preserve discoverability of all paid/useful power-user capabilities and macOS-native workflow. No migration/data loss.
 - PRIVACY/RELIABILITY: no remote fallback, new telemetry, transcript in logs/URLs, hidden capture, status fiction, stale write or rollback regression. Search stays in canonical local FTS5/archive owner. Never claim representative target-Mac validation from a browser fixture.
 
-## Current confirmed inventory (audit @ base)
+## Current verified ownership (audit @ base)
 
-| Experience | Owners | UX duplication / preservation requirement |
-| --- | --- | --- |
-| Workspace navigation | `frontend/src/App.tsx`, `workspace.css` | Primary Today/Projects/Activities with contextual recording/transcription/analysis routes; avoid two active navigation models. |
-| Today and library | `DashboardPage.tsx`, `MeetingListDialog.tsx`, `MeetingSearchDialog.tsx` | Separate recent-list, archive-list and full-text search entry points. Preserve bounded paged search and archive actions. |
-| Project | `ProjectsPage.tsx`, `ProjectSidebar`, `InsightDetailDialog` | Timeline / summary / actions / decisions / risks are valid project context, not a second meeting detail. |
-| Saved Meeting | `MeetingDetailPage.tsx`, `TranscriptTextView`, `StructuredNotesEditor`, `SpeakerDiarizationEditor` | Canonical detail already exists; tab/layout and hardcoded return to Today need attention. Preserve notes revisions, timestamped moments, playback and speaker undo. |
-| Legacy recording detail | `RecordingPage.tsx` under `#recording/:id` | Audio, transcript and analysis card duplicate Meeting; preserve legacy deep links until migration tests prove safe. `#recording/auto/:token` must continue the capture path. |
-| Transcript tools | `TranscriptionPage.tsx`, `ResultsStep.tsx` | Wizard/alternate transcript+analysis useful for independent imports, rerun, merge/split; linked meeting should have a canonical review destination. |
-| Analysis tools | `AnalysisPage.tsx`, Meeting analysis tab | Saved-meeting analysis belongs beside source material; standalone text analysis remains separate. |
-| Activities | `ActivitiesPage.tsx`, `MeetingProcessingStatus.tsx` | Different scopes legitimate but should share lifecycle semantics. |
+- Navigation + legacy `recording/:id` route: `App.tsx`; canonical saved Meeting: `MeetingDetailPage.tsx`; old detail also lives in `RecordingPage.tsx`. Preserve `recording/auto/:token` capture handoff.
+- Today/list/search/archive entry points: `DashboardPage.tsx`, `MeetingListDialog.tsx`, `MeetingSearchDialog.tsx`; retain bounded local server-side FTS5 paging, cancellation and archive recovery.
+- Projects + insights: `ProjectsPage.tsx` and workspace components; project filters differ legitimately from global notes, but must not create another meeting detail.
+- Expert input/results: `TranscriptionPage.tsx`, `ResultsStep.tsx`, `AnalysisPage.tsx`. Preserve independent import, export, merge/split, advanced rerun and unlinked-text analysis.
+- Canonical notes, timestamps and diarization: `TranscriptTextView`, `StructuredNotesEditor`, `SpeakerDiarizationEditor`, `CommunityOneReviewPanel`; protect snapshot undo, source anchors and speaker provenance.
+- Progress: `ActivitiesPage.tsx`, `MeetingProcessingStatus.tsx`; display distinct global/contextual views of the same jobs.
 
 ## Target information architecture and critical journey
 
