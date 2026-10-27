@@ -19,14 +19,39 @@ interface MeetingSearchDialogProps {
   demoMeetings?: Meeting[];
 }
 
-export function MeetingSearchDialog({
+
+type MeetingArchiveExplorerProps = Pick<
+  MeetingSearchDialogProps,
+  'open' | 'onOpenMeeting' | 'lang' | 'initialView' | 'demoMeetings'
+>;
+
+/** Cmd+K remains a quick-search modal; the library page reuses the exact same local query owner. */
+export function MeetingSearchDialog(props: MeetingSearchDialogProps) {
+  const { open, onOpenChange, lang } = props;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="lg" dataTour="dashboard-search-dialog-content" className="max-h-[78vh]">
+        <DialogHeader
+          title={lang === 'it' ? 'Cerca in tutti i meeting' : 'Search all meetings'}
+          description={lang === 'it'
+            ? 'Un’unica libreria per tutti i periodi. La ricerca resta locale sul Mac.'
+            : 'One library across all dates. Search stays local on your Mac.'}
+        />
+        <MeetingArchiveExplorer {...props} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** One bounded, abortable paged search surface shared by modal and full-page library. */
+export function MeetingArchiveExplorer({
   open,
   onOpenChange,
   onOpenMeeting,
   lang,
   initialView = 'active',
   demoMeetings,
-}: MeetingSearchDialogProps) {
+}: MeetingArchiveExplorerProps) {
   const [query, setQuery] = useState(() => sessionStorage.getItem(QUERY_STORAGE_KEY) || '');
   const [showArchived, setShowArchived] = useState(initialView === 'archived');
   const [items, setItems] = useState<Meeting[]>([]);
@@ -139,16 +164,7 @@ export function MeetingSearchDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg" dataTour="dashboard-search-dialog-content" className="max-h-[78vh]">
-        <DialogHeader
-          title={lang === 'it' ? 'Cerca in tutti i meeting' : 'Search all meetings'}
-          description={
-            lang === 'it'
-              ? 'Un’unica libreria per tutti i periodi. La ricerca resta locale sul Mac.'
-              : 'One library across all dates. Search stays local on your Mac.'
-          }
-        />
+    <section className="flex min-h-0 flex-col" data-meeting-library-explorer="true">
         <div className="flex gap-2 border-b border-border-subtle px-4 py-2" role="group" aria-label={lang === 'it' ? 'Libreria meeting' : 'Meeting library'}>
           <button
             type="button"
@@ -256,7 +272,6 @@ export function MeetingSearchDialog({
             </div>
           )}
         </DialogBody>
-      </DialogContent>
-    </Dialog>
+    </section>
   );
 }
