@@ -85,4 +85,4 @@ Still required: complete exact-head integration gates on this wave, review Meeti
 
 ## Resume checkpoint — 2026-10-27
 
-Integrated baseline: `dev` `88e00ce`, PR #155. Wave 2 on `ux/meeting-consolidation-wave2`: UX-3 library recovery, UX-4 notes/source focus, UX-7 linked expert-return + docs. Remaining: legacy Audio Intelligence parity, target Mac usability/VoiceOver, outcome evidence. Do not claim release readiness.
+Base: `dev` `88e00ce`. Wave 2 on `ux/meeting-consolidation-wave2`; see acceptance and gaps above.
