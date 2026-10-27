@@ -62,7 +62,7 @@ States: READY / ACTIVE / BLOCKED / DONE. Parallel means non-overlapping **write 
 | UX-6 | READY | Global activity status as secondary utility and accessible in-context progress, without a second job store | `ActivitiesPage.tsx`, `MeetingProcessingStatus.tsx`, `App.tsx` after UX-5 | UX-5 (shared shell owner) |
 | UX-7 | READY | Retire remaining duplicate legacy entry points **only after** use-site census; unify notes/analysis/transcript defaults and finish documentation | `RecordingPage.tsx`, `AnalysisPage.tsx`, `TranscriptionPage.tsx`, `design/ux-contract.json`, `docs/features.md`, README usage, e2e | UX-3..6 |
 
-Early-convergence rule: UX-1 and UX-2 start in parallel directly from exact `dev`. Merge/rebase only after required evidence. UX-3 and UX-4 can run concurrently with disjoint files after UX-1 stabilizes; UX-5/6 own shell changes sequentially to avoid hidden coupling. Do not stack every feature PR or refactor backend to solve UI duplication.
+Converge early on disjoint owners; the shell and shared Meeting component are serialized. UX-6 and UX-7 must preserve exact-head validation.
 
 ## Incremental checkpoints and acceptance
 
@@ -82,6 +82,6 @@ Outcome measurement, proposed baseline+comparison: attempts/clicks and elapsed t
 - Keep individual slices reviewable and revertible; do not migrate transcript/recording IDs, rename persistent owners or delete finalized artifacts. Protect original texts/times, screenshot provenance and version-checked speaker rollback.
 - Owner for resume checkpoint: **this file only**. Before resuming refresh head/tree/base, branch/PR outcomes, failures and next proof. Transfer final UX rules into `design/ux-contract.json` and affected canonical owners before deleting the workstream plan.
 
-## Resume checkpoint — initial
+## Resume checkpoint — 2026-10-27
 
-Source: `dev` @ `f9ff980d`. PR #145 integrated legacy route alias with browser FULL_MEDIA; PR #149 integrated linked transcript results, one local Active/Archived search dialog and synchronized Notes/Transcript companion with INTEGRATION/SCOPED source and browser FULL_MEDIA; PR #150 integrated origin-aware Project Back and preserved local UI filters with the same automated gates. PR #146–148 were superseded by #149 and closed unmerged. UX-3 remains ACTIVE for destination-level library IA and UI polish; UX-4 remains ACTIVE for deeper content hierarchy/adaptive/accessibility review. UX-6 status utility and UX-7 legacy entry cleanup are READY. Automated integration proven only; representative packaged WKWebView / VoiceOver subjective evidence remains unclaimed. Next action: shape the remaining library destination and contextual Activities shell without duplicating search or job owners.
+Latest: `dev` `f9ff980d`. UX-1: PR #145, UX-2/3/4 first slices: PR #149, UX-5: PR #150 merged with exact-head INTEGRATION/SCOPED source and browser FULL_MEDIA evidence. PR #146–148 superseded by #149. Remaining: UX-3 destination-level library IA, UX-4 content/adaptive refinement, UX-6 global activity utility and UX-7 legacy cleanup. Packaged target-Mac/VoiceOver usability and product-success evidence remain unclaimed. Next: converge library destination and contextual Activities without duplicating canonical owners.
