@@ -9,6 +9,7 @@ import { Dialog, DialogBody, DialogContent, DialogHeader } from '../ui/Dialog';
 
 const PAGE_SIZE = 25;
 const QUERY_STORAGE_KEY = 'closedroom.meeting-search.query';
+const VIEW_STORAGE_KEY = 'closedroom.meeting-search.view';
 
 interface MeetingSearchDialogProps {
   open: boolean;
@@ -48,11 +49,11 @@ export function MeetingArchiveExplorer({
   open,
   onOpenMeeting,
   lang,
-  initialView = 'active',
+  initialView,
   demoMeetings,
 }: MeetingArchiveExplorerProps) {
   const [query, setQuery] = useState(() => sessionStorage.getItem(QUERY_STORAGE_KEY) || '');
-  const [showArchived, setShowArchived] = useState(initialView === 'archived');
+  const [showArchived, setShowArchived] = useState(() => initialView ? initialView === 'archived' : sessionStorage.getItem(VIEW_STORAGE_KEY) === 'archived');
   const [items, setItems] = useState<Meeting[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -63,12 +64,16 @@ export function MeetingArchiveExplorer({
   const generationRef = useRef(0);
 
   useEffect(() => {
-    if (open) setShowArchived(initialView === 'archived');
+    if (open && initialView) setShowArchived(initialView === 'archived');
   }, [open, initialView]);
 
   useEffect(() => {
     sessionStorage.setItem(QUERY_STORAGE_KEY, query);
   }, [query]);
+
+  useEffect(() => {
+    if (open) sessionStorage.setItem(VIEW_STORAGE_KEY, showArchived ? 'archived' : 'active');
+  }, [open, showArchived]);
 
   useEffect(() => {
     if (!open) return;
