@@ -70,7 +70,10 @@ function MainApp() {
       settings: 'settings',
       meeting: 'meeting',
     };
-    const route = pageRouteMap[page] || page;
+    // Saved recordings are always reviewed in the canonical Meeting workspace.
+    // The auto/<token> route belongs to native meeting-start handoff.
+    const legacyRecordingDetail = page === 'recording' && detail !== null && !detail.startsWith('auto/');
+    const route = legacyRecordingDetail ? 'meeting' : (pageRouteMap[page] || page);
     window.location.hash = detail ? `${route}/${detail}` : route;
     if (tourStep === 'today-to-projects' && route === 'projects') {
       const nextStep = TOUR_STEPS[tourStepIndex(tourStep) + 1];
@@ -123,7 +126,12 @@ function MainApp() {
         activities: 'activities',
         meeting: 'meeting',
       };
-      setActivePage(pageMap[pageName] || 'home');
+      const legacySavedRecording = pageName === 'recording' && Boolean(detail) && !detail.startsWith('auto/');
+      if (legacySavedRecording) {
+        // Replace, do not add a duplicate history entry for old bookmarked URLs.
+        window.history.replaceState(null, '', `#meeting/${detail}`);
+      }
+      setActivePage(pageMap[legacySavedRecording ? 'meeting' : pageName] || 'home');
       setRouteDetail(detail || null);
       setMoreOpen(false);
     };
