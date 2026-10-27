@@ -49,6 +49,7 @@ function MainApp() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [brandLogoFailed, setBrandLogoFailed] = useState(false);
   const [routeDetail, setRouteDetail] = useState<string | null>(null);
+  const meetingOriginRef = useRef<'home' | 'projects'>('home');
   const [tourStep, setTourStep] = useState<TourStepId | null>(null);
   const [tourReturnHash, setTourReturnHash] = useState('');
   const moreTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -74,6 +75,9 @@ function MainApp() {
     // The auto/<token> route belongs to native meeting-start handoff.
     const legacyRecordingDetail = page === 'recording' && detail !== null && !detail.startsWith('auto/');
     const route = legacyRecordingDetail ? 'meeting' : (pageRouteMap[page] || page);
+    if (route === 'meeting' && activePage !== 'meeting') {
+      meetingOriginRef.current = activePage === 'projects' ? 'projects' : 'home';
+    }
     window.location.hash = detail ? `${route}/${detail}` : route;
     if (tourStep === 'today-to-projects' && route === 'projects') {
       const nextStep = TOUR_STEPS[tourStepIndex(tourStep) + 1];
@@ -271,7 +275,13 @@ function MainApp() {
       case 'activities':
         return <ActivitiesPage activities={activities} navigateTo={navigateTo} />;
       case 'meeting':
-        return <MeetingDetailPage recordingId={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
+        return <MeetingDetailPage
+          recordingId={routeDetail}
+          navigateTo={navigateTo}
+          onBack={() => navigateTo(meetingOriginRef.current)}
+          backLabel={meetingOriginRef.current === 'projects' ? t('nav.projects') : t('nav.home')}
+          demoMode={isDemoActive}
+        />;
       case 'recording':
         if (isDemoActive) return <TourRecordingMock />;
         return routeDetail?.startsWith('auto/')
@@ -306,10 +316,11 @@ function MainApp() {
     );
   }
 
-  const todayActive = activePage === 'home' || activePage === 'meeting';
+  const meetingFromProject = activePage === 'meeting' && meetingOriginRef.current === 'projects';
+  const todayActive = activePage === 'home' || (activePage === 'meeting' && !meetingFromProject);
   const navItems = [
     { id: 'home', label: t('nav.home'), icon: BarChart3, active: todayActive },
-    { id: 'projects', label: t('nav.projects'), icon: FolderKanban, active: activePage === 'projects' },
+    { id: 'projects', label: t('nav.projects'), icon: FolderKanban, active: activePage === 'projects' || meetingFromProject },
     { id: 'activities', label: t('nav.activities'), icon: ListTodo, active: activePage === 'activities' },
   ];
 
