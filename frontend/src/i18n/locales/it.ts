@@ -54,6 +54,7 @@ const it = {
   nav: {
     activities: "Attivit\u00e0",
     home: 'Oggi',
+    meetings: 'Riunioni',
     projects: 'Progetti',
     recording: 'Registrazione',
     transcription: 'Trascrizione',

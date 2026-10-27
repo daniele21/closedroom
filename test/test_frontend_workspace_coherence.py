@@ -24,8 +24,17 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertNotIn('className="app-header', self.app)
         self.assertNotIn('className="app-nav', self.app)
 
+    def test_meetings_is_a_durable_destination_and_today_remains_reachable(self) -> None:
+        meeting_page = (ROOT / "frontend/src/pages/MeetingsPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("case 'meetings':", self.app)
+        self.assertIn("id === 'home' ? 'meetings' : item.id", self.app)
+        self.assertIn("label: t('nav.meetings')", self.app)
+        self.assertIn("<MeetingArchiveExplorer", meeting_page)
+        self.assertIn("navigateTo('home')", meeting_page)
+        self.assertIn("activePage === 'meetings'", self.app)
+
     def test_meeting_stays_a_child_of_today_in_navigation(self) -> None:
-        self.assertIn("const todayActive = activePage === 'home' || (activePage === 'meeting' && !meetingFromProject)", self.app)
+        self.assertIn("const todayActive = activePage === 'home' || activePage === 'meetings' || (activePage === 'meeting' && !meetingFromProject)", self.app)
         self.assertIn("aria-current={item.active ? 'page' : undefined}", self.app)
         self.assertNotIn("{ id: 'meeting'", self.app)
 
@@ -57,6 +66,17 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertNotIn("id: 'transcription'", nav_block)
         self.assertIn('workspace-runtime-status', self.app)
         self.assertIn('workspace-settings-trigger', self.app)
+
+    def test_activities_are_secondary_without_duplicating_job_ownership(self) -> None:
+        nav_start = self.app.index("const navItems = [")
+        nav_end = self.app.index("];", nav_start)
+        self.assertNotIn("id: 'activities'", self.app[nav_start:nav_end])
+        self.assertIn('data-tour="utility-activities"', self.app)
+        self.assertIn("navigateTo('activities')", self.app)
+        self.assertIn("activities.activeCount > 0", self.app)
+        self.assertIn("case 'activities':", self.app)
+        self.assertIn("workspace-activity-count", self.app)
+        self.assertIn(".workspace-activity-trigger", self.css)
 
     def test_shell_has_explicit_wide_compact_narrow_and_reduced_motion_behavior(self) -> None:
         self.assertIn('grid-template-columns: 236px minmax(0, 1fr)', self.css)

@@ -544,6 +544,34 @@ try {
   );
   await checkpoint(browser, '03b-project-return-preserved');
 
+  // Job state remains shell-owned, but its entry point is a utility, not a third peer page.
+  const activityUtility = await browser.execute(`
+    const primary = document.querySelector('.workspace-primary-nav');
+    const utility = document.querySelector('[data-tour="utility-activities"]');
+    return {
+      utilityFound: Boolean(utility),
+      duplicatedInPrimary: Boolean(primary?.querySelector('[data-tour="nav-activities"]')),
+      utilityLabel: utility?.getAttribute('aria-label') || ''
+    };
+  `);
+  if (!activityUtility.utilityFound || activityUtility.duplicatedInPrimary || !activityUtility.utilityLabel) {
+    throw new Error(`Activity utility was not placed correctly: ${JSON.stringify(activityUtility)}`);
+  }
+  await browser.click('[data-tour="utility-activities"]');
+  await waitUntil(
+    browser,
+    'Activity utility opens canonical job page',
+    `return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'activities'
+      && Boolean(document.querySelector('[data-activities-page]'))
+      && document.querySelector('[data-tour="utility-activities"]')?.getAttribute('aria-current') === 'page';`,
+    10000,
+    true,
+  );
+  await checkpoint(browser, '03c-activity-utility');
+  await browser.click('[data-tour="nav-projects"]');
+  await waitUntil(browser, 'Project navigation after activity', `return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'projects';`, 10000);
+
+
   const themeBefore = await browser.execute("return document.documentElement.getAttribute('data-theme');");
   await browser.click('.workspace-settings-trigger');
   await waitUntil(browser, 'workspace utility menu', "return Boolean(document.querySelector('#app-settings-menu'));", 5000);

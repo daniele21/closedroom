@@ -9,6 +9,7 @@ import { Dialog, DialogBody, DialogContent, DialogHeader } from '../ui/Dialog';
 
 const PAGE_SIZE = 25;
 const QUERY_STORAGE_KEY = 'closedroom.meeting-search.query';
+const VIEW_STORAGE_KEY = 'closedroom.meeting-search.view';
 
 interface MeetingSearchDialogProps {
   open: boolean;
@@ -19,16 +20,41 @@ interface MeetingSearchDialogProps {
   demoMeetings?: Meeting[];
 }
 
-export function MeetingSearchDialog({
+
+type MeetingArchiveExplorerProps = Pick<
+  MeetingSearchDialogProps,
+  'open' | 'onOpenMeeting' | 'lang' | 'initialView' | 'demoMeetings'
+> & { onOpenChange?: (open: boolean) => void };
+
+/** Cmd+K remains a quick-search modal; the library page reuses the exact same local query owner. */
+export function MeetingSearchDialog(props: MeetingSearchDialogProps) {
+  const { open, onOpenChange, lang } = props;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="lg" dataTour="dashboard-search-dialog-content" className="max-h-[78vh]">
+        <DialogHeader
+          title={lang === 'it' ? 'Cerca in tutti i meeting' : 'Search all meetings'}
+          description={lang === 'it'
+            ? 'Un’unica libreria per tutti i periodi. La ricerca resta locale sul Mac.'
+            : 'One library across all dates. Search stays local on your Mac.'}
+        />
+        <MeetingArchiveExplorer {...props} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** One bounded, abortable paged search surface shared by modal and full-page library. */
+export function MeetingArchiveExplorer({
   open,
   onOpenChange,
   onOpenMeeting,
   lang,
-  initialView = 'active',
+  initialView,
   demoMeetings,
-}: MeetingSearchDialogProps) {
+}: MeetingArchiveExplorerProps) {
   const [query, setQuery] = useState(() => sessionStorage.getItem(QUERY_STORAGE_KEY) || '');
-  const [showArchived, setShowArchived] = useState(initialView === 'archived');
+  const [showArchived, setShowArchived] = useState(() => initialView ? initialView === 'archived' : sessionStorage.getItem(VIEW_STORAGE_KEY) === 'archived');
   const [items, setItems] = useState<Meeting[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -39,12 +65,16 @@ export function MeetingSearchDialog({
   const generationRef = useRef(0);
 
   useEffect(() => {
-    if (open) setShowArchived(initialView === 'archived');
+    if (open && initialView) setShowArchived(initialView === 'archived');
   }, [open, initialView]);
 
   useEffect(() => {
     sessionStorage.setItem(QUERY_STORAGE_KEY, query);
   }, [query]);
+
+  useEffect(() => {
+    if (open) sessionStorage.setItem(VIEW_STORAGE_KEY, showArchived ? 'archived' : 'active');
+  }, [open, showArchived]);
 
   useEffect(() => {
     if (!open) return;
@@ -139,16 +169,7 @@ export function MeetingSearchDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg" dataTour="dashboard-search-dialog-content" className="max-h-[78vh]">
-        <DialogHeader
-          title={lang === 'it' ? 'Cerca in tutti i meeting' : 'Search all meetings'}
-          description={
-            lang === 'it'
-              ? 'Un’unica libreria per tutti i periodi. La ricerca resta locale sul Mac.'
-              : 'One library across all dates. Search stays local on your Mac.'
-          }
-        />
+    <section className="flex min-h-0 flex-col" data-meeting-library-explorer="true">
         <div className="flex gap-2 border-b border-border-subtle px-4 py-2" role="group" aria-label={lang === 'it' ? 'Libreria meeting' : 'Meeting library'}>
           <button
             type="button"
@@ -227,7 +248,7 @@ export function MeetingSearchDialog({
                   type="button"
                   onClick={() => {
                     onOpenMeeting(meeting.id);
-                    onOpenChange(false);
+                    onOpenChange?.(false);
                   }}
                   className="group flex w-full items-center justify-between rounded-xl border border-transparent p-3 text-left transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 >
@@ -256,7 +277,6 @@ export function MeetingSearchDialog({
             </div>
           )}
         </DialogBody>
-      </DialogContent>
-    </Dialog>
+    </section>
   );
 }
