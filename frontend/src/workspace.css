@@ -437,7 +437,7 @@
     padding: 0;
   }
 
-  .workspace-activity-trigger > span {
+  .workspace-activity-trigger > .workspace-activity-label {
     display: none;
   }
 
