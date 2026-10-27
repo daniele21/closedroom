@@ -125,6 +125,7 @@ let benchmarkRequest = null;
 let communityReviewJob = null;
 let communityReviewApplied = false;
 let lastBenchmarkWindowStart = null;
+const benchmarkWindowStarts = [];
 let failNextAlternateScreenshots = false;
 let failNextAlternateNotes = false;
 let holdNextMeetingId = null;
@@ -331,6 +332,7 @@ function fixtureServer(port) {
       const start = Number(params.get('start_seconds'));
       const end = Number(params.get('end_seconds'));
       lastBenchmarkWindowStart = start;
+      benchmarkWindowStarts.push(start);
       const sourceStart = benchmarkRequest.scope === 'range' ? benchmarkRequest.start_seconds : 0;
       const sourceEnd = benchmarkRequest.scope === 'range' ? benchmarkRequest.end_seconds
         : benchmarkRequest.scope === 'full' ? 600 : 300;
@@ -596,6 +598,28 @@ async function waitCount(key, minimum, timeoutMs = 5000) {
     await sleep(50);
   }
   throw new Error(`timed out waiting for ${key} >= ${minimum}; counts=${JSON.stringify(counts)}`);
+}
+
+/** Synchronize both the requested API window and the React-rendered slider.
+ * Request counters alone can advance on an obsolete/stale fetch. */
+async function waitBenchmarkWindow(browser, expectedStart, minimumRequests, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  let observed = null;
+  while (Date.now() < deadline) {
+    observed = await browser.execute(`
+      const root = document.querySelector('[data-diarization-benchmark="true"]');
+      const slider = Array.from(root?.querySelectorAll('input[type="range"]') || [])
+        .find((el) => /Timeline position|Posizione della timeline/.test(el.getAttribute('aria-label') || ''));
+      return { slider: slider ? Number(slider.value) : null, exists: Boolean(root) };
+    `);
+    if (counts.benchmark_window >= minimumRequests
+      && lastBenchmarkWindowStart === expectedStart
+      && observed?.slider === expectedStart) return;
+    await sleep(75);
+  }
+  throw new Error(`Benchmark window never stabilized at ${expectedStart}s: ${JSON.stringify({
+    observed, requests: counts.benchmark_window, windowStarts: benchmarkWindowStarts
+  })}`);
 }
 
 async function waitAbsent(browser, needles, timeoutMs = 5000) {
@@ -968,8 +992,7 @@ try {
   if (!canFindSpeaker) throw new Error('whole-meeting speaker locator missing for off-window cluster');
   // After Next, the window is 5:00–10:00: A is absent there.
   await browser.clickCss('[data-benchmark-jump="A"]');
-  await waitCount('benchmark_window', 5);
-  if (lastBenchmarkWindowStart !== 0) throw new Error('speaker locator did not return to first occurrence');
+  await waitBenchmarkWindow(browser, 0, 5);
   // The HTTP fixture counter increments before React renders the next
   // window. Wait for the actual UI control, not merely the response request.
   let speakerReady = false;
@@ -985,8 +1008,7 @@ try {
   if (!speakerReady) throw new Error('speaker jump control did not reappear after changing windows');
   // B is now absent from the first five minutes.
   await browser.clickCss('[data-benchmark-jump="B"]');
-  await waitCount('benchmark_window', 6);
-  if (lastBenchmarkWindowStart < 300) throw new Error('speaker locator did not find the later cluster');
+  await waitBenchmarkWindow(browser, 300, 6);
   await checkpoint(browser, '15-comparison-locate-speaker');
 
   // Review may only start from an explicit user action. The synthetic
