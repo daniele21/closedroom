@@ -741,6 +741,23 @@ try {
     return Boolean(section && /Tracce e qualità audio|Audio tracks and quality/.test(section.querySelector('summary')?.textContent || ''));
   `);
   if (!audioControls) throw new Error('Canonical Meeting lost recording quality and source track access');
+  // The Radix Sheet slides in over 250ms. Wait for its actual hit-test target
+  // before using a real WebDriver click; do not bypass pointer interaction.
+  let summaryClickable = false;
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    summaryClickable = await browser.execute(`
+      const summary = document.querySelector('[data-meeting-audio-intelligence="true"] summary');
+      if (!summary) return false;
+      summary.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const rect = summary.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return false;
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return Boolean(hit && (summary === hit || summary.contains(hit)));
+    `);
+    if (summaryClickable) break;
+    await sleep(100);
+  }
+  if (!summaryClickable) throw new Error('Audio Intelligence disclosure never became pointer-clickable in Meeting Details');
   await browser.clickCss('[data-meeting-audio-intelligence="true"] summary');
   await waitCount('audio_intelligence', 1);
   await waitText(browser, ['48%'], 5000, true);
