@@ -15,6 +15,7 @@ interface MeetingSearchDialogProps {
   onOpenChange: (open: boolean) => void;
   onOpenMeeting: (id: string) => void;
   lang: string;
+  initialView?: 'active' | 'archived';
   demoMeetings?: Meeting[];
 }
 
@@ -23,9 +24,11 @@ export function MeetingSearchDialog({
   onOpenChange,
   onOpenMeeting,
   lang,
+  initialView = 'active',
   demoMeetings,
 }: MeetingSearchDialogProps) {
   const [query, setQuery] = useState(() => sessionStorage.getItem(QUERY_STORAGE_KEY) || '');
+  const [showArchived, setShowArchived] = useState(initialView === 'archived');
   const [items, setItems] = useState<Meeting[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -34,6 +37,10 @@ export function MeetingSearchDialog({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const generationRef = useRef(0);
+
+  useEffect(() => {
+    if (open) setShowArchived(initialView === 'archived');
+  }, [open, initialView]);
 
   useEffect(() => {
     sessionStorage.setItem(QUERY_STORAGE_KEY, query);
@@ -49,14 +56,15 @@ export function MeetingSearchDialog({
       try {
         if (demoMeetings) {
           const needle = query.trim().toLocaleLowerCase(lang);
+          const source = demoMeetings.filter((meeting) => Boolean(meeting.recording.archived_at) === showArchived);
           const filtered = needle
-            ? demoMeetings.filter((meeting) =>
+            ? source.filter((meeting) =>
                 [meetingTitle(meeting), meeting.project_name, meeting.transcription?.text || '']
                   .join(' ')
                   .toLocaleLowerCase(lang)
                   .includes(needle),
               )
-            : demoMeetings;
+            : source;
           if (generation !== generationRef.current) return;
           setItems(filtered.slice(0, PAGE_SIZE));
           setTotal(filtered.length);
@@ -65,7 +73,7 @@ export function MeetingSearchDialog({
           return;
         }
 
-        const response = await searchMeetingArchive(query, 1, PAGE_SIZE, controller.signal);
+        const response = await searchMeetingArchive(query, 1, PAGE_SIZE, controller.signal, showArchived);
         if (generation !== generationRef.current) return;
         setItems(response.items);
         setTotal(response.total);
@@ -86,20 +94,21 @@ export function MeetingSearchDialog({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, query, demoMeetings, lang]);
+  }, [open, query, demoMeetings, lang, showArchived]);
 
   const loadMore = async () => {
     if (loadingMore || !hasMore) return;
     if (demoMeetings) {
       const needle = query.trim().toLocaleLowerCase(lang);
+      const source = demoMeetings.filter((meeting) => Boolean(meeting.recording.archived_at) === showArchived);
       const filtered = needle
-        ? demoMeetings.filter((meeting) =>
+        ? source.filter((meeting) =>
             [meetingTitle(meeting), meeting.project_name, meeting.transcription?.text || '']
               .join(' ')
               .toLocaleLowerCase(lang)
               .includes(needle),
           )
-        : demoMeetings;
+        : source;
       const nextPage = page + 1;
       setItems(filtered.slice(0, nextPage * PAGE_SIZE));
       setPage(nextPage);
@@ -111,7 +120,7 @@ export function MeetingSearchDialog({
     setLoadingMore(true);
     setError(null);
     try {
-      const response = await searchMeetingArchive(query, page + 1, PAGE_SIZE);
+      const response = await searchMeetingArchive(query, page + 1, PAGE_SIZE, undefined, showArchived);
       if (generation !== generationRef.current) return;
       setItems((current) => {
         const known = new Set(current.map((meeting) => meeting.id));
@@ -136,10 +145,29 @@ export function MeetingSearchDialog({
           title={lang === 'it' ? 'Cerca in tutti i meeting' : 'Search all meetings'}
           description={
             lang === 'it'
-              ? 'Titolo, progetto, trascrizione e note. La ricerca resta locale sul Mac.'
-              : 'Title, project, transcript and notes. Search stays local on your Mac.'
+              ? 'Un’unica libreria per tutti i periodi. La ricerca resta locale sul Mac.'
+              : 'One library across all dates. Search stays local on your Mac.'
           }
         />
+        <div className="flex gap-2 border-b border-border-subtle px-4 py-2" role="group" aria-label={lang === 'it' ? 'Libreria meeting' : 'Meeting library'}>
+          <button
+            type="button"
+            onClick={() => setShowArchived(false)}
+            aria-pressed={!showArchived}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${!showArchived ? 'bg-bg-hover text-text-primary' : 'text-text-muted hover:text-text-primary'}`}
+          >
+            {lang === 'it' ? 'Attivi' : 'Active'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowArchived(true)}
+            aria-pressed={showArchived}
+            data-archived-meetings="true"
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${showArchived ? 'bg-bg-hover text-text-primary' : 'text-text-muted hover:text-text-primary'}`}
+          >
+            {lang === 'it' ? 'Archiviati' : 'Archived'}
+          </button>
+        </div>
         <div className="flex items-center gap-3 border-b border-border-subtle bg-bg-elevated px-4 py-3 pr-12">
           <Search className="h-5 w-5 shrink-0 text-text-muted" aria-hidden="true" />
           <label htmlFor="dashboard-meeting-search" className="sr-only">

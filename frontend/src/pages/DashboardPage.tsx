@@ -31,7 +31,6 @@ import { Tooltip } from '../components/ui/Tooltip';
 import { Dialog, DialogContent, DialogHeader, DialogBody } from '../components/ui/Dialog';
 import { TaskProcessingLoader } from '../components/workspace/TaskProcessingLoader';
 import { InsightDetailDialog, InsightTab } from '../components/workspace/InsightDetailDialog';
-import { MeetingListDialog } from '../components/workspace/MeetingListDialog';
 import { MeetingSearchDialog } from '../components/workspace/MeetingSearchDialog';
 import {
   DigestPanel,
@@ -122,7 +121,11 @@ export default function DashboardPage({
 
   const [insightDialogOpen, setInsightDialogOpen] = useState(false);
   const [insightDialogTab, setInsightDialogTab] = useState<InsightTab>('actions');
-  const [meetingListDialogOpen, setMeetingListDialogOpen] = useState(false);
+  const [libraryView, setLibraryView] = useState<'active' | 'archived'>('active');
+  const openLibrary = () => {
+    setLibraryView('active');
+    setIsSearchOpen(true);
+  };
   const [techDetailsOpen, setTechDetailsOpen] = useState(false);
 
   useEffect(() => {
@@ -421,7 +424,7 @@ export default function DashboardPage({
               <div className="mt-4 flex flex-wrap gap-2.5">
                 <button
                   type="button"
-                  onClick={() => setMeetingListDialogOpen(true)}
+                  onClick={openLibrary}
                   className="flex items-center gap-2 rounded-xl border border-border-subtle bg-bg-glass/40 px-3 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 >
                   <FileAudio className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
@@ -467,7 +470,7 @@ export default function DashboardPage({
               />
               {periodMeetings.length > 3 && (
                 <ViewAllLink
-                  onClick={() => setMeetingListDialogOpen(true)}
+                  onClick={openLibrary}
                   label={`${t('demo.viewAllMeetings').replace('→', '')}(${periodMeetings.length}) →`}
                 />
               )}
@@ -507,7 +510,7 @@ export default function DashboardPage({
                 {periodMeetings.length > 3 && (
                   <button
                     type="button"
-                    onClick={() => setMeetingListDialogOpen(true)}
+                    onClick={openLibrary}
                     className="rounded-xl border border-dashed border-border-subtle py-3 text-center text-xs font-semibold text-text-muted transition-colors hover:border-border-focus hover:bg-bg-hover hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   >
                     {lang === 'it'
@@ -627,14 +630,6 @@ export default function DashboardPage({
         risks={risks}
       />
 
-      <MeetingListDialog
-        dataTour="meeting-list-dialog-content"
-        open={meetingListDialogOpen}
-        onOpenChange={setMeetingListDialogOpen}
-        meetings={periodMeetings}
-        onOpenMeeting={(id) => navigateTo('meeting', id)}
-      />
-
       <Dialog open={techDetailsOpen} onOpenChange={setTechDetailsOpen}>
         <DialogContent size="sm" dataTour="tech-details-dialog-content">
           <DialogHeader
@@ -666,6 +661,7 @@ export default function DashboardPage({
         onOpenChange={setIsSearchOpen}
         onOpenMeeting={(id) => navigateTo('meeting', id)}
         lang={lang}
+        initialView={libraryView}
         demoMeetings={demoMode ? meetings : undefined}
       />
     </div>

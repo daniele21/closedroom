@@ -563,6 +563,17 @@ try {
   await waitText(browser, ['Verified notes review'], 30000, true);
   await waitText(browser, ['Alex validates the release']);
   await waitText(browser, ['Revision 1', 'Revisione 1']);
+  const notesAndSource = await browser.execute(`
+    const notes = document.querySelector('[data-meeting-notes-workspace="true"]');
+    const companion = document.querySelector('[data-meeting-transcript-companion="true"]');
+    const text = companion?.textContent || '';
+    const full = Array.from(companion?.querySelectorAll('button') || [])
+      .some((button) => /Open full|Apri completa/i.test(button.textContent || ''));
+    return { notes: Boolean(notes), companion: Boolean(companion), transcript: text.includes('Release validation review'), expand: full };
+  `);
+  if (!notesAndSource.notes || !notesAndSource.companion || !notesAndSource.transcript || !notesAndSource.expand) {
+    throw new Error(`Ready Meeting lacks synchronized notes/transcript companion: ${JSON.stringify(notesAndSource)}`);
+  }
   await checkpoint(browser, '01-evidence-ready');
 
   await browser.clickButton(['00:05 · Alex']);

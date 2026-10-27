@@ -322,10 +322,15 @@ export default function ResultsStep({
               🔄 {lang === 'it' ? 'Trascrivi di nuovo' : 'Transcribe again'}
             </Button>
           )}
+          {recordingId && (
+            <Button onClick={() => navigateTo('meeting', recordingId)} disabled={isSplitting}>
+              {lang === 'it' ? 'Apri meeting' : 'Open meeting'}
+            </Button>
+          )}
           <Button variant="secondary" onClick={goToUploadStep} disabled={isSplitting}>
             🔄 {t('transcription.newTranscription')}
           </Button>
-          <Button onClick={copyToClipboard} disabled={isSplitting}>
+          <Button variant={recordingId ? 'secondary' : 'primary'} onClick={copyToClipboard} disabled={isSplitting}>
             📄 {copiedText}
           </Button>
         </div>
@@ -420,9 +425,12 @@ export default function ResultsStep({
               </div>
               <Button
                 size="sm"
-                onClick={() => navigateTo('analysis', transcriptionResult.id || transcriptionResult.saved_id)}
+                onClick={() => {
+                  if (recordingId) navigateTo('meeting', recordingId);
+                  else navigateTo('analysis', transcriptionResult.id || transcriptionResult.saved_id);
+                }}
               >
-                🧠 {t('transcription.ctaAnalyze')}
+                🧠 {recordingId ? (lang === 'it' ? 'Prepara note nel meeting' : 'Prepare notes in Meeting') : t('transcription.ctaAnalyze')}
               </Button>
             </div>
           )}
