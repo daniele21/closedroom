@@ -77,11 +77,11 @@ Outcome measurement, proposed baseline+comparison: attempts/clicks and elapsed t
 - Keep individual slices reviewable and revertible; do not migrate transcript/recording IDs, rename persistent owners or delete finalized artifacts. Protect original texts/times, screenshot provenance and version-checked speaker rollback.
 - Owner for resume checkpoint: **this file only**. Before resuming refresh head/tree/base, branch/PR outcomes, failures and next proof. Transfer final UX rules into `design/ux-contract.json` and affected canonical owners before deleting the workstream plan.
 
-## Wave 2 acceptance checkpoint — 2026-10-27
+## Integration checkpoints — 2026-10-27
 
-Base: `dev` `88e00ce` (UX-3 library destination, UX-6 activity utility, unused list removal) integrated with exact-head source/browser FULL_MEDIA in PR #155. UX-3: bounded full-page library and quick-search share the same query owner. Wave 2 improves compact full-page list sizing, retry on search failure, non-destructive pagination-error feedback and avoids stealing focus on page entry. UX-4: ready notes get clearer tab naming; opening full transcript transfers keyboard focus and retains source/seek semantics (browser check). UX-7: linked transcriptions in expert Analysis expose a canonical Meeting return without removing imported-text analysis. The former Recording detail still hosts an Audio Intelligence panel; **do not delete** until parity and consumers are proven. Old `MeetingListDialog` is already deleted; `docs/features.md` owner corrected.
-
-Wave 2 integrated in PR #156 with exact-head source/browser FULL_MEDIA PASS. Wave 3 moves recording audio metadata and Audio Intelligence into Meeting as read-only optional details; before deleting old Recording verify title/project and route consumers. macOS/VoiceOver/user-outcome evidence remains open.
+- PR #155 (`88e00ce`): Meetings library and global Activities, removed duplicate list.
+- PR #156 (`83d70c7`): library retry/compact layout, accessible notes→source focus, linked expert analysis→Meeting. Exact-head source/browser FULL_MEDIA PASS.
+- Wave 3: local audio metrics on explicit Meeting disclosure, source tracks and quality in advanced details. Preserve no eager fetch, mock attribution and previous recording IDs. Old Recording page deletion waits for title/project and consumer parity; native WKWebView/VoiceOver/outcome evidence remains pending.
 
 ## Resume checkpoint — 2026-10-27
 
