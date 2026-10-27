@@ -30,6 +30,8 @@ class MeetingAudioDetailsContractTests(unittest.TestCase):
         self.assertIn("preload=\"none\"", RECORDING_DETAILS)
         self.assertIn("recording.quality_report", RECORDING_DETAILS)
         self.assertIn("sync_duration_warning", RECORDING_DETAILS)
+        self.assertIn("probeUnavailable", RECORDING_DETAILS)
+        self.assertIn("qualityProbeUnavailable", RECORDING_DETAILS)
         self.assertIn("qualitySyncLabel", RECORDING_DETAILS)
 
     def test_reuses_original_audio_projection_with_truthful_mock_disclaimer(self) -> None:
