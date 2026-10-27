@@ -1,7 +1,7 @@
 # Meeting-first UX consolidation — navigation, library and saved Meeting
 
-Status: ACTIVE (planning baseline; implementation slices not yet integrated)
-Base: `dev` @ `20795b9e440efaf8b4d9817c3a13c9e2916acdda` (2026-10-26)
+Status: ACTIVE — canonical Meeting routing, unified search first slice, notes/transcript companion and origin-preserving Projects return integrated; remaining UX-3/4 refinements, UX-6/7 pending.
+Latest integration checkpoint: `dev` @ `f9ff980dcdbcc1083a8a4dc50b023b7f5c0e61b1` (2026-10-27).
 Product / delivery / validation / execution: PRODUCT_FEATURE / ITERATION; risk-selected SCOPED for isolated routes, STRONG when shared navigation/meeting contracts or recovery changes; REMOTE_AUTOMATED for unavailable deterministic Mac/browser gates, REAL_ENVIRONMENT for subjective macOS usability/TCC when materially affected. Integration always uses repository selector, affected FULL_MEDIA UX journeys, exact head/base evidence.
 
 ## User job and scope
@@ -53,12 +53,12 @@ States: READY / ACTIVE / BLOCKED / DONE. Parallel means non-overlapping **write 
 
 | ID | State | Independently observable deliverable | Owning files (write boundary) | Dependency |
 | --- | --- | --- | --- | --- |
-| UX-0 | ACTIVE | Audited plan, acceptance and sequencing in this document | `docs/workstreams/meeting-ux-consolidation.md` | Base dev |
-| UX-1 | ACTIVE | Legacy saved-recording route resolves to Meeting while `recording/auto` stays canonical New Meeting; saved output opens Meeting | `frontend/src/App.tsx`, `frontend/src/pages/RecordingPage.tsx`, route contract tests | Base dev |
-| UX-2 | ACTIVE | Recording-linked transcription results prominently return to saved Meeting, including optional notes CTA; unlinked input retains expert analysis | `frontend/src/pages/transcription/components/ResultsStep.tsx`, transcript workflow tests | Base dev |
-| UX-3 | READY | A single full-archive library surface for local search/filter/archive, including today/recent; no full transcript loading in UI | `DashboardPage.tsx`, `MeetingListDialog.tsx`, `MeetingSearchDialog.tsx`, archive search tests | UX-0 product decision; coordinate navigation contract with UX-5 |
-| UX-4 | READY | Unified saved Meeting content hierarchy, synced audio/note/transcript/moments and speaker tools via progressive disclosure | `MeetingDetailPage.tsx`, meeting semantic components, relevant browser journeys | UX-1 and explicit responsive/content decision |
-| UX-5 | READY | Stable project-origin return, selected project and filter/deep-link restoration; avoid per-page improvised history state | canonical shell route owner (`App.tsx`) + `ProjectsPage.tsx`, targeted tests | UX-1; serialize with UX-3 shell integration |
+| UX-0 | DONE | Audited plan, acceptance and sequencing in this document | `docs/workstreams/meeting-ux-consolidation.md` | Base dev |
+| UX-1 | DONE | Legacy saved-recording route resolves to Meeting while `recording/auto` stays canonical New Meeting; saved output opens Meeting | `frontend/src/App.tsx`, `frontend/src/pages/RecordingPage.tsx`, route contract tests | Base dev |
+| UX-2 | DONE | Recording-linked transcription results prominently return to saved Meeting, including optional notes CTA; unlinked input retains expert analysis | `frontend/src/pages/transcription/components/ResultsStep.tsx`, transcript workflow tests | Base dev |
+| UX-3 | ACTIVE | A single full-archive library surface for local search/filter/archive, including today/recent; no full transcript loading in UI | `DashboardPage.tsx`, `MeetingListDialog.tsx`, `MeetingSearchDialog.tsx`, archive search tests | UX-0 product decision; coordinate navigation contract with UX-5 |
+| UX-4 | ACTIVE | Unified saved Meeting content hierarchy, synced audio/note/transcript/moments and speaker tools via progressive disclosure | `MeetingDetailPage.tsx`, meeting semantic components, relevant browser journeys | UX-1 and explicit responsive/content decision |
+| UX-5 | DONE | Stable project-origin return, selected project and filter/deep-link restoration; avoid per-page improvised history state | canonical shell route owner (`App.tsx`) + `ProjectsPage.tsx`, targeted tests | UX-1; serialize with UX-3 shell integration |
 | UX-6 | READY | Global activity status as secondary utility and accessible in-context progress, without a second job store | `ActivitiesPage.tsx`, `MeetingProcessingStatus.tsx`, `App.tsx` after UX-5 | UX-5 (shared shell owner) |
 | UX-7 | READY | Retire remaining duplicate legacy entry points **only after** use-site census; unify notes/analysis/transcript defaults and finish documentation | `RecordingPage.tsx`, `AnalysisPage.tsx`, `TranscriptionPage.tsx`, `design/ux-contract.json`, `docs/features.md`, README usage, e2e | UX-3..6 |
 
@@ -84,4 +84,4 @@ Outcome measurement, proposed baseline+comparison: attempts/clicks and elapsed t
 
 ## Resume checkpoint — initial
 
-Source: `dev` @ `20795b9e`; UI code owns routes in `App.tsx`, detailed Meeting in `MeetingDetailPage.tsx`, and `ResultStep` still has independent linked-recording results. Files and tests inspected: workspace-coherence, archive search, transcription workflow. No exact-head deterministic or representative Mac evidence from this planning baseline. Initial parallel tasks UX-1 / UX-2 are implementation candidates; merge readiness and usability are **not established**.
+Source: `dev` @ `f9ff980d`. PR #145 integrated legacy route alias with browser FULL_MEDIA; PR #149 integrated linked transcript results, one local Active/Archived search dialog and synchronized Notes/Transcript companion with INTEGRATION/SCOPED source and browser FULL_MEDIA; PR #150 integrated origin-aware Project Back and preserved local UI filters with the same automated gates. PR #146–148 were superseded by #149 and closed unmerged. UX-3 remains ACTIVE for destination-level library IA and UI polish; UX-4 remains ACTIVE for deeper content hierarchy/adaptive/accessibility review. UX-6 status utility and UX-7 legacy entry cleanup are READY. Automated integration proven only; representative packaged WKWebView / VoiceOver subjective evidence remains unclaimed. Next action: shape the remaining library destination and contextual Activities shell without duplicating search or job owners.
