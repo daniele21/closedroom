@@ -11,16 +11,15 @@ export function MeetingRecordingDetails({ recording }: { recording: Recording })
     .filter((warning) => !/^track_.*_invalid$/.test(warning)
       && !warning.startsWith('Visual') && !warning.includes('ScreenCaptureKit'))
     .map((warning) => {
-      const keys: Record<string, string> = {
-        track_mic_empty: 'qualityMicEmpty',
-        track_system_empty: 'qualitySystemEmpty',
-        track_mixed_empty: 'qualityMixedEmpty',
-        sync_duration_warning: 'qualitySyncWarning',
-        sync_duration_serious_warning: 'qualitySyncSeriousWarning',
-        sync_duration_unreliable: 'qualitySyncUnreliable',
+      const labels: Record<string, string> = {
+        track_mic_empty: t('recording.qualityMicEmpty'),
+        track_system_empty: t('recording.qualitySystemEmpty'),
+        track_mixed_empty: t('recording.qualityMixedEmpty'),
+        sync_duration_warning: t('recording.qualitySyncWarning'),
+        sync_duration_serious_warning: t('recording.qualitySyncSeriousWarning'),
+        sync_duration_unreliable: t('recording.qualitySyncUnreliable'),
       };
-      const key = keys[warning];
-      return key ? t(`recording.${key}` as Parameters<typeof t>[0]) : warning;
+      return labels[warning] || warning;
     });
   const hasQuality = Boolean(recording.quality_report) || warnings.length > 0;
   if (!additionalTracks.length && !hasQuality) return null;
