@@ -21,7 +21,8 @@ export function MeetingRecordingDetails({ recording }: { recording: Recording })
       };
       return labels[warning] || warning;
     });
-  const hasQuality = Boolean(recording.quality_report) || warnings.length > 0;
+  const probeUnavailable = (recording.warnings || []).some((warning) => /^track_.*_invalid$/.test(warning));
+  const hasQuality = Boolean(recording.quality_report) || warnings.length > 0 || probeUnavailable;
   if (!additionalTracks.length && !hasQuality) return null;
 
   return (
@@ -59,6 +60,8 @@ export function MeetingRecordingDetails({ recording }: { recording: Recording })
               <ul className="mt-2 list-disc space-y-1 pl-4 text-warning">
                 {warnings.map((warning, index) => <li key={index}>{warning}</li>)}
               </ul>
+            ) : probeUnavailable ? (
+              <p className="mt-2 text-text-muted">{t('recording.qualityProbeUnavailable')}</p>
             ) : (
               <p className="mt-2 text-text-muted">{t('recording.qualityOk')}</p>
             )}
