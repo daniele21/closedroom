@@ -72,16 +72,44 @@ const ACTION_SCOPE_OPTIONS = [
 
 type ActionScope = typeof ACTION_SCOPE_OPTIONS[number]['value'];
 
+const PROJECT_VIEW_STORAGE_KEY = 'closedroom.projects.view';
+
+function restoreProjectView(): { name: string; range: TimeRangeState; actionScope: ActionScope } {
+  const fallback = { name: '', range: { mode: 'last7' } as TimeRangeState, actionScope: 'week' as ActionScope };
+  try {
+    const raw = sessionStorage.getItem(PROJECT_VIEW_STORAGE_KEY);
+    if (!raw) return fallback;
+    const saved: unknown = JSON.parse(raw);
+    if (!saved || typeof saved !== 'object') return fallback;
+    const data = saved as Record<string, unknown>;
+    const range = data.range && typeof data.range === 'object' ? data.range as Record<string, unknown> : null;
+    const mode = range && ['last7', 'last30', 'all', 'custom'].includes(String(range.mode)) ? range.mode : 'last7';
+    const validRange = {
+      mode,
+      ...(range?.startDate && typeof range.startDate === 'string' ? { startDate: range.startDate } : {}),
+      ...(range?.endDate && typeof range.endDate === 'string' ? { endDate: range.endDate } : {}),
+    } as TimeRangeState;
+    return {
+      name: typeof data.name === 'string' ? data.name : '',
+      range: validRange,
+      actionScope: ['week', 'month', 'all'].includes(String(data.actionScope)) ? data.actionScope as ActionScope : 'week',
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsPageProps) {
   const { t, lang } = useTranslation();
   const { showToast } = useToast();
 
+  const savedProjectView = useMemo(restoreProjectView, []);
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectName, setSelectedProjectName] = useState('');
+  const [selectedProjectName, setSelectedProjectName] = useState(savedProjectView.name);
   const [sidebarQuery, setSidebarQuery] = useState('');
-  const [projectRange, setProjectRange] = useState<TimeRangeState>({ mode: 'last7' });
-  const [actionScope, setActionScope] = useState<ActionScope>('week');
+  const [projectRange, setProjectRange] = useState<TimeRangeState>(savedProjectView.range);
+  const [actionScope, setActionScope] = useState<ActionScope>(savedProjectView.actionScope);
   const [projectDigestGeneratedAt, setProjectDigestGeneratedAt] = useState<string | null>(null);
   const [isProjectGenerating, setIsProjectGenerating] = useState(false);
   const [editingRecordingId, setEditingRecordingId] = useState<string | null>(null);
@@ -150,6 +178,7 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
   }, [demoMode, lang]);
 
   useEffect(() => {
+    if (loading) return; // Wait for the canonical project list before validating a restored selection.
     if (projects.length === 0) {
       setSelectedProjectName('');
       return;
@@ -157,7 +186,18 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     if (!selectedProjectName || !projects.some((project) => project.name === selectedProjectName)) {
       setSelectedProjectName(projects[0].name);
     }
-  }, [projects, selectedProjectName]);
+  }, [projects, selectedProjectName, loading]);
+
+  // The Projects view alone owns its ephemeral selection and time filters.
+  // Restoring a Meeting's origin never creates a second route or persistence owner.
+  useEffect(() => {
+    if (loading || demoMode) return;
+    sessionStorage.setItem(PROJECT_VIEW_STORAGE_KEY, JSON.stringify({
+      name: selectedProjectName,
+      range: projectRange,
+      actionScope,
+    }));
+  }, [loading, demoMode, selectedProjectName, projectRange, actionScope]);
 
   useEffect(() => {
     setProjectDigestGeneratedAt(null);
