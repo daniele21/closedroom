@@ -611,6 +611,32 @@ async function waitText(browser, needles, timeoutMs = 5000, record = false) {
   throw new Error(`timed out waiting for ${needles.join(' | ')}; text=${last.slice(0, 1000)}`);
 }
 
+// Verify a real pointer target in the sliding Radix drawer before WebDriver clicks.
+async function clickWhenPointerReady(browser, selector, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let details = null;
+  while (Date.now() < deadline) {
+    details = await browser.execute(`
+      const element = document.querySelector(${JSON.stringify(selector)});
+      if (!element) return { ready: false, reason: 'missing' };
+      element.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const rect = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return {
+        ready: rect.width > 0 && rect.height > 0 && Boolean(hit && (element === hit || element.contains(hit))),
+        target: element.tagName, hit: hit?.tagName || null,
+        pointerEvents: getComputedStyle(element).pointerEvents,
+      };
+    `);
+    if (details?.ready) {
+      await browser.clickCss(selector);
+      return;
+    }
+    await sleep(100);
+  }
+  throw new Error(`Pointer interaction unavailable for ${selector}: ${JSON.stringify(details)}`);
+}
+
 async function waitCount(key, minimum, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -738,27 +764,16 @@ try {
   if (counts.audio_intelligence !== 0) throw new Error('Opening Meeting Details fetched audio metrics without user disclosure');
   const audioControls = await browser.execute(`
     const section = document.querySelector('[data-meeting-recording-details="true"]');
-    return Boolean(section && /Tracce e qualità audio|Audio tracks and quality/.test(section.querySelector('summary')?.textContent || ''));
+    return Boolean(section && /Tracce e qualità audio|Audio tracks and quality/.test(section.querySelector('button[aria-expanded]')?.textContent || ''));
   `);
   if (!audioControls) throw new Error('Canonical Meeting lost recording quality and source track access');
-  // The Radix Sheet slides in over 250ms. Wait for its actual hit-test target
-  // before using a real WebDriver click; do not bypass pointer interaction.
-  let summaryClickable = false;
-  for (let attempt = 0; attempt < 45; attempt += 1) {
-    summaryClickable = await browser.execute(`
-      const summary = document.querySelector('[data-meeting-audio-intelligence="true"] summary');
-      if (!summary) return false;
-      summary.scrollIntoView({ block: 'center', behavior: 'instant' });
-      const rect = summary.getBoundingClientRect();
-      if (rect.width < 1 || rect.height < 1) return false;
-      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-      return Boolean(hit && (summary === hit || summary.contains(hit)));
-    `);
-    if (summaryClickable) break;
-    await sleep(100);
-  }
-  if (!summaryClickable) throw new Error('Audio Intelligence disclosure never became pointer-clickable in Meeting Details');
-  await browser.clickCss('[data-meeting-audio-intelligence="true"] summary');
+  await clickWhenPointerReady(browser, '[data-meeting-recording-details="true"] button[aria-expanded]');
+  await waitText(browser, ['System track'], 5000, true);
+  await clickWhenPointerReady(browser, '[data-meeting-audio-intelligence="true"] button[aria-expanded]');
+  const expanded = await browser.execute(`
+    return document.querySelector('[data-meeting-audio-intelligence="true"] button[aria-expanded]')?.getAttribute('aria-expanded') === 'true';
+  `);
+  if (!expanded) throw new Error('Audio Intelligence disclosure did not open through pointer interaction');
   await waitCount('audio_intelligence', 1);
   await waitText(browser, ['48%'], 5000, true);
   await checkpoint(browser, '01a-audio-metrics-on-demand');
