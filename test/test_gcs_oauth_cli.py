@@ -60,6 +60,29 @@ class TestDesktopOAuthConfig(unittest.TestCase):
             f.chmod(0o600)
             self.assertEqual(read_desktop_config(f)[0], "12345678-test.apps.googleusercontent.com")
 
+    def test_check_client_never_opens_browser_or_keychain(self):
+        with tempfile.TemporaryDirectory() as d:
+            file = Path(d) / "client.json"
+            file.write_text(json.dumps({"installed": {
+                "client_id": "12345678-test.apps.googleusercontent.com",
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": TOKEN_URI,
+            }}))
+            file.chmod(0o600)
+            from unittest.mock import patch
+            result = io.StringIO()
+            with (
+                patch("scripts.probe_closedroom_gcs_oauth.GCSDesktopOAuth") as oauth,
+                contextlib.redirect_stdout(result),
+            ):
+                self.assertEqual(main(["check-client", "--client-json", str(file)]), 0)
+            oauth.assert_not_called()
+            self.assertEqual(json.loads(result.getvalue()), {
+                "status": "desktop_client_verified",
+                "network_access": False,
+                "keychain_access": False,
+            })
+
     def test_missing_file_diagnostic_without_exposing_path(self):
         with tempfile.TemporaryDirectory() as d:
             missing = Path(d) / "do-not-print-my-path.json"
