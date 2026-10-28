@@ -248,6 +248,8 @@ UV_CACHE_DIR=.cache/uv uv run local-asr serve --reload
 
 The macOS bundle uses Python **3.12** by default, while source/CLI support remains `>=3.10,<3.14`. `CLOSEDROOM_BUILD_PYTHON_VERSION` overrides packaging Python only when validating an alternative toolchain; builds fail if SciPy/MLX Whisper native imports fail.
 
+The build compiles the React UI into tracked `src/local_asr_server/static/` for packaging. It now requires that generated directory to be clean before starting, then restores **only** those Vite outputs on exit (including build failures), leaving other source changes and finalized artifacts untouched. If it refuses to start, inspect `git status --short -- src/local_asr_server/static` before choosing any cleanup; never run a repository-wide hard reset.
+
 
 ```bash
 ./build.sh --no-dmg
