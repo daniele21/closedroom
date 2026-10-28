@@ -50,6 +50,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Install/reuse a verified test-only copy under /Applications and run physical tests from it; never overwrite ClosedRoom.app",
     )
+    parser.add_argument(
+        "--use-installed-app",
+        action="store_true",
+        help="Test the existing verified /Applications/ClosedRoom.app; do not rebuild or replace it, and pause for TCC permissions",
+    )
     parser.add_argument("--output")
     parser.add_argument("--record-seconds", type=float, default=8.0)
     parser.add_argument("--seed-record-seconds", type=float, default=20.0)
@@ -70,6 +75,24 @@ def restore_generated_frontend(root: Path) -> None:
         check=True,
     )
     subprocess.run(["git", "clean", "-fd", "--", target], cwd=root, check=True)
+
+
+def permission_checkpoint(app: Path) -> None:
+    """Let the human grant macOS TCC/Accessibility permissions before evidence starts."""
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "--use-installed-app requires an interactive Terminal for the "
+            "permission checkpoint; tests did not start"
+        )
+    print(f"\nInstalled app verified: {app}", flush=True)
+    print("Open this ClosedRoom app in Finder to grant Microphone and Screen & System Audio Recording.", flush=True)
+    print("Allow Terminal (or your terminal app) under Screen & System Audio Recording for screencapture.", flush=True)
+    print("Allow closedroom-ax-helper under Accessibility if macOS requests it.", flush=True)
+    print("Quit ClosedRoom completely after granting permissions (macOS may require relaunch).", flush=True)
+    try:
+        input("Press ENTER only after permissions are enabled and ClosedRoom is closed: ")
+    except EOFError as exc:
+        raise RuntimeError("permission checkpoint cancelled; tests did not start") from exc
 
 
 def required_tools_missing() -> list[str]:
@@ -202,7 +225,9 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
     print(f"candidate: {report.get('checkout_revision') or 'unknown'}")
     print(f"artifact selection: {report.get('artifact_selection') or 'unknown'}")
     if report.get("installed_app"):
-        print(f"installed test app: {report['installed_app']} ({report['installation_status']})")
+        print(f"installed app: {report['installed_app']} ({report['installation_status']})")
+    if report.get("permission_checkpoint"):
+        print(f"permission checkpoint: {report['permission_checkpoint']}")
     for name in ("measured_release", "record_while_ai_busy"):
         child = (report.get("tests") or {}).get(name) or {}
         label = name.replace("_", " ")
@@ -248,6 +273,7 @@ def main() -> int:
         "artifact_selection": None,
         "installation_status": None,
         "installed_app": None,
+        "permission_checkpoint": None,
         "tests": {},
         "errors": [],
         "distribution_authority": {
@@ -277,6 +303,10 @@ def main() -> int:
     }
 
     try:
+        if args.use_installed_app and (args.install_to_applications or args.app or args.rebuild):
+            raise RuntimeError(
+                "--use-installed-app cannot be combined with --install-to-applications, --app or --rebuild"
+            )
         if platform.system() != "Darwin" or platform.machine() != "arm64":
             raise RuntimeError("LOCAL REAL_ENVIRONMENT requires an Apple-Silicon Mac")
         missing = required_tools_missing()
@@ -291,12 +321,18 @@ def main() -> int:
             )
         report["checkout_revision"] = checkout_revision
 
-        app, manifest_path, manifest, selection = select_local_artifact(
-            root,
-            checkout_revision,
-            args.app,
-            args.rebuild,
-        )
+        if args.use_installed_app:
+            installed_app, source_app, manifest_path, manifest = (
+                local_policy.installed_main_artifact(root, checkout_revision)
+            )
+            app, selection = source_app, "installed_main_exact"
+        else:
+            app, manifest_path, manifest, selection = select_local_artifact(
+                root,
+                checkout_revision,
+                args.app,
+                args.rebuild,
+            )
         source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
         source_revision = str(source.get("revision") or "")
         report["source_revision"] = source_revision
@@ -313,6 +349,19 @@ def main() -> int:
             report["installation_status"] = install_status
             child_env[local_policy.INSTALLED_APP_ENV] = str(evidence_app)
             child_env[local_policy.SOURCE_APP_ENV] = str(app)
+        elif args.use_installed_app:
+            evidence_app = installed_app
+            report["app"] = str(evidence_app)
+            report["source_artifact_app"] = str(app)
+            report["installed_app"] = str(evidence_app)
+            report["installation_status"] = "existing_main_verified"
+            child_env[local_policy.INSTALLED_APP_ENV] = str(evidence_app)
+            child_env[local_policy.SOURCE_APP_ENV] = str(app)
+            child_env[local_policy.MAIN_APP_ENV] = "1"
+            permission_checkpoint(evidence_app)
+            # Recheck the exact installation after the operator's TCC interaction.
+            local_policy.verify_installed_copy(evidence_app, manifest)
+            report["permission_checkpoint"] = "acknowledged"
 
         evidence_root = root / "dist" / "evidence" / "local-real-environment" / source_revision
         if not args.output:

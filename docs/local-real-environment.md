@@ -42,7 +42,15 @@ From the repository root:
 python3 scripts/run_local_real_environment_suite.py
 ```
 
-To run the physical checks from an app located in **/Applications** instead of the build tree, opt in:
+To test the **existing definitive app** at `/Applications/ClosedRoom.app` without installing or changing it, run from an **interactive Terminal**:
+
+```bash
+python3 scripts/run_local_real_environment_suite.py --use-installed-app
+```
+
+This mode requires an installed `com.closedroom.app` that is byte-for-byte identical to a clean finalized build of the **current checkout** under `dist/artifacts` (ad-hoc or locally identified signing). It checks the codesign signature and source identity before running. If the installed app is older or differs, the run refuses to start, never overwrites `/Applications/ClosedRoom.app`, and reports the mismatch; it cannot qualify a different commit by pretending it is the current one. Before starting physical tests it **pauses indefinitely until you press Enter**: open the installed app to grant Microphone and Screen & System Audio Recording; allow the terminal application Screen & System Audio Recording for `screencapture`; grant the dedicated AX helper Accessibility; then quit the app completely and press Enter. The suite rechecks integrity after this checkpoint and launches the verified installed binary with an isolated temporary HOME. It never runs permission prompts or record tests against your personal meeting database. A new build/identity may still require granting permissions again. Identified local signing does **not** establish Developer ID notarization/release authority.
+
+To run the physical checks from a separate test app located in **/Applications** instead of the build tree, opt in:
 
 ```bash
 python3 scripts/run_local_real_environment_suite.py --install-to-applications
