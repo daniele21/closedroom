@@ -166,6 +166,54 @@ def install_test_app(
     return destination, "installed_verified"
 
 
+def install_main_app(
+    source_app: Path,
+    manifest: dict[str, Any],
+    *,
+    applications_dir: Path = Path("/Applications"),
+) -> Path:
+    """Install one exact locally identified candidate as the real ClosedRoom.app.
+
+    Explicit opt-in only: must not replace existing files, folders or symlinks.
+    The source artifact remains immutable and a failed copy leaves no main app.
+    """
+    source_app = source_app.expanduser().absolute()
+    _, verified = local_manifest_for(source_app, allow_identified=True)
+    if manifest != verified or (verified.get("configuration") or {}).get("signing") != "identified":
+        raise RuntimeError("main app installation requires the exact identified build manifest")
+    if (verified.get("configuration") or {}).get("bundle_id") != "com.closedroom.app":
+        raise RuntimeError("main app installation requires com.closedroom.app bundle identity")
+    verify_installed_copy(source_app, verified)
+    with (source_app / "Contents" / "Info.plist").open("rb") as stream:
+        bundle_info = plistlib.load(stream)
+    if bundle_info.get("CFBundleIdentifier") != "com.closedroom.app":
+        raise RuntimeError("source bundle identity is not com.closedroom.app")
+
+    target = applications_dir / "ClosedRoom.app"
+    if not applications_dir.is_dir():
+        raise RuntimeError(f"Applications directory missing: {applications_dir}")
+    if target.exists() or target.is_symlink():
+        raise RuntimeError(
+            f"main app destination already exists: {target}; refusing to replace it"
+        )
+    temporary = applications_dir / f".ClosedRoom-main-install-{secrets.token_hex(8)}.app"
+    try:
+        subprocess.run(["ditto", str(source_app), str(temporary)], check=True, timeout=900)
+        verify_installed_copy(temporary, verified)
+        subprocess.run(
+            ["codesign", "--verify", "--deep", "--strict", str(temporary)],
+            check=True, capture_output=True, text=True, timeout=120,
+        )
+        if target.exists() or target.is_symlink():
+            raise RuntimeError(f"destination appeared during install: {target}")
+        temporary.rename(target)
+    finally:
+        if temporary.is_dir() and not temporary.is_symlink():
+            shutil.rmtree(temporary)
+    verify_installed_copy(target, verified)
+    return target
+
+
 def installed_main_artifact(
     root: Path,
     revision: str,

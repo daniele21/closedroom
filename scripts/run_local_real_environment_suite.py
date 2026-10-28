@@ -55,6 +55,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Test the existing verified /Applications/ClosedRoom.app; do not rebuild or replace it, and pause for TCC permissions",
     )
+    parser.add_argument(
+        "--install-main-app",
+        action="store_true",
+        help="Opt in to building and installing a stable-signed exact main app if /Applications/ClosedRoom.app is missing; never overwrite an existing app; pause for permissions",
+    )
     parser.add_argument("--output")
     parser.add_argument("--record-seconds", type=float, default=8.0)
     parser.add_argument("--seed-record-seconds", type=float, default=20.0)
@@ -108,6 +113,32 @@ def read_last_build(root: Path) -> Path:
     app = Path(str(payload.get("app") or "")).expanduser().resolve()
     if not app.is_dir():
         raise RuntimeError(f"local build app missing: {app}")
+    return app
+
+
+def build_identified_main_artifact(root: Path, checkout_revision: str) -> Path:
+    """Build one exact local artifact using the operator's stable signing identity."""
+    identity = os.environ.get("CLOSEDROOM_SIGN_IDENTITY", "").strip()
+    if not identity or identity == "-":
+        raise RuntimeError(
+            "--install-main-app requires CLOSEDROOM_SIGN_IDENTITY to be set "
+            "to a valid stable Code Signing certificate; no ad-hoc main app was installed. "
+            "Inspect: security find-identity -v -p codesigning"
+        )
+    env = os.environ.copy()
+    env["CLOSEDROOM_BUILD_CHANNEL"] = "local-real-environment"
+    subprocess.run(
+        ["bash", "scripts/build_artifact.sh", "--no-dmg"],
+        cwd=root, env=env, check=True, timeout=3600,
+    )
+    restore_generated_frontend(root)
+    after_revision, dirty_entries = measured.git_state(root)
+    if not local_policy.revisions_match(checkout_revision, after_revision) or dirty_entries:
+        raise RuntimeError("main app build changed HEAD or left the checkout dirty")
+    app = read_last_build(root)
+    _, manifest = local_policy.local_manifest_for(app, allow_identified=True)
+    if (manifest.get("configuration") or {}).get("signing") != "identified":
+        raise RuntimeError("main app build did not use an identified code-signing certificate")
     return app
 
 
@@ -303,10 +334,13 @@ def main() -> int:
     }
 
     try:
-        if args.use_installed_app and (args.install_to_applications or args.app or args.rebuild):
+        main_mode = args.use_installed_app or args.install_main_app
+        if main_mode and (args.install_to_applications or args.app or args.rebuild):
             raise RuntimeError(
-                "--use-installed-app cannot be combined with --install-to-applications, --app or --rebuild"
+                "main-app mode cannot be combined with --install-to-applications, --app or --rebuild"
             )
+        if main_mode and not sys.stdin.isatty():
+            raise RuntimeError("main-app mode requires an interactive Terminal for macOS permissions")
         if platform.system() != "Darwin" or platform.machine() != "arm64":
             raise RuntimeError("LOCAL REAL_ENVIRONMENT requires an Apple-Silicon Mac")
         missing = required_tools_missing()
@@ -321,7 +355,17 @@ def main() -> int:
             )
         report["checkout_revision"] = checkout_revision
 
-        if args.use_installed_app:
+        if main_mode:
+            definitive = Path("/Applications/ClosedRoom.app")
+            if args.install_main_app and not definitive.exists() and not definitive.is_symlink():
+                source_app = build_identified_main_artifact(root, checkout_revision)
+                manifest_path, manifest = local_policy.local_manifest_for(
+                    source_app, allow_identified=True
+                )
+                local_policy.install_main_app(source_app, manifest)
+                installation_kind = "installed_new_main"
+            else:
+                installation_kind = "existing_main_verified"
             installed_app, source_app, manifest_path, manifest = (
                 local_policy.installed_main_artifact(root, checkout_revision)
             )
@@ -349,12 +393,12 @@ def main() -> int:
             report["installation_status"] = install_status
             child_env[local_policy.INSTALLED_APP_ENV] = str(evidence_app)
             child_env[local_policy.SOURCE_APP_ENV] = str(app)
-        elif args.use_installed_app:
+        elif main_mode:
             evidence_app = installed_app
             report["app"] = str(evidence_app)
             report["source_artifact_app"] = str(app)
             report["installed_app"] = str(evidence_app)
-            report["installation_status"] = "existing_main_verified"
+            report["installation_status"] = installation_kind
             child_env[local_policy.INSTALLED_APP_ENV] = str(evidence_app)
             child_env[local_policy.SOURCE_APP_ENV] = str(app)
             child_env[local_policy.MAIN_APP_ENV] = "1"

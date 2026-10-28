@@ -176,6 +176,50 @@ class LocalRealEnvironmentPolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "differs"):
                     policy.local_manifest_for(installed_app)
 
+    def test_install_main_app_requires_identified_artifact_and_never_overwrites(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root / "artifact"
+            source_app = folder / "ClosedRoom-source.app"
+            (source_app / "Contents").mkdir(parents=True)
+            with (source_app / "Contents" / "Info.plist").open("wb") as stream:
+                plistlib.dump({"CFBundleIdentifier": "com.closedroom.app"}, stream)
+            (source_app / "Contents" / "payload").write_bytes(b"original")
+            manifest_path = write_manifest(folder, source_app, signing="identified")
+            manifest = json.loads(manifest_path.read_text())
+            manifest["configuration"]["bundle_id"] = "com.closedroom.app"
+            manifest["artifacts"]["app"].update(policy.fingerprint_tree(source_app))
+            manifest_path.write_text(json.dumps(manifest))
+            apps = root / "Applications"
+            apps.mkdir()
+
+            original_run = subprocess.run
+            def simulate_install(command: list[str], **kwargs: object):
+                if command[0] == "ditto":
+                    shutil.copytree(command[1], command[2], symlinks=True)
+                elif command[0] != "codesign":
+                    return original_run(command, **kwargs)
+                return subprocess.CompletedProcess(command, 0)
+
+            with patch.object(policy.subprocess, "run", side_effect=simulate_install):
+                installed = policy.install_main_app(source_app, manifest, applications_dir=apps)
+                self.assertEqual(installed, apps / "ClosedRoom.app")
+                self.assertEqual((installed / "Contents" / "payload").read_bytes(), b"original")
+                with self.assertRaisesRegex(RuntimeError, "already exists"):
+                    policy.install_main_app(source_app, manifest, applications_dir=apps)
+                self.assertEqual((installed / "Contents" / "payload").read_bytes(), b"original")
+
+                installed.rename(apps / "moved.app")
+                (apps / "ClosedRoom.app").symlink_to(apps / "moved.app")
+                with self.assertRaisesRegex(RuntimeError, "already exists"):
+                    policy.install_main_app(source_app, manifest, applications_dir=apps)
+
+            (apps / "ClosedRoom.app").unlink()
+            with self.assertRaisesRegex(RuntimeError, "identified"):
+                wrong = dict(manifest, configuration={"signing": "ad-hoc", "bundle_id": "com.closedroom.app"})
+                policy.install_main_app(source_app, wrong, applications_dir=apps)
+            self.assertFalse((apps / "ClosedRoom.app").exists())
+
     def test_main_installed_matching_artifact_is_read_only_and_exact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -258,6 +302,59 @@ class LocalRealEnvironmentSuiteTests(unittest.TestCase):
             self.assertIn("--keep-sandbox", command)
         self.assertIn("measured_release", commands[0][1])
         self.assertIn("record_while_ai_busy", commands[1][1])
+
+    def test_install_main_mode_bootstraps_missing_app_then_waits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "artifact" / "ClosedRoom-build.app"
+            source.mkdir(parents=True)
+            manifest_path = write_manifest(source.parent, source, revision="abc123", signing="identified")
+            manifest = json.loads(manifest_path.read_text())
+            installed = Path("/Applications/ClosedRoom.app")
+            report_path = root / "summary.json"
+            commands = []
+            def fake_run(cmd: list[str], **kwargs: object):
+                commands.append(cmd)
+                child_path = Path(cmd[cmd.index("--output") + 1])
+                child_path.parent.mkdir(parents=True, exist_ok=True)
+                child_path.write_text(json.dumps({"status": "pass", "checks": [], "errors": []}))
+                return subprocess.CompletedProcess(cmd, 0)
+
+            original_exists = Path.exists
+            def fake_exists(path):
+                if str(path) == str(installed):
+                    return False
+                return original_exists(path)
+
+            with (
+                patch.object(sys, "argv", ["suite", "--root", str(root), "--output", str(report_path), "--install-main-app"]),
+                patch.object(suite.platform, "system", return_value="Darwin"),
+                patch.object(suite.platform, "machine", return_value="arm64"),
+                patch.object(suite.sys.stdin, "isatty", return_value=True),
+                patch.object(suite, "required_tools_missing", return_value=[]),
+                patch.object(suite.measured, "git_state", return_value=("abc123", [])),
+                patch.object(suite, "build_identified_main_artifact", return_value=source) as build,
+                patch.object(suite.local_policy, "local_manifest_for", return_value=(manifest_path, manifest)),
+                patch.object(suite.local_policy, "install_main_app", return_value=installed) as install,
+                patch.object(suite.local_policy, "installed_main_artifact", return_value=(installed, source, manifest_path, manifest)),
+                patch.object(suite.local_policy, "verify_installed_copy"),
+                patch.object(suite, "permission_checkpoint") as checkpoint,
+                patch.object(suite.subprocess, "run", side_effect=fake_run),
+                patch.object(Path, "exists", fake_exists),
+            ):
+                status = suite.main()
+            self.assertEqual(status, 0)
+            build.assert_called_once()
+            install.assert_called_once()
+            checkpoint.assert_called_once_with(installed)
+            self.assertEqual(len(commands), 2)
+            payload = json.loads(report_path.read_text())
+            self.assertEqual(payload["installation_status"], "installed_new_main")
+
+    def test_install_main_mode_requires_stable_signing_identity(self) -> None:
+        with patch.dict(suite.os.environ, {"CLOSEDROOM_SIGN_IDENTITY": ""}):
+            with self.assertRaisesRegex(RuntimeError, "CLOSEDROOM_SIGN_IDENTITY"):
+                suite.build_identified_main_artifact(Path("/repo"), "abc123")
 
     def test_main_app_suite_waits_and_uses_existing_exact_installed_app(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

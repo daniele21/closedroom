@@ -48,7 +48,18 @@ To test the **existing definitive app** at `/Applications/ClosedRoom.app` withou
 python3 scripts/run_local_real_environment_suite.py --use-installed-app
 ```
 
-This mode requires an installed `com.closedroom.app` that is byte-for-byte identical to a clean finalized build of the **current checkout** under `dist/artifacts` (ad-hoc or locally identified signing). It checks the codesign signature and source identity before running. If the installed app is older or differs, the run refuses to start, never overwrites `/Applications/ClosedRoom.app`, and reports the mismatch; it cannot qualify a different commit by pretending it is the current one. Before starting physical tests it **pauses indefinitely until you press Enter**: open the installed app to grant Microphone and Screen & System Audio Recording; allow the terminal application Screen & System Audio Recording for `screencapture`; grant the dedicated AX helper Accessibility; then quit the app completely and press Enter. The suite rechecks integrity after this checkpoint and launches the verified installed binary with an isolated temporary HOME. It never runs permission prompts or record tests against your personal meeting database. A new build/identity may still require granting permissions again. Identified local signing does **not** establish Developer ID notarization/release authority.
+If `/Applications/ClosedRoom.app` is **not present**, you can explicitly build/install a definitive copy signed with your stable local signing certificate, and pause for permissions, in one command:
+
+```bash
+# Select your existing stable Code Signing certificate:
+security find-identity -v -p codesigning
+export CLOSEDROOM_SIGN_IDENTITY="ClosedRoom Local Development"
+python3 scripts/run_local_real_environment_suite.py --install-main-app
+```
+
+Replace the example certificate name with the actual identity shown by `security`. This mode builds a **new exact-HEAD local artifact** with the chosen identified signature and creates `/Applications/ClosedRoom.app` **only when that path does not exist**. It never deletes, upgrades, renames, re-signs or silently overwrites an already installed main app. It validates the source/installed file fingerprints and code signature before testing. If an older `ClosedRoom.app` exists, this mode fails closed unless it is byte-identical to a finalized artifact of the current Git HEAD. Use the standard `--use-installed-app` flag for subsequent runs without rebuilding. An identified local signature is not distribution notarization.
+
+The read-only `--use-installed-app` mode requires an installed `com.closedroom.app` that is byte-for-byte identical to a clean finalized build of the **current checkout** under `dist/artifacts` (ad-hoc or locally identified signing). It checks the codesign signature and source identity before running. If the installed app is older or differs, the run refuses to start, never overwrites `/Applications/ClosedRoom.app`, and reports the mismatch; it cannot qualify a different commit by pretending it is the current one. Before starting physical tests it **pauses indefinitely until you press Enter**: open the installed app to grant Microphone and Screen & System Audio Recording; allow the terminal application Screen & System Audio Recording for `screencapture`; grant the dedicated AX helper Accessibility; then quit the app completely and press Enter. The suite rechecks integrity after this checkpoint and launches the verified installed binary with an isolated temporary HOME. It never runs permission prompts or record tests against your personal meeting database. A new build/identity may still require granting permissions again. Identified local signing does **not** establish Developer ID notarization/release authority.
 
 To run the physical checks from a separate test app located in **/Applications** instead of the build tree, opt in:
 
