@@ -97,6 +97,50 @@ the OAuth identity may already have adequate permissions via other grants.
 `GCS_NETWORK_OR_SDK_FAILURE` to network/SDK conditions. Raw credential
 errors are intentionally suppressed; never paste tokens or downloaded JSON.
 
+## Next gate: portable archive-key recovery on two physical Macs
+
+This is a **test-only Keychain service**, distinct from OAuth and any future
+real meeting encryption key. This is not a cloud-backup test and does not need
+IAM or another Terraform apply. The completed OAuth probe proves test-bucket
+create/read rights only for the tested Google account.
+
+On **Mac A**, with the feature branch checked out and an interactive terminal:
+
+```bash
+cd ~/Personal/local-asr-server
+umask 077
+mkdir -p "$HOME/.config/closedroom"
+PYTHONPATH=src uv run --no-project --with cryptography --with keyring \
+  python scripts/verify_gcs_keychain_recovery.py create-fixture \
+  --recovery-file "$HOME/.config/closedroom/key-recovery-fixture.json"
+```
+
+The command creates an encrypted recovery envelope with `0600` permissions
+and prints a **one-time 256-bit test recovery code**. Keep that code
+**separate from the file**; do not paste it into issues, chat, command-line
+arguments, terminal logs or screenshots. Do not delete the Mac A Keychain key.
+
+Transfer **only** `key-recovery-fixture.json` privately to **Mac B**
+(never commit it). On Mac B, use the same ClosedRoom feature branch, place
+the file at a private path, then:
+
+```bash
+chmod 600 "$HOME/.config/closedroom/key-recovery-fixture.json"
+PYTHONPATH=src uv run --no-project --with cryptography --with keyring \
+  python scripts/verify_gcs_keychain_recovery.py restore-fixture \
+  --recovery-file "$HOME/.config/closedroom/key-recovery-fixture.json"
+PYTHONPATH=src uv run --no-project --with cryptography --with keyring \
+  python scripts/verify_gcs_keychain_recovery.py check-fixture \
+  --recovery-file "$HOME/.config/closedroom/key-recovery-fixture.json"
+```
+
+Type the test recovery code at the **hidden** prompt. Both commands must
+report `fingerprint matches: True`. The test refuses to overwrite a
+different Keychain key and does not mutate the archive bucket. If an earlier
+test key already exists on Mac B, don't delete it blindly; examine the
+fixture-service conflict first. This proves key portability only, not
+production backup/restore or independent recovery of a full meeting.
+
 ## Blocking before real meeting backup
 
 Desktop OAuth identity and bucket access, native Keychain storage, portable recovery on a second Mac, dependency packaging, and the canonical RecordingStore/metadata backup lifecycle are still outstanding. `storage_mode=local` remains enforced; **no real media upload, eviction or remote deletion**.
