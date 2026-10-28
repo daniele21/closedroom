@@ -36,7 +36,7 @@ Follow the closest scoped `AGENTS.md`. Extend one canonical owner before introdu
 | Missing deterministic remote gate | `skills/remote-preflight/SKILL.md` |
 | Persistent multi-session work | `skills/plan-workstream/SKILL.md` + active plan; finalize with `skills/finalize-workstream/SKILL.md` |
 
-Mac CI: source preflight dispatches exact trusted SHA to `daniele21/local-runner-infra` and waits for `local-ci/mac`; see `.github/ci/local-test.sh`. Never use caller self-hosted labels or trust dispatch success as test success.
+Mac CI: use `daniele21/local-runner-infra` and `.github/ci/local-test.sh`; require exact `local-ci/mac` PASS, not dispatch alone.
 
 ## Delivery and evidence
 
