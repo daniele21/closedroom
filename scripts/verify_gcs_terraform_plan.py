@@ -58,9 +58,12 @@ def validate_plan(plan: Any) -> dict[str, int]:
             if any(after.get(k) != v for k, v in expected.items()):
                 raise UnsafeTerraformPlan("Bucket security configuration is not exact")
             policy = after.get("soft_delete_policy")
-            if not isinstance(policy, list) or len(policy) != 1 or str(
-                policy[0].get("retention_duration_seconds")
-            ) != "604800":
+            if (
+                not isinstance(policy, list)
+                or len(policy) != 1
+                or not isinstance(policy[0], dict)
+                or str(policy[0].get("retention_duration_seconds")) != "604800"
+            ):
                 raise UnsafeTerraformPlan("Bucket soft-delete policy is unexpected")
         elif address and any(address.startswith(prefix + "[") or address == prefix for prefix in PERMITTED_IAM):
             matching = [role for prefix, role in PERMITTED_IAM.items() if address.startswith(prefix + "[") or address == prefix]
@@ -86,7 +89,7 @@ def main() -> int:
     try:
         plan = json.load(sys.stdin)
         summary = validate_plan(plan)
-    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+    except (ValueError, TypeError, KeyError):
         print("BLOCKED: Terraform plan did not meet GCS import/least-privilege guardrails.", file=sys.stderr)
         return 2
     print(json.dumps({"status": "safe_plan_guard_pass", **summary}, sort_keys=True))
