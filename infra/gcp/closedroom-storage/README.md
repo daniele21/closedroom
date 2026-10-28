@@ -31,7 +31,10 @@ This is a development aid, NOT permission to upload real recordings.
    terraform validate
    terraform plan -out=closedroom.tfplan
    terraform show closedroom.tfplan
+   terraform show -json closedroom.tfplan | python3 ../../../scripts/verify_gcs_terraform_plan.py
    ```
+
+   The guard must print `safe_plan_guard_pass` and `bucket_modifications: 0`; it **refuses** bucket creation, update, replacement, deletion, unknown resources or unapproved IAM roles. This does not replace human review of the complete `terraform show` output.
 
 4. The **initial plan should show the bucket being imported** and **zero bucket creates, destroys, or replacements**. Abort on unexpected drift or security-setting changes. When the plan is reviewed, `terraform apply closedroom.tfplan` performs the import and any explicitly approved changes. This may require bucket-management permissions.
 5. Only after the Google OAuth Desktop client and authorized user are known, optionally add `oauth_user_email = "your-user@example.com"` to `terraform.tfvars`; repeat the plan, inspect two additive IAM members, then explicitly approve `terraform apply`. If existing project-level roles already grant more, these additions do not reduce those privileges. An OAuth consent grant is **not** created by IAM.
