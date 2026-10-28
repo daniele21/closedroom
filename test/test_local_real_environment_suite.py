@@ -382,6 +382,7 @@ class LocalRealEnvironmentSuiteTests(unittest.TestCase):
                 patch.object(sys, "argv", ["suite", "--root", str(root), "--output", str(output), "--use-installed-app"]),
                 patch.object(suite.platform, "system", return_value="Darwin"),
                 patch.object(suite.platform, "machine", return_value="arm64"),
+                patch.object(suite.sys.stdin, "isatty", return_value=True),
                 patch.object(suite, "required_tools_missing", return_value=[]),
                 patch.object(suite.measured, "git_state", return_value=("abc123", [])),
                 patch.object(suite.local_policy, "installed_main_artifact", return_value=(installed, source, manifest_path, manifest)),
