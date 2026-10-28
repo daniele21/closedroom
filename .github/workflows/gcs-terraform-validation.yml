@@ -1,4 +1,4 @@
-name: GCS Terraform validation
+name: GCS Terraform and OAuth probes validation
 
 on:
   pull_request:
@@ -8,6 +8,10 @@ on:
       - "infra/gcp/closedroom-storage/**"
       - "scripts/verify_gcs_terraform_plan.py"
       - "test/test_gcs_terraform_plan_guard.py"
+      - "scripts/probe_closedroom_gcs_oauth.py"
+      - "src/local_asr_server/storage/gcs_oauth.py"
+      - "test/test_gcs_oauth.py"
+      - "test/test_gcs_oauth_cli.py"
 
 permissions:
   contents: read
@@ -29,3 +33,7 @@ jobs:
         run: terraform -chdir=infra/gcp/closedroom-storage validate -no-color
       - name: Terraform destructive-plan guard tests
         run: python3 -m unittest discover -s test -p 'test_gcs_terraform_plan_guard.py' -v
+      - name: OAuth desktop probe regression tests (fake credentials, no browser)
+        env:
+          PYTHONPATH: src
+        run: python3 -m unittest discover -s test -p 'test_gcs_oauth*.py' -v
