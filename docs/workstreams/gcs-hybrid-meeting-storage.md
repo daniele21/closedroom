@@ -14,7 +14,7 @@ Assi: PRODUCT_FEATURE / ITERATION / SCOPED (tooling only, selector authoritative
 
 **Non-goals:** cloud inference/fallback implicito, sync concorrente multi-Mac, Cloud SQL/Firestore, stream GCS durante capture, più provider nel MVP, compressione lossy, FUSE, promessa di 1 GB inclusi modelli AI.
 
-**Rischi:** VALUE (GB liberi), USABILITY (bucket/chiavi/offline), FEASIBILITY (Path), VIABILITY (IAM/costi), PRIVACY/RELIABILITY (restore e perdita dati).
+**Rischi:** VALUE spazio, USABILITY setup, FEASIBILITY Path, VIABILITY IAM/costi, PRIVACY/RELIABILITY recovery.
 
 ## Verifica su dev e owner
 
@@ -96,8 +96,8 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 
 ## Prossimo slice, checkpoint e chiusura
 
-**CS-0 + CS-1 avviati** su feature branch. Per misurare dati reali, eseguire `python3 scripts/audit_meeting_data.py` sul Mac con un archivio ClosedRoom; per includere root storiche usare `--extra-recordings-root <path>`. Output JSON aggregato, no meeting content; report non ancora acquisito. Bootstrap senza side-effect: `python3 scripts/bootstrap_closedroom_gcs_test.py`. Solo con gcloud autorizzato sul progetto test, `python3 scripts/bootstrap_closedroom_gcs_test.py --apply` tenta di creare `gs://project-tests-498508-closedroom-test` in `europe-west8`, Standard, UBLA, public access prevention, soft delete 7d. Bucket name globalmente unico **non verificato**; nessun ruolo IAM è concesso né dati trasferiti. Dopo creazione verificare autorizzazione, cifratura/key recovery e fixture restore prima di CS-2/CS-3.
+**CS-0/1 ACTIVE.** Audit: `python3 scripts/audit_meeting_data.py` (legacy: `--extra-recordings-root <path>`); GCS dry-run: `python3 scripts/bootstrap_closedroom_gcs_test.py` (`--apply` richiede autorità GCP). Bucket proposto `gs://project-tests-498508-closedroom-test` in `europe-west8`, Standard, UBLA, PAP e soft delete 7d. Nome non verificato. Pending: Mac inventory, GCS auth, key recovery e fixture restore.
 
-**Checkpoint 2026-10-28:** `feature/gcs-storage-discovery-project-tests` da `dev` `229cef8c`; `scripts/audit_meeting_data.py`, `scripts/bootstrap_closedroom_gcs_test.py` e due test. In ambiente Python isolato: 7 test PASS e compileall, senza utenti/meeting reali, bucket, credenziali o gcloud. CS-0/1 rimangono ACTIVE finché inventory target Mac e GCS auth/fixture/key recovery non sono provati. Verificare head/tree/base, gate e documentazione a ogni ripresa.
+**Checkpoint 2026-10-28:** feature branch da `dev` `229cef8c`; audit+bootstrap e 7 test Python PASS in ambiente isolato; compileall PASS. Nessuna verifica GCP, Keychain o Mac reale. CS-0/1 ACTIVE; al resume rivedere head/tree/base.
 
 **Documentazione a integrazione:** `docs/architecture.md` owner/boundary, `docs/features.md` comportamento, `SECURITY.md` chiavi/deletion, `design/ux-contract.json` UX, README usage, `docs/current-state.md` solo quando vero. ADR per decisioni durevoli. Dopo completamento trasferire verità e obblighi REAL_ENVIRONMENT, quindi eliminare questo piano secondo `docs/workstreams/README.md`.
