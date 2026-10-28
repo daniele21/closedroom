@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -49,6 +50,16 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertNotIn("<RecordingPage", self.app)
         self.assertFalse((ROOT / "frontend/src/pages/RecordingPage.tsx").exists())
         self.assertIn("routeDetail?.startsWith('auto/')", self.app)
+
+    def test_removed_recording_page_has_no_frontend_consumers(self) -> None:
+        # Prevent reintroducing an alternate saved-recording detail entry point.
+        # NewRecordingPage is the dedicated capture surface, not this old page.
+        pattern = re.compile(r"\\bRecordingPage\\b")
+        for path in (ROOT / "frontend/src").rglob("*"):
+            if path.suffix not in {".ts", ".tsx"}:
+                continue
+            with self.subTest(source=str(path.relative_to(ROOT))):
+                self.assertIsNone(pattern.search(path.read_text(encoding="utf-8")))
 
     def test_meeting_back_retains_project_origin(self) -> None:
         meeting = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
