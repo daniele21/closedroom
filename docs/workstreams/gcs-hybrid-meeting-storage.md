@@ -1,10 +1,10 @@
 # GCS hybrid meeting storage — piano di implementazione
 
-Status: ACTIVE — GCS bucket policy verified by operator on 2026-10-28; CS-0 inventory and CS-3 isolated GCS transport authored; no app integration.
+Status: ACTIVE — operator GCS encrypted fixture restore PASS; local-only settings prepared; OAuth/Keychain pending.
 Owner: RecordingStore, CatalogStore, TranscriptionStore; Settings e saved Meeting come consumer
 Read when: storage GCS opzionale, backup/ripristino e recupero spazio degli audio
 Base: `dev` @ `229cef8c35b257258cf5782c1ef22967279bf86b` (2026-10-28); aggiornare base/HEAD alla ripresa.
-Assi: PRODUCT_FEATURE / ITERATION / SCOPED (tooling only, selector authoritative) / AGENT_LOCAL. Future persistence/privacy code requires STRONG at least; target-Mac REAL_ENVIRONMENT where applicable.
+Assi: PRODUCT_FEATURE / ITERATION / STRONG (privacy/settings scope; selector authoritative) / AGENT_LOCAL + GCP operator. FULL at release.
 
 ## Outcome e product intent
 
@@ -70,7 +70,7 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 | --- | --- | --- | --- | --- |
 | CS-0 | ACTIVE | Audit read-only di dati privati: GB per audio/transcript/visual/cache/DB, duplicati fisici, spazio davvero liberabile; solo aggregati | nuovo script e test fixture, **non** audit bundle | — |
 | CS-1 | ACTIVE | Decisione UX/privacy/IAM/Keychain/encryption/recovery; prova GCS con fixture e go/no-go BYO | piano, spike isolato; ADR solo dopo evidenza | — |
-| CS-2 | BLOCKED | Settings, policy per meeting, schema asset/catalog e migration idempotente | `settings.py`, `schemas.py`, `settings_service.py`, `recordings.py`, `catalog.py`, test | CS-1 |
+| CS-2 | ACTIVE (settings-only) | Settings, policy per meeting, schema asset/catalog e migration idempotente | `settings.py`, `schemas.py`, `settings_service.py`, `recordings.py`, `catalog.py`, test | CS-1 |
 | CS-3 | ACTIVE | Adapter GCS con OAuth/cifratura/checksum/retry e mock | adapter e test propri, senza edit simultanei degli store | CS-1; interfaccia concordata con CS-2 |
 | CS-4 | BLOCKED | Backup coerente e restore su catalogo vuoto, preservando relazioni | `transcriptions.py`, owner snapshot/restore, test DB | CS-2, CS-3 |
 | CS-5 | BLOCKED | Upload post-finalize, retry/crash recovery e zero eviction | RecordingStore/uploader/integrazione router; serializzare con CS-2 | CS-2, CS-3 |
@@ -96,8 +96,8 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 
 ## Prossimo slice, checkpoint e chiusura
 
-**GCS gate:** operator ran `check-bucket --apply`, returned `bucket_policy_verified` for `project-tests-498508-closedroom-test` / `project-tests-498508`, `remote_changes=false` (2026-10-28). No upload yet. **Next:** synthetic `prepare` → `verify-local` → `upload --apply` → `restore --apply` with private fixture key; record results. No app hookup/eviction. Pending target-Mac audit, OAuth/Keychain and independent key recovery.
+**GCS operator evidence 2026-10-28:** bucket `project-tests-498508-closedroom-test` policy verified. Synthetic AES-256-GCM `prepare`→`verify-local`→`upload --apply`→`restore --apply`: `prepared`/`verified`/`uploaded_not_restored`/`verified`; ciphertext 65,609 bytes, authentication and SHA-256 match. No user meeting transferred. Next: OAuth, Keychain recovery, Mac footprint; app backup/eviction NOT active.
 
-**Checkpoint 2026-10-28:** feature branch from `dev` `229cef8c`; CS-0 inventory, CS-1 test tools, CS-3 encrypted transport and fake tests. 5 transport tests PASS in isolated Python; exact-head CI requires refresh. GCP bucket policy validated via operator output only; no encrypted remote roundtrip or Keychain/recovery proof. CS-2/4/5 blocked.
+**Checkpoint:** feature branch from `dev` `229cef8c`; CS-0 audit, CS-3 transport and tests, CS-2 staged bucket settings (`storage_mode=local` enforced; `storage_capability=preparation_only`). Operator fixture restore PASS. OAuth/Keychain and portable recovery, meeting policy/catalog, metadata backup and eviction pending. No real meeting backup.
 
 **Documentazione a integrazione:** `docs/architecture.md` owner/boundary, `docs/features.md` comportamento, `SECURITY.md` chiavi/deletion, `design/ux-contract.json` UX, README usage, `docs/current-state.md` solo quando vero. ADR per decisioni durevoli. Dopo completamento trasferire verità e obblighi REAL_ENVIRONMENT, quindi eliminare questo piano secondo `docs/workstreams/README.md`.
