@@ -198,8 +198,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [existingProjects, setExistingProjects] = useState<string[]>([]);
   const currentRecordingIdRef = useRef(recordingId);
-  currentRecordingIdRef.current = recordingId;
   useEffect(() => {
+    currentRecordingIdRef.current = recordingId;
     setEditingTitle(false);
     setProjectPickerOpen(false);
     setExistingProjects([]);
