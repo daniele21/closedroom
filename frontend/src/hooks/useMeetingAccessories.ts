@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiClient, MeetingDiagnostics, RecordingNote, RecordingScreenshot } from '../api/apiClient';
+import { ApiClient, AudioIntelligence, MeetingDiagnostics, RecordingNote, RecordingScreenshot } from '../api/apiClient';
 
 export type VisualFramesState = 'idle' | 'loading' | 'ready' | 'error';
 export type ScreenshotsState = 'idle' | 'loading' | 'ready' | 'error';
@@ -56,6 +56,10 @@ export function useMeetingAccessories({
   demoMode,
   lang,
 }: MeetingAccessoriesOptions) {
+  const [audioIntelligence, setAudioIntelligence] = useState<AudioIntelligence | null>(null);
+  const [audioIntelligenceState, setAudioIntelligenceState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [audioIntelligenceError, setAudioIntelligenceError] = useState<string | null>(null);
+  const audioIntelligenceGenerationRef = useRef(0);
   const [diagnosticReport, setDiagnosticReport] = useState<MeetingDiagnostics | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
@@ -79,6 +83,27 @@ export function useMeetingAccessories({
 
   const diagnosticsGenerationRef = useRef(0);
   const visualFramesGenerationRef = useRef(0);
+
+  // Read-only, explicitly opened Meeting detail; never fetched during the normal fast-open path.
+  const loadAudioIntelligence = useCallback(async () => {
+    if (!recordingId || demoMode) return;
+    const generation = ++audioIntelligenceGenerationRef.current;
+    setAudioIntelligenceState('loading');
+    setAudioIntelligenceError(null);
+    try {
+      const result = await ApiClient.recordingIntelligence(recordingId);
+      if (generation !== audioIntelligenceGenerationRef.current) return;
+      setAudioIntelligence(result);
+      setAudioIntelligenceState('ready');
+    } catch (err: unknown) {
+      if (generation !== audioIntelligenceGenerationRef.current) return;
+      setAudioIntelligenceError(
+        err instanceof Error ? err.message
+          : (lang === 'it' ? 'Metriche audio non disponibili' : 'Audio metrics unavailable'),
+      );
+      setAudioIntelligenceState('error');
+    }
+  }, [demoMode, lang, recordingId]);
 
   const loadDiagnostics = useCallback(async () => {
     if (!recordingId || demoMode) return;
@@ -121,6 +146,10 @@ export function useMeetingAccessories({
   }, [demoMode, lang, recordingId]);
 
   useEffect(() => {
+    audioIntelligenceGenerationRef.current += 1;
+    setAudioIntelligence(null);
+    setAudioIntelligenceState('idle');
+    setAudioIntelligenceError(null);
     diagnosticsGenerationRef.current += 1;
     visualFramesGenerationRef.current += 1;
     setDiagnosticReport(null);
@@ -133,6 +162,7 @@ export function useMeetingAccessories({
     resetNotes();
 
     return () => {
+      audioIntelligenceGenerationRef.current += 1;
       diagnosticsGenerationRef.current += 1;
       visualFramesGenerationRef.current += 1;
       invalidateScreenshots();
@@ -141,6 +171,10 @@ export function useMeetingAccessories({
   }, [demoMode, invalidateNotes, invalidateScreenshots, lang, recordingId, resetNotes, resetScreenshots]);
 
   return {
+    audioIntelligence,
+    audioIntelligenceState,
+    audioIntelligenceError,
+    loadAudioIntelligence,
     diagnosticReport,
     diagnosticsLoading,
     diagnosticsError,

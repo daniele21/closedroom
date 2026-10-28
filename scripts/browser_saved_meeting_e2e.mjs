@@ -30,6 +30,12 @@ const meetingFixture = {
     created_at: '2026-09-05T10:00:00Z',
     stopped_at: '2026-09-05T10:10:00Z',
     duration_seconds: 600,
+    audio_tracks: [
+      { id: 'mixed', source: 'mixed', label: 'Mixed', bytes_written: 524288, primary: true },
+      { id: 'system', source: 'system', label: 'System track', bytes_written: 262144, primary: false },
+    ],
+    warnings: ['sync_duration_warning'],
+    quality_report: { sync: { duration_delta_ms: 135 } },
   },
   transcription: {
     id: 'e2e-transcription',
@@ -115,6 +121,7 @@ const diagnosticsFixture = {
 const counts = {
   session: 0, health: 0, meeting: 0, alternate_meeting: 0, held_meeting: 0,
   diagnostics: 0, visual_frames: 0, screenshots: 0, alternate_screenshots: 0, notes: 0, alternate_notes: 0,
+  audio_intelligence: 0,
   alternate_visual_context: 0,
   metadata_title: 0, metadata_project: 0, metadata_projects_list: 0,
   benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0, benchmark_window: 0,
@@ -246,6 +253,19 @@ function fixtureServer(port) {
         meetingFixture.project_name = payload.project_name;
       }
       return json(res, 200, meetingFixture.recording);
+    }
+    if (pathname === `/v1/recordings/${MEETING_ID}/intelligence`) {
+      counts.audio_intelligence += 1;
+      return json(res, 200, {
+        version: 1, backend: 'synthetic', mode: 'shadow', mock: true,
+        channels: {}, conversation_metrics: {
+          speaking_time_pct: { mic: 48, system: 36 },
+          speaking_time_seconds: { mic: 288, system: 216 },
+          speech_rate_wpm: { mic: 118, system: 105 },
+          long_pauses: [], overlaps: [], high_energy_moments: [],
+        },
+        insight_candidates: [],
+      });
     }
     if (pathname === `/v1/meetings/${MEETING_ID}/diagnostics`) {
       counts.diagnostics += 1;
@@ -619,6 +639,62 @@ async function waitText(browser, needles, timeoutMs = 5000, record = false) {
   throw new Error(`timed out waiting for ${needles.join(' | ')}; text=${last.slice(0, 1000)}`);
 }
 
+// WebDriver's actual pointer action is authoritative. A custom elementFromPoint
+// center heuristic can report the enclosing Section instead of its child button
+// in Radix drawer content, despite a visible and actionable target.
+async function clickWhenPointerReady(browser, selector, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      // Never substitute HTMLElement.click(): this must exercise pointer interaction.
+      await browser.clickCss(selector);
+      return;
+    } catch (error) {
+      lastError = String(error?.message || error);
+      await sleep(100);
+    }
+  }
+  const details = await browser.execute(`
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!element) return { reason: 'missing', lastError: ${JSON.stringify(lastError)} };
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const dialog = element.closest('[role="dialog"]');
+    const section = element.closest('section');
+    const samplePoints = [
+      [0.5, 0.5], [0.1, 0.5], [0.9, 0.5], [0.5, 0.15], [0.5, 0.85],
+    ].map(([rx, ry]) => {
+      const stack = document.elementsFromPoint(rect.left + rect.width * rx, rect.top + rect.height * ry);
+      return { point: [rx, ry], hits: stack.slice(0, 4).map((node) => node.tagName + ':' + (node.className?.baseVal || node.className || '').toString().slice(0, 50)) };
+    });
+    const style = getComputedStyle(element);
+    const sectionStyle = section ? getComputedStyle(section) : null;
+    return {
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      target: element.tagName, hit: hit?.tagName || null,
+      hitIsOwnSection: hit === section, hitClass: typeof hit?.className === 'string' ? hit.className.slice(0, 120) : null,
+      samplePoints,
+      button: {
+        disabled: element.disabled, inert: element.inert, hidden: element.hidden,
+        clientRects: element.getClientRects().length, visibility: style.visibility, display: style.display,
+        opacity: style.opacity, pointerEvents: style.pointerEvents, zIndex: style.zIndex,
+        position: style.position, transform: style.transform, clipPath: style.clipPath,
+        contentVisibility: style.contentVisibility,
+      },
+      section: {
+        inert: section?.inert, pointerEvents: sectionStyle?.pointerEvents,
+        position: sectionStyle?.position, zIndex: sectionStyle?.zIndex,
+        before: section ? getComputedStyle(section, '::before').content : null,
+        after: section ? getComputedStyle(section, '::after').content : null,
+      },
+      inertAncestors: Array.from((function* () { for (let node = element; node; node = node.parentElement) if (node.inert || node.hasAttribute('inert')) yield node.tagName; })()),
+      dialogTransform: dialog ? getComputedStyle(dialog).transform : null,
+    };
+  `);
+  throw new Error(`WebDriver pointer click unavailable for ${selector}: ${lastError}; ${JSON.stringify(details)}`);
+}
+
 async function waitCount(key, minimum, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -736,13 +812,14 @@ try {
   await browser.navigate(`http://127.0.0.1:${vitePort}/#meeting/${MEETING_ID}`);
   await waitText(browser, ['Quarterly launch review'], 30000, true);
   await waitText(browser, ['Decision: ship the release after validation.']);
-  if (counts.diagnostics !== 0 || counts.visual_frames !== 0) {
+  if (counts.diagnostics !== 0 || counts.visual_frames !== 0 || counts.audio_intelligence !== 0) {
     throw new Error(`normal open fetched disclosure-driven accessories: ${JSON.stringify(counts)}`);
   }
   await waitCount('screenshots', 1);
   await checkpoint(browser, '01-ready-core-only');
 
   await browser.clickButton(['Details', 'Dettagli']);
+  if (counts.audio_intelligence !== 0) throw new Error('Opening Meeting Details fetched audio metrics without user disclosure');
   await waitCount('diagnostics', 1);
   await waitText(
     browser,
@@ -769,6 +846,22 @@ try {
     ['Detailed diagnostics unavailable', 'Diagnostica dettagliata non disponibile'],
   );
   await checkpoint(browser, '04-diagnostics-recovered');
+
+  const audioControls = await browser.execute(`
+    const section = document.querySelector('[data-meeting-recording-details="true"]');
+    return Boolean(section && /Tracce e qualità audio|Audio tracks and quality/.test(section.querySelector('button[aria-expanded]')?.textContent || ''));
+  `);
+  if (!audioControls) throw new Error('Canonical Meeting lost recording quality and source track access');
+  await clickWhenPointerReady(browser, '[data-meeting-recording-details="true"] button[aria-expanded]');
+  await waitText(browser, ['System track'], 5000, true);
+  await clickWhenPointerReady(browser, '[data-meeting-audio-intelligence="true"] button[aria-expanded]');
+  const expanded = await browser.execute(`
+    return document.querySelector('[data-meeting-audio-intelligence="true"] button[aria-expanded]')?.getAttribute('aria-expanded') === 'true';
+  `);
+  if (!expanded) throw new Error('Audio Intelligence disclosure did not open through pointer interaction');
+  await waitCount('audio_intelligence', 1);
+  await waitText(browser, ['48%'], 5000, true);
+  await checkpoint(browser, '04a-audio-metrics-on-demand');
 
   await browser.clickCss('button[aria-label="Chiudi"]');
   await browser.clickCss('#meeting-tab-analysis');

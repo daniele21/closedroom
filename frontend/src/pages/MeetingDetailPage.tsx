@@ -43,6 +43,8 @@ import { cn } from '../utils/cn';
 import { MeetingProcessingStatus } from '../components/meeting/MeetingProcessingStatus';
 import { VisualIntelligencePanel } from '../components/meeting/VisualIntelligencePanel';
 import { VisualDebugPanel } from '../components/meeting/VisualDebugPanel';
+import { MeetingRecordingDetails } from '../components/meeting/MeetingRecordingDetails';
+import AudioIntelligencePanel from './recording/AudioIntelligencePanel';
 import { StructuredNotesEditor } from '../components/meeting/StructuredNotesEditor';
 import { useMeetingJobEvents } from '../hooks/useMeetingJobEvents';
 import { useVisualIntelligence } from '../hooks/useVisualIntelligence';
@@ -221,12 +223,17 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
   const [analysisSetupOpen, setAnalysisSetupOpen] = useState(false);
   const [analysisPipelineTarget, setAnalysisPipelineTarget] = useState('meeting_default');
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [audioIntelligenceOpen, setAudioIntelligenceOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   const [activeTab, setActiveTab] = useState<MeetingTab>('transcript');
   const [currentTime, setCurrentTime] = useState(0);
   const {
+    audioIntelligence,
+    audioIntelligenceState,
+    audioIntelligenceError,
+    loadAudioIntelligence,
     diagnosticReport,
     diagnosticsLoading,
     diagnosticsError,
@@ -242,6 +249,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
     notesState,
     loadNotes,
   } = useMeetingAccessories({ recordingId, demoMode, lang });
+  // The optional audio disclosure belongs to the selected Meeting, never its predecessor.
+  useEffect(() => { setAudioIntelligenceOpen(false); }, [recordingId]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabListRef = useRef<HTMLDivElement | null>(null);
   const analysisMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1799,7 +1808,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
             title={t('meeting.statusTitle')}
             description={t('workspace.advancedDesc')}
           />
-          <SheetBody className="flex flex-col gap-5 overflow-y-auto pt-2">
+          <SheetBody className="flex flex-col gap-5 overflow-y-auto pt-2 [&>*]:shrink-0">
             <div className="rounded-xl border border-border-subtle bg-bg-surface p-4">
               <h4 className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-3">
                 {lang === 'it' ? 'Stato Componenti' : 'Component Status'}
@@ -1850,6 +1859,58 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                   <p className="text-xs text-text-muted">{t('meeting.noSpeakerAttribution')}</p>
                 )}
               </div>
+            )}
+
+            <MeetingRecordingDetails recording={meeting.recording} />
+
+            {meeting.transcription && !demoMode && (
+              <section className="surface-advanced rounded-xl overflow-hidden" data-meeting-audio-intelligence="true">
+                <button
+                  type="button"
+                  aria-expanded={audioIntelligenceOpen}
+                  aria-controls="meeting-audio-intelligence-panel"
+                  onClick={() => {
+                    const opening = !audioIntelligenceOpen;
+                    setAudioIntelligenceOpen(opening);
+                    if (opening && audioIntelligenceState === 'idle') void loadAudioIntelligence();
+                  }}
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-text-primary hover:bg-bg-hover/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                >
+                  <span>
+                    {t('audioIntelligence.title')}
+                    <span className="block text-xs font-normal text-text-muted">{t('audioIntelligence.description')}</span>
+                  </span>
+                  <ChevronDown className={cn('h-4 w-4 shrink-0 text-text-muted transition-transform', audioIntelligenceOpen && 'rotate-180')} aria-hidden="true" />
+                </button>
+                <div id="meeting-audio-intelligence-panel" hidden={!audioIntelligenceOpen} className="border-t border-border-subtle p-3" aria-live="polite">
+                  {audioIntelligenceOpen && (
+                    <>
+                      {audioIntelligenceState === 'loading' && (
+                        <p role="status" className="flex items-center gap-2 text-xs text-text-muted">
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          {lang === 'it' ? 'Caricamento delle metriche audio locali…' : 'Loading local audio metrics…'}
+                        </p>
+                      )}
+                      {audioIntelligenceState === 'error' && (
+                        <div role="alert" className="rounded-lg border border-warning/30 p-3 text-xs text-text-secondary">
+                          <p>{audioIntelligenceError || (lang === 'it' ? 'Metriche non disponibili' : 'Metrics unavailable')}</p>
+                          <Button variant="secondary" size="sm" className="mt-2" onClick={() => void loadAudioIntelligence()}>
+                            {lang === 'it' ? 'Riprova' : 'Retry'}
+                          </Button>
+                        </div>
+                      )}
+                      {audioIntelligenceState === 'ready' && (
+                        <AudioIntelligencePanel
+                          compact
+                          intelligence={audioIntelligence}
+                          hasTranscription={Boolean(meeting.transcription)}
+                          onTranscribe={startDefaultTranscription}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+              </section>
             )}
 
             {diagnosticsLoading && (

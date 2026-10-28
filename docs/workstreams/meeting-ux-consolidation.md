@@ -1,7 +1,7 @@
 # Meeting-first UX consolidation — navigation, library and saved Meeting
 
-Status: ACTIVE — UX-0/1/2/5/6 integrated, UX-3 destination and recovery implemented, UX-4 notes/source refinement and UX-7 canonical expert return under integration; physical macOS usability and legacy Audio Intelligence parity still pending.
-Latest integration checkpoint: `dev` @ `88e00ce7568f7e9e423806ab243fdcef7547dfef` (2026-10-27, PR #155).
+Status: ACTIVE — UX-0/1/2/3/5/6 integrated; UX-4/7 integration joins local Audio Intelligence, audio tracks/quality and editable Meeting metadata; legacy-page removal and target-Mac UX evidence remain pending.
+Latest integration checkpoint: `dev` @ `0a7320aa220eedb4081d9e037fe38de7949ed204` (2026-10-28, PR #158).
 Product / delivery / validation / execution: PRODUCT_FEATURE / ITERATION; risk-selected SCOPED for isolated routes, STRONG when shared navigation/meeting contracts or recovery changes; REMOTE_AUTOMATED for unavailable deterministic Mac/browser gates, REAL_ENVIRONMENT for subjective macOS usability/TCC when materially affected. Integration always uses repository selector, affected FULL_MEDIA UX journeys, exact head/base evidence.
 
 ## User job and scope
@@ -27,7 +27,7 @@ Non-goals: brand rework, changing ASR/LLM/diarization engines, replacing storage
 
 ## Canonical ownership
 
-`App.tsx` owns routes and compatibility. `MeetingDetailPage.tsx` owns saved Meeting and advanced tools. `MeetingsPage.tsx`, `DashboardPage.tsx` and `MeetingSearchDialog.tsx` share bounded local FTS5. `ProjectsPage.tsx` scopes the same Meeting. `AnalysisPage.tsx`/`TranscriptionPage.tsx` retain independent imports. `useActivities` projects one canonical job store. Legacy `RecordingPage.tsx` still hosts Audio Intelligence and requires parity before deletion.
+`App.tsx` owns routes and compatibility. `MeetingDetailPage.tsx` owns saved Meeting and advanced tools. `MeetingsPage.tsx`, `DashboardPage.tsx` and `MeetingSearchDialog.tsx` share bounded local FTS5. `ProjectsPage.tsx` scopes the same Meeting. `AnalysisPage.tsx`/`TranscriptionPage.tsx` retain independent imports. `useActivities` projects one canonical job store. Legacy `RecordingPage.tsx` remains until its consumers and saved-detail parity are fully checked.
 
 ## Target information architecture and critical journey
 
@@ -85,4 +85,4 @@ PR #155 merged the full Meetings library/Activities and removed the unused list;
 
 Branch `ux/meeting-metadata-parity` (based on `dev` `83d70c7`) adds title rename and project assignment to the canonical saved Meeting. Both reuse `ApiClient.updateRecording` and the same project selector already used in Projects; project suggestions are fetched only after an explicit edit. Demo mode remains read-only, writes stay tied to the selected recording identity, and failures retain the user's edit. No new persistence, cloud access or runtime owner.
 
-This is *not* approval to delete `RecordingPage`. Before retirement, merge UX-4 Audio Intelligence/track parity from PR #157, prove these metadata interactions in the full browser journey (including project reassignment and errors), census legacy route consumers, and apply exact-head integration gates. Target-Mac keyboard/VoiceOver/usability remains release evidence.
+This is *not* approval to delete `RecordingPage`. Before retirement, prove Audio Intelligence/track and metadata parity together on the exact combined HEAD, census legacy route consumers and complete required integration gates. Target-Mac keyboard/VoiceOver/usability remains release evidence.
