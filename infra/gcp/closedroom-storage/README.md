@@ -57,6 +57,46 @@ The CLI returns safe JSON error codes: `CLIENT_FILE_MISSING` (wrong path), `CLIE
 
 The CLI is **opt-in** and not a production UI. Credentials are meant for the macOS Keychain; project IAM and refresh behavior must still be validated with the *desktop* identity and a real GCS request. Disconnecting locally does not revoke the remote Google grant.
 
+## Verify the *Keychain OAuth* identity against GCS (synthetic only)
+
+After an operator has seen `desktop_oauth_saved_in_keychain`, prove that
+the desktop identity (rather than Terraform/gcloud ADC) can both create and
+read an object on the private test bucket. The probe hardcodes the approved
+test project and bucket and creates only 4 KiB of random bytes under
+`closedroom-oauth-fixtures/`. It does not enumerate or send meeting data,
+delete objects, print secrets or use a default-credential fallback.
+
+From the repository root:
+
+```bash
+CLIENT_JSON="$HOME/.config/closedroom/oauth-desktop.json"
+PYTHONPATH=src uv run --no-project --with keyring --with google-auth --with google-auth-oauthlib --with google-cloud-storage python scripts/probe_closedroom_gcs_oauth.py status --client-json "$CLIENT_JSON"
+PYTHONPATH=src uv run --no-project --with keyring --with google-auth --with google-auth-oauthlib --with google-cloud-storage python scripts/probe_closedroom_gcs_oauth.py verify-bucket --client-json "$CLIENT_JSON" --apply
+```
+
+Expected final `status`: `oauth_bucket_read_write_verified`; it reports
+`auth_source=native_keychain`, `generation_pinned=true` and
+`meeting_data_transferred=false`. The synthetic object is retained (the
+minimum create/viewer IAM roles intentionally **do not permit delete**).
+The Google OAuth client may be in Testing mode, requiring renewed consent
+after token expiry.
+
+On `GCS_IAM_FORBIDDEN`, first check which Google account was granted
+consent. If necessary, set `oauth_user_email` in the local, gitignored
+Terraform `terraform.tfvars` for that **same** principal; review
+`terraform plan -out=iam.tfplan`, inspect `terraform show` and run
+`terraform show -json iam.tfplan | python3 ../../../scripts/verify_gcs_terraform_plan.py`
+from the infrastructure directory. Only after an approved plan containing
+two additive bucket IAM members and zero bucket changes, explicitly
+apply `iam.tfplan`; then re-run the probe. Do not add IAM blindly:
+the OAuth identity may already have adequate permissions via other grants.
+
+`GCS_OAUTH_TOKEN_REJECTED` points to the token/refresh grant,
+`GCS_BUCKET_OR_OBJECT_NOT_FOUND` to target or object read,
+`GCS_GENERATION_CONFLICT` to an unexpected generation failure and
+`GCS_NETWORK_OR_SDK_FAILURE` to network/SDK conditions. Raw credential
+errors are intentionally suppressed; never paste tokens or downloaded JSON.
+
 ## Blocking before real meeting backup
 
 Desktop OAuth identity and bucket access, native Keychain storage, portable recovery on a second Mac, dependency packaging, and the canonical RecordingStore/metadata backup lifecycle are still outstanding. `storage_mode=local` remains enforced; **no real media upload, eviction or remote deletion**.
