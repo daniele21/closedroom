@@ -27,7 +27,7 @@ Non-goals: brand rework, changing ASR/LLM/diarization engines, replacing storage
 
 ## Canonical ownership
 
-`App.tsx` owns routes and compatibility. `MeetingDetailPage.tsx` owns saved Meeting and advanced tools. `MeetingsPage.tsx`, `DashboardPage.tsx` and `MeetingSearchDialog.tsx` share bounded local FTS5. `ProjectsPage.tsx` scopes the same Meeting. `AnalysisPage.tsx`/`TranscriptionPage.tsx` retain independent imports. `useActivities` projects one canonical job store. Legacy `RecordingPage.tsx` remains until its consumers and saved-detail parity are fully checked.
+`App.tsx` owns routes and compatibility. `MeetingDetailPage.tsx` owns saved Meeting and advanced tools. `MeetingsPage.tsx`, `DashboardPage.tsx` and `MeetingSearchDialog.tsx` share bounded local FTS5. `ProjectsPage.tsx` scopes the same Meeting. `AnalysisPage.tsx`/`TranscriptionPage.tsx` retain independent imports. `useActivities` projects one canonical job store. Legacy `RecordingPage.tsx` is retired in the final UX-7 slice; the saved-recording alias keeps redirecting to the canonical Meeting while `recording/auto` remains the native New Meeting handoff.
 
 ## Target information architecture and critical journey
 
@@ -85,4 +85,4 @@ PR #155 merged the full Meetings library/Activities and removed the unused list;
 
 Branch `ux/meeting-metadata-parity` (based on `dev` `83d70c7`) adds title rename and project assignment to the canonical saved Meeting. Both reuse `ApiClient.updateRecording` and the same project selector already used in Projects; project suggestions are fetched only after an explicit edit. Demo mode remains read-only, writes stay tied to the selected recording identity, and failures retain the user's edit. No new persistence, cloud access or runtime owner.
 
-This is *not* approval to delete `RecordingPage`. Before retirement, prove Audio Intelligence/track and metadata parity together on the exact combined HEAD, census legacy route consumers and complete required integration gates. Target-Mac keyboard/VoiceOver/usability remains release evidence.
+Legacy page retirement in PR #159 is conditional on exact-HEAD/full-base FULL_MEDIA and source validation, zero remaining consumers, plus preserved Audio Intelligence, metadata editing, native auto-start and saved-meeting redirects. Packaged WKWebView, VoiceOver and qualitative target-Mac usability remain separate REAL_ENVIRONMENT release obligations.

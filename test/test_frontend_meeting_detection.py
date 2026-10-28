@@ -32,7 +32,9 @@ class MeetingDetectionFrontendContractTests(unittest.TestCase):
     def test_auto_route_is_distinct_from_opening_saved_recording(self):
         app = (ROOT / "frontend/src/App.tsx").read_text()
         self.assertIn("routeDetail?.startsWith('auto/')", app)
-        self.assertIn("autoStartToken={routeDetail.slice(5)}", app)
+        self.assertIn("!detail.startsWith('auto/')", app)
+        self.assertIn("legacySavedRecording ? 'meeting' : pageName", app)
+        self.assertIn("autoStartToken={routeDetail?.startsWith('auto/') ? routeDetail.slice(5) : undefined}", app)
 
     def test_native_only_request_fails_closed_without_fallback(self):
         hook = (ROOT / "frontend/src/hooks/useRecorder.ts").read_text()
