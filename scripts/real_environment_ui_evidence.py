@@ -166,10 +166,19 @@ def find_closedroom_pid(expected_executable: str | None = None, excluded: set[in
         if pid in excluded or "/Contents/MacOS/" not in command or "ClosedRoom" not in command:
             continue
         generic.append(pid)
-        if expected_executable and expected_executable in command:
+        if expected_executable and (
+            command == expected_executable or command.startswith(expected_executable + " ")
+        ):
             exact.append(pid)
-    candidates = exact or generic
+    # When a concrete packaged-app executable is known, never fall back to a
+    # different ClosedRoom instance (including the user's regular installation).
+    candidates = exact if expected_executable else generic
     return max(candidates) if candidates else None
+
+
+def media_directory(report_path: Path) -> Path:
+    """Keep per-child and per-run FULL_MEDIA evidence isolated."""
+    return report_path.parent / "ui-media" / report_path.stem / "meeting-recording-ui"
 
 
 def window_rect(pid: int) -> str:
@@ -223,7 +232,7 @@ def main() -> int:
     args = parse_args()
     root = Path(args.root).resolve()
     report_path = evidence_report_path(root, args.evidence)
-    media_root = report_path.parent / "ui-media" / "meeting-recording-ui"
+    media_root = media_directory(report_path)
     screenshot_root = media_root / "screenshots"
     video_path = media_root / "video" / "journey.mov"
     manifest_path = media_root / "manifest.json"
@@ -349,7 +358,9 @@ def main() -> int:
         if successful_smoke
         else report.get("status", "fail"),
         "screenshots": [str(path.relative_to(report_path.parent)) for path in screenshot_paths if path.is_file()],
+        "missing_screenshots": [path.name for path in screenshot_paths if not (path.is_file() and path.stat().st_size > 0)],
         "video": str(video_path.relative_to(report_path.parent)) if video_path.is_file() else None,
+        "video_complete": video_ok,
         "media_errors": media_errors,
         "privacy_boundary": "Capture is restricted to the ClosedRoom application window rectangle; synthetic test content only.",
     }

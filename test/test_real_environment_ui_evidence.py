@@ -153,6 +153,30 @@ class RealEnvironmentUIEvidenceTest(unittest.TestCase):
                 200,
             )
 
+    def test_media_is_isolated_per_child_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            measured = self.runner.media_directory(parent / "ui-target-mac-report.json")
+            contention = self.runner.media_directory(parent / "contention-seed-ui-report.json")
+            self.assertNotEqual(measured, contention)
+            self.assertEqual(measured.name, "meeting-recording-ui")
+            self.assertEqual(contention.name, "meeting-recording-ui")
+            self.assertEqual(measured.parent.name, "ui-target-mac-report")
+            self.assertEqual(contention.parent.name, "contention-seed-ui-report")
+
+    def test_known_executable_never_falls_back_to_another_closedroom(self) -> None:
+        wanted = "/Applications/ClosedRoom Test-id.app/Contents/MacOS/ClosedRoom"
+        running = [
+            (101, "/Applications/ClosedRoom.app/Contents/MacOS/ClosedRoom"),
+            (102, "/Applications/ClosedRoom Test-other.app/Contents/MacOS/ClosedRoom"),
+            (103, wanted + "-spurious"),
+        ]
+        with mock.patch.object(self.runner, "process_snapshot", return_value=running):
+            self.assertIsNone(self.runner.find_closedroom_pid(expected_executable=wanted))
+        running.append((104, wanted))
+        with mock.patch.object(self.runner, "process_snapshot", return_value=running):
+            self.assertEqual(self.runner.find_closedroom_pid(expected_executable=wanted), 104)
+
     def test_find_closedroom_pid_excludes_processes_present_before_smoke(self) -> None:
         snapshot = [
             (100, "/old/ClosedRoom.app/Contents/MacOS/ClosedRoom"),
