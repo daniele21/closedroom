@@ -86,3 +86,9 @@ Still required: complete exact-head integration gates on this wave, review Meeti
 ## Resume checkpoint — 2026-10-27
 
 Base: `dev` `88e00ce`. Wave 2 on `ux/meeting-consolidation-wave2`; see acceptance and gaps above.
+
+## UX-7 metadata parity slice — 2026-10-28
+
+Branch `ux/meeting-metadata-parity` (based on `dev` `83d70c7`) adds title rename and project assignment to the canonical saved Meeting. Both reuse `ApiClient.updateRecording` and the same project selector already used in Projects; project suggestions are fetched only after an explicit edit. Demo mode remains read-only, writes stay tied to the selected recording identity, and failures retain the user's edit. No new persistence, cloud access or runtime owner.
+
+This is *not* approval to delete `RecordingPage`. Before retirement, merge UX-4 Audio Intelligence/track parity from PR #157, prove these metadata interactions in the full browser journey (including project reassignment and errors), census legacy route consumers, and apply exact-head integration gates. Target-Mac keyboard/VoiceOver/usability remains release evidence.
