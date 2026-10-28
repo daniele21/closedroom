@@ -1,0 +1,31 @@
+name: GCS Terraform validation
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - ".github/workflows/gcs-terraform-validation.yml"
+      - "infra/gcp/closedroom-storage/**"
+      - "scripts/verify_gcs_terraform_plan.py"
+      - "test/test_gcs_terraform_plan_guard.py"
+
+permissions:
+  contents: read
+
+jobs:
+  gcs-terraform-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.12.2"
+      - name: Terraform formatting
+        run: terraform fmt -check -recursive infra/gcp/closedroom-storage
+      - name: Terraform provider initialization (NO backend, GCP auth or apply)
+        run: terraform -chdir=infra/gcp/closedroom-storage init -backend=false -input=false -no-color
+      - name: Terraform configuration validation (offline from GCP)
+        run: terraform -chdir=infra/gcp/closedroom-storage validate -no-color
+      - name: Terraform destructive-plan guard tests
+        run: python3 -m unittest discover -s test -p 'test_gcs_terraform_plan_guard.py' -v
