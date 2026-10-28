@@ -666,6 +666,7 @@ class RecordingApiTests(unittest.TestCase):
             json={
                 "language": "it",
                 "response_format": "verbose_json",
+                "diarization_provider": "none",
                 "visual_intelligence_enabled": False,
             },
         )

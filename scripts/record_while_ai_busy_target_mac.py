@@ -305,16 +305,7 @@ def main() -> int:
             for item in api.recordings()
             if item.get("id")
         }
-        job = api.json(
-            f"/v1/recordings/{recording_id}/transcription-jobs",
-            "POST",
-            {
-                "asr_provider": "local",
-                "diarization_provider": "disabled",
-                "visual_intelligence_enabled": False,
-            },
-            20,
-        )
+        job = measured.submit_local_transcription_job(api, recording_id)
         job_id = str(job.get("id") or "")
         check("managed_ai_submitted", bool(job_id), {"job_id": job_id})
 

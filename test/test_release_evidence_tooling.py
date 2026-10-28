@@ -115,6 +115,28 @@ class ProductionArtifactContractTests(unittest.TestCase):
 
 
 class MeasuredReleaseContractTests(unittest.TestCase):
+    def test_local_managed_job_uses_supported_diarization_request_value(self) -> None:
+        api = Mock()
+        api.json.return_value = {"id": "job-1"}
+
+        job = measured.submit_local_transcription_job(api, "recording-1")
+
+        self.assertEqual(job, {"id": "job-1"})
+        api.json.assert_called_once_with(
+            "/v1/recordings/recording-1/transcription-jobs",
+            "POST",
+            {
+                "asr_provider": "local",
+                "diarization_provider": "none",
+                "visual_intelligence_enabled": False,
+            },
+            20,
+        )
+        source = (ROOT / "scripts" / "measured_release_target_mac.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("job = submit_local_transcription_job(api, recording_id)", source)
+
     def test_production_manifest_rejects_non_notarized_app(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)

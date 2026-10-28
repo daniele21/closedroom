@@ -26,6 +26,24 @@ TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 BENCHMARK_ID = "dual_track_vs_mixed_asr"
 
 
+def submit_local_transcription_job(api: Any, recording_id: str) -> dict[str, Any]:
+    """Submit the same local-ASR request in both target-Mac evidence journeys.
+
+    The API uses "none" for no diarization; "disabled" is the resulting
+    diagnostic status, not a supported request provider.
+    """
+    return api.json(
+        f"/v1/recordings/{recording_id}/transcription-jobs",
+        "POST",
+        {
+            "asr_provider": "local",
+            "diarization_provider": "none",
+            "visual_intelligence_enabled": False,
+        },
+        20,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -503,16 +521,7 @@ def main() -> int:
         language = str(settings.get("default_language") or "it")
         check("local_asr_model_resolved", bool(model), {"model": model})
 
-        job = api.json(
-            f"/v1/recordings/{recording_id}/transcription-jobs",
-            "POST",
-            {
-                "asr_provider": "local",
-                "diarization_provider": "disabled",
-                "visual_intelligence_enabled": False,
-            },
-            20,
-        )
+        job = submit_local_transcription_job(api, recording_id)
         job_id = str(job.get("id") or "")
         check("managed_transcription_submitted", bool(job_id), {"job_id": job_id})
         started = time.monotonic()

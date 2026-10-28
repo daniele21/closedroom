@@ -45,6 +45,7 @@ class RecordWhileAiBusyReleaseToolingTests(unittest.TestCase):
         self.assertIn("02-recording-after-boundary.png", source)
         self.assertIn("contention-journey.mov", source)
         self.assertIn("measured.existing_directory", source)
+        self.assertIn("job = measured.submit_local_transcription_job(api, recording_id)", source)
 
     def test_native_both_requires_mic_and_system_tracks(self) -> None:
         module = load_contention()
