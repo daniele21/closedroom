@@ -1,7 +1,6 @@
 """Guard real Terraform JSON plans before any GCS apply (no cloud access)."""
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 import sys
 import unittest
@@ -92,6 +91,27 @@ class TestTerraformPlanGuard(unittest.TestCase):
                                                   iam_change("oauth_object_creator", "roles/storage.objectCreator")]})
         with self.assertRaises(UnsafeTerraformPlan):
             validate_plan({"resource_changes": []})
+
+    def test_duplicate_iam_role_does_not_pass_as_two_approved_roles(self):
+        twice = [
+            bucket_change(),
+            iam_change("oauth_object_creator", "roles/storage.objectCreator"),
+            iam_change("oauth_object_creator", "roles/storage.objectCreator"),
+        ]
+        twice[-1]["address"] = twice[-1]["address"].replace("example@example.com", "other@example.com")
+        twice[-1]["change"]["after"]["member"] = "user:other@example.com"
+        with self.assertRaises(UnsafeTerraformPlan):
+            validate_plan({"resource_changes": twice})
+
+    def test_two_roles_must_target_same_identity(self):
+        changes = [
+            bucket_change(),
+            iam_change("oauth_object_creator", "roles/storage.objectCreator"),
+            iam_change("oauth_object_viewer", "roles/storage.objectViewer"),
+        ]
+        changes[-1]["change"]["after"]["member"] = "user:other@example.com"
+        with self.assertRaises(UnsafeTerraformPlan):
+            validate_plan({"resource_changes": changes})
 
     def test_no_secret_bearing_output_for_failures(self):
         with self.assertRaises(UnsafeTerraformPlan) as caught:
