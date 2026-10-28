@@ -177,6 +177,25 @@ if $CLEAN_BUILD; then
     ok "Cleaned"
 fi
 
+# Vite writes into tracked src/local_asr_server/static. Reject preexisting
+# changes before it can overwrite them, and restore only this generated tree on
+# normal success/failure exits. This preserves the original build exit status.
+FRONTEND_BUILD_HEAD="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
+python3 "$SCRIPT_DIR/scripts/generated_frontend_state.py" check \
+    --root "$SCRIPT_DIR" --expected-head "$FRONTEND_BUILD_HEAD"
+
+restore_generated_frontend_on_exit() {
+    local build_status=$?
+    trap - EXIT
+    if ! python3 "$SCRIPT_DIR/scripts/generated_frontend_state.py" restore \
+        --root "$SCRIPT_DIR" --expected-head "$FRONTEND_BUILD_HEAD"; then
+        warn "Generated frontend cleanup failed; inspect Git status before the next build."
+        if [[ "$build_status" -eq 0 ]]; then build_status=1; fi
+    fi
+    exit "$build_status"
+}
+trap restore_generated_frontend_on_exit EXIT
+
 mkdir -p "$BUILD_ASSETS"
 
 # ── Step 0: Build React frontend ──────────────────────────────────────────────

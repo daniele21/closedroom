@@ -46,6 +46,8 @@ No Apple Developer ID, notary profile or signing environment variables are requi
 
 The macOS app bundle uses **Python 3.12** by default (distinct from the package's broader supported Python range), ensuring SciPy >=1.16 is used. This avoids a known SciPy 1.15.3 `_spropack` Mach-O import failure on macOS 27. The build checks actual SciPy/MLX Whisper imports *before* PyInstaller and fails closed if the native libraries cannot load. Do not patch or re-sign third-party wheels to bypass dyld errors. To diagnose a build failure, capture `bash scripts/build_artifact.sh --no-dmg` stdout/stderr locally; the aggregate suite only records the nonzero exit status.
 
+A direct `./build.sh` or `bash scripts/build_artifact.sh --no-dmg` run restores tracked Vite output after packaging, including on ordinary build errors. A preexisting dirty `src/local_asr_server/static/` is rejected *before* Vite runs, to avoid overwriting work. If an earlier build left generated assets dirty, inspect them before explicitly restoring the tracked static files and cleaning untracked generated assets within that directory only. The REAL_ENVIRONMENT suite still requires the **whole checkout** clean.
+
 Use `--rebuild` only when you intentionally want a fresh local artifact:
 
 ```bash
