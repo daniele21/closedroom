@@ -35,6 +35,58 @@ def create_command(bucket: str, location: str) -> list[str]:
     ]
 
 
+
+def classify_create_failure(stderr: str) -> tuple[str, str]:
+    """Reduce untrusted gcloud diagnostics to a stable, non-sensitive reason.
+
+    Never print the raw diagnostics: they may include email, token or bucket
+    identifiers. Do not claim a conflict bucket is ours without verification.
+    """
+    error = stderr.casefold()
+    if any(marker in error for marker in (
+        'unauthorized_client', 'invalid_grant', 'no active account',
+        're-authentication', 'reauthentication', 'login required',
+        'please run: gcloud auth login', 'invalid credentials',
+    )):
+        return ('AUTHENTICATION', 'Authenticate with gcloud auth login; check the active identity with gcloud auth list.')
+    if any(marker in error for marker in (
+        'already exists', 'already in use', 'already taken',
+        'bucket name is not available', 'conflict', 'http 409',
+    )):
+        return ('NAME_CONFLICT', 'Bucket names are global. Verify an existing bucket ownership/policy, or retry with --bucket project-tests-498508-closedroom-test-<unique-suffix>.')
+    if any(marker in error for marker in (
+        'orgpolicy', 'organization policy', 'resource locations constraint',
+        'gcp.resourcelocations', 'violates constraint',
+    )):
+        return ('ORG_POLICY', 'Check project organization restrictions, especially allowed regions and bucket naming policy.')
+    if any(marker in error for marker in (
+        'billing account', 'billing is disabled', 'billing not enabled',
+        'project has no billing', 'billingdisabled',
+    )):
+        return ('BILLING', 'Check billing status of project-tests-498508 before provisioning.')
+    if any(marker in error for marker in (
+        'storage.googleapis.com is disabled', 'api has not been used',
+        'has not been enabled', 'service_disabled',
+    )):
+        return ('API_DISABLED', 'Confirm the Cloud Storage API is enabled for project-tests-498508.')
+    if any(marker in error for marker in (
+        'storage.buckets.create', 'permission denied', 'access denied',
+        'forbidden', 'http 403', 'permission ', 'does not have permission',
+    )):
+        return ('PERMISSION_DENIED', 'Check the active gcloud identity has storage.buckets.create on project-tests-498508.')
+    if any(marker in error for marker in (
+        'unrecognized arguments', 'unknown arguments', 'invalid choice',
+        'no such option', 'not a valid choice',
+    )):
+        return ('CLI_FLAGS', 'Check gcloud --version and gcloud storage buckets create --help; update the CLI if necessary.')
+    if any(marker in error for marker in ('not found', 'http 404', 'project does not exist')):
+        return ('PROJECT_NOT_FOUND', 'Verify project-tests-498508 exists and that the active identity can access it.')
+    if any(marker in error for marker in ('invalid location', 'invalid location constraint', 'http 400')):
+        return ('INVALID_ARGUMENT', 'Inspect bucket name/location and project constraints; keep region europe-west8 unless explicitly changed.')
+    return ('UNCLASSIFIED', 'Run the equivalent gcloud storage buckets create command directly to inspect the original error locally; redact personal information before sharing it.')
+
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--bucket', default=DEFAULT_BUCKET)
@@ -54,10 +106,18 @@ def main(argv: list[str] | None = None) -> int:
         print('gcloud is unavailable; bucket was not created.', file=sys.stderr)
         return 2
     # No shell, no service account key, no implicit login or IAM role changes.
-    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    try:
+        result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        print('Bucket creation timed out. Outcome is unknown: inspect bucket state before retrying.', file=sys.stderr)
+        return 2
+    except OSError:
+        print('Cannot start gcloud. Check local CLI installation and execution permissions.', file=sys.stderr)
+        return 2
     if result.returncode:
-        # Do not echo stderr: remote diagnostics may contain private account details.
-        print('Bucket creation failed. Inspect authenticated gcloud errors locally; no success claimed.', file=sys.stderr)
+        code, action = classify_create_failure(result.stderr or '')
+        print(f'Bucket creation failed [{code}]: {action}', file=sys.stderr)
+        print('No provisioning success is claimed. Never infer bucket ownership from a name conflict.', file=sys.stderr)
         return 1
     print(json.dumps({'status': 'create_command_succeeded', 'project': PROJECT,
                       'bucket': args.bucket, 'location': args.location,
