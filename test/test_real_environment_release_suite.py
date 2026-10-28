@@ -63,6 +63,9 @@ class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
                     Path(command[-1]).write_bytes(b"recorded-clip")
                 elif command[0] == "ffmpeg":
                     self.assertFalse(destination.exists())
+                    playlist = Path(command[command.index("-i") + 1]).read_text()
+                    self.assertEqual(playlist.splitlines()[0], "ffconcat version 1.0")
+                    self.assertTrue(all(line.startswith("file '") for line in playlist.splitlines()[1:]))
                     destination.write_bytes(b"joined-video")
                 else:
                     self.fail(f"unexpected tool: {command[0]}")

@@ -134,8 +134,8 @@ class ContentionWindowVideo:
                 raise RuntimeError("contention_video_has_no_finalized_segments")
             playlist = self.segment_dir / "segments.ffconcat"
             playlist.write_text(
-                "ffconcat version 1.0\\n"
-                + "".join(f"file '{segment.name}'\\n" for segment in self.segments),
+                "ffconcat version 1.0\n"
+                + "".join(f"file '{segment.name}'\n" for segment in self.segments),
                 encoding="utf-8",
             )
             result = subprocess.run(
