@@ -36,7 +36,7 @@ def _token_info(value: str, client_id: str) -> dict[str, Any]:
     ) or not isinstance(info.get("refresh_token"), str) or not info["refresh_token"]:
         raise OAuthUnavailable("Stored OAuth credential is incomplete or mismatched")
     scopes = info.get("scopes")
-    if not isinstance(scopes, list) or STORAGE_SCOPE not in scopes:
+    if not isinstance(scopes, list) or scopes != [STORAGE_SCOPE]:
         raise OAuthUnavailable("GCS OAuth scope was not granted")
     return info
 
@@ -93,6 +93,8 @@ class GCSDesktopOAuth:
         # Never use a console code pasted into terminal or a remote redirect.
         creds = flow.run_local_server(
             host="127.0.0.1", port=0, open_browser=True,
+            authorization_prompt_message=None,
+            success_message="ClosedRoom GCS authorization completed. You may close this window.",
             access_type="offline", prompt="consent",
         )
         if not getattr(creds, "refresh_token", None):
