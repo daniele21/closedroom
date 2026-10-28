@@ -1,6 +1,6 @@
 # GCS hybrid meeting storage — piano di implementazione
 
-Status: ACTIVE — GCS PASS; OAuth Keychain PASS (operator); IAM pending.
+Status: ACTIVE — GCS and OAuth Keychain bucket create/read PASS; recovery pending.
 Owner: RecordingStore, CatalogStore, TranscriptionStore; Settings e saved Meeting come consumer
 Read when: storage GCS opzionale, backup/ripristino e recupero spazio degli audio
 Base: `dev` @ `229cef8c35b257258cf5782c1ef22967279bf86b` (2026-10-28); aggiornare base/HEAD alla ripresa.
@@ -98,6 +98,6 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 
 **GCS operator evidence 2026-10-28:** bucket `project-tests-498508-closedroom-test` policy verified. Synthetic AES-256-GCM `prepare`→`verify-local`→`upload --apply`→`restore --apply`: `prepared`/`verified`/`uploaded_not_restored`/`verified`; ciphertext 65,609 bytes, authentication and SHA-256 match. No user meeting transferred. Next: OAuth, Keychain on two Macs and Mac footprint; backup off.
 
-**Checkpoint:** `dev` base `229cef8c`. Mac GCS encrypted fixture PASS; Terraform bucket imported/no drift; Desktop OAuth consent and Keychain PASS (operator output). **OAuth bucket IAM unverified**. New opt-in `verify-bucket --apply` checks 4 KiB synthetic create/read with Keychain-only credentials, no ADC or deletion. Next: probe; on 403 review Terraform IAM. Pending two-Mac recovery, packaging and meeting backup. Runtime local-only, eviction OFF.
+**Checkpoint:** base `dev` `229cef8c`. Operator: GCS encrypted fixture PASS; Terraform imported/no drift; OAuth Desktop Keychain **create/read GCS PASS** (4 KiB synthetic, generation pinned, no ADC or meeting data, object retained). IAM/access tested for current principal; no new IAM grant needed. Next: two physical Mac Keychain recovery fixture, then OAuth refresh/packaging and meeting backup. No uploads of meeting data or eviction.
 
 **Documentazione a integrazione:** `docs/architecture.md` owner/boundary, `docs/features.md` comportamento, `SECURITY.md` chiavi/deletion, `design/ux-contract.json` UX, README usage, `docs/current-state.md` solo quando vero. ADR per decisioni durevoli. Dopo completamento trasferire verità e obblighi REAL_ENVIRONMENT, quindi eliminare questo piano secondo `docs/workstreams/README.md`.
