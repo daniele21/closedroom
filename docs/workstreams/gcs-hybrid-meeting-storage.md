@@ -30,7 +30,7 @@ Assi: PRODUCT_FEATURE / ITERATION / SCOPED (tooling only, selector authoritative
 
 **CS-1 deve provare prima del build:** OAuth desktop con consenso e IAM minimo sul bucket; verifica OAuth, credenziali Keychain, revoca e restore su altro Mac. ADC/gcloud solo per sviluppo; mai service-account JSON/secrets nel bundle o settings. Se BYO GCS non è praticabile, restringere a backup senza eviction o scegliere alternativa, senza doppio provider.
 
-**Cifratura:** file cifrati/autenticati client-side con libreria consolidata e formato versionato; chiave in Keychain e **recovery indipendente dal Mac provato** prima dell'eviction. Oggetti opachi, bucket privato, IAM minimo, niente link pubblici; documentare costi download, lifecycle, soft delete GCS (default 7 giorni). La cifratura GCS server-side da sola non è E2E.
+**Cifratura:** client-side autenticata/versionata; Keychain e **recovery indipendente dal Mac provato** prima dell'eviction. Oggetti opachi, bucket privato, IAM minimo; costi download, lifecycle e soft delete espliciti. GCS server-side non è E2E.
 
 ## Politica dati e contratti
 
@@ -44,7 +44,7 @@ Assi: PRODUCT_FEATURE / ITERATION / SCOPED (tooling only, selector authoritative
 
 **Scope policy:** default congelato per ogni nuovo meeting (bucket/prefix, classi dati); cambiarlo non migra i precedenti. Import/transcript indipendenti richiedono consenso/provenance dedicati.
 
-**Asset reference:** schema versionato in canonical store: meeting/track, object opaco+generation, hash plaintext e checksum ciphertext, key/version, size, verified_at, stato/errore sanitizzato. Migrazione idempotente, no policy duplicata nei router.
+**Asset reference:** schema versionato: meeting/track, object+generation opachi, hash plaintext/ciphertext, key/version, size, verified_at, stato e errore sanificato. Migrazione idempotente, owner unico.
 
 **Lifecycle:** LOCAL_ONLY → UPLOAD_QUEUED → UPLOADING → REMOTE_VERIFIED; dopo verifica: LOCAL_CACHED / REMOTE_ONLY / HYDRATING / UNAVAILABLE. Stati di *backup* e *retention/eviction eligibility* separati dallo stato di upload. Write condizionali generation-match, upload resumable/idempotente, retry/backoff bounded, checksum e prova decrypt/restore **prima** di REMOTE_VERIFIED.
 
@@ -96,8 +96,8 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 
 ## Prossimo slice, checkpoint e chiusura
 
-**CS-0/1 ACTIVE.** Audit: `python3 scripts/audit_meeting_data.py` (legacy: `--extra-recordings-root <path>`); GCS dry-run: `python3 scripts/bootstrap_closedroom_gcs_test.py` (`--apply` richiede autorità GCP). Bucket proposto `gs://project-tests-498508-closedroom-test` in `europe-west8`, Standard, UBLA, PAP e soft delete 7d. Nome non verificato. Pending: Mac inventory, GCS auth, key recovery e fixture restore.
+**CS-0/1 ACTIVE.** Audit WAL/SHM: `python3 scripts/audit_meeting_data.py` (legacy: `--extra-recordings-root <path>`); GCS dry-run: `python3 scripts/bootstrap_closedroom_gcs_test.py` (`--apply` richiede autorità GCP). Bucket proposto `gs://project-tests-498508-closedroom-test` in `europe-west8`, Standard, UBLA, PAP e soft delete 7d. Nome non verificato. Fixture: `python3 scripts/probe_closedroom_gcs_fixture.py prepare --directory <dir>` e `verify-local`; upload/restore richiedono `--apply`. Chiave fixture 0600, non Keychain. Pending: Mac inventory, GCS auth e restore remoto.
 
-**Checkpoint 2026-10-28:** feature branch da `dev` `229cef8c`; audit+bootstrap e 7 test Python PASS in ambiente isolato; compileall PASS. Nessuna verifica GCP, Keychain o Mac reale. CS-0/1 ACTIVE; al resume rivedere head/tree/base.
+**Checkpoint 2026-10-28:** feature branch da `dev` `229cef8c`; audit+bootstrap+probe: 11 test locali PASS; compileall PASS. Nessuna verifica GCP, Keychain o Mac reale. CS-0/1 ACTIVE; al resume rivedere head/tree/base.
 
 **Documentazione a integrazione:** `docs/architecture.md` owner/boundary, `docs/features.md` comportamento, `SECURITY.md` chiavi/deletion, `design/ux-contract.json` UX, README usage, `docs/current-state.md` solo quando vero. ADR per decisioni durevoli. Dopo completamento trasferire verità e obblighi REAL_ENVIRONMENT, quindi eliminare questo piano secondo `docs/workstreams/README.md`.
