@@ -45,6 +45,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Build a fresh exact ad-hoc app even if one already exists for this revision",
     )
+    parser.add_argument(
+        "--install-to-applications",
+        action="store_true",
+        help="Install/reuse a verified test-only copy under /Applications and run physical tests from it; never overwrite ClosedRoom.app",
+    )
     parser.add_argument("--output")
     parser.add_argument("--record-seconds", type=float, default=8.0)
     parser.add_argument("--seed-record-seconds", type=float, default=20.0)
@@ -196,6 +201,8 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
     print("\nClosedRoom LOCAL REAL_ENVIRONMENT suite")
     print(f"candidate: {report.get('checkout_revision') or 'unknown'}")
     print(f"artifact selection: {report.get('artifact_selection') or 'unknown'}")
+    if report.get("installed_app"):
+        print(f"installed test app: {report['installed_app']} ({report['installation_status']})")
     for name in ("measured_release", "record_while_ai_busy"):
         child = (report.get("tests") or {}).get(name) or {}
         label = name.replace("_", " ")
@@ -235,6 +242,8 @@ def main() -> int:
         "app": None,
         "build_manifest": None,
         "artifact_selection": None,
+        "installation_status": None,
+        "installed_app": None,
         "tests": {},
         "errors": [],
         "distribution_authority": {
@@ -290,6 +299,16 @@ def main() -> int:
         report["app"] = str(app)
         report["build_manifest"] = str(manifest_path)
         report["artifact_selection"] = selection
+        child_env = os.environ.copy()
+        evidence_app = app
+        if args.install_to_applications:
+            evidence_app, install_status = local_policy.install_test_app(app, manifest)
+            report["app"] = str(evidence_app)
+            report["source_artifact_app"] = str(app)
+            report["installed_app"] = str(evidence_app)
+            report["installation_status"] = install_status
+            child_env[local_policy.INSTALLED_APP_ENV] = str(evidence_app)
+            child_env[local_policy.SOURCE_APP_ENV] = str(app)
 
         evidence_root = root / "dist" / "evidence" / "local-real-environment" / source_revision
         if not args.output:
@@ -299,7 +318,7 @@ def main() -> int:
 
         for name, command, child_output, timeout in build_commands(
             root,
-            app,
+            evidence_app,
             measured_output,
             contention_output,
             args,
@@ -310,6 +329,7 @@ def main() -> int:
                     cwd=root,
                     check=False,
                     timeout=timeout,
+                    env=child_env,
                 )
                 summary = aggregate.child_summary(child_output, completed.returncode)
             except subprocess.TimeoutExpired:

@@ -359,7 +359,11 @@ def main() -> int:
         if a.app:
             app = Path(a.app).expanduser().resolve()
             manifest_path = app.parent / "build-manifest.json"
-            if not manifest_path.is_file():
+            if os.environ.get("CLOSEDROOM_LOCAL_REAL_ENVIRONMENT_INSTALLED_APP") == str(app):
+                from local_real_environment_policy import local_manifest_for
+
+                manifest_path, _ = local_manifest_for(app)
+            elif not manifest_path.is_file():
                 manifest_path = None
         else:
             app, manifest_path = latest_app(root)

@@ -42,6 +42,14 @@ From the repository root:
 python3 scripts/run_local_real_environment_suite.py
 ```
 
+To run the physical checks from an app located in **/Applications** instead of the build tree, opt in:
+
+```bash
+python3 scripts/run_local_real_environment_suite.py --install-to-applications
+```
+
+This copies (does not move or mutate) the exact finalized ad-hoc artifact into a separate `/Applications/ClosedRoom Test-<source>-<build>.app` and runs both tests from that verified installation. `/Applications/ClosedRoom.app` is never replaced. An existing exact matching test copy is reused; a different build gets a different name. The installed copy is fingerprint-checked against the original manifest, and code-sign verification is required. No automatic `sudo`, fallback directory, removal of other apps, or changes to bundle identifiers/signatures. You may need user-authorized write access to `/Applications`; on access failure the suite reports FAIL without altering another app. After installing, approve **Screen & System Audio Recording** and **Microphone** for the exact test app if macOS prompts; changing the app build may require new TCC grants. The original immutable artifact and report remain under `dist/`. This does not qualify a public release.
+
 No Apple Developer ID, notary profile or signing environment variables are required. The local build path explicitly removes `CLOSEDROOM_SIGN_IDENTITY` and produces a finalized ad-hoc artifact.
 
 The macOS app bundle uses **Python 3.12** by default (distinct from the package's broader supported Python range), ensuring SciPy >=1.16 is used. This avoids a known SciPy 1.15.3 `_spropack` Mach-O import failure on macOS 27. The build checks actual SciPy/MLX Whisper imports *before* PyInstaller and fails closed if the native libraries cannot load. Do not patch or re-sign third-party wheels to bypass dyld errors. To diagnose a build failure, capture `bash scripts/build_artifact.sh --no-dmg` stdout/stderr locally; the aggregate suite only records the nonzero exit status.

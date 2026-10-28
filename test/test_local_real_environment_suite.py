@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -99,6 +100,81 @@ class LocalRealEnvironmentPolicyTests(unittest.TestCase):
                     with self.assertRaises(RuntimeError):
                         policy.local_manifest_for(app)
 
+    def test_installs_verified_copy_without_overwriting_other_apps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact_dir = root / "artifact"
+            source_app = artifact_dir / "ClosedRoom-source.app"
+            (source_app / "Contents" / "MacOS").mkdir(parents=True)
+            (source_app / "Contents" / "MacOS" / "ClosedRoom").write_bytes(b"app")
+            manifest_path = write_manifest(artifact_dir, source_app)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["build_id"] = "local-verified"
+            manifest["artifacts"]["app"].update(policy.fingerprint_tree(source_app))
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            applications = root / "Applications"
+            applications.mkdir()
+            normal_app = applications / "ClosedRoom.app"
+            normal_app.mkdir()
+            (normal_app / "keep.txt").write_text("untouched", encoding="utf-8")
+
+            original_run = subprocess.run
+            def simulate_install(command: list[str], **kwargs: object):
+                if command[0] == "ditto":
+                    shutil.copytree(command[1], command[2], symlinks=True)
+                    return subprocess.CompletedProcess(command, 0)
+                if command[0] == "codesign":
+                    return subprocess.CompletedProcess(command, 0)
+                return original_run(command, **kwargs)
+
+            with patch.object(policy.subprocess, "run", side_effect=simulate_install):
+                installed, status = policy.install_test_app(
+                    source_app, manifest, applications_dir=applications
+                )
+                reused, reused_status = policy.install_test_app(
+                    source_app, manifest, applications_dir=applications
+                )
+
+            self.assertEqual(status, "installed_verified")
+            self.assertEqual(reused_status, "reused_verified")
+            self.assertEqual(installed, reused)
+            self.assertTrue(installed.name.startswith("ClosedRoom Test-"))
+            self.assertEqual((normal_app / "keep.txt").read_text(), "untouched")
+            self.assertEqual(
+                (installed / "Contents" / "MacOS" / "ClosedRoom").read_bytes(), b"app"
+            )
+            self.assertEqual(
+                (source_app / "Contents" / "MacOS" / "ClosedRoom").read_bytes(), b"app"
+            )
+
+            (installed / "Contents" / "MacOS" / "ClosedRoom").write_bytes(b"tampered")
+            with self.assertRaisesRegex(RuntimeError, "differs"):
+                policy.install_test_app(source_app, manifest, applications_dir=applications)
+            self.assertEqual((normal_app / "keep.txt").read_text(), "untouched")
+
+    def test_installed_override_requires_exact_verified_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_app = root / "artifact" / "ClosedRoom-source.app"
+            source_app.mkdir(parents=True)
+            (source_app / "data").write_text("original", encoding="utf-8")
+            manifest_path = write_manifest(source_app.parent, source_app)
+            manifest = json.loads(manifest_path.read_text())
+            manifest["artifacts"]["app"].update(policy.fingerprint_tree(source_app))
+            manifest_path.write_text(json.dumps(manifest))
+            installed_app = root / "Applications" / "ClosedRoom Test.app"
+            shutil.copytree(source_app, installed_app)
+            env = {
+                policy.INSTALLED_APP_ENV: str(installed_app),
+                policy.SOURCE_APP_ENV: str(source_app),
+            }
+            with patch.dict(policy.os.environ, env):
+                actual_manifest, _ = policy.local_manifest_for(installed_app)
+                self.assertEqual(actual_manifest, manifest_path)
+                (installed_app / "data").write_text("modified", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "differs"):
+                    policy.local_manifest_for(installed_app)
+
     def test_finds_newest_exact_local_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -154,6 +230,47 @@ class LocalRealEnvironmentSuiteTests(unittest.TestCase):
             self.assertIn("--keep-sandbox", command)
         self.assertIn("measured_release", commands[0][1])
         self.assertIn("record_while_ai_busy", commands[1][1])
+
+    def test_installed_suite_passes_same_app_and_original_manifest_to_both_children(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "artifact" / "ClosedRoom-original.app"
+            source.mkdir(parents=True)
+            manifest_path = write_manifest(source.parent, source, revision="abc123")
+            manifest = json.loads(manifest_path.read_text())
+            installed = root / "Applications" / "ClosedRoom Test.app"
+            output = root / "local-report.json"
+            recorded: list[tuple[list[str], dict[str, str]]] = []
+
+            def fake_run(command: list[str], **kwargs: object):
+                child_output = Path(command[command.index("--output") + 1])
+                child_output.parent.mkdir(parents=True, exist_ok=True)
+                child_output.write_text(json.dumps({"status": "pass", "checks": [], "errors": []}))
+                recorded.append((command, kwargs["env"]))
+                return subprocess.CompletedProcess(command, 0)
+
+            with (
+                patch.object(sys, "argv", ["suite", "--root", str(root), "--output", str(output), "--install-to-applications"]),
+                patch.object(suite.platform, "system", return_value="Darwin"),
+                patch.object(suite.platform, "machine", return_value="arm64"),
+                patch.object(suite, "required_tools_missing", return_value=[]),
+                patch.object(suite.measured, "git_state", return_value=("abc123", [])),
+                patch.object(suite, "select_local_artifact", return_value=(source, manifest_path, manifest, "reused_exact")),
+                patch.object(suite.local_policy, "install_test_app", return_value=(installed, "installed_verified")),
+                patch.object(suite.subprocess, "run", side_effect=fake_run),
+            ):
+                code = suite.main()
+
+            self.assertEqual(code, 0)
+            self.assertEqual(len(recorded), 2)
+            for command, env in recorded:
+                self.assertIn(str(installed), command)
+                self.assertEqual(env[policy.SOURCE_APP_ENV], str(source))
+                self.assertEqual(env[policy.INSTALLED_APP_ENV], str(installed))
+            result = json.loads(output.read_text())
+            self.assertEqual(result["app"], str(installed))
+            self.assertEqual(result["build_manifest"], str(manifest_path))
+            self.assertEqual(result["installation_status"], "installed_verified")
 
     def test_main_can_pass_local_evidence_while_distribution_remains_blocked(self) -> None:
         temporary = tempfile.TemporaryDirectory()
