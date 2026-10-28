@@ -44,12 +44,16 @@ This is a development aid, NOT permission to upload real recordings.
 
 In `project-tests-498508`, create/configure Google Auth Platform branding, audience and test users as appropriate, then **Clients > Create client > Desktop app**. Export the Desktop OAuth JSON to a private path **outside git** (`chmod 600`). The client ID/consent is not managed by this Terraform provider configuration.
 
-After the OAuth client is prepared, run the separate (still experimental) ClosedRoom script from the repository root:
+After the OAuth client is prepared, run the separate (still experimental) ClosedRoom script from the repository root. Always validate the file first: `check-client` reads the local private JSON but does **not** start the browser, access Keychain or contact Google. Google Desktop exports may use either official authorization endpoint; do not edit the downloaded JSON to work around a rejected endpoint.
+
 
 ```bash
+PYTHONPATH=src uv run --no-project --with cryptography --with keyring --with google-auth-oauthlib --with google-auth python scripts/probe_closedroom_gcs_oauth.py check-client --client-json /private/path/oauth-desktop.json
 PYTHONPATH=src uv run --no-project --with cryptography --with keyring --with google-auth-oauthlib --with google-auth python scripts/probe_closedroom_gcs_oauth.py status --client-json /private/path/oauth-desktop.json
 PYTHONPATH=src uv run --no-project --with cryptography --with keyring --with google-auth-oauthlib --with google-auth python scripts/probe_closedroom_gcs_oauth.py connect --client-json /private/path/oauth-desktop.json
 ```
+
+The CLI returns safe JSON error codes: `CLIENT_FILE_MISSING` (wrong path), `CLIENT_FILE_PERMISSIONS` (use `chmod 600`), `CLIENT_FILE_NOT_DESKTOP` (download a Google Desktop OAuth client, not Web/service-account JSON), `CLIENT_ENDPOINT_UNSUPPORTED` (invalid identity endpoint), `CLIENT_ID_INVALID`, `KEYCHAIN_UNAVAILABLE` / `KEYCHAIN_READ_FAILED`, `OAUTH_BROWSER_FLOW_FAILED` (browser, consent, local callback or exchange), `OAUTH_REFRESH_TOKEN_MISSING`, and `KEYCHAIN_WRITE_FAILED`. Never copy the JSON, refresh token, callback URL or client secret into a support issue.
 
 The CLI is **opt-in** and not a production UI. Credentials are meant for the macOS Keychain; project IAM and refresh behavior must still be validated with the *desktop* identity and a real GCS request. Disconnecting locally does not revoke the remote Google grant.
 
