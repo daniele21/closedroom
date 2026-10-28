@@ -308,11 +308,7 @@ def main() -> int:
         job = api.json(
             f"/v1/recordings/{recording_id}/transcription-jobs",
             "POST",
-            {
-                "asr_provider": "local",
-                "diarization_provider": "disabled",
-                "visual_intelligence_enabled": False,
-            },
+            measured.local_managed_transcription_payload(),
             20,
         )
         job_id = str(job.get("id") or "")

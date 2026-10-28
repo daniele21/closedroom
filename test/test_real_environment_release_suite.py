@@ -44,6 +44,24 @@ def arguments(**overrides: object) -> argparse.Namespace:
 
 
 class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
+    def test_target_mac_ai_runners_use_supported_disabled_diarization_value(self) -> None:
+        # Catch the exact physical failure: 'disabled' is not a backend provider.
+        scripts_dir = str(ROOT / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import measured_release_target_mac as measured
+        from local_asr_server.transcription_diarization import DIARIZATION_PROVIDER_DISABLED
+
+        payload = measured.local_managed_transcription_payload()
+        self.assertEqual(payload["asr_provider"], "local")
+        self.assertEqual(payload["diarization_provider"], DIARIZATION_PROVIDER_DISABLED)
+        self.assertEqual(payload["diarization_provider"], "none")
+        self.assertIs(payload["visual_intelligence_enabled"], False)
+        # Native contention imports measured and reuses the exact same payload.
+        import record_while_ai_busy_target_mac as contention
+        self.assertIs(contention.measured, measured)
+
+
     def test_commands_use_same_exact_app_and_explicit_child_outputs(self) -> None:
         root = Path("/repo")
         app = Path("/release/ClosedRoom.app")
