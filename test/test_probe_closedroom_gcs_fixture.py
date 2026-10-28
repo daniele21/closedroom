@@ -70,5 +70,35 @@ class TestGcsFixture(unittest.TestCase):
                 probe.verify_bucket(probe.DEFAULT_BUCKET)
 
 
+    def test_check_bucket_without_fixture_requires_apply_and_never_modifies_cloud(self):
+        dry = io.StringIO()
+        with patch.object(probe, 'call_cloud') as call, contextlib.redirect_stdout(dry):
+            self.assertEqual(probe.main(['check-bucket']), 0)
+        call.assert_not_called()
+        self.assertEqual(json.loads(dry.getvalue())['status'], 'dry_run')
+
+        good_project = json.dumps({'projectNumber': '12345'})
+        good_bucket = {
+            'projectNumber': '12345', 'location': 'EUROPE-WEST8',
+            'storageClass': 'STANDARD',
+            'iamConfiguration': {
+                'uniformBucketLevelAccess': {'enabled': True},
+                'publicAccessPrevention': 'enforced',
+            },
+            'softDeletePolicy': {'retentionDurationSeconds': '604800'},
+        }
+        output = io.StringIO()
+        with patch.object(probe, 'call_cloud', side_effect=[good_project, json.dumps(good_bucket)]) as call, contextlib.redirect_stdout(output):
+            self.assertEqual(probe.main(['check-bucket', '--apply']), 0)
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(json.loads(output.getvalue())['status'], 'bucket_policy_verified')
+
+    def test_fixture_operations_require_directory(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(probe.main(['prepare']), 2)
+            self.assertEqual(probe.main(['upload', '--apply']), 2)
+
+
+
 if __name__ == '__main__':
     unittest.main()
