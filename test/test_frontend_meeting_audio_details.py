@@ -37,6 +37,16 @@ class MeetingAudioDetailsContractTests(unittest.TestCase):
         self.assertIn("qualityProbeUnavailable", RECORDING_DETAILS)
         self.assertIn("qualitySyncLabel", RECORDING_DETAILS)
 
+    def test_scrollable_details_drawer_does_not_shrink_disclosure_targets(self) -> None:
+        # Flex children with overflow-hidden otherwise shrink below the button's
+        # 44px hit area, so the parent section intercepts the actual pointer.
+        self.assertIn(
+            '<SheetBody className="flex flex-col gap-5 overflow-y-auto pt-2 [&>*]:shrink-0">',
+            MEETING,
+        )
+        self.assertIn("await clickWhenPointerReady(browser, '[data-meeting-recording-details", BROWSER)
+        self.assertIn("await clickWhenPointerReady(browser, '[data-meeting-audio-intelligence", BROWSER)
+
     def test_reuses_original_audio_projection_with_truthful_mock_disclaimer(self) -> None:
         self.assertIn("<AudioIntelligencePanel", MEETING)
         self.assertIn("compact", AUDIO_PANEL)
