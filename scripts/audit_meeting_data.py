@@ -139,7 +139,8 @@ def configured_roots(settings_file: Path, extra_recordings: list[Path], cache: l
     recordings = configured('recordings_dir', DEFAULT_RECORDINGS)
     transcripts = configured('transcriptions_dir', DEFAULT_TRANSCRIPTS)
     catalog = configured('catalog_db_path', DEFAULT_CATALOG)
-    return [('recordings', recordings), ('transcriptions', transcripts), ('catalog', catalog)] + [
+    return [('recordings', recordings), ('transcriptions', transcripts), ('catalog', catalog),
+            ('catalog', Path(str(catalog) + '-wal')), ('catalog', Path(str(catalog) + '-shm'))] + [
         ('recordings', p) for p in extra_recordings
     ] + [('cache', p) for p in cache]
 
