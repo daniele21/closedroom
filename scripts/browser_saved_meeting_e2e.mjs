@@ -820,21 +820,6 @@ try {
 
   await browser.clickButton(['Details', 'Dettagli']);
   if (counts.audio_intelligence !== 0) throw new Error('Opening Meeting Details fetched audio metrics without user disclosure');
-  const audioControls = await browser.execute(`
-    const section = document.querySelector('[data-meeting-recording-details="true"]');
-    return Boolean(section && /Tracce e qualità audio|Audio tracks and quality/.test(section.querySelector('button[aria-expanded]')?.textContent || ''));
-  `);
-  if (!audioControls) throw new Error('Canonical Meeting lost recording quality and source track access');
-  await clickWhenPointerReady(browser, '[data-meeting-recording-details="true"] button[aria-expanded]');
-  await waitText(browser, ['System track'], 5000, true);
-  await clickWhenPointerReady(browser, '[data-meeting-audio-intelligence="true"] button[aria-expanded]');
-  const expanded = await browser.execute(`
-    return document.querySelector('[data-meeting-audio-intelligence="true"] button[aria-expanded]')?.getAttribute('aria-expanded') === 'true';
-  `);
-  if (!expanded) throw new Error('Audio Intelligence disclosure did not open through pointer interaction');
-  await waitCount('audio_intelligence', 1);
-  await waitText(browser, ['48%'], 5000, true);
-  await checkpoint(browser, '01a-audio-metrics-on-demand');
   await waitCount('diagnostics', 1);
   await waitText(
     browser,
@@ -861,6 +846,22 @@ try {
     ['Detailed diagnostics unavailable', 'Diagnostica dettagliata non disponibile'],
   );
   await checkpoint(browser, '04-diagnostics-recovered');
+
+  const audioControls = await browser.execute(`
+    const section = document.querySelector('[data-meeting-recording-details="true"]');
+    return Boolean(section && /Tracce e qualità audio|Audio tracks and quality/.test(section.querySelector('button[aria-expanded]')?.textContent || ''));
+  `);
+  if (!audioControls) throw new Error('Canonical Meeting lost recording quality and source track access');
+  await clickWhenPointerReady(browser, '[data-meeting-recording-details="true"] button[aria-expanded]');
+  await waitText(browser, ['System track'], 5000, true);
+  await clickWhenPointerReady(browser, '[data-meeting-audio-intelligence="true"] button[aria-expanded]');
+  const expanded = await browser.execute(`
+    return document.querySelector('[data-meeting-audio-intelligence="true"] button[aria-expanded]')?.getAttribute('aria-expanded') === 'true';
+  `);
+  if (!expanded) throw new Error('Audio Intelligence disclosure did not open through pointer interaction');
+  await waitCount('audio_intelligence', 1);
+  await waitText(browser, ['48%'], 5000, true);
+  await checkpoint(browser, '04a-audio-metrics-on-demand');
 
   await browser.clickCss('button[aria-label="Chiudi"]');
   await browser.clickCss('#meeting-tab-analysis');
