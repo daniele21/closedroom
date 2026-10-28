@@ -8,6 +8,7 @@ from local_asr_server.asr_provider import normalize_asr_provider, speechmatics_o
 from local_asr_server.env import get_env_var
 from local_asr_server.schemas import SettingsRequest
 from local_asr_server.settings import DEFAULT_SETTINGS, load_settings, save_settings
+from local_asr_server.storage.config import validate_storage_configuration, public_storage_state
 from local_asr_server.speaker_diarization import DIARIZATION_ENGINES, NEMOTRON3_PRESETS
 from local_asr_server.analysis_templates import PIPELINES
 from local_asr_server.llm import LLM_PROVIDER_NAMES
