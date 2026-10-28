@@ -1,4 +1,4 @@
-name: GCS Terraform and OAuth probes validation
+name: GCS Terraform, OAuth and archive recovery validation
 
 on:
   pull_request:
@@ -12,6 +12,12 @@ on:
       - "src/local_asr_server/storage/gcs_oauth.py"
       - "test/test_gcs_oauth.py"
       - "test/test_gcs_oauth_cli.py"
+      - "src/local_asr_server/storage/gcs_archive.py"
+      - "src/local_asr_server/storage/key_recovery.py"
+      - "scripts/verify_gcs_keychain_recovery.py"
+      - "test/test_gcs_archive_transport.py"
+      - "test/test_gcs_key_recovery.py"
+      - "test/test_gcs_cross_mac_archive_fixture.py"
 
 permissions:
   contents: read
@@ -37,3 +43,12 @@ jobs:
         env:
           PYTHONPATH: src
         run: python3 -m unittest discover -s test -p 'test_gcs_oauth*.py' -v
+      - name: Prepare synthetic archive encryption test dependency
+        run: python3 -m pip install --disable-pip-version-check cryptography
+      - name: Encryption transport, recovery and cross-Mac fixture tests (fake Keychains)
+        env:
+          PYTHONPATH: src
+        run: |
+          python3 -m unittest discover -s test -p 'test_gcs_archive_transport.py' -v
+          python3 -m unittest discover -s test -p 'test_gcs_key_recovery.py' -v
+          python3 -m unittest discover -s test -p 'test_gcs_cross_mac_archive_fixture.py' -v
