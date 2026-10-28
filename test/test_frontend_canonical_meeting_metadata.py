@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MEETING = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
 LEGACY = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
 PROJECTS = (ROOT / "frontend/src/pages/ProjectsPage.tsx").read_text(encoding="utf-8")
+BROWSER = (ROOT / "scripts/browser_saved_meeting_e2e.mjs").read_text(encoding="utf-8")
 
 
 class CanonicalMeetingMetadataTests(unittest.TestCase):
@@ -29,6 +30,13 @@ class CanonicalMeetingMetadataTests(unittest.TestCase):
         self.assertIn("current?.id === id", MEETING)
         self.assertIn("if (!meeting || !recordingId || demoMode || isBusy) return", MEETING)
         self.assertIn("if (currentRecordingIdRef.current === id)", MEETING)
+
+    def test_full_media_checks_real_recording_updates_and_retry(self) -> None:
+        self.assertIn("19-metadata-edit", BROWSER)
+        self.assertIn("metadata_title", BROWSER)
+        self.assertIn("metadata_project", BROWSER)
+        self.assertIn("synthetic metadata outage", BROWSER)
+        self.assertIn("saved Meeting project update failed to render persistent metadata", BROWSER)
 
     def test_legacy_bookmarks_remain_canonical(self) -> None:
         self.assertIn("const legacySavedRecording", LEGACY)
