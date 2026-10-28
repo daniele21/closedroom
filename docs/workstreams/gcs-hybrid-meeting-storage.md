@@ -12,9 +12,9 @@ Assi: PRODUCT_FEATURE / ITERATION / LEAN (solo piano) / AGENT_LOCAL. Futuro codi
 
 **Successo osservabile:** opt-in GCS revocabile, registrazione/ASR/diarizzazione sempre locali, upload e restore verificati, nessuna perdita dati, cache audio limitata e riduzione spazio misurata dopo eviction. Per ogni meeting stato remoto/locale chiaro; migrazione sicura dei precedenti.
 
-**Non-goals:** inferenza su GCP o fallback implicito, cloud obbligatorio, multiutente/Cloud SQL/Firestore, live upload durante capture, sync concorrente multi-Mac, supporto più storage provider nel MVP, compressione lossy, promessa 1 GB per app e modelli, mount FUSE come store.
+**Non-goals:** cloud inference/fallback implicito, sync concorrente multi-Mac, Cloud SQL/Firestore, stream GCS durante capture, più provider nel MVP, compressione lossy, FUSE, promessa di 1 GB inclusi modelli AI.
 
-**Rischi:** VALUE (GB realmente liberati); USABILITY (setup bucket/chiavi, offline, errore); FEASIBILITY (consumer che esigono Path locale); VIABILITY (attrito OAuth/IAM e costi GCS); PRIVACY/RELIABILITY (key loss, upload incompleti, delete e restore).
+**Rischi:** VALUE (GB liberi), USABILITY (bucket/chiavi/offline), FEASIBILITY (Path), VIABILITY (IAM/costi), PRIVACY/RELIABILITY (restore e perdita dati).
 
 ## Verifica su dev e owner
 
@@ -23,16 +23,14 @@ Assi: PRODUCT_FEATURE / ITERATION / LEAN (solo piano) / AGENT_LOCAL. Futuro codi
 - `transcriptions.py`: export JSON/TXT, speaker revision e indice; mantenere testo/ricerca locale e backup applicativo coerente.
 - `routers/recordings.py`, `routers/transcriptions.py`, diarization/benchmark, `frontend/src/api/apiClient.ts`: consumano file/audio attraverso API/path; conservare URL e introdurre accessor con hydration/lease.
 - `settings.py`, `schemas.py`, `services/settings_service.py`, `frontend/src/pages/SettingsPage.tsx`: solo percorsi locali; introdurre policy separata da ASR/LLM.
-- `scripts/audit_footprint.py` misura tree/bundle, **non** dati meeting utente: serve audit dedicato senza leggere contenuti.
-- Confini: `AGENTS.md`, `docs/architecture.md`, `SECURITY.md`, `design/ux-contract.json`. Lo storico `docs/cloud-provider-asr-analysis-implementation-plan.md` riguarda inferenza, non storage.
 
 ## Decisione iniziale proposta e gate di prodotto
 
 **MVP:** bucket Google Cloud Storage privato BYO (configurato dall'utente), classe Standard e regione scelta esplicitamente. Default app **Solo Mac**; l'opzione GCS non si attiva per effetto della selezione di un provider ASR/LLM. Cattura e processing scrivono staging locale; **solo al termine** si sincronizza. Niente VM/server GCP.
 
-**CS-1 deve provare prima del build:** OAuth desktop per account utente, IAM least privilege sul bucket, consenso/scopes e problemi di verifica OAuth, credenziali in macOS Keychain, revoca e restore su Mac diverso. ADC/gcloud solo per sviluppo, non dipendenza invisibile della app. Vietati file JSON di service account nel bundle, secret in settings/log/manifest/API. Se UX BYO GCS è troppo complessa, scegliere NARROW_SCOPE (backup manuale, niente eviction) o CHOOSE_ALTERNATIVE; non implementare Firebase in parallelo.
+**CS-1 deve provare prima del build:** OAuth desktop con consenso e IAM minimo sul bucket; verifica OAuth, credenziali Keychain, revoca e restore su altro Mac. ADC/gcloud solo per sviluppo; mai service-account JSON/secrets nel bundle o settings. Se BYO GCS non è praticabile, restringere a backup senza eviction o scegliere alternativa, senza doppio provider.
 
-**Cifratura:** contenuti cloud cifrati e autenticati client-side con libreria consolidata e formato/versione dichiarati. Oltre alla chiave Keychain, occorre **recupero indipendente dal Mac provato** prima di eliminare l'unica copia locale; dichiarare il rischio di perdita chiave. Object names opachi senza titoli/testi; bucket non pubblico, uniform bucket-level access, HTTPS, niente link pubblici. Valutare costi download, regione, GCS soft delete (normalmente 7 giorni) e lifecycle prima di attivare purge. Crittografia server-side GCS da sola non equivale a E2E.
+**Cifratura:** file cifrati/autenticati client-side con libreria consolidata e formato versionato; chiave in Keychain e **recovery indipendente dal Mac provato** prima dell'eviction. Oggetti opachi, bucket privato, IAM minimo, niente link pubblici; documentare costi download, lifecycle, soft delete GCS (default 7 giorni). La cifratura GCS server-side da sola non è E2E.
 
 ## Politica dati e contratti
 
@@ -44,19 +42,19 @@ Assi: PRODUCT_FEATURE / ITERATION / LEAN (solo piano) / AGENT_LOCAL. Futuro codi
 | Screenshot/frame | locali | solo se categoria esplicitamente consentita, altrimenti mai inviati |
 | Modelli AI, cache inference, token | locali | esclusi dal backup ordinario |
 
-**Scope policy:** default salvato per nuove registrazioni e *congelato per ogni meeting* (bucket/prefix e classi dati); cambio di preferenza non migra i precedenti né autorizza upload retroattivi. Import e transcript slegati da meeting fuori scope finché manca policy/provenance esplicita.
+**Scope policy:** default congelato per ogni nuovo meeting (bucket/prefix, classi dati); cambiarlo non migra i precedenti. Import/transcript indipendenti richiedono consenso/provenance dedicati.
 
-**Asset reference:** schema versionato e migrazione idempotente nei canonical store: meeting/track/role, local cache, bucket/object opaco, generation, size, SHA-256 plaintext privato, checksum ciphertext, key/version, verified_at, stato ed errore sanitizzato. Evitare duplicazione di policy/stato in UI/router.
+**Asset reference:** schema versionato in canonical store: meeting/track, object opaco+generation, hash plaintext e checksum ciphertext, key/version, size, verified_at, stato/errore sanitizzato. Migrazione idempotente, no policy duplicata nei router.
 
 **Lifecycle:** LOCAL_ONLY → UPLOAD_QUEUED → UPLOADING → REMOTE_VERIFIED; dopo verifica: LOCAL_CACHED / REMOTE_ONLY / HYDRATING / UNAVAILABLE. Stati di *backup* e *retention/eviction eligibility* separati dallo stato di upload. Write condizionali generation-match, upload resumable/idempotente, retry/backoff bounded, checksum e prova decrypt/restore **prima** di REMOTE_VERIFIED.
 
-**Eviction:** default OFF fino ai gate; mai cancellare asset con capture, ASR, benchmark, playback, lease, backup incompleto, credenziali/chiave non recuperabili o ultima copia non provata. File grandi oltre quota cache usano scratch temporaneo bounded con controllo spazio libero. Il cleanup non cancella sorgenti in uso e tratta cancel/crash/reboot.
+**Eviction:** OFF fino ai gate. Non cancellare mai ultima copia non verificata o file in uso da capture/job/playback/lease; vietata anche con backup incompleto o chiave non recuperabile. Cache e scratch bounded, cleanup sicuro dopo crash.
 
 **Hydration:** un unico accessor canonico restituisce Path temporaneo con lease ai consumer, senza GCS calls durante list/search. Offline: transcript e note funzionano; audio mostra indisponibilità e retry. Scaricare la traccia richiesta, ripristino verificato e riproduzione/diarizzazione corretti senza duplicare audio permanentemente.
 
-**Backup/restore:** snapshot applicativo transazionale coerente di catalogo, metadata, trascrizioni, speaker revision, note, analisi, archivi e loro riferimenti; manifest/versione e commit logico remoto. Restore su nuovo Mac deve preservare ID e relazioni, distinguere asset mancanti/corrotti e fallire senza lasciare catalogo falsamente completo. Non copiare a caldo `closedroom.db` WAL.
+**Backup/restore:** snapshot coerente di catalogo, manifest, transcript, speaker, note, analisi e riferimenti; manifest versionato. Restore su Mac vuoto preserva ID/relazioni, segnala oggetti assenti e non lascia cataloghi falsamente completi. No copia del DB WAL live.
 
-**Delete:** separare "rimuovi cache", "libera copia locale" e "elimina meeting ovunque". Delete ovunque richiede tombstone, idempotenza SQL/FS/GCS, protezione dei riferimenti condivisi, recovery crash e indicazione della retention/soft delete remota. Estendere il contratto di `delete_archived_meeting`.
+**Delete:** distinguere cache, eviction audio e delete ovunque; tombstone idempotenti, protezione riferimenti condivisi, recovery crash e soft delete espliciti. Estendere `delete_archived_meeting`.
 
 ## UX critica
 
@@ -64,7 +62,7 @@ Assi: PRODUCT_FEATURE / ITERATION / LEAN (solo piano) / AGENT_LOCAL. Futuro codi
 
 `Saved Meeting`: stato comprensibile (Solo Mac / Backup in corso / Archiviato / Solo cloud / Offline / Errore), azione pertinente (Riprova / Scarica / Rendi offline / Libera copia), progress e ripresa dopo cambio pagina. Non creare seconda pagina meeting o secondo job store; tastiera/VoiceOver e no hidden cloud fallback.
 
-Journey: opt-in/test → capture locale → stop + processing → upload cifrato → checksum + decrypt verificato → backup snapshot → disponibilità remota visibile → eviction manuale/opt-in → on-demand hydration per playback/diarizzazione → cache reclaim. Fallimenti di rete/auth non eliminano mai l'unica copia.
+Journey: opt-in/test → capture e processing locali → upload cifrato verificato → backup coerente → eventuale eviction → hydration per playback/diarizzazione → cleanup. Errori rete/auth non cancellano l'ultima copia.
 
 ## Work graph e parallelismo
 
@@ -92,9 +90,9 @@ Journey: opt-in/test → capture locale → stop + processing → upload cifrato
 4. **C — Recupero spazio (CS-7/9):** dopo prove di restore su Mac distinto/fixture e crash invariants, abilitare eviction opt-in e migrazione dry-run; confrontare byte fisicamente liberati con baseline.
 5. **Integrazione (CS-10):** selector `python3 scripts/select_validation_profile.py --base <base> --head <head> --stage integration`; gates selezionati senza downgrade; E2E percorsi critici con FULL_MEDIA per UX materiale. RELEASE `dev → main`: FULL + evidenza target-Mac pertinente.
 
-**Test di falsificazione:** offline durante capture, credenziale revocata, bucket negato, rete interrotta, checksum alterato, oggetto remoto assente, chiave perduta, quota disco/cache, upload duplicato, cancellazione crash, DB WAL, transcriptions merged, più roots legacy, job attivo, cancel, soft delete. Mai ultima copia cancellata. No dati personali in fixture/log/telemetria.
+**Test di falsificazione:** offline, auth revocata, bucket negato, upload interrotto/duplicato, checksum alterato, oggetto assente, chiave persa, disco pieno, delete crash, legacy roots, job attivo, cancel, soft delete. Mai unica copia persa, mai PII nei log.
 
-**Evidence owners:** `test/test_recordings.py`, `test/test_recording_api.py`, `test/test_settings_service.py`, nuovi test storage/backup/migration, frontend lint/typecheck + journey, `python3 scripts/verify_docs.py`; usare `.engineering/commands.json` e selettore per gates effettivi. CI deterministica non sostituisce TCC/cattura/Keychain/MLX/Metal reali; costo GCS verificato su bucket test.
+**Evidence owners:** test recordings/API/settings e nuovi storage/backup/migration, frontend lint/typecheck + journey, verify_docs, gates selezionati. CI non sostituisce Keychain/TCC/cattura/MLX/Metal reali; misurare costi su bucket di test.
 
 ## Prossimo slice, checkpoint e chiusura
 
