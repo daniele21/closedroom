@@ -18,26 +18,33 @@ from local_asr_server.storage.key_recovery import native_macos_keychain, Archive
 STORAGE_SCOPE = "https://www.googleapis.com/auth/devstorage.read_write"
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
+# Google Desktop JSON may contain the older official authorization endpoint.
+SUPPORTED_AUTH_URIS = frozenset({AUTH_URI, "https://accounts.google.com/o/oauth2/auth"})
+SUPPORTED_TOKEN_URIS = frozenset({TOKEN_URI, "https://accounts.google.com/o/oauth2/token"})
 OAUTH_SERVICE = "com.closedroom.app.gcs.oauth"
 CLIENT_ID_RE = re.compile(r"[0-9]+-[a-zA-Z0-9_-]+\.apps\.googleusercontent\.com\Z")
 
 
 class OAuthUnavailable(RuntimeError):
-    """Desktop consent is unavailable or has not yet been granted."""
+    """Safe diagnostic code; never include OAuth provider exception strings."""
+
+    def __init__(self, message: str, *, code: str = "OAUTH_UNAVAILABLE"):
+        super().__init__(message)
+        self.code = code
 
 
 def _token_info(value: str, client_id: str) -> dict[str, Any]:
     try:
         info = json.loads(value)
     except (TypeError, ValueError):
-        raise OAuthUnavailable("Stored OAuth credential is invalid") from None
+        raise OAuthUnavailable("Stored OAuth credential is invalid", code="KEYCHAIN_CREDENTIAL_INVALID") from None
     if not isinstance(info, dict) or info.get("client_id") != client_id or (
         info.get("token_uri") != TOKEN_URI
     ) or not isinstance(info.get("refresh_token"), str) or not info["refresh_token"]:
-        raise OAuthUnavailable("Stored OAuth credential is incomplete or mismatched")
+        raise OAuthUnavailable("Stored OAuth credential is incomplete or mismatched", code="KEYCHAIN_CREDENTIAL_INVALID")
     scopes = info.get("scopes")
     if not isinstance(scopes, list) or scopes != [STORAGE_SCOPE]:
-        raise OAuthUnavailable("GCS OAuth scope was not granted")
+        raise OAuthUnavailable("GCS OAuth scope was not granted", code="OAUTH_SCOPE_MISMATCH")
     return info
 
 
@@ -58,7 +65,7 @@ class GCSDesktopOAuth:
         try:
             return self._keychain.get_password(OAUTH_SERVICE, self._account)
         except Exception:
-            raise OAuthUnavailable("Cannot access macOS Keychain for OAuth") from None
+            raise OAuthUnavailable("Cannot access macOS Keychain for OAuth", code="KEYCHAIN_READ_FAILED") from None
 
     def is_connected(self) -> bool:
         item = self._read()
@@ -75,13 +82,13 @@ class GCSDesktopOAuth:
         The caller must never invoke this during app startup or capture.
         """
         if sys.platform != "darwin":
-            raise OAuthUnavailable("Google desktop consent is only available on the Mac")
+            raise OAuthUnavailable("Google desktop consent is only available on the Mac", code="PLATFORM_UNSUPPORTED")
         if flow_factory is None:
             try:
                 from google_auth_oauthlib.flow import InstalledAppFlow
                 flow_factory = InstalledAppFlow.from_client_config
             except ImportError:
-                raise OAuthUnavailable("google-auth-oauthlib is required for desktop consent") from None
+                raise OAuthUnavailable("google-auth-oauthlib is required for desktop consent", code="OAUTH_DEPENDENCY_MISSING") from None
         cfg = {"installed": {
             "client_id": self._client_id,
             "client_secret": self._client_secret,
@@ -89,22 +96,35 @@ class GCSDesktopOAuth:
             "token_uri": TOKEN_URI,
             "redirect_uris": ["http://127.0.0.1"],
         }}
-        flow = flow_factory(cfg, scopes=[STORAGE_SCOPE])
+        try:
+            flow = flow_factory(cfg, scopes=[STORAGE_SCOPE])
+        except Exception:
+            # Underlying provider exceptions may contain sensitive URLs.
+            raise OAuthUnavailable("Desktop OAuth flow could not start", code="OAUTH_FLOW_INIT_FAILED") from None
         # Never use a console code pasted into terminal or a remote redirect.
-        creds = flow.run_local_server(
-            host="127.0.0.1", port=0, open_browser=True,
-            authorization_prompt_message=None,
-            success_message="ClosedRoom GCS authorization completed. You may close this window.",
-            access_type="offline", prompt="consent",
-        )
+        try:
+            creds = flow.run_local_server(
+                host="127.0.0.1", port=0, open_browser=True,
+                authorization_prompt_message=None,
+                success_message="ClosedRoom GCS authorization completed. You may close this window.",
+                access_type="offline", prompt="consent",
+                timeout_seconds=180,
+            )
+        except Exception:
+            # The browser, consent screen, local callback and token exchange
+            # all occur here; do not print an OAuth exception or callback URL.
+            raise OAuthUnavailable(
+                "Browser consent, loopback callback or token exchange failed",
+                code="OAUTH_BROWSER_FLOW_FAILED",
+            ) from None
         if not getattr(creds, "refresh_token", None):
-            raise OAuthUnavailable("Google did not return an offline refresh token")
+            raise OAuthUnavailable("Google did not return an offline refresh token", code="OAUTH_REFRESH_TOKEN_MISSING")
         serialized = creds.to_json()
         _token_info(serialized, self._client_id)
         try:
             self._keychain.set_password(OAUTH_SERVICE, self._account, serialized)
         except Exception:
-            raise OAuthUnavailable("Cannot store OAuth credential in macOS Keychain") from None
+            raise OAuthUnavailable("Cannot store OAuth credential in macOS Keychain", code="KEYCHAIN_WRITE_FAILED") from None
 
     def credentials(self, *, credentials_class: Any = None) -> Any:
         """Load OAuth credentials only when a GCS operation is explicitly requested.
@@ -114,14 +134,14 @@ class GCSDesktopOAuth:
         """
         item = self._read()
         if item is None:
-            raise OAuthUnavailable("Google Cloud Storage is not connected")
+            raise OAuthUnavailable("Google Cloud Storage is not connected", code="OAUTH_NOT_CONNECTED")
         info = _token_info(item, self._client_id)
         if credentials_class is None:
             try:
                 from google.oauth2.credentials import Credentials
                 credentials_class = Credentials
             except ImportError:
-                raise OAuthUnavailable("google-auth is required for GCS credentials") from None
+                raise OAuthUnavailable("google-auth is required for GCS credentials", code="OAUTH_DEPENDENCY_MISSING") from None
         return credentials_class.from_authorized_user_info(info, scopes=[STORAGE_SCOPE])
 
     def disconnect_local(self) -> None:
@@ -131,6 +151,6 @@ class GCSDesktopOAuth:
         try:
             self._keychain.delete_password(OAUTH_SERVICE, self._account)
         except Exception:
-            raise OAuthUnavailable("Cannot delete local Google OAuth credential") from None
+            raise OAuthUnavailable("Cannot delete local Google OAuth credential", code="KEYCHAIN_DELETE_FAILED") from None
         if self._read() is not None:
-            raise OAuthUnavailable("Google OAuth Keychain deletion not verified")
+            raise OAuthUnavailable("Google OAuth Keychain deletion not verified", code="KEYCHAIN_DELETE_FAILED")
