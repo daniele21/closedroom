@@ -1709,7 +1709,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
             title={t('meeting.statusTitle')}
             description={t('workspace.advancedDesc')}
           />
-          <SheetBody className="flex flex-col gap-5 overflow-y-auto pt-2">
+          <SheetBody className="flex flex-col gap-5 overflow-y-auto pt-2 [&>*]:shrink-0">
             <div className="rounded-xl border border-border-subtle bg-bg-surface p-4">
               <h4 className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-3">
                 {lang === 'it' ? 'Stato Componenti' : 'Component Status'}
