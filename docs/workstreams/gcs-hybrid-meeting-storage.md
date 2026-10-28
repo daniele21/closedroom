@@ -1,6 +1,6 @@
 # GCS hybrid meeting storage — piano di implementazione
 
-Status: ACTIVE — bucket reported created (unverified); CS-0 inventory and CS-3 isolated GCS transport authored; no app integration.
+Status: ACTIVE — GCS bucket policy verified by operator on 2026-10-28; CS-0 inventory and CS-3 isolated GCS transport authored; no app integration.
 Owner: RecordingStore, CatalogStore, TranscriptionStore; Settings e saved Meeting come consumer
 Read when: storage GCS opzionale, backup/ripristino e recupero spazio degli audio
 Base: `dev` @ `229cef8c35b257258cf5782c1ef22967279bf86b` (2026-10-28); aggiornare base/HEAD alla ripresa.
@@ -96,8 +96,8 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 
 ## Prossimo slice, checkpoint e chiusura
 
-**Next gate:** `python3 scripts/probe_closedroom_gcs_fixture.py check-bucket --apply` on authenticated Mac (read-only). Then synthetic fixture `prepare`/`verify-local`/`upload --apply`/`restore --apply`. Isolated `storage/gcs_archive.py` provides streamed AES-GCM and generation-pinned GCS transfer under injected bucket/key. No app hookup, user data transfer or eviction. Pending: target-Mac audit, remote test, OAuth/Keychain and independent key recovery.
+**GCS gate:** operator ran `check-bucket --apply`, returned `bucket_policy_verified` for `project-tests-498508-closedroom-test` / `project-tests-498508`, `remote_changes=false` (2026-10-28). No upload yet. **Next:** synthetic `prepare` → `verify-local` → `upload --apply` → `restore --apply` with private fixture key; record results. No app hookup/eviction. Pending target-Mac audit, OAuth/Keychain and independent key recovery.
 
-**Checkpoint 2026-10-28:** feature branch from `dev` `229cef8c`; CS-0 inventory, CS-1 test tools, CS-3 encrypted transport and fake tests. 5 transport tests PASS in isolated Python; exact-head CI requires refresh. No GCP/Keychain/restore proof, CS-2/4/5 blocked.
+**Checkpoint 2026-10-28:** feature branch from `dev` `229cef8c`; CS-0 inventory, CS-1 test tools, CS-3 encrypted transport and fake tests. 5 transport tests PASS in isolated Python; exact-head CI requires refresh. GCP bucket policy validated via operator output only; no encrypted remote roundtrip or Keychain/recovery proof. CS-2/4/5 blocked.
 
 **Documentazione a integrazione:** `docs/architecture.md` owner/boundary, `docs/features.md` comportamento, `SECURITY.md` chiavi/deletion, `design/ux-contract.json` UX, README usage, `docs/current-state.md` solo quando vero. ADR per decisioni durevoli. Dopo completamento trasferire verità e obblighi REAL_ENVIRONMENT, quindi eliminare questo piano secondo `docs/workstreams/README.md`.
