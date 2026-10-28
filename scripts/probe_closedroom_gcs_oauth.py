@@ -143,7 +143,7 @@ def verify_bucket_oauth(oauth: GCSDesktopOAuth, *, client_factory: Any = None,
             if isinstance(exc, api_exc.Forbidden):
                 code = "GCS_IAM_FORBIDDEN"
             elif isinstance(exc, api_exc.Unauthorized) or isinstance(
-                exc, (auth_exc.RefreshError, auth_exc.InvalidOperation)
+                exc, auth_exc.GoogleAuthError
             ):
                 code = "GCS_OAUTH_TOKEN_REJECTED"
             elif isinstance(exc, api_exc.NotFound):
