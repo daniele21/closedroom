@@ -633,15 +633,35 @@ async function clickWhenPointerReady(browser, selector, timeoutMs = 5000) {
     const rect = element.getBoundingClientRect();
     const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
     const dialog = element.closest('[role="dialog"]');
+    const section = element.closest('section');
+    const samplePoints = [
+      [0.5, 0.5], [0.1, 0.5], [0.9, 0.5], [0.5, 0.15], [0.5, 0.85],
+    ].map(([rx, ry]) => {
+      const stack = document.elementsFromPoint(rect.left + rect.width * rx, rect.top + rect.height * ry);
+      return { point: [rx, ry], hits: stack.slice(0, 4).map((node) => node.tagName + ':' + (node.className?.baseVal || node.className || '').toString().slice(0, 50)) };
+    });
+    const style = getComputedStyle(element);
+    const sectionStyle = section ? getComputedStyle(section) : null;
     return {
       rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-      target: element.tagName,
-      hit: hit?.tagName || null,
-      hitIsOwnSection: hit === element.closest('section'),
-      hitClass: typeof hit?.className === 'string' ? hit.className.slice(0, 120) : null,
+      target: element.tagName, hit: hit?.tagName || null,
+      hitIsOwnSection: hit === section, hitClass: typeof hit?.className === 'string' ? hit.className.slice(0, 120) : null,
+      samplePoints,
+      button: {
+        disabled: element.disabled, inert: element.inert, hidden: element.hidden,
+        clientRects: element.getClientRects().length, visibility: style.visibility, display: style.display,
+        opacity: style.opacity, pointerEvents: style.pointerEvents, zIndex: style.zIndex,
+        position: style.position, transform: style.transform, clipPath: style.clipPath,
+        contentVisibility: style.contentVisibility,
+      },
+      section: {
+        inert: section?.inert, pointerEvents: sectionStyle?.pointerEvents,
+        position: sectionStyle?.position, zIndex: sectionStyle?.zIndex,
+        before: section ? getComputedStyle(section, '::before').content : null,
+        after: section ? getComputedStyle(section, '::after').content : null,
+      },
+      inertAncestors: Array.from((function* () { for (let node = element; node; node = node.parentElement) if (node.inert || node.hasAttribute('inert')) yield node.tagName; })()),
       dialogTransform: dialog ? getComputedStyle(dialog).transform : null,
-      pointerEvents: getComputedStyle(element).pointerEvents,
-      visibility: getComputedStyle(element).visibility,
     };
   `);
   throw new Error(`WebDriver pointer click unavailable for ${selector}: ${lastError}; ${JSON.stringify(details)}`);
