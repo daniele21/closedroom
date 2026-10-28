@@ -913,7 +913,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                     disabled={isBusy} maxLength={200}
                     className="min-w-0 rounded-lg border border-border-focus bg-bg-surface px-2 py-1 text-lg font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                     data-meeting-title-input="true" />
-                  <Button type="submit" size="sm" disabled={isBusy || !editedTitle.trim()}>{t('common.save')}</Button>
+                  <Button type="submit" size="sm" disabled={isBusy || !editedTitle.trim()}>{lang === 'it' ? 'Salva' : 'Save'}</Button>
                   <Button type="button" size="sm" variant="ghost" disabled={isBusy}
                     onClick={() => setEditingTitle(false)}>{t('common.cancel')}</Button>
                 </form>
