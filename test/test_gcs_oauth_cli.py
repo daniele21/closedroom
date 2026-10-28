@@ -92,6 +92,22 @@ class TestDesktopOAuthConfig(unittest.TestCase):
             self.assertEqual(caught.exception.code, "CLIENT_FILE_NOT_DESKTOP")
             self.assertNotIn("do-not-print-secret", str(caught.exception))
 
+    def test_non_string_endpoints_are_rejected_without_traceback(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "client.json"
+            for field in ("auth_uri", "token_uri"):
+                data = {"installed": {
+                    "client_id": "12345678-test.apps.googleusercontent.com",
+                    "auth_uri": AUTH_URI, "token_uri": TOKEN_URI,
+                }}
+                data["installed"][field] = {"unexpected": "do-not-log"}
+                f.write_text(json.dumps(data))
+                f.chmod(0o600)
+                with self.subTest(field=field):
+                    with self.assertRaises(OAuthUnavailable) as caught:
+                        read_desktop_config(f)
+                    self.assertEqual(caught.exception.code, "CLIENT_ENDPOINT_UNSUPPORTED")
+
     def test_unsupported_third_party_auth_endpoint_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "client.json"
