@@ -77,11 +77,17 @@ def read_desktop_config(path: Path) -> tuple[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["connect", "status", "disconnect-local"])
+    parser.add_argument("operation", choices=["check-client", "connect", "status", "disconnect-local"])
     parser.add_argument("--client-json", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         client_id, secret = read_desktop_config(args.client_json)
+        if args.operation == "check-client":
+            # No Keychain, browser or GCP connection. Never display client ID.
+            print(json.dumps({"status": "desktop_client_verified",
+                              "network_access": False,
+                              "keychain_access": False}, sort_keys=True))
+            return 0
         oauth = GCSDesktopOAuth(client_id=client_id, client_secret=secret)
         if args.operation == "connect":
             oauth.authorize_explicitly()
