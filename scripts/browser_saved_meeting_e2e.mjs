@@ -123,6 +123,7 @@ const counts = {
   diagnostics: 0, visual_frames: 0, screenshots: 0, alternate_screenshots: 0, notes: 0, alternate_notes: 0,
   audio_intelligence: 0,
   alternate_visual_context: 0,
+  metadata_title: 0, metadata_project: 0, metadata_projects_list: 0,
   benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0, benchmark_window: 0,
   review_list: 0, review_start: 0, review_poll: 0, review_preview: 0,
   review_apply: 0, review_undo: 0,
@@ -135,6 +136,7 @@ let lastBenchmarkWindowStart = null;
 const benchmarkWindowStarts = [];
 let failNextAlternateScreenshots = false;
 let failNextAlternateNotes = false;
+let failNextMetadataUpdate = false;
 let holdNextMeetingId = null;
 const heldMeetingResponses = [];
 const checkpoints = [];
@@ -225,6 +227,32 @@ function fixtureServer(port) {
         if (gate === 'error') return json(res, 503, { detail: 'stale_meeting_fetch_failed' });
       }
       return json(res, 200, requestedId === MEETING_ID ? meetingFixture : alternateMeetingFixture);
+    }
+    if (pathname === '/v1/projects') {
+      counts.metadata_projects_list += 1;
+      return json(res, 200, { items: [
+        { name: 'Browser E2E', is_unassigned: false },
+        { name: 'User Success', is_unassigned: false },
+      ] });
+    }
+    if (pathname === `/v1/recordings/${MEETING_ID}` && req.method === 'PATCH') {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (failNextMetadataUpdate) {
+        failNextMetadataUpdate = false;
+        return json(res, 503, { detail: 'synthetic metadata outage' });
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'title')) {
+        counts.metadata_title += 1;
+        meetingFixture.recording.title = payload.title;
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'project_name')) {
+        counts.metadata_project += 1;
+        meetingFixture.recording.project_name = payload.project_name;
+        meetingFixture.project_name = payload.project_name;
+      }
+      return json(res, 200, meetingFixture.recording);
     }
     if (pathname === `/v1/recordings/${MEETING_ID}/intelligence`) {
       counts.audio_intelligence += 1;
@@ -1123,6 +1151,59 @@ try {
   await browser.clickButton(['Restore previous speakers', 'Ripristina speaker precedenti']);
   await waitCount('review_undo', 1);
   await checkpoint(browser, '18-community-review-undo');
+
+  // Canonical Meeting retains metadata edits formerly isolated in the legacy Recording detail.
+  if (counts.metadata_title || counts.metadata_project || counts.metadata_projects_list) {
+    throw new Error('saved Meeting fetched or mutated metadata before an explicit edit');
+  }
+  await browser.clickCss('[data-meeting-rename="true"]');
+  const titleInput = await browser.execute(`
+    const input = document.querySelector('[data-meeting-title-input="true"]');
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, 'Quarterly launch review revised');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  if (!titleInput) throw new Error('saved Meeting title editor not available');
+  failNextMetadataUpdate = true;
+  await browser.clickCss('form:has([data-meeting-title-input="true"]) button[type="submit"]');
+  await waitText(browser, ['synthetic metadata outage'], 5000, true);
+  const retained = await browser.execute(`
+    return document.querySelector('[data-meeting-title-input="true"]')?.value === 'Quarterly launch review revised';
+  `);
+  if (!retained) throw new Error('metadata error discarded title edit');
+  await browser.clickCss('form:has([data-meeting-title-input="true"]) button[type="submit"]');
+  await waitCount('metadata_title', 1);
+  await waitText(browser, ['Quarterly launch review revised'], 5000, true);
+
+  await browser.clickCss('[data-meeting-project-edit="true"]');
+  await waitCount('metadata_projects_list', 1);
+  const projectInput = await browser.execute(`
+    const input = document.querySelector('div.fixed.inset-0.z-50 form input');
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, 'User Success');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  if (!projectInput) throw new Error('saved Meeting project editor not available');
+  await browser.clickCss('div.fixed.inset-0.z-50 form button[type="submit"]');
+  await waitCount('metadata_project', 1);
+  let projectShown = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    projectShown = await browser.execute(`
+      const edit = document.querySelector('[data-meeting-project-edit="true"]');
+      return Boolean(edit?.textContent?.includes('User Success') &&
+        !document.querySelector('div.fixed.inset-0.z-50 form'));
+    `);
+    if (projectShown) break;
+    await sleep(100);
+  }
+  if (!projectShown || meetingFixture.project_name !== 'User Success') {
+    throw new Error('saved Meeting project update failed to render persistent metadata');
+  }
+  await checkpoint(browser, '19-metadata-edit');
 
   video = await renderVideo();
 } catch (caught) {
