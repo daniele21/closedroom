@@ -15,8 +15,9 @@ import json
 import os
 import platform
 import shutil
-import signal
 import subprocess
+import tempfile
+import threading
 import sys
 import time
 from datetime import datetime, timezone
@@ -67,37 +68,103 @@ def capture_window(rect: str, destination: Path) -> None:
     )
 
 
-def start_video(rect: str, destination: Path) -> subprocess.Popen[bytes]:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    return subprocess.Popen(
-        [
-            "screencapture",
-            "-v",
-            "-V",
-            "900",
-            "-R",
-            rect,
-            "-x",
-            str(destination),
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+VIDEO_SEGMENT_SECONDS = 12
 
 
-def finish_video(process: subprocess.Popen[bytes] | None) -> None:
-    if process is None or process.poll() is not None:
-        return
-    process.send_signal(signal.SIGINT)
-    try:
-        process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        process.terminate()
+class ContentionWindowVideo:
+    """Capture one bounded window in naturally finalized clips until UI transition.
+
+    screencapture discards the MOV on SIGINT. Each -V clip exits naturally;
+    the local ffmpeg concat preserves the waiting -> recording progression,
+    including AI jobs whose completion time is not known in advance.
+    """
+
+    def __init__(self, rect: str, destination: Path) -> None:
+        self.rect = rect
+        self.destination = destination
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        # Never reuse a video from an earlier run with the same evidence path.
+        destination.unlink(missing_ok=True)
+        self.segment_dir = Path(tempfile.mkdtemp(
+            prefix=".contention-video-", dir=destination.parent
+        ))
+        self.segments: list[Path] = []
+        self.error: str | None = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._capture, daemon=True)
+        self._thread.start()
+
+    def _capture(self) -> None:
+        while not self._stop.is_set():
+            segment = self.segment_dir / f"segment-{len(self.segments):04d}.mov"
+            try:
+                completed = subprocess.run(
+                    [
+                        "screencapture", "-v", "-V", str(VIDEO_SEGMENT_SECONDS),
+                        "-R", self.rect, "-x", str(segment),
+                    ],
+                    check=False, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=VIDEO_SEGMENT_SECONDS + 20,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                self.error = f"contention_video_capture_failed:{type(exc).__name__}"
+                return
+            if completed.returncode != 0:
+                self.error = f"contention_video_capture_exit:{completed.returncode}"
+                return
+            if not file_nonempty(segment):
+                self.error = "contention_video_segment_empty"
+                return
+            self.segments.append(segment)
+
+    def stop(self, *, finalize: bool) -> None:
+        # Hold the synthetic ClosedRoom window until the current clip has
+        # naturally finalized; never record on the desktop after app cleanup.
+        self._stop.set()
+        self._thread.join(timeout=VIDEO_SEGMENT_SECONDS + 25)
+        if self._thread.is_alive():
+            raise RuntimeError("contention_video_recorder_did_not_stop")
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+            if not finalize:
+                return
+            if self.error:
+                raise RuntimeError(self.error)
+            if not self.segments:
+                raise RuntimeError("contention_video_has_no_finalized_segments")
+            playlist = self.segment_dir / "segments.ffconcat"
+            playlist.write_text(
+                "ffconcat version 1.0\n"
+                + "".join(f"file '{segment.name}'\n" for segment in self.segments),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-f", "concat", "-safe", "0",
+                    "-i", str(playlist), "-c", "copy", "-y",
+                    str(self.destination),
+                ],
+                check=False, capture_output=True, timeout=120,
+            )
+            if result.returncode != 0 or not file_nonempty(self.destination):
+                raise RuntimeError(
+                    f"contention_video_concat_failed:{result.returncode}"
+                )
+        finally:
+            # Source clips are transient; the joined real video is the evidence.
+            shutil.rmtree(self.segment_dir, ignore_errors=True)
+
+
+def start_video(rect: str, destination: Path) -> ContentionWindowVideo:
+    return ContentionWindowVideo(rect, destination)
+
+
+def finish_video(
+    recorder: ContentionWindowVideo | None, *, finalize: bool = False
+) -> None:
+    if recorder is not None:
+        recorder.stop(finalize=finalize)
 
 
 def file_nonempty(path: Path) -> bool:
@@ -209,7 +276,7 @@ def main() -> int:
     smoke = measured.load_smoke_module(root)
     sandbox: Path | None = None
     app_process: subprocess.Popen[Any] | None = None
-    video: subprocess.Popen[bytes] | None = None
+    video: ContentionWindowVideo | None = None
     executable = ""
     port: int | None = None
     try:
@@ -298,6 +365,9 @@ def main() -> int:
             ),
         )
         rect = smoke.UI_DRIVER.window_rect(app_process.pid)
+        # The contention video must represent this run, not a previous PASS.
+        for stale in (waiting_shot, recording_shot):
+            stale.unlink(missing_ok=True)
         video = start_video(rect, video_path)
 
         before_ids = {
@@ -308,11 +378,7 @@ def main() -> int:
         job = api.json(
             f"/v1/recordings/{recording_id}/transcription-jobs",
             "POST",
-            {
-                "asr_provider": "local",
-                "diarization_provider": "disabled",
-                "visual_intelligence_enabled": False,
-            },
+            measured.local_managed_transcription_payload(),
             20,
         )
         job_id = str(job.get("id") or "")
@@ -405,7 +471,7 @@ def main() -> int:
             ),
         )
         capture_window(rect, recording_shot)
-        finish_video(video)
+        finish_video(video, finalize=True)
         video = None
         check(
             "contention_full_media_complete",
