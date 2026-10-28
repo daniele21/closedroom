@@ -51,7 +51,7 @@ def classify_create_failure(stderr: str) -> tuple[str, str]:
         return ('AUTHENTICATION', 'Authenticate with gcloud auth login; check the active identity with gcloud auth list.')
     if any(marker in error for marker in (
         'already exists', 'already in use', 'already taken',
-        'bucket name is not available', 'conflict', 'http 409',
+        'bucket name is not available', 'conflict', 'http 409', 'httperror 409',
     )):
         return ('NAME_CONFLICT', 'Bucket names are global. Verify an existing bucket ownership/policy, or retry with --bucket project-tests-498508-closedroom-test-<unique-suffix>.')
     if any(marker in error for marker in (
@@ -71,7 +71,7 @@ def classify_create_failure(stderr: str) -> tuple[str, str]:
         return ('API_DISABLED', 'Confirm the Cloud Storage API is enabled for project-tests-498508.')
     if any(marker in error for marker in (
         'permission storage.buckets.create', "permission 'storage.buckets.create'", 'permission denied', 'access denied',
-        'forbidden', 'http 403', 'permission ', 'does not have permission',
+        'forbidden', 'http 403', 'httperror 403', 'permission ', 'does not have permission',
     )):
         return ('PERMISSION_DENIED', 'Check the active gcloud identity has storage.buckets.create on project-tests-498508.')
     if any(marker in error for marker in (
@@ -79,9 +79,9 @@ def classify_create_failure(stderr: str) -> tuple[str, str]:
         'no such option', 'not a valid choice',
     )):
         return ('CLI_FLAGS', 'Check gcloud --version and gcloud storage buckets create --help; update the CLI if necessary.')
-    if any(marker in error for marker in ('not found', 'http 404', 'project does not exist')):
+    if any(marker in error for marker in ('not found', 'http 404', 'httperror 404', 'project does not exist')):
         return ('PROJECT_NOT_FOUND', 'Verify project-tests-498508 exists and that the active identity can access it.')
-    if any(marker in error for marker in ('invalid location', 'invalid location constraint', 'http 400')):
+    if any(marker in error for marker in ('invalid location', 'invalid location constraint', 'http 400', 'httperror 400')):
         return ('INVALID_ARGUMENT', 'Inspect bucket name/location and project constraints; keep region europe-west8 unless explicitly changed.')
     return ('UNCLASSIFIED', 'Run the equivalent gcloud storage buckets create command directly to inspect the original error locally; redact personal information before sharing it.')
 
