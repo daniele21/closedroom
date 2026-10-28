@@ -135,7 +135,7 @@ class OAuthBucketProbeTests(unittest.TestCase):
             ):
                 rc = main(["verify-bucket", "--client-json", str(path)])
             self.assertEqual(rc, 2)
-            constructor.assert_called_once()
+            constructor.assert_not_called()
             self.assertEqual(json.loads(error.getvalue())["error_code"], "GCS_EXPLICIT_APPLY_REQUIRED")
 
 
