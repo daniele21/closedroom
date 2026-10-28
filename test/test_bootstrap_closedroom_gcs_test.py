@@ -49,7 +49,8 @@ class GCSBootstrapTests(unittest.TestCase):
             ('ERROR: billing account is disabled', 'BILLING'),
             ('ERROR: storage.googleapis.com is disabled', 'API_DISABLED'),
             ('ERROR: unrecognized arguments: --public-access-prevention', 'CLI_FLAGS'),
-            ('unexpected failure', 'UNCLASSIFIED'),
+            ('ERROR: (gcloud.storage.buckets.create) HTTPError 400: unspecified', 'INVALID_ARGUMENT'),
+            ('ERROR: (gcloud.storage.buckets.create) unexpected failure', 'UNCLASSIFIED'),
         ]
         for raw, expected in cases:
             with self.subTest(expected=expected):
