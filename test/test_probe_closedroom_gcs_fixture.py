@@ -28,7 +28,7 @@ class TestGcsFixture(unittest.TestCase):
                 probe.validate_plaintext(folder, bytes(tampered))
             key = folder / 'key.bin'
             key.write_bytes(b'Z' * 32)
-            with self.assertRaises(Exception):
+            with self.assertRaises(ValueError):
                 probe.validate_plaintext(folder, ciphertext)
 
     def test_cloud_dry_run_never_calls_gcloud(self):
@@ -53,9 +53,9 @@ class TestGcsFixture(unittest.TestCase):
                 probe.prepare(Path(root) / 'invalid', 'somebody-else')
 
     def test_owner_and_bucket_security_are_mandatory(self):
-        good_project = json.dumps({'projectNumber': '47024716227'})
+        good_project = json.dumps({'projectNumber': '12345'})
         good_bucket = {
-            'projectNumber': '47024716227', 'location': 'EUROPE-WEST8',
+            'projectNumber': '12345', 'location': 'EUROPE-WEST8',
             'storageClass': 'STANDARD', 'iamConfiguration': {
                 'uniformBucketLevelAccess': {'enabled': True},
                 'publicAccessPrevention': 'enforced',
