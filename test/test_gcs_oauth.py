@@ -104,6 +104,8 @@ class GCSDesktopOAuthTests(unittest.TestCase):
         for credentials in (
             {"client_id": CLIENT_ID, "token_uri": TOKEN_URI, "refresh_token": "abc",
              "scopes": ["https://www.googleapis.com/auth/cloud-platform"]},
+            {"client_id": CLIENT_ID, "token_uri": TOKEN_URI, "refresh_token": "abc",
+             "scopes": [STORAGE_SCOPE, "https://www.googleapis.com/auth/cloud-platform"]},
             {"client_id": "other-client", "token_uri": TOKEN_URI, "refresh_token": "abc",
              "scopes": [STORAGE_SCOPE]},
             {"client_id": CLIENT_ID, "token_uri": "https://evil.test", "refresh_token": "abc",
