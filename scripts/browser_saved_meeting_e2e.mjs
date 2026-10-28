@@ -611,48 +611,40 @@ async function waitText(browser, needles, timeoutMs = 5000, record = false) {
   throw new Error(`timed out waiting for ${needles.join(' | ')}; text=${last.slice(0, 1000)}`);
 }
 
-// Verify a real pointer target in the sliding Radix drawer before WebDriver clicks.
+// WebDriver's actual pointer action is authoritative. A custom elementFromPoint
+// center heuristic can report the enclosing Section instead of its child button
+// in Radix drawer content, despite a visible and actionable target.
 async function clickWhenPointerReady(browser, selector, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
-  let details = null;
+  let lastError = null;
   while (Date.now() < deadline) {
-    details = await browser.execute(`
-      const element = document.querySelector(${JSON.stringify(selector)});
-      if (!element) return { ready: false, reason: 'missing' };
-      element.scrollIntoView({ block: 'center', behavior: 'instant' });
-      const rect = element.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      const hit = document.elementFromPoint(x, y);
-      const dialog = element.closest('[role="dialog"]');
-      const scrollParent = element.closest('.overflow-y-auto');
-      const dialogRect = dialog?.getBoundingClientRect();
-      const scrollRect = scrollParent?.getBoundingClientRect();
-      return {
-        ready: rect.width > 0 && rect.height > 0 && Boolean(hit && (element === hit || element.contains(hit))),
-        target: element.tagName, hit: hit?.tagName || null,
-        hitClass: typeof hit?.className === 'string' ? hit.className.slice(0, 120) : null,
-        hitWithinDialog: Boolean(dialog?.contains(hit)),
-        hitStack: document.elementsFromPoint(x, y).slice(0, 5).map((node) => ({
-          tag: node.tagName,
-          className: typeof node.className === 'string' ? node.className.slice(0, 80) : '',
-        })),
-        targetRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-        dialogRect: dialogRect ? { x: dialogRect.x, y: dialogRect.y, width: dialogRect.width, height: dialogRect.height } : null,
-        dialogTransform: dialog ? getComputedStyle(dialog).transform : null,
-        scrollRect: scrollRect ? { x: scrollRect.x, y: scrollRect.y, width: scrollRect.width, height: scrollRect.height } : null,
-        scrollTop: scrollParent?.scrollTop ?? null,
-        viewport: { width: innerWidth, height: innerHeight },
-        pointerEvents: getComputedStyle(element).pointerEvents,
-      };
-    `);
-    if (details?.ready) {
+    try {
+      // Never substitute HTMLElement.click(): this must exercise pointer interaction.
       await browser.clickCss(selector);
       return;
+    } catch (error) {
+      lastError = String(error?.message || error);
+      await sleep(100);
     }
-    await sleep(100);
   }
-  throw new Error(`Pointer interaction unavailable for ${selector}: ${JSON.stringify(details)}`);
+  const details = await browser.execute(`
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!element) return { reason: 'missing', lastError: ${JSON.stringify(lastError)} };
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const dialog = element.closest('[role="dialog"]');
+    return {
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      target: element.tagName,
+      hit: hit?.tagName || null,
+      hitIsOwnSection: hit === element.closest('section'),
+      hitClass: typeof hit?.className === 'string' ? hit.className.slice(0, 120) : null,
+      dialogTransform: dialog ? getComputedStyle(dialog).transform : null,
+      pointerEvents: getComputedStyle(element).pointerEvents,
+      visibility: getComputedStyle(element).visibility,
+    };
+  `);
+  throw new Error(`WebDriver pointer click unavailable for ${selector}: ${lastError}; ${JSON.stringify(details)}`);
 }
 
 async function waitCount(key, minimum, timeoutMs = 5000) {
