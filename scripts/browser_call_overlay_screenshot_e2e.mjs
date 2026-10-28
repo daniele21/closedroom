@@ -477,7 +477,8 @@ class Browser {
   async start() {
     const value = await webdriver(this.port, 'POST', '/session', { capabilities: { alwaysMatch: {
       browserName: 'chrome',
-      'goog:chromeOptions': { args: ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--window-size=1280,900', '--force-device-scale-factor=1', '--disable-background-networking', '--disable-default-apps'] },
+      'goog:chromeOptions': {
+            ...(process.env.CI_CHROME_BINARY ? { binary: process.env.CI_CHROME_BINARY } : {}), args: ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--window-size=1280,900', '--force-device-scale-factor=1', '--disable-background-networking', '--disable-default-apps'] },
     } } });
     this.sessionId = value.sessionId;
   }

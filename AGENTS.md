@@ -36,6 +36,8 @@ Follow the closest scoped `AGENTS.md`. Extend one canonical owner before introdu
 | Missing deterministic remote gate | `skills/remote-preflight/SKILL.md` |
 | Persistent multi-session work | `skills/plan-workstream/SKILL.md` + active plan; finalize with `skills/finalize-workstream/SKILL.md` |
 
+Mac CI: use `daniele21/local-runner-infra` and `.github/ci/local-test.sh`; require exact `local-ci/mac` PASS, not dispatch alone.
+
 ## Delivery and evidence
 
 - **ITERATION**: focused owner-local falsification; no exact-head/full-diff/docs/publication ceremony per edit.

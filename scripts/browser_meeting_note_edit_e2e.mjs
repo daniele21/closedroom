@@ -366,6 +366,7 @@ class Browser {
         alwaysMatch: {
           browserName: 'chrome',
           'goog:chromeOptions': {
+            ...(process.env.CI_CHROME_BINARY ? { binary: process.env.CI_CHROME_BINARY } : {}),
             args: [
               '--headless=new',
               '--disable-gpu',
