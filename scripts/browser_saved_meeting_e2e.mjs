@@ -1098,9 +1098,16 @@ try {
   if (!projectInput) throw new Error('saved Meeting project editor not available');
   await browser.clickCss('div.fixed.inset-0.z-50 form button[type="submit"]');
   await waitCount('metadata_project', 1);
-  const projectShown = await browser.execute(`
-    return document.querySelector('[data-meeting-project-edit="true"]')?.textContent?.includes('User Success') || false;
-  `);
+  let projectShown = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    projectShown = await browser.execute(`
+      const edit = document.querySelector('[data-meeting-project-edit="true"]');
+      return Boolean(edit?.textContent?.includes('User Success') &&
+        !document.querySelector('div.fixed.inset-0.z-50 form'));
+    `);
+    if (projectShown) break;
+    await sleep(100);
+  }
   if (!projectShown || meetingFixture.project_name !== 'User Success') {
     throw new Error('saved Meeting project update failed to render persistent metadata');
   }
