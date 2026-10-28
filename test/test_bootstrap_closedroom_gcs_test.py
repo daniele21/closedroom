@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import subprocess
 from pathlib import Path
 import sys
 import unittest
@@ -37,6 +38,50 @@ class GCSBootstrapTests(unittest.TestCase):
     def test_apply_without_cli_fails_closed(self):
         with patch.object(bootstrap.shutil, 'which', return_value=None), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(bootstrap.main(['--apply']), 2)
+
+
+    def test_failures_classify_without_exposing_account_identity(self):
+        cases = [
+            ('HTTPError 409: Bucket name already exists', 'NAME_CONFLICT'),
+            ('HTTPError 403: caller lacks storage.buckets.create', 'PERMISSION_DENIED'),
+            ('ERROR: gcloud: no active account selected', 'AUTHENTICATION'),
+            ('HTTPError 412: violates constraint constraints/gcp.resourceLocations', 'ORG_POLICY'),
+            ('ERROR: billing account is disabled', 'BILLING'),
+            ('ERROR: storage.googleapis.com is disabled', 'API_DISABLED'),
+            ('ERROR: unrecognized arguments: --public-access-prevention', 'CLI_FLAGS'),
+            ('unexpected failure', 'UNCLASSIFIED'),
+        ]
+        for raw, expected in cases:
+            with self.subTest(expected=expected):
+                category, message = bootstrap.classify_create_failure(
+                    raw + ' user@example.com secret-token-123'
+                )
+                self.assertEqual(category, expected)
+                self.assertNotIn('user@example.com', message)
+                self.assertNotIn('secret-token-123', message)
+
+    def test_apply_prints_sanitized_diagnostic_only_and_returns_failure(self):
+        stderr = 'HTTPError 403: storage.buckets.create denied for user@example.com private-token'
+        mocked = subprocess.CompletedProcess(args=['gcloud'], returncode=1, stdout='', stderr=stderr)
+        output = io.StringIO()
+        with patch.object(bootstrap.shutil, 'which', return_value='/fake/gcloud'), \
+             patch.object(bootstrap.subprocess, 'run', return_value=mocked) as run, \
+             contextlib.redirect_stderr(output):
+            self.assertEqual(bootstrap.main(['--apply']), 1)
+        self.assertIn('[PERMISSION_DENIED]', output.getvalue())
+        self.assertNotIn('user@example.com', output.getvalue())
+        self.assertNotIn('private-token', output.getvalue())
+        self.assertEqual(run.call_args.kwargs['timeout'], 120)
+        self.assertNotIn('shell', run.call_args.kwargs)
+
+    def test_timeout_never_claims_success(self):
+        output = io.StringIO()
+        with patch.object(bootstrap.shutil, 'which', return_value='/fake/gcloud'), \
+             patch.object(bootstrap.subprocess, 'run', side_effect=subprocess.TimeoutExpired(['gcloud'], 120)), \
+             contextlib.redirect_stderr(output):
+            self.assertEqual(bootstrap.main(['--apply']), 2)
+        self.assertIn('Outcome is unknown', output.getvalue())
+
 
 
 if __name__ == '__main__':
