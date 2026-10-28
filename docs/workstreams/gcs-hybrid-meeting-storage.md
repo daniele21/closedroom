@@ -1,6 +1,6 @@
 # GCS hybrid meeting storage — piano di implementazione
 
-Status: ACTIVE — CS-0 audit tool and CS-1 GCS bootstrap prepared; real Mac inventory, GCP bucket and credential/recovery proof pending.
+Status: ACTIVE — bucket reported created (unverified); CS-0 inventory and CS-3 isolated GCS transport authored; no app integration.
 Owner: RecordingStore, CatalogStore, TranscriptionStore; Settings e saved Meeting come consumer
 Read when: storage GCS opzionale, backup/ripristino e recupero spazio degli audio
 Base: `dev` @ `229cef8c35b257258cf5782c1ef22967279bf86b` (2026-10-28); aggiornare base/HEAD alla ripresa.
@@ -71,7 +71,7 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 | CS-0 | ACTIVE | Audit read-only di dati privati: GB per audio/transcript/visual/cache/DB, duplicati fisici, spazio davvero liberabile; solo aggregati | nuovo script e test fixture, **non** audit bundle | — |
 | CS-1 | ACTIVE | Decisione UX/privacy/IAM/Keychain/encryption/recovery; prova GCS con fixture e go/no-go BYO | piano, spike isolato; ADR solo dopo evidenza | — |
 | CS-2 | BLOCKED | Settings, policy per meeting, schema asset/catalog e migration idempotente | `settings.py`, `schemas.py`, `settings_service.py`, `recordings.py`, `catalog.py`, test | CS-1 |
-| CS-3 | BLOCKED | Adapter GCS con OAuth/cifratura/checksum/retry e mock | adapter e test propri, senza edit simultanei degli store | CS-1; interfaccia concordata con CS-2 |
+| CS-3 | ACTIVE | Adapter GCS con OAuth/cifratura/checksum/retry e mock | adapter e test propri, senza edit simultanei degli store | CS-1; interfaccia concordata con CS-2 |
 | CS-4 | BLOCKED | Backup coerente e restore su catalogo vuoto, preservando relazioni | `transcriptions.py`, owner snapshot/restore, test DB | CS-2, CS-3 |
 | CS-5 | BLOCKED | Upload post-finalize, retry/crash recovery e zero eviction | RecordingStore/uploader/integrazione router; serializzare con CS-2 | CS-2, CS-3 |
 | CS-6 | BLOCKED | Hydration/lease per audio API, ASR, speaker/benchmark; quota e cleanup | accessor+consumer/test, serializzare edit RecordingStore con CS-5 | CS-5 |
@@ -96,8 +96,8 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 
 ## Prossimo slice, checkpoint e chiusura
 
-**CS-0/1 ACTIVE.** Audit WAL/SHM: `python3 scripts/audit_meeting_data.py` (legacy: `--extra-recordings-root <path>`); GCS dry-run: `python3 scripts/bootstrap_closedroom_gcs_test.py` (`--apply` richiede autorità GCP). Bucket proposto `gs://project-tests-498508-closedroom-test` in `europe-west8`, Standard, UBLA, PAP e soft delete 7d. Nome non verificato. Fixture: `python3 scripts/probe_closedroom_gcs_fixture.py prepare --directory <dir>` e `verify-local`; upload/restore richiedono `--apply`. Chiave fixture 0600, non Keychain. Pending: Mac inventory, GCS auth e restore remoto.
+**Next gate:** `python3 scripts/probe_closedroom_gcs_fixture.py check-bucket --apply` on authenticated Mac (read-only). Then synthetic fixture `prepare`/`verify-local`/`upload --apply`/`restore --apply`. Isolated `storage/gcs_archive.py` provides streamed AES-GCM and generation-pinned GCS transfer under injected bucket/key. No app hookup, user data transfer or eviction. Pending: target-Mac audit, remote test, OAuth/Keychain and independent key recovery.
 
-**Checkpoint 2026-10-28:** feature branch da `dev` `229cef8c`; audit+bootstrap+probe: 11 test locali PASS; compileall PASS. Nessuna verifica GCP, Keychain o Mac reale. CS-0/1 ACTIVE; al resume rivedere head/tree/base.
+**Checkpoint 2026-10-28:** feature branch from `dev` `229cef8c`; CS-0 inventory, CS-1 test tools, CS-3 encrypted transport and fake tests. 5 transport tests PASS in isolated Python; exact-head CI requires refresh. No GCP/Keychain/restore proof, CS-2/4/5 blocked.
 
 **Documentazione a integrazione:** `docs/architecture.md` owner/boundary, `docs/features.md` comportamento, `SECURITY.md` chiavi/deletion, `design/ux-contract.json` UX, README usage, `docs/current-state.md` solo quando vero. ADR per decisioni durevoli. Dopo completamento trasferire verità e obblighi REAL_ENVIRONMENT, quindi eliminare questo piano secondo `docs/workstreams/README.md`.
