@@ -12,6 +12,7 @@ Or via the build script:
 import shutil
 import os
 import sys
+import importlib.util
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -100,9 +101,13 @@ extra_datas = [
 # data is documentation-only for ClosedRoom's inference path, so do not copy it.
 extra_datas.extend(collect_data_files("local_llm_server"))
 
-# mlx_whisper ships tokenizer data (json / tiktoken files)
-import mlx_whisper as _mlx_w
-mlx_w_dir = Path(_mlx_w.__file__).parent
+# Locate tokenizer assets without importing mlx_whisper. Importing its __init__
+# eagerly loads SciPy native libraries on the build host; module collection and
+# the explicit dependency probe in build.sh own runtime import validation.
+mlx_w_spec = importlib.util.find_spec("mlx_whisper")
+if mlx_w_spec is None or not mlx_w_spec.submodule_search_locations:
+    raise FileNotFoundError("mlx_whisper package data unavailable in build environment")
+mlx_w_dir = Path(next(iter(mlx_w_spec.submodule_search_locations)))
 for ext in ("*.json", "*.tiktoken", "*.txt", "*.npz"):
     for f in mlx_w_dir.rglob(ext):
         rel = str(f.parent.relative_to(mlx_w_dir.parent))

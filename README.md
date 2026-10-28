@@ -246,6 +246,9 @@ UV_CACHE_DIR=.cache/uv uv run local-asr serve --reload
 
 ### Build the native macOS application
 
+The macOS bundle uses Python **3.12** by default, while source/CLI support remains `>=3.10,<3.14`. `CLOSEDROOM_BUILD_PYTHON_VERSION` overrides packaging Python only when validating an alternative toolchain; builds fail if SciPy/MLX Whisper native imports fail.
+
+
 ```bash
 ./build.sh --no-dmg
 # => dist/ClosedRoom.app

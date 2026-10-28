@@ -39,7 +39,7 @@ APP_NAME="${CLOSEDROOM_APP_NAME:-ClosedRoom}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_VERSION="$(python3 "$SCRIPT_DIR/scripts/product_version.py" --root "$SCRIPT_DIR")"
 BUNDLE_ID="${CLOSEDROOM_APP_BUNDLE_ID:-com.closedroom.app}"
-BUILD_PYTHON_VERSION="${CLOSEDROOM_BUILD_PYTHON_VERSION:-3.10}"
+BUILD_PYTHON_VERSION="${CLOSEDROOM_BUILD_PYTHON_VERSION:-3.12}"
 BUILD_ASSETS="$SCRIPT_DIR/build_assets"
 # uv refuses to build a source tree when its cache lives inside that same tree.
 # Keep the packaging cache outside the repository while still allowing callers
@@ -402,7 +402,15 @@ log "  Installing wheel and dependencies into build_venv..."
 WHEEL_FILE=$(ls dist/wheels/local_asr_server-*.whl)
 # The opt-in Korgis consumer must be present in the frozen Python runtime,
 # despite legacy remaining the default transport. Git-SHA pin lives in pyproject.
-uv pip install --python build_venv "${WHEEL_FILE}[app,speechmatics,korgis-sdk]" "pyinstaller>=6.0"
+# macOS 27 dyld rejects the SciPy 1.15.3 PROPACK wheel loaded by mlx-whisper.
+# Python 3.12 permits fixed SciPy >=1.16; do not bundle the broken ABI.
+uv pip install --python build_venv "${WHEEL_FILE}[app,speechmatics,korgis-sdk]" "pyinstaller>=6.0" "scipy>=1.16"
+
+# Detect incompatible native wheels before PyInstaller runs its package hooks.
+# Fail explicitly rather than shipping an .app with broken local transcription.
+if ! build_venv/bin/python -c 'import scipy.signal; import scipy.sparse.linalg; import mlx_whisper'; then
+    die "Packaging dependency import failed (SciPy/MLX Whisper). Check macOS native wheels and Python $BUILD_PYTHON_VERSION; no app was finalized."
+fi
 
 log "  Running PyInstaller from build_venv..."
 CLOSEDROOM_APP_NAME="$APP_NAME" \
