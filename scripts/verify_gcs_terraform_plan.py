@@ -31,7 +31,7 @@ def validate_plan(plan: Any) -> dict[str, int]:
     if not isinstance(changes, list) or not changes:
         raise UnsafeTerraformPlan("Missing resource changes; no approval possible")
     seen_bucket = False
-    iam_created = 0
+    created_iam_roles: dict[str, str] = {}
     for resource in changes:
         if not isinstance(resource, dict) or resource.get("mode") != "managed":
             raise UnsafeTerraformPlan("Unexpected Terraform resource mode")
@@ -75,14 +75,19 @@ def validate_plan(plan: Any) -> dict[str, int]:
             if not isinstance(member, str) or not member.startswith("user:") or len(member) < 7:
                 raise UnsafeTerraformPlan("IAM principal must be a named user")
             if action == "create":
-                iam_created += 1
+                if matching[0] in created_iam_roles:
+                    raise UnsafeTerraformPlan("Multiple new grants for the same role are prohibited")
+                created_iam_roles[matching[0]] = member
         else:
             raise UnsafeTerraformPlan("Unexpected resource in Terraform plan")
     if not seen_bucket:
         raise UnsafeTerraformPlan("Expected bucket import/ownership resource missing")
-    if iam_created not in (0, 2):
-        raise UnsafeTerraformPlan("A partial new IAM grant was requested")
-    return {"bucket_modifications": 0, "iam_members_created": iam_created}
+    if created_iam_roles and (
+        len(set(created_iam_roles.values())) != 1
+        or set(created_iam_roles) != set(PERMITTED_IAM.values())
+    ):
+        raise UnsafeTerraformPlan("New IAM grants must have both permitted roles for one user")
+    return {"bucket_modifications": 0, "iam_members_created": len(created_iam_roles)}
 
 
 def main() -> int:
