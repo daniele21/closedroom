@@ -151,7 +151,7 @@ jobs:
     name: Source tests / ${{ needs.select.outputs.stage }} / ${{ needs.select.outputs.profile }}
     needs: [select, reuse]
     if: >-
-      ${{ always() && contains(needs.select.outputs.required_gates, 'source-tests') && needs.reuse.outputs.reused != 'true' }}
+      ${{ needs.select.result == 'success' && contains(needs.select.outputs.required_gates, 'source-tests') && needs.reuse.outputs.reused != 'true' }}
     # Only orchestration runs in this source repository. All Mac checks execute
     # on local-runner-infra, where self-hosted registrations actually live.
     runs-on: ubuntu-latest
