@@ -181,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
                               "network_access": False,
                               "keychain_access": False}, sort_keys=True))
             return 0
+        if args.operation == "verify-bucket" and not args.apply:
+            raise BucketProbeFailed("GCS_EXPLICIT_APPLY_REQUIRED")
         oauth = GCSDesktopOAuth(client_id=client_id, client_secret=secret)
         if args.operation == "connect":
             oauth.authorize_explicitly()
@@ -192,8 +194,6 @@ def main(argv: list[str] | None = None) -> int:
                               else "local_credentials_absent",
                               "bucket_access_verified": False}))
         elif args.operation == "verify-bucket":
-            if not args.apply:
-                raise BucketProbeFailed("GCS_EXPLICIT_APPLY_REQUIRED")
             print(json.dumps(verify_bucket_oauth(oauth), sort_keys=True))
         else:
             oauth.disconnect_local()
