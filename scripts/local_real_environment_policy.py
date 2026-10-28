@@ -9,8 +9,24 @@ clean, local Apple-Silicon builds using ad-hoc signing.
 from __future__ import annotations
 
 import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
+
+SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+
+from finalize_build_artifact import fingerprint_tree
+
+INSTALLED_APP_ENV = "CLOSEDROOM_LOCAL_REAL_ENVIRONMENT_INSTALLED_APP"
+SOURCE_APP_ENV = "CLOSEDROOM_LOCAL_REAL_ENVIRONMENT_SOURCE_APP"
+
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -27,7 +43,16 @@ def local_manifest_for(app: Path) -> tuple[Path, dict[str, Any]]:
     """Validate one finalized ad-hoc artifact for local physical evidence only."""
     manifest_path = app.parent / "build-manifest.json"
     if not manifest_path.is_file():
-        raise RuntimeError("local app is missing build-manifest.json")
+        installed = os.environ.get(INSTALLED_APP_ENV)
+        original = os.environ.get(SOURCE_APP_ENV)
+        if not installed or not original or app.absolute() != Path(installed).absolute():
+            raise RuntimeError("local app is missing build-manifest.json")
+        source_app = Path(original).expanduser().absolute()
+        if source_app == app.absolute():
+            raise RuntimeError("installed and source app must be separate paths")
+        original_manifest, manifest = local_manifest_for(source_app)
+        verify_installed_copy(app, manifest)
+        return original_manifest, manifest
 
     manifest = read_json(manifest_path)
     if manifest.get("status") != "successful":
@@ -65,6 +90,72 @@ def local_manifest_for(app: Path) -> tuple[Path, dict[str, Any]]:
         raise RuntimeError("local REAL_ENVIRONMENT app does not match build manifest")
 
     return manifest_path, manifest
+
+
+def verify_installed_copy(app: Path, manifest: dict[str, Any]) -> None:
+    """Reject altered/partial installed bundles; keep the finalized source authoritative."""
+    if app.is_symlink() or not app.is_dir():
+        raise RuntimeError("installed test application is not a real app directory")
+    expected = ((manifest.get("artifacts") or {}).get("app") or {})
+    expected_sha = str(expected.get("sha256") or "")
+    if not expected_sha or not isinstance(expected.get("file_count"), int):
+        raise RuntimeError("installed app requires finalized SHA-256 and file-count evidence")
+    actual = fingerprint_tree(app)
+    if actual["sha256"] != expected_sha or actual["file_count"] != expected["file_count"]:
+        raise RuntimeError("installed test app differs from immutable finalized artifact")
+    if isinstance(expected.get("bytes"), int) and actual["bytes"] != expected["bytes"]:
+        raise RuntimeError("installed test app size differs from immutable finalized artifact")
+
+
+def install_test_app(
+    source_app: Path,
+    manifest: dict[str, Any],
+    *,
+    applications_dir: Path = Path("/Applications"),
+) -> tuple[Path, str]:
+    """Copy one immutable, validated local app into /Applications for TCC testing.
+
+    Never overwrite an existing app, never alter the source artifact, never sudo.
+    Same exact build is reused; differing builds have distinct app names.
+    """
+    source_app = source_app.expanduser().absolute()
+    manifest_path, validated = local_manifest_for(source_app)
+    if manifest != validated:
+        raise RuntimeError("source manifest changed during test-app installation")
+    verify_installed_copy(source_app, validated)
+
+    source = validated.get("source") or {}
+    revision = str(source.get("revision") or "")[:12]
+    build_id = str(validated.get("build_id") or "")
+    if not revision or not build_id:
+        raise RuntimeError("test installation requires exact revision and build ID")
+    safe_build_id = re.sub(r"[^A-Za-z0-9._-]", "-", build_id)[:90]
+    destination = applications_dir / f"ClosedRoom Test-{revision}-{safe_build_id}.app"
+    if not applications_dir.is_dir():
+        raise RuntimeError(f"Applications directory missing: {applications_dir}")
+
+    if destination.exists() or destination.is_symlink():
+        verify_installed_copy(destination, validated)
+        return destination, "reused_verified"
+
+    temporary = applications_dir / f".ClosedRoom-Test-install-{secrets.token_hex(8)}.app"
+    try:
+        subprocess.run(["ditto", str(source_app), str(temporary)], check=True, timeout=900)
+        verify_installed_copy(temporary, validated)
+        subprocess.run(
+            ["codesign", "--verify", "--deep", "--strict", str(temporary)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if destination.exists() or destination.is_symlink():
+            raise RuntimeError(f"test app destination appeared during installation: {destination}")
+        temporary.rename(destination)
+    finally:
+        if temporary.is_dir() and not temporary.is_symlink():
+            shutil.rmtree(temporary)
+    return destination, "installed_verified"
 
 
 def revisions_match(left: str, right: str) -> bool:
