@@ -58,6 +58,8 @@ class CentralMacPreflightContractTests(unittest.TestCase):
         self.assertIn('chrome-for-testing-public/', source)
         self.assertIn("export CHROMEWEBDRIVER", source)
         self.assertIn("export CI_CHROME_BINARY", source)
+        self.assertIn('export CHROME_BINARY="$CI_CHROME_BINARY"', source)
+        self.assertIn("maxRetries: 12", (ROOT / "scripts/browser_activities_e2e.mjs").read_text(encoding="utf-8"))
         for journey in BROWSER_JOURNEYS:
             with self.subTest(journey=journey):
                 content = (ROOT / "scripts" / journey).read_text(encoding="utf-8")

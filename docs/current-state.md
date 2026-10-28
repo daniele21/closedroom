@@ -28,10 +28,6 @@ PRS-18 has two target-Mac evidence paths:
 
 Ad-hoc evidence never substitutes for production signing.
 
-## Shared macOS CI execution (in migration)
-
-The source `Remote preflight` retains Linux repository guard/selector jobs and source validation/evidence identity. Its costly macOS source, Python and browser FULL_MEDIA gates are being routed through the **central** `daniele21/local-runner-infra` self-hosted Mac fleet using exact-commit `repository_dispatch`. The source CI gate waits for a new central `local-ci/mac` status before passing; dispatch acceptance alone is insufficient. `.github/ci/local-test.sh` owns the checks, and an isolated Chrome for Testing/ChromeDriver pair is provisioned for the run without host-wide package installation. This automated evidence does not prove installed WKWebView/TCC/physical audio or representative MLX/Metal; those remain release gates.
-
 ## Stable-source evidence still pending
 
 Promotion `dev -> main` remains blocked until **RELEASE / FULL** automation and applicable target-environment observations agree on the exact candidate.

@@ -28,6 +28,7 @@ for kind in chrome chromedriver; do
 done
 export CHROMEWEBDRIVER="$CLOSEDROOM_CI_BROWSER_DIR/chromedriver-mac-arm64/chromedriver"
 export CI_CHROME_BINARY="$CLOSEDROOM_CI_BROWSER_DIR/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+export CHROME_BINARY="$CI_CHROME_BINARY"
 chmod +x "$CHROMEWEBDRIVER" "$CI_CHROME_BINARY"
 [[ -x "$CHROMEWEBDRIVER" && -x "$CI_CHROME_BINARY" ]] || {
   echo "Portable Chrome for Testing setup incomplete" >&2
