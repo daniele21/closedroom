@@ -44,6 +44,82 @@ def arguments(**overrides: object) -> argparse.Namespace:
 
 
 class RealEnvironmentReleaseSuiteTests(unittest.TestCase):
+    def test_contention_video_natural_clips_are_joined_only_after_stop(self) -> None:
+        scripts_dir = str(ROOT / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import record_while_ai_busy_target_mac as contention
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "contention.mov"
+            commands = []
+
+            def fake_run(command, **kwargs):
+                commands.append(command)
+                if command[0] == "screencapture":
+                    self.assertEqual(command[2:4], ["-V", str(contention.VIDEO_SEGMENT_SECONDS)])
+                    time.sleep(0.025)
+                    Path(command[-1]).write_bytes(b"recorded-clip")
+                elif command[0] == "ffmpeg":
+                    self.assertFalse(destination.exists())
+                    destination.write_bytes(b"joined-video")
+                else:
+                    self.fail(f"unexpected tool: {command[0]}")
+                return subprocess.CompletedProcess(command, 0)
+
+            with patch.object(contention.subprocess, "run", side_effect=fake_run):
+                recorder = contention.start_video("0,0,640,480", destination)
+                time.sleep(0.05)
+                contention.finish_video(recorder, finalize=True)
+
+            self.assertEqual(destination.read_bytes(), b"joined-video")
+            self.assertTrue(any(c[0] == "screencapture" for c in commands))
+            self.assertTrue(any(c[0] == "ffmpeg" for c in commands))
+            self.assertFalse(recorder.segment_dir.exists())
+
+    def test_contention_video_rejects_failed_or_empty_capture(self) -> None:
+        scripts_dir = str(ROOT / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import record_while_ai_busy_target_mac as contention
+
+        for exit_code, write_file in ((-2, False), (0, False)):
+            with self.subTest(exit_code=exit_code):
+                with tempfile.TemporaryDirectory() as tmp:
+                    destination = Path(tmp) / "contention.mov"
+                    destination.write_bytes(b"stale-previous-run")
+
+                    def fake_run(command, **kwargs):
+                        if write_file:
+                            Path(command[-1]).write_bytes(b"nonempty")
+                        return subprocess.CompletedProcess(command, exit_code)
+
+                    with patch.object(contention.subprocess, "run", side_effect=fake_run):
+                        recorder = contention.start_video("0,0,640,480", destination)
+                        recorder._thread.join(timeout=2)
+                        with self.assertRaisesRegex(RuntimeError, "contention_video_"):
+                            contention.finish_video(recorder, finalize=True)
+                    self.assertFalse(destination.exists())
+
+    def test_contention_failed_journey_does_not_publish_false_video(self) -> None:
+        scripts_dir = str(ROOT / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import record_while_ai_busy_target_mac as contention
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "contention.mov"
+            def fake_run(command, **kwargs):
+                Path(command[-1]).write_bytes(b"recorded-clip")
+                return subprocess.CompletedProcess(command, 0)
+
+            with patch.object(contention.subprocess, "run", side_effect=fake_run):
+                recorder = contention.start_video("0,0,640,480", destination)
+                contention.finish_video(recorder)
+            self.assertFalse(destination.exists())
+            self.assertFalse(recorder.segment_dir.exists())
+
+
     def test_target_mac_ai_runners_use_supported_disabled_diarization_value(self) -> None:
         # Catch the exact physical failure: 'disabled' is not a backend provider.
         scripts_dir = str(ROOT / "scripts")
