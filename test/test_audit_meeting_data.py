@@ -48,13 +48,15 @@ class MeetingDataInventoryTests(unittest.TestCase):
             rec = root / 'recordings'; rec.mkdir()
             tr = root / 'trans'; tr.mkdir()
             catalog = root / 'closedroom.db'; catalog.write_bytes(b'x' * 5)
+            (root / 'closedroom.db-wal').write_bytes(b'y' * 3)
+            (root / 'closedroom.db-shm').write_bytes(b'z' * 2)
             settings = root / 'settings.json'
             settings.write_text(json.dumps({'recordings_dir': str(rec), 'transcriptions_dir': str(tr),
                                             'catalog_db_path': str(catalog), 'gemini_api_key': 'private-token'}))
             roots = audit.configured_roots(settings, [], [])
-            self.assertEqual(len(roots), 3)
+            self.assertEqual(len(roots), 5)
             report = audit.inventory(roots)
-            self.assertEqual(report['groups']['catalog']['logical_bytes'], 5)
+            self.assertEqual(report['groups']['catalog']['logical_bytes'], 10)
             self.assertNotIn('private-token', json.dumps(report))
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
