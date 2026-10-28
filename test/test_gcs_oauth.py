@@ -85,6 +85,27 @@ class GCSDesktopOAuthTests(unittest.TestCase):
                 self.oauth.authorize_explicitly(flow_factory=lambda *a, **kw: None)
         self.assertFalse(self.backend.items)
 
+    def test_browser_flow_provider_errors_are_sanitized(self):
+        class BrokenFlow:
+            def run_local_server(self, **kwargs):
+                raise RuntimeError("LEAKED_TOKEN_SENTINEL auth_url=https://example.test?code=secret")
+        with patch("local_asr_server.storage.gcs_oauth.sys.platform", "darwin"):
+            with self.assertRaises(OAuthUnavailable) as caught:
+                self.oauth.authorize_explicitly(flow_factory=lambda *a, **kw: BrokenFlow())
+        self.assertEqual(caught.exception.code, "OAUTH_BROWSER_FLOW_FAILED")
+        self.assertNotIn("LEAKED_TOKEN_SENTINEL", str(caught.exception))
+        self.assertFalse(self.backend.items)
+
+    def test_failed_oauth_flow_initialization_is_sanitized(self):
+        def broken_factory(*a, **kw):
+            raise RuntimeError("LEAKED_TOKEN_SENTINEL")
+        with patch("local_asr_server.storage.gcs_oauth.sys.platform", "darwin"):
+            with self.assertRaises(OAuthUnavailable) as caught:
+                self.oauth.authorize_explicitly(flow_factory=broken_factory)
+        self.assertEqual(caught.exception.code, "OAUTH_FLOW_INIT_FAILED")
+        self.assertNotIn("LEAKED_TOKEN_SENTINEL", str(caught.exception))
+        self.assertFalse(self.backend.items)
+
     def test_missing_refresh_token_rejected_before_persist(self):
         class WithoutRefresh(FakeCredentials):
             refresh_token = None
