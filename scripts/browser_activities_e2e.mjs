@@ -137,7 +137,9 @@ finally {
   socket?.close();
   for (const child of children.reverse()) { child.kill('SIGTERM'); await Promise.race([new Promise((r) => child.once('exit', r)), sleep(3000)]); if (child.exitCode === null) child.kill('SIGKILL'); }
   await new Promise((r) => server.close(r));
-  await fs.rm(profile, { recursive: true, force: true });
+  // Chromium descendants can still flush their profile after the parent exits.
+  // Retry the real teardown; never ignore residue or turn ENOTEMPTY into PASS.
+  await fs.rm(profile, { recursive: true, force: true, maxRetries: 12, retryDelay: 250 });
 }
 if (frame > 0) {
   const ffmpeg = spawn('ffmpeg', ['-y', '-framerate', '4', '-i', path.join(evidence, 'frames/frame-%04d.png'), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(evidence, 'activities.mp4')], { stdio: 'ignore' });
