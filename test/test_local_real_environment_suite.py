@@ -220,6 +220,131 @@ class LocalRealEnvironmentPolicyTests(unittest.TestCase):
                 policy.install_main_app(source_app, wrong, applications_dir=apps)
             self.assertFalse((apps / "ClosedRoom.app").exists())
 
+    def test_upgrade_main_app_preserves_backup_and_current_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_app = root / "Applications" / "ClosedRoom.app"
+            (original_app / "Contents").mkdir(parents=True)
+            with (original_app / "Contents" / "Info.plist").open("wb") as stream:
+                plistlib.dump({"CFBundleIdentifier": "com.closedroom.app"}, stream)
+            (original_app / "Contents" / "payload").write_bytes(b"old-version")
+            source = root / "artifact" / "ClosedRoom-new.app"
+            shutil.copytree(original_app, source)
+            (source / "Contents" / "payload").write_bytes(b"new-version")
+            manifest_path = write_manifest(source.parent, source, signing="identified")
+            manifest = json.loads(manifest_path.read_text())
+            manifest["configuration"]["bundle_id"] = "com.closedroom.app"
+            manifest["artifacts"]["app"].update(policy.fingerprint_tree(source))
+            manifest_path.write_text(json.dumps(manifest))
+            real_run = subprocess.run
+
+            def run_copy(command: list[str], **kwargs: object):
+                if command[0] == "ditto":
+                    shutil.copytree(command[1], command[2], symlinks=True)
+                elif command[0] == "codesign" and "-dv" in command:
+                    return subprocess.CompletedProcess(
+                        command, 0, "", "Authority=ClosedRoom Local Development\\nTeamIdentifier=not set\\n"
+                    )
+                elif command[0] not in ("codesign", "ps"):
+                    return real_run(command, **kwargs)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with (
+                patch.object(policy.subprocess, "run", side_effect=run_copy),
+                patch.object(policy, "main_app_running", return_value=False),
+            ):
+                installed, backup = policy.upgrade_main_app(
+                    source, manifest, applications_dir=root / "Applications"
+                )
+            self.assertEqual(installed, original_app)
+            self.assertEqual((installed / "Contents" / "payload").read_bytes(), b"new-version")
+            self.assertEqual((backup / "Contents" / "payload").read_bytes(), b"old-version")
+            self.assertTrue(backup.name.startswith(".ClosedRoom-backup-"))
+            self.assertEqual((source / "Contents" / "payload").read_bytes(), b"new-version")
+
+    def test_upgrade_main_app_restores_original_if_publish_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_app = root / "Applications" / "ClosedRoom.app"
+            (original_app / "Contents").mkdir(parents=True)
+            with (original_app / "Contents" / "Info.plist").open("wb") as stream:
+                plistlib.dump({"CFBundleIdentifier": "com.closedroom.app"}, stream)
+            (original_app / "Contents" / "payload").write_bytes(b"old-version")
+            source = root / "artifact" / "ClosedRoom-new.app"
+            shutil.copytree(original_app, source)
+            (source / "Contents" / "payload").write_bytes(b"new-version")
+            manifest_path = write_manifest(source.parent, source, signing="identified")
+            manifest = json.loads(manifest_path.read_text())
+            manifest["configuration"]["bundle_id"] = "com.closedroom.app"
+            manifest["artifacts"]["app"].update(policy.fingerprint_tree(source))
+            manifest_path.write_text(json.dumps(manifest))
+            real_run = subprocess.run
+            real_rename = Path.rename
+
+            def run_copy(command: list[str], **kwargs: object):
+                if command[0] == "ditto":
+                    shutil.copytree(command[1], command[2], symlinks=True)
+                elif command[0] == "codesign" and "-dv" in command:
+                    return subprocess.CompletedProcess(command, 0, "", "Authority=ClosedRoom Local Development\\n")
+                elif command[0] not in ("codesign", "ps"):
+                    return real_run(command, **kwargs)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            def fail_publishing(path: Path, destination: Path):
+                if str(path).endswith("/.ClosedRoom-upgrade-staging") or (
+                    path.parent.name.startswith(".ClosedRoom-upgrade-staging-")
+                    and destination == original_app
+                ):
+                    raise OSError("injected app publish failure")
+                return real_rename(path, destination)
+
+            with (
+                patch.object(policy.subprocess, "run", side_effect=run_copy),
+                patch.object(policy, "main_app_running", return_value=False),
+                patch.object(Path, "rename", fail_publishing),
+            ):
+                with self.assertRaisesRegex(OSError, "injected app publish failure"):
+                    policy.upgrade_main_app(source, manifest, applications_dir=root / "Applications")
+
+            self.assertEqual((original_app / "Contents" / "payload").read_bytes(), b"old-version")
+            self.assertFalse(list((root / "Applications").glob(".ClosedRoom-backup-*.app")))
+
+    def test_upgrade_main_app_fails_closed_on_certificate_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old = root / "Applications" / "ClosedRoom.app"
+            (old / "Contents").mkdir(parents=True)
+            with (old / "Contents" / "Info.plist").open("wb") as stream:
+                plistlib.dump({"CFBundleIdentifier": "com.closedroom.app"}, stream)
+            (old / "Contents" / "payload").write_bytes(b"old")
+            source = root / "artifact" / "ClosedRoom-new.app"
+            shutil.copytree(old, source)
+            (source / "Contents" / "payload").write_bytes(b"new")
+            mp = write_manifest(source.parent, source, signing="identified")
+            manifest = json.loads(mp.read_text())
+            manifest["configuration"]["bundle_id"] = "com.closedroom.app"
+            manifest["artifacts"]["app"].update(policy.fingerprint_tree(source))
+            mp.write_text(json.dumps(manifest))
+            authorities = iter([("Old Signer",), ("New Signer",)])
+            real_run = subprocess.run
+
+            def run_copy(command: list[str], **kwargs: object):
+                if command[0] == "ditto":
+                    shutil.copytree(command[1], command[2], symlinks=True)
+                elif command[0] not in ("codesign", "ps"):
+                    return real_run(command, **kwargs)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with (
+                patch.object(policy.subprocess, "run", side_effect=run_copy),
+                patch.object(policy, "main_app_running", return_value=False),
+                patch.object(policy, "signing_authorities", side_effect=lambda _: next(authorities)),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "signing authority differs"):
+                    policy.upgrade_main_app(source, manifest, applications_dir=root / "Applications")
+            self.assertEqual((old / "Contents" / "payload").read_bytes(), b"old")
+            self.assertFalse(list((root / "Applications").glob(".ClosedRoom-backup-*.app")))
+
     def test_main_installed_matching_artifact_is_read_only_and_exact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -350,6 +475,51 @@ class LocalRealEnvironmentSuiteTests(unittest.TestCase):
             self.assertEqual(len(commands), 2)
             payload = json.loads(report_path.read_text())
             self.assertEqual(payload["installation_status"], "installed_new_main")
+
+    def test_upgrade_main_mode_builds_verified_candidate_then_checks_permissions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "artifact" / "ClosedRoom-new.app"
+            source.mkdir(parents=True)
+            manifest_path = write_manifest(source.parent, source, revision="abc123", signing="identified")
+            manifest = json.loads(manifest_path.read_text())
+            installed = Path("/Applications/ClosedRoom.app")
+            backup = Path("/Applications/.ClosedRoom-backup-fake.app")
+            report_path = root / "summary.json"
+            commands = []
+
+            def fake_run(cmd: list[str], **kwargs: object):
+                commands.append(cmd)
+                child = Path(cmd[cmd.index("--output") + 1])
+                child.parent.mkdir(parents=True, exist_ok=True)
+                child.write_text(json.dumps({"status": "pass", "checks": [], "errors": []}))
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with (
+                patch.object(sys, "argv", ["suite", "--root", str(root), "--output", str(report_path), "--upgrade-main-app"]),
+                patch.object(suite.platform, "system", return_value="Darwin"),
+                patch.object(suite.platform, "machine", return_value="arm64"),
+                patch.object(suite.sys.stdin, "isatty", return_value=True),
+                patch.object(suite, "required_tools_missing", return_value=[]),
+                patch.object(suite.measured, "git_state", return_value=("abc123", [])),
+                patch.object(suite, "build_identified_main_artifact", return_value=source) as build,
+                patch.object(suite.local_policy, "local_manifest_for", return_value=(manifest_path, manifest)),
+                patch.object(suite.local_policy, "upgrade_main_app", return_value=(installed, backup)) as upgrade,
+                patch.object(suite.local_policy, "installed_main_artifact", return_value=(installed, source, manifest_path, manifest)),
+                patch.object(suite.local_policy, "verify_installed_copy"),
+                patch.object(suite, "permission_checkpoint") as checkpoint,
+                patch.object(suite.subprocess, "run", side_effect=fake_run),
+                patch.object(Path, "is_dir", lambda path: str(path) == str(installed) or path == root or (path.exists() and not path.is_symlink())),
+            ):
+                result = suite.main()
+            self.assertEqual(result, 0)
+            self.assertEqual(len(commands), 2)
+            build.assert_called_once()
+            upgrade.assert_called_once()
+            checkpoint.assert_called_once_with(installed)
+            report = json.loads(report_path.read_text())
+            self.assertEqual(report["installation_status"], "upgraded_main_verified")
+            self.assertEqual(report["previous_app_backup"], str(backup))
 
     def test_install_main_mode_requires_stable_signing_identity(self) -> None:
         with patch.dict(suite.os.environ, {"CLOSEDROOM_SIGN_IDENTITY": ""}):

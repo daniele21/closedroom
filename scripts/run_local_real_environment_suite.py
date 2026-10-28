@@ -60,6 +60,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Opt in to building and installing a stable-signed exact main app if /Applications/ClosedRoom.app is missing; never overwrite an existing app; pause for permissions",
     )
+    parser.add_argument(
+        "--upgrade-main-app",
+        action="store_true",
+        help="Explicitly update existing /Applications/ClosedRoom.app from signed exact HEAD; preserve prior signed app as hidden backup, then wait for permissions",
+    )
     parser.add_argument("--output")
     parser.add_argument("--record-seconds", type=float, default=8.0)
     parser.add_argument("--seed-record-seconds", type=float, default=20.0)
@@ -257,6 +262,8 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
     print(f"artifact selection: {report.get('artifact_selection') or 'unknown'}")
     if report.get("installed_app"):
         print(f"installed app: {report['installed_app']} ({report['installation_status']})")
+    if report.get("previous_app_backup"):
+        print(f"previous main app backup: {report['previous_app_backup']}")
     if report.get("permission_checkpoint"):
         print(f"permission checkpoint: {report['permission_checkpoint']}")
     for name in ("measured_release", "record_while_ai_busy"):
@@ -304,6 +311,7 @@ def main() -> int:
         "artifact_selection": None,
         "installation_status": None,
         "installed_app": None,
+        "previous_app_backup": None,
         "permission_checkpoint": None,
         "tests": {},
         "errors": [],
@@ -334,7 +342,9 @@ def main() -> int:
     }
 
     try:
-        main_mode = args.use_installed_app or args.install_main_app
+        main_mode = args.use_installed_app or args.install_main_app or args.upgrade_main_app
+        if sum((args.use_installed_app, args.install_main_app, args.upgrade_main_app)) > 1:
+            raise RuntimeError("select only one main-app mode")
         if main_mode and (args.install_to_applications or args.app or args.rebuild):
             raise RuntimeError(
                 "main-app mode cannot be combined with --install-to-applications, --app or --rebuild"
@@ -364,6 +374,19 @@ def main() -> int:
                 )
                 local_policy.install_main_app(source_app, manifest)
                 installation_kind = "installed_new_main"
+            elif args.upgrade_main_app:
+                if definitive.is_symlink() or not definitive.is_dir():
+                    raise RuntimeError(
+                        "--upgrade-main-app requires existing /Applications/ClosedRoom.app; "
+                        "use --install-main-app for first installation"
+                    )
+                source_app = build_identified_main_artifact(root, checkout_revision)
+                manifest_path, manifest = local_policy.local_manifest_for(
+                    source_app, allow_identified=True
+                )
+                _, backup = local_policy.upgrade_main_app(source_app, manifest)
+                report["previous_app_backup"] = str(backup)
+                installation_kind = "upgraded_main_verified"
             else:
                 installation_kind = "existing_main_verified"
             installed_app, source_app, manifest_path, manifest = (

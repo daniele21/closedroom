@@ -214,6 +214,111 @@ def install_main_app(
     return target
 
 
+
+def signing_authorities(app: Path) -> tuple[str, ...]:
+    """Match the existing app's certificate chain to the newly signed candidate."""
+    result = subprocess.run(
+        ["codesign", "-dv", "--verbose=4", str(app)],
+        check=True, capture_output=True, text=True, timeout=120,
+    )
+    output = "\n".join((result.stdout, result.stderr))
+    authorities = tuple(
+        line.partition("=")[2].strip()
+        for line in output.splitlines()
+        if line.startswith("Authority=") and line.partition("=")[2].strip()
+    )
+    if not authorities:
+        raise RuntimeError("main app upgrade requires identifiable certificate authority (not ad-hoc)")
+    return authorities
+
+
+def main_app_running(app: Path) -> bool:
+    """Check the exact installed executable, not unrelated ClosedRoom test apps."""
+    expected = str(app / "Contents" / "MacOS" / "ClosedRoom")
+    result = subprocess.run(
+        ["ps", "-axo", "command="],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    return any(
+        command.strip() == expected or command.strip().startswith(expected + " ")
+        for command in result.stdout.splitlines()
+    )
+
+
+def upgrade_main_app(
+    source_app: Path,
+    manifest: dict[str, Any],
+    *,
+    applications_dir: Path = Path("/Applications"),
+) -> tuple[Path, Path]:
+    """Explicit upgrade of main app: stage verified build, preserve old, rollback on error.
+
+    This never deletes the previous app. Backup is kept in /Applications and
+    reported to the operator, but hidden to avoid duplicate LaunchServices apps.
+    The real native app must be closed before any rename.
+    """
+    target = applications_dir / "ClosedRoom.app"
+    if target.is_symlink() or not target.is_dir():
+        raise RuntimeError(f"cannot upgrade missing/symlink main app: {target}")
+    with (target / "Contents" / "Info.plist").open("rb") as stream:
+        info = plistlib.load(stream)
+    if info.get("CFBundleIdentifier") != "com.closedroom.app":
+        raise RuntimeError("cannot upgrade app with unexpected bundle identifier")
+    subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(target)],
+        check=True, capture_output=True, text=True, timeout=120,
+    )
+    if main_app_running(target):
+        raise RuntimeError("quit the existing /Applications/ClosedRoom.app before upgrading")
+    original_authorities = signing_authorities(target)
+    existing_fingerprint = fingerprint_tree(target)
+
+    # The canonical main-app installation owner verifies the source/manifest,
+    # signed staging bundle, and exact tree before any installed app is touched.
+    token = secrets.token_hex(8)
+    staging_dir = applications_dir / f".ClosedRoom-upgrade-staging-{token}"
+    backup = applications_dir / f".ClosedRoom-backup-{token}.app"
+    failed_candidate = applications_dir / f".ClosedRoom-failed-upgrade-{token}.app"
+    if staging_dir.exists() or backup.exists() or failed_candidate.exists():
+        raise RuntimeError("main app upgrade generated a conflicting staging/backup path")
+    staging_dir.mkdir()
+    try:
+        staged = install_main_app(
+            source_app, manifest, applications_dir=staging_dir,
+        )
+        if signing_authorities(staged) != original_authorities:
+            raise RuntimeError(
+                "new app signing authority differs from installed ClosedRoom; "
+                "old app preserved and TCC continuity cannot be assumed"
+            )
+        if main_app_running(target):
+            raise RuntimeError("existing ClosedRoom started during upgrade; close it")
+        if fingerprint_tree(target) != existing_fingerprint:
+            raise RuntimeError("existing main app changed during staging; nothing replaced")
+        # Backup is the complete, signed original app, on the same volume.
+        target.rename(backup)
+        try:
+            if target.exists() or target.is_symlink():
+                raise RuntimeError("main app destination occupied during upgrade")
+            staged.rename(target)
+            verify_installed_copy(target, manifest)
+            subprocess.run(
+                ["codesign", "--verify", "--deep", "--strict", str(target)],
+                check=True, capture_output=True, text=True, timeout=120,
+            )
+        except Exception:
+            # Preserve the failed candidate instead of deleting unknown content.
+            if target.is_dir() and not target.is_symlink():
+                target.rename(failed_candidate)
+            if not target.exists() and not target.is_symlink() and backup.is_dir():
+                backup.rename(target)
+            raise
+    finally:
+        if staging_dir.is_dir() and not staging_dir.is_symlink():
+            shutil.rmtree(staging_dir)
+    return target, backup
+
+
 def installed_main_artifact(
     root: Path,
     revision: str,
