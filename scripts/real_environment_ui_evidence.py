@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import signal
+import math
 import subprocess
 import sys
 import time
@@ -16,6 +16,11 @@ from macos_ui_driver import UIAutomationError, default_driver
 
 UI_DRIVER = default_driver()
 GENERATED_FRONTEND = Path("src/local_asr_server/static")
+# A fixed-duration native screencapture needs a natural exit to finalize its .mov.
+# Keep it running until the smoke's last UI assertion, with the app still open.
+MIN_VIDEO_SECONDS = 90
+MAX_VIDEO_SECONDS = 180
+VIDEO_GRACE_SECONDS = 20
 CHECKPOINTS = [
     ("01-ready-to-record", ("Ready to record", "Pronto per registrare")),
     ("02-recording", ("Stop and Save", "Termina e salva")),
@@ -194,28 +199,42 @@ def capture_window(rect: str, destination: Path) -> None:
     subprocess.run(["screencapture", "-x", "-R", rect, str(destination)], check=True, timeout=15)
 
 
-def start_video(rect: str, destination: Path) -> subprocess.Popen[bytes]:
+def video_duration(record_seconds: float) -> int:
+    """Leave headroom for packaged UI transitions; bounded independent of inputs."""
+    return min(MAX_VIDEO_SECONDS, max(MIN_VIDEO_SECONDS, math.ceil(record_seconds) + 65))
+
+
+def start_video(rect: str, destination: Path, duration: int) -> subprocess.Popen[bytes]:
     destination.parent.mkdir(parents=True, exist_ok=True)
     return subprocess.Popen(
-        ["screencapture", "-v", "-V", "180", "-R", rect, "-x", str(destination)],
+        ["screencapture", "-v", "-V", str(duration), "-R", rect, "-x", str(destination)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
 
 
-def finish_video(process: subprocess.Popen[bytes] | None) -> None:
+def abort_unfinished_video(process: subprocess.Popen[bytes] | None) -> bool:
+    """Only abort a failed/expired journey. SIGINT destroys unfinalized .mov files."""
     if process is None or process.poll() is not None:
-        return
-    process.send_signal(signal.SIGINT)
+        return False
+    process.terminate()
     try:
-        process.wait(timeout=10)
+        process.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+        process.kill()
+        process.wait(timeout=5)
+    return True
+
+
+def video_passes(
+    exit_code: int | None, path: Path, workflow_completed_before_video_exit: bool
+) -> bool:
+    return (
+        exit_code == 0
+        and workflow_completed_before_video_exit
+        and path.is_file()
+        and path.stat().st_size > 0
+    )
 
 
 def evidence_report_path(root: Path, explicit: str | None) -> Path:
@@ -237,6 +256,18 @@ def main() -> int:
     video_path = media_root / "video" / "journey.mov"
     manifest_path = media_root / "manifest.json"
     media_root.mkdir(parents=True, exist_ok=True)
+    workflow_marker = media_root / ".workflow-complete"
+    video_finalized_marker = media_root / ".video-finalized"
+    # An exact-HEAD rerun must never reuse screenshots or videos from an earlier attempt.
+    for stale in (
+        *[screenshot_root / f"{name}.png" for name, _ in CHECKPOINTS],
+        video_path,
+        manifest_path,
+        workflow_marker,
+        video_finalized_marker,
+    ):
+        stale.unlink(missing_ok=True)
+    duration = video_duration(args.record_seconds)
 
     selected_app: Path | None = Path(args.app).expanduser().resolve() if args.app else None
     artifact_selection = "explicit" if selected_app is not None else "smoke_default"
@@ -269,6 +300,11 @@ def main() -> int:
         command += ["--app", str(selected_app)]
     if args.keep_sandbox:
         command.append("--keep-sandbox")
+    command += [
+        "--media-workflow-marker", str(workflow_marker),
+        "--media-finalized-marker", str(video_finalized_marker),
+        "--media-wait-seconds", str(duration + VIDEO_GRACE_SECONDS),
+    ]
 
     existing_closedroom = closedroom_pids(process_snapshot())
     expected_executable = str(selected_app / "Contents" / "MacOS" / "ClosedRoom") if selected_app is not None else None
@@ -276,9 +312,11 @@ def main() -> int:
     app_pid: int | None = None
     rect: str | None = None
     video: subprocess.Popen[bytes] | None = None
+    video_exit_code: int | None = None
+    video_finished_after_workflow = False
     captured: set[str] = set()
     media_errors: list[str] = []
-    deadline = time.monotonic() + max(args.timeout + args.record_seconds + 90, 180)
+    deadline = time.monotonic() + max(args.timeout + args.record_seconds + duration + 50, 240)
 
     def media_error(message: str) -> None:
         if message not in media_errors:
@@ -291,7 +329,7 @@ def main() -> int:
             if app_pid is not None and rect is None:
                 try:
                     rect = window_rect(app_pid)
-                    video = start_video(rect, video_path)
+                    video = start_video(rect, video_path, duration)
                 except UIAutomationError as exc:
                     if str(exc) != "closedroom_window_missing":
                         media_error(f"media_start_ui: {exc}")
@@ -315,6 +353,21 @@ def main() -> int:
                         captured.add(name)
                     except Exception as exc:
                         media_error(f"{name}: {exc}")
+            # Let screencapture exit at its configured -V duration. On macOS an
+            # early SIGINT produces exit -2 and an empty .mov (verified on target).
+            # The smoke keeps ClosedRoom open until this acknowledgment; we never
+            # keep recording the desktop after the app has quit successfully.
+            if video is not None and video.poll() is not None and video_exit_code is None:
+                video_exit_code = video.returncode
+                video_finished_after_workflow = workflow_marker.is_file()
+                if video_exit_code != 0:
+                    media_error(f"video_capture_exit_nonzero:{video_exit_code}")
+                if not video_finished_after_workflow:
+                    media_error("video_ended_before_ui_journey_complete")
+                video_finalized_marker.touch()
+            elif video is None and workflow_marker.is_file() and not video_finalized_marker.is_file():
+                media_error("video_not_started_during_ui_journey")
+                video_finalized_marker.touch()
             time.sleep(0.4)
 
         if smoke.poll() is None:
@@ -326,7 +379,10 @@ def main() -> int:
                 smoke.wait(timeout=5)
             media_error("real_environment_smoke exceeded UI evidence wrapper deadline")
     finally:
-        finish_video(video)
+        if abort_unfinished_video(video):
+            media_error("video_aborted_without_natural_finalization")
+        workflow_marker.unlink(missing_ok=True)
+        video_finalized_marker.unlink(missing_ok=True)
 
     smoke_status = smoke.returncode if smoke.returncode is not None else 1
     report: dict = {}
@@ -338,7 +394,7 @@ def main() -> int:
 
     screenshot_paths = [screenshot_root / f"{name}.png" for name, _ in CHECKPOINTS]
     screenshots_ok = all(path.is_file() and path.stat().st_size > 0 for path in screenshot_paths)
-    video_ok = video_path.is_file() and video_path.stat().st_size > 0
+    video_ok = video_passes(video_exit_code, video_path, video_finished_after_workflow)
     successful_smoke = smoke_status == 0 and report.get("status") == "pass"
     media_complete = screenshots_ok and video_ok
 
@@ -361,6 +417,9 @@ def main() -> int:
         "missing_screenshots": [path.name for path in screenshot_paths if not (path.is_file() and path.stat().st_size > 0)],
         "video": str(video_path.relative_to(report_path.parent)) if video_path.is_file() else None,
         "video_complete": video_ok,
+        "video_capture_duration_seconds": duration,
+        "video_capture_exit_code": video_exit_code,
+        "video_finished_after_ui_journey": video_finished_after_workflow,
         "media_errors": media_errors,
         "privacy_boundary": "Capture is restricted to the ClosedRoom application window rectangle; synthetic test content only.",
     }
