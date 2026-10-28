@@ -70,7 +70,7 @@ def classify_create_failure(stderr: str) -> tuple[str, str]:
     )):
         return ('API_DISABLED', 'Confirm the Cloud Storage API is enabled for project-tests-498508.')
     if any(marker in error for marker in (
-        'storage.buckets.create', 'permission denied', 'access denied',
+        'permission storage.buckets.create', "permission 'storage.buckets.create'", 'permission denied', 'access denied',
         'forbidden', 'http 403', 'permission ', 'does not have permission',
     )):
         return ('PERMISSION_DENIED', 'Check the active gcloud identity has storage.buckets.create on project-tests-498508.')
