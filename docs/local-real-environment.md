@@ -44,6 +44,8 @@ python3 scripts/run_local_real_environment_suite.py
 
 No Apple Developer ID, notary profile or signing environment variables are required. The local build path explicitly removes `CLOSEDROOM_SIGN_IDENTITY` and produces a finalized ad-hoc artifact.
 
+The macOS app bundle uses **Python 3.12** by default (distinct from the package's broader supported Python range), ensuring SciPy >=1.16 is used. This avoids a known SciPy 1.15.3 `_spropack` Mach-O import failure on macOS 27. The build checks actual SciPy/MLX Whisper imports *before* PyInstaller and fails closed if the native libraries cannot load. Do not patch or re-sign third-party wheels to bypass dyld errors. To diagnose a build failure, capture `bash scripts/build_artifact.sh --no-dmg` stdout/stderr locally; the aggregate suite only records the nonzero exit status.
+
 Use `--rebuild` only when you intentionally want a fresh local artifact:
 
 ```bash
