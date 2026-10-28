@@ -1,6 +1,6 @@
 # GCS hybrid meeting storage — piano di implementazione
 
-Status: ACTIVE — operator GCS encrypted fixture restore PASS; local-only settings prepared; OAuth/Keychain pending.
+Status: ACTIVE — GCS fixture PASS; OAuth/Keychain pending; backup off.
 Owner: RecordingStore, CatalogStore, TranscriptionStore; Settings e saved Meeting come consumer
 Read when: storage GCS opzionale, backup/ripristino e recupero spazio degli audio
 Base: `dev` @ `229cef8c35b257258cf5782c1ef22967279bf86b` (2026-10-28); aggiornare base/HEAD alla ripresa.
@@ -96,8 +96,8 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 
 ## Prossimo slice, checkpoint e chiusura
 
-**GCS operator evidence 2026-10-28:** bucket `project-tests-498508-closedroom-test` policy verified. Synthetic AES-256-GCM `prepare`→`verify-local`→`upload --apply`→`restore --apply`: `prepared`/`verified`/`uploaded_not_restored`/`verified`; ciphertext 65,609 bytes, authentication and SHA-256 match. No user meeting transferred. Next: OAuth, Keychain recovery, Mac footprint; app backup/eviction NOT active.
+**GCS operator evidence 2026-10-28:** bucket `project-tests-498508-closedroom-test` policy verified. Synthetic AES-256-GCM `prepare`→`verify-local`→`upload --apply`→`restore --apply`: `prepared`/`verified`/`uploaded_not_restored`/`verified`; ciphertext 65,609 bytes, authentication and SHA-256 match. No user meeting transferred. Next: OAuth, Keychain on two Macs and Mac footprint; backup off.
 
-**Checkpoint:** feature branch from `dev` `229cef8c`; CS-0 audit, CS-3 transport and tests, CS-2 staged bucket settings (`storage_mode=local` enforced; `storage_capability=preparation_only`). Operator fixture restore PASS. OAuth/Keychain and portable recovery, meeting policy/catalog, metadata backup and eviction pending. No real meeting backup.
+**Checkpoint:** branch from `dev` `229cef8c`; CS-0 audit, CS-2 local-only settings, CS-3 GCS transport; remote fixture PASS. `gcs_oauth.py`: explicit Desktop OAuth read/write scope, native Keychain only (no ADC). `key_recovery.py`: Keychain archive key, authenticated recovery file plus separate random code. CLIs for OAuth consent and two-Mac recovery; fake cross-Mac audio tests. Pending OAuth client/consent, real Keychain on two Macs, package dependencies, scoped IAM, meeting policy, metadata backup, eviction. No meeting uploads.
 
 **Documentazione a integrazione:** `docs/architecture.md` owner/boundary, `docs/features.md` comportamento, `SECURITY.md` chiavi/deletion, `design/ux-contract.json` UX, README usage, `docs/current-state.md` solo quando vero. ADR per decisioni durevoli. Dopo completamento trasferire verità e obblighi REAL_ENVIRONMENT, quindi eliminare questo piano secondo `docs/workstreams/README.md`.
