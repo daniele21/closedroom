@@ -105,7 +105,7 @@ The aggregate JSON is written under:
 dist/evidence/local-real-environment/<source-revision>/local-real-environment-suite.json
 ```
 
-The same directory contains the two detailed child reports and bounded media evidence. The aggregate never copies arbitrary child error payloads, transcript or meeting text. For an exhausted `closedroom_window_missing` failure only, it may include the explicitly whitelisted non-content `ui_failure_diagnostic` process/window fields described above.
+The same directory contains the two detailed child reports and bounded media evidence. Each functional UI child owns independent `ui-media/<ui-report-stem>/meeting-recording-ui/` screenshots, video and manifest: measured-release and contention seeds must never reuse each other's media, and the media collector must never fall back to a different ClosedRoom executable when the exact app is known. The aggregate reports allowlisted `ui_smoke_status` and `ui_media_status` separately, so a macOS TCC permission blocker is not confused with incomplete screenshots. Neither status changes the required PASS criteria. The aggregate never copies arbitrary child error payloads, transcript or meeting text. For an exhausted `closedroom_window_missing` failure only, it may include the explicitly whitelisted non-content `ui_failure_diagnostic` process/window fields described above.
 
 When a physical check fails the command returns non-zero and prints the failed check names. Rerun with `--keep-sandbox` only when diagnosing a failure.
 

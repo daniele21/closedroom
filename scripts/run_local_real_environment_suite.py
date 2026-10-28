@@ -213,6 +213,10 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
         diagnostic = child.get("ui_failure_diagnostic")
         if diagnostic:
             print(f"  bounded UI diagnostic: {json.dumps(diagnostic, sort_keys=True)}")
+        if child.get("ui_smoke_status"):
+            print(f"  UI functional smoke: {child['ui_smoke_status'].upper()}")
+        if child.get("ui_media_status"):
+            print(f"  UI media evidence: {child['ui_media_status']}")
         if child.get("error_count"):
             print(f"  child errors: {child['error_count']} (see child evidence)")
         if child.get("timeout_seconds"):
