@@ -28,5 +28,6 @@ uv sync --all-extras --frozen --python 3.12
   pnpm exec tsc --noEmit
 )
 UV_CACHE_DIR=.cache/uv uv run --frozen --python 3.12 python -m unittest discover -s test -v
+source .github/ci/setup-browser.sh
 E2E_SOURCE_REVISION="$(git rev-parse HEAD)" node scripts/browser_meeting_ui_e2e.mjs
 echo "ClosedRoom Mac source and browser FULL_MEDIA checks passed"
