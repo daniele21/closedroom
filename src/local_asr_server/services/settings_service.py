@@ -57,6 +57,7 @@ class SettingsService:
             "speechmatics_api_key_configured": bool(
                 settings.get("speechmatics_api_key") or get_env_var("SPEECHMATICS_API_KEY")
             ),
+            **public_storage_state(settings),
         }
 
     def update(self, body: SettingsRequest) -> dict[str, Any]:
@@ -84,6 +85,10 @@ class SettingsService:
         except ValueError as exc:
             raise InvalidSettings(str(exc)) from exc
         self._validate_choices(current)
+        try:
+            validate_storage_configuration(current)
+        except ValueError as exc:
+            raise InvalidSettings(str(exc)) from exc
 
         save_settings(current)
         return self.get_public()
