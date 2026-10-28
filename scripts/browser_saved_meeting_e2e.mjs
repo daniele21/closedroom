@@ -621,10 +621,28 @@ async function clickWhenPointerReady(browser, selector, timeoutMs = 5000) {
       if (!element) return { ready: false, reason: 'missing' };
       element.scrollIntoView({ block: 'center', behavior: 'instant' });
       const rect = element.getBoundingClientRect();
-      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      const dialog = element.closest('[role="dialog"]');
+      const scrollParent = element.closest('.overflow-y-auto');
+      const dialogRect = dialog?.getBoundingClientRect();
+      const scrollRect = scrollParent?.getBoundingClientRect();
       return {
         ready: rect.width > 0 && rect.height > 0 && Boolean(hit && (element === hit || element.contains(hit))),
         target: element.tagName, hit: hit?.tagName || null,
+        hitClass: typeof hit?.className === 'string' ? hit.className.slice(0, 120) : null,
+        hitWithinDialog: Boolean(dialog?.contains(hit)),
+        hitStack: document.elementsFromPoint(x, y).slice(0, 5).map((node) => ({
+          tag: node.tagName,
+          className: typeof node.className === 'string' ? node.className.slice(0, 80) : '',
+        })),
+        targetRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        dialogRect: dialogRect ? { x: dialogRect.x, y: dialogRect.y, width: dialogRect.width, height: dialogRect.height } : null,
+        dialogTransform: dialog ? getComputedStyle(dialog).transform : null,
+        scrollRect: scrollRect ? { x: scrollRect.x, y: scrollRect.y, width: scrollRect.width, height: scrollRect.height } : null,
+        scrollTop: scrollParent?.scrollTop ?? null,
+        viewport: { width: innerWidth, height: innerHeight },
         pointerEvents: getComputedStyle(element).pointerEvents,
       };
     `);
