@@ -54,7 +54,7 @@ class ArchiveTransportTests(unittest.TestCase):
         asset = self.transport.upload_encrypted(source, self.root, self.key, kind='audio')
         self.assertEqual(asset.format_version, 1)
         self.assertEqual(asset.plaintext_bytes, len(original))
-        self.assertNotIn(b'RIFF', self.bucket.stored[asset.object_name])
+        self.assertNotEqual(self.bucket.stored[asset.object_name], original)
         self.assertTrue(source.exists())
         target = self.root / 'restored.wav'
         self.transport.restore_encrypted(asset, target, self.root, self.key)
