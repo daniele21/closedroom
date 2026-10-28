@@ -39,12 +39,16 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertNotIn("{ id: 'meeting'", self.app)
 
     def test_legacy_recording_details_resolve_to_meeting_without_intercepting_auto_start(self) -> None:
-        recording_page = (ROOT / "frontend/src/pages/RecordingPage.tsx").read_text(encoding="utf-8")
+        new_meeting_page = (ROOT / "frontend/src/pages/NewRecordingPage.tsx").read_text(encoding="utf-8")
         self.assertIn("legacyRecordingDetail = page === 'recording'", self.app)
         self.assertIn("legacySavedRecording = pageName === 'recording'", self.app)
         self.assertIn("!detail.startsWith('auto/')", self.app)
         self.assertIn("window.history.replaceState(null, '', `#meeting/${detail}`)", self.app)
-        self.assertIn("navigateTo('meeting', recording.id);", recording_page)
+        self.assertIn("navigateTo('meeting', recording.id);", new_meeting_page)
+        self.assertNotIn("const RecordingPage = lazy(", self.app)
+        self.assertNotIn("<RecordingPage", self.app)
+        self.assertFalse((ROOT / "frontend/src/pages/RecordingPage.tsx").exists())
+        self.assertIn("routeDetail?.startsWith('auto/')", self.app)
 
     def test_meeting_back_retains_project_origin(self) -> None:
         meeting = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")

@@ -31,7 +31,6 @@ import { TOUR_STEPS, TourStepId, tourStepIndex } from './features/tour/tourSteps
 import './workspace.css';
 
 const ActivitiesPage = lazy(() => import('./pages/ActivitiesPage'));
-const RecordingPage = lazy(() => import('./pages/RecordingPage'));
 const TranscriptionPage = lazy(() => import('./pages/TranscriptionPage'));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
 const AnalysisPage = lazy(() => import('./pages/AnalysisPage'));
@@ -289,11 +288,10 @@ function MainApp() {
         />;
       case 'recording':
         if (isDemoActive) return <TourRecordingMock />;
-        return routeDetail?.startsWith('auto/')
-          ? <NewRecordingPage navigateTo={navigateTo} autoStartToken={routeDetail.slice(5)} />
-          : routeDetail
-            ? <RecordingPage detailId={routeDetail} navigateTo={navigateTo} />
-            : <NewRecordingPage navigateTo={navigateTo} />;
+        return <NewRecordingPage
+          navigateTo={navigateTo}
+          autoStartToken={routeDetail?.startsWith('auto/') ? routeDetail.slice(5) : undefined}
+        />;
       case 'transcription':
         return <TranscriptionPage detailPath={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'projects':
