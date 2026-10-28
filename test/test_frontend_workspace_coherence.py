@@ -54,7 +54,7 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
     def test_removed_recording_page_has_no_frontend_consumers(self) -> None:
         # Prevent reintroducing an alternate saved-recording detail entry point.
         # NewRecordingPage is the dedicated capture surface, not this old page.
-        pattern = re.compile(r"\\bRecordingPage\\b")
+        pattern = re.compile(r"\bRecordingPage\b")
         for path in (ROOT / "frontend/src").rglob("*"):
             if path.suffix not in {".ts", ".tsx"}:
                 continue
