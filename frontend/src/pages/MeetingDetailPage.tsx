@@ -23,6 +23,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { ApiClient, AnalysisRun, Meeting, RecordingNote, RecordingScreenshot, TranscriptionSegment } from '../api/apiClient';
+import { useToast } from '../context/ToastContext';
 import { createVisualIntelligenceJob, cancelVisualIntelligenceJob } from '../api/visualJobs';
 import type { VisualIntelligenceResponseV2, VisualManualScreenshotGroup } from '../api/visualIntelligence';
 import { prepareMeetingNotes, cancelMeetingPreparation } from '../api/meetingPreparation';
@@ -35,6 +36,7 @@ import { formatBytes, formatProjectDate, getDurationSeconds } from '../utils/for
 import { useTranslation } from '../i18n/i18n';
 import { getDemoMeetings } from '../features/demo/demoData';
 import { AnalysisSetupModal, AnalysisSetupSelection } from '../components/ui/AnalysisSetupModal';
+import { ProjectPromptModal } from '../components/ui/ProjectPromptModal';
 import { Sheet, SheetContent, SheetHeader, SheetBody } from '../components/ui/Sheet';
 import { Dialog, DialogContent, DialogHeader, DialogBody } from '../components/ui/Dialog';
 import { cn } from '../utils/cn';
@@ -187,9 +189,21 @@ function keyMomentContext(
 
 export default function MeetingDetailPage({ recordingId, navigateTo, onBack, backLabel, demoMode = false }: MeetingDetailPageProps) {
   const { t, lang } = useTranslation();
+  const { showToast } = useToast();
   const goBack = () => (onBack ? onBack() : navigateTo('home'));
 
   const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState('');
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [existingProjects, setExistingProjects] = useState<string[]>([]);
+  const currentRecordingIdRef = useRef(recordingId);
+  useEffect(() => {
+    currentRecordingIdRef.current = recordingId;
+    setEditingTitle(false);
+    setProjectPickerOpen(false);
+    setExistingProjects([]);
+  }, [recordingId]);
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
   // The screenshot list owns current content; selection retains only its meeting-scoped identity.
   const [selectedScreenshotKey, setSelectedScreenshotKey] = useState<{ meetingId: string; id: string } | null>(null);
@@ -580,6 +594,61 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
     );
   };
 
+  // Reuse the existing recording metadata owner; never create a second Meeting record.
+  const handleSaveTitle = async () => {
+    if (!meeting || !recordingId || demoMode || isBusy) return;
+    const title = editedTitle.trim();
+    if (!title) { showToast(t('transcription.titleEmptyError'), 'error'); return; }
+    const id = recordingId;
+    setBusyAction('metadata-title');
+    try {
+      const recording = await ApiClient.updateRecording(id, { title });
+      if (currentRecordingIdRef.current !== id) return;
+      setMeeting((current) => current?.id === id ? { ...current, recording } : current);
+      setEditingTitle(false);
+      showToast(t('transcription.titleSaveSuccess'), 'success');
+    } catch (err: any) {
+      if (currentRecordingIdRef.current === id) {
+        showToast(t('transcription.titleSaveError', { error: String(err?.message || err) }), 'error');
+      }
+    } finally { setBusyAction(null); }
+  };
+
+  const openProjectPicker = async () => {
+    if (!meeting || !recordingId || demoMode || isBusy) return;
+    const id = recordingId;
+    setExistingProjects([]);
+    setProjectPickerOpen(true);
+    try {
+      const response = await ApiClient.listProjects();
+      if (currentRecordingIdRef.current !== id) return;
+      setExistingProjects((response.items || [])
+        .filter((project) => !project.is_unassigned)
+        .map((project) => project.name));
+    } catch {
+      // Suggestions are optional; manual project assignment still works offline.
+    }
+  };
+
+  const handleSaveProject = async (projectName: string) => {
+    if (!meeting || !recordingId || demoMode || isBusy) return;
+    const id = recordingId;
+    setBusyAction('metadata-project');
+    try {
+      const recording = await ApiClient.updateRecording(id, { project_name: projectName });
+      if (currentRecordingIdRef.current !== id) return;
+      setMeeting((current) => current?.id === id
+        ? { ...current, project_name: recording.project_name || '', recording }
+        : current);
+      setProjectPickerOpen(false);
+      showToast(t('transcription.projectUpdateSuccess'), 'success');
+    } catch (err: any) {
+      if (currentRecordingIdRef.current === id) {
+        showToast(t('transcription.projectUpdateError', { error: String(err?.message || err) }), 'error');
+      }
+    } finally { setBusyAction(null); }
+  };
+
   const handleArchiveState = async (archived: boolean) => {
     if (!meeting || demoMode || isBusy) return;
     setBusyAction('archive');
@@ -835,11 +904,42 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-2xl font-bold text-text-primary tracking-tight truncate">{title}</h2>
-              {meeting.project_name && (
-                <span className="rounded-md border border-border-subtle bg-bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">
-                  {meeting.project_name}
-                </span>
+              {editingTitle ? (
+                <form className="flex min-w-0 flex-wrap items-center gap-2"
+                  onSubmit={(event) => { event.preventDefault(); void handleSaveTitle(); }}>
+                  <input autoFocus type="text" aria-label={lang === 'it' ? 'Nome meeting' : 'Meeting title'}
+                    value={editedTitle} onChange={(event) => setEditedTitle(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Escape') setEditingTitle(false); }}
+                    disabled={isBusy} maxLength={200}
+                    className="min-w-0 rounded-lg border border-border-focus bg-bg-surface px-2 py-1 text-lg font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                    data-meeting-title-input="true" />
+                  <Button type="submit" size="sm" disabled={isBusy || !editedTitle.trim()}>{lang === 'it' ? 'Salva' : 'Save'}</Button>
+                  <Button type="button" size="sm" variant="ghost" disabled={isBusy}
+                    onClick={() => setEditingTitle(false)}>{t('common.cancel')}</Button>
+                </form>
+              ) : (
+                <div className="flex min-w-0 items-center gap-2">
+                  <h2 className="min-w-0 truncate text-2xl font-bold tracking-tight text-text-primary">{title}</h2>
+                  {!demoMode && (
+                    <button type="button" disabled={isBusy}
+                      onClick={() => { setEditedTitle(meeting.recording.title || ''); setEditingTitle(true); }}
+                      aria-label={lang === 'it' ? 'Rinomina meeting' : 'Rename meeting'}
+                      className="shrink-0 rounded-md p-1 text-text-muted hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                      data-meeting-rename="true">
+                      <PencilLine className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              )}
+              {demoMode ? (
+                meeting.project_name && <span className="rounded-md border border-border-subtle bg-bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">{meeting.project_name}</span>
+              ) : (
+                <button type="button" disabled={isBusy} onClick={() => void openProjectPicker()}
+                  aria-label={lang === 'it' ? 'Cambia progetto' : 'Change project'}
+                  className="rounded-md border border-border-subtle bg-bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted hover:border-border-focus hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  data-meeting-project-edit="true">
+                  {meeting.project_name || (lang === 'it' ? '+ Progetto' : '+ Project')}
+                </button>
               )}
               <Badge variant={meeting.status === 'ready' ? 'success' : meeting.status === 'analyzing' ? 'warning' : 'idle'}>
                 {meetingStatusLabel(meeting.status, lang)}
@@ -2162,6 +2262,14 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
           </div>
         </div>
       )}
+
+      <ProjectPromptModal
+        isOpen={projectPickerOpen && !demoMode}
+        initialValue={meeting.project_name || ''}
+        onConfirm={(value) => void handleSaveProject(value)}
+        onCancel={() => { if (!isBusy) setProjectPickerOpen(false); }}
+        existingProjects={existingProjects}
+      />
 
       <Dialog
         open={deleteConfirmOpen}

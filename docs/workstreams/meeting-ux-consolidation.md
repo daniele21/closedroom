@@ -77,12 +77,12 @@ Outcome measurement, proposed baseline+comparison: attempts/clicks and elapsed t
 - Keep individual slices reviewable and revertible; do not migrate transcript/recording IDs, rename persistent owners or delete finalized artifacts. Protect original texts/times, screenshot provenance and version-checked speaker rollback.
 - Owner for resume checkpoint: **this file only**. Before resuming refresh head/tree/base, branch/PR outcomes, failures and next proof. Transfer final UX rules into `design/ux-contract.json` and affected canonical owners before deleting the workstream plan.
 
-## Wave 2 acceptance checkpoint — 2026-10-27
+## Integrated checkpoints — 2026-10-27
 
-Base: `dev` `88e00ce` (UX-3 library destination, UX-6 activity utility, unused list removal) integrated with exact-head source/browser FULL_MEDIA in PR #155. UX-3: bounded full-page library and quick-search share the same query owner. Wave 2 improves compact full-page list sizing, retry on search failure, non-destructive pagination-error feedback and avoids stealing focus on page entry. UX-4: ready notes get clearer tab naming; opening full transcript transfers keyboard focus and retains source/seek semantics (browser check). UX-7: linked transcriptions in expert Analysis expose a canonical Meeting return without removing imported-text analysis. The former Recording detail still hosts an Audio Intelligence panel; **do not delete** until parity and consumers are proven. Old `MeetingListDialog` is already deleted; `docs/features.md` owner corrected.
+PR #155 merged the full Meetings library/Activities and removed the unused list; PR #156 merged notes/source focus, resilient search and expert return with automated source/browser FULL_MEDIA PASS. `dev` base: `83d70c7`. Native WKWebView/VoiceOver and the old Recording detail remain outstanding.
 
-Still required: complete exact-head integration gates on this wave, review Meeting content density/adaptive interaction on installed target macOS, keyboard/VoiceOver and manual usability; verify and eventually retire old Recording page only with Audio Intelligence parity. No new cloud flow, persistence owner or silent capture.
+## UX-7 metadata parity slice — 2026-10-28
 
-## Resume checkpoint — 2026-10-27
+Branch `ux/meeting-metadata-parity` (based on `dev` `83d70c7`) adds title rename and project assignment to the canonical saved Meeting. Both reuse `ApiClient.updateRecording` and the same project selector already used in Projects; project suggestions are fetched only after an explicit edit. Demo mode remains read-only, writes stay tied to the selected recording identity, and failures retain the user's edit. No new persistence, cloud access or runtime owner.
 
-Base: `dev` `88e00ce`. Wave 2 on `ux/meeting-consolidation-wave2`; see acceptance and gaps above.
+This is *not* approval to delete `RecordingPage`. Before retirement, merge UX-4 Audio Intelligence/track parity from PR #157, prove these metadata interactions in the full browser journey (including project reassignment and errors), census legacy route consumers, and apply exact-head integration gates. Target-Mac keyboard/VoiceOver/usability remains release evidence.
