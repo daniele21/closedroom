@@ -58,6 +58,11 @@ def args() -> argparse.Namespace:
     p.add_argument("--timeout", type=float, default=90.0)
     p.add_argument("--keep-sandbox", action="store_true", help="Keep the isolated HOME after the run for debugging")
     p.add_argument("--evidence")
+    # Internal handshake only: retain the synthetic ClosedRoom window until the
+    # fixed-duration native video has naturally finalized. No external media.
+    p.add_argument("--media-workflow-marker")
+    p.add_argument("--media-finalized-marker")
+    p.add_argument("--media-wait-seconds", type=float, default=0.0)
     return p.parse_args()
 
 
@@ -479,6 +484,23 @@ def main() -> int:
         check("search_focus_exposed", search_focus_exposed(focused), focused)
         ui(pid, "press", LABELS["close"])
         check("search_closed_accessibly", wait(lambda: not exists(pid, LABELS["close"]), 8))
+
+        if a.media_workflow_marker or a.media_finalized_marker:
+            if not (a.media_workflow_marker and a.media_finalized_marker):
+                raise RuntimeError("incomplete media finalization handshake")
+            # Signal only *after* all UI checks have passed and before cleanup.
+            # The app stays open on synthetic content while screencapture finishes.
+            Path(a.media_workflow_marker).touch()
+            finished = wait(
+                lambda: Path(a.media_finalized_marker).is_file()
+                or (app_process is not None and app_process.poll() is not None),
+                max(a.media_wait_seconds, 1),
+            )
+            check(
+                "video_finalization_acknowledged_before_app_close",
+                finished and Path(a.media_finalized_marker).is_file()
+                and app_process is not None and app_process.poll() is None,
+            )
 
         report["status"] = PASS
 
