@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import plistlib
 import shutil
 from pathlib import Path
 import subprocess
@@ -175,6 +176,33 @@ class LocalRealEnvironmentPolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "differs"):
                     policy.local_manifest_for(installed_app)
 
+    def test_main_installed_matching_artifact_is_read_only_and_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root / "dist" / "artifacts" / "lineage" / "build"
+            source = folder / "ClosedRoom-build.app"
+            (source / "Contents").mkdir(parents=True)
+            with (source / "Contents" / "Info.plist").open("wb") as stream:
+                plistlib.dump({"CFBundleIdentifier": "com.closedroom.app"}, stream)
+            (source / "Contents" / "binary").write_bytes(b"original")
+            manifest_path = write_manifest(folder, source, revision="abc123", signing="identified")
+            manifest = json.loads(manifest_path.read_text())
+            manifest["configuration"]["bundle_id"] = "com.closedroom.app"
+            manifest["artifacts"]["app"].update(policy.fingerprint_tree(source))
+            manifest_path.write_text(json.dumps(manifest))
+            installed = root / "Applications" / "ClosedRoom.app"
+            shutil.copytree(source, installed)
+            with patch.object(policy.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+                found, artifact, reference, verified = policy.installed_main_artifact(
+                    root, "abc123", installed_app=installed
+                )
+                self.assertEqual((found, artifact, reference), (installed, source, manifest_path))
+                self.assertEqual(verified["configuration"]["signing"], "identified")
+                (installed / "Contents" / "binary").write_bytes(b"tampered")
+                with self.assertRaisesRegex(RuntimeError, "does not match"):
+                    policy.installed_main_artifact(root, "abc123", installed_app=installed)
+            self.assertEqual((source / "Contents" / "binary").read_bytes(), b"original")
+
     def test_finds_newest_exact_local_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -230,6 +258,54 @@ class LocalRealEnvironmentSuiteTests(unittest.TestCase):
             self.assertIn("--keep-sandbox", command)
         self.assertIn("measured_release", commands[0][1])
         self.assertIn("record_while_ai_busy", commands[1][1])
+
+    def test_main_app_suite_waits_and_uses_existing_exact_installed_app(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "artifact" / "ClosedRoom-build.app"
+            source.mkdir(parents=True)
+            manifest_path = write_manifest(source.parent, source, revision="abc123", signing="identified")
+            manifest = json.loads(manifest_path.read_text())
+            installed = root / "Applications" / "ClosedRoom.app"
+            output = root / "summary.json"
+            calls: list[list[str]] = []
+
+            def fake_run(cmd: list[str], **kwargs: object):
+                report_path = Path(cmd[cmd.index("--output") + 1])
+                report_path.parent.mkdir(parents=True, exist_ok=True)
+                report_path.write_text(json.dumps({"status": "pass", "checks": [], "errors": []}))
+                env = kwargs["env"]
+                self.assertEqual(env[policy.MAIN_APP_ENV], "1")
+                self.assertEqual(env[policy.SOURCE_APP_ENV], str(source))
+                self.assertEqual(env[policy.INSTALLED_APP_ENV], str(installed))
+                calls.append(cmd)
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with (
+                patch.object(sys, "argv", ["suite", "--root", str(root), "--output", str(output), "--use-installed-app"]),
+                patch.object(suite.platform, "system", return_value="Darwin"),
+                patch.object(suite.platform, "machine", return_value="arm64"),
+                patch.object(suite, "required_tools_missing", return_value=[]),
+                patch.object(suite.measured, "git_state", return_value=("abc123", [])),
+                patch.object(suite.local_policy, "installed_main_artifact", return_value=(installed, source, manifest_path, manifest)),
+                patch.object(suite.local_policy, "verify_installed_copy"),
+                patch.object(suite, "select_local_artifact", side_effect=AssertionError("must not build")),
+                patch.object(suite, "permission_checkpoint") as checkpoint,
+                patch.object(suite.subprocess, "run", side_effect=fake_run),
+            ):
+                result = suite.main()
+            self.assertEqual(result, 0)
+            checkpoint.assert_called_once_with(installed)
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all(str(installed) in cmd for cmd in calls))
+            report = json.loads(output.read_text())
+            self.assertEqual(report["installation_status"], "existing_main_verified")
+            self.assertEqual(report["permission_checkpoint"], "acknowledged")
+
+    def test_permission_checkpoint_requires_terminal(self) -> None:
+        with patch.object(suite.sys.stdin, "isatty", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "interactive Terminal"):
+                suite.permission_checkpoint(Path("/Applications/ClosedRoom.app"))
 
     def test_installed_suite_passes_same_app_and_original_manifest_to_both_children(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

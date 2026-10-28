@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import plistlib
 import re
 import secrets
 import shutil
@@ -26,6 +27,7 @@ from finalize_build_artifact import fingerprint_tree
 
 INSTALLED_APP_ENV = "CLOSEDROOM_LOCAL_REAL_ENVIRONMENT_INSTALLED_APP"
 SOURCE_APP_ENV = "CLOSEDROOM_LOCAL_REAL_ENVIRONMENT_SOURCE_APP"
+MAIN_APP_ENV = "CLOSEDROOM_LOCAL_REAL_ENVIRONMENT_MAIN_APP"
 
 
 
@@ -39,7 +41,9 @@ def read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-def local_manifest_for(app: Path) -> tuple[Path, dict[str, Any]]:
+def local_manifest_for(
+    app: Path, *, allow_identified: bool = False
+) -> tuple[Path, dict[str, Any]]:
     """Validate one finalized ad-hoc artifact for local physical evidence only."""
     manifest_path = app.parent / "build-manifest.json"
     if not manifest_path.is_file():
@@ -50,7 +54,10 @@ def local_manifest_for(app: Path) -> tuple[Path, dict[str, Any]]:
         source_app = Path(original).expanduser().absolute()
         if source_app == app.absolute():
             raise RuntimeError("installed and source app must be separate paths")
-        original_manifest, manifest = local_manifest_for(source_app)
+        is_main_app = os.environ.get(MAIN_APP_ENV) == "1"
+        original_manifest, manifest = local_manifest_for(
+            source_app, allow_identified=is_main_app
+        )
         verify_installed_copy(app, manifest)
         return original_manifest, manifest
 
@@ -68,9 +75,10 @@ def local_manifest_for(app: Path) -> tuple[Path, dict[str, Any]]:
         else {}
     )
     signing = str(configuration.get("signing") or "")
-    if signing != "ad-hoc":
+    if signing not in ({"ad-hoc", "identified"} if allow_identified else {"ad-hoc"}):
         raise RuntimeError(
-            "local REAL_ENVIRONMENT requires an ad-hoc artifact; "
+            "local REAL_ENVIRONMENT requires an ad-hoc artifact except for "
+            "the explicitly selected verified main app; "
             f"manifest signing is {signing or 'unknown'}"
         )
 
@@ -156,6 +164,57 @@ def install_test_app(
         if temporary.is_dir() and not temporary.is_symlink():
             shutil.rmtree(temporary)
     return destination, "installed_verified"
+
+
+def installed_main_artifact(
+    root: Path,
+    revision: str,
+    *,
+    installed_app: Path = Path("/Applications/ClosedRoom.app"),
+) -> tuple[Path, Path, Path, dict[str, Any]]:
+    """Match existing real /Applications app to one immutable exact-HEAD build.
+
+    Read only: never replace, sign, move, or launch the user's installed app.
+    Identified local builds qualify for physical tests but not release distribution.
+    """
+    if not installed_app.is_dir() or installed_app.is_symlink():
+        raise RuntimeError(f"main ClosedRoom app missing or symlink: {installed_app}")
+    with (installed_app / "Contents" / "Info.plist").open("rb") as stream:
+        bundle_info = plistlib.load(stream)
+    if bundle_info.get("CFBundleIdentifier") != "com.closedroom.app":
+        raise RuntimeError("installed main app does not have com.closedroom.app bundle identity")
+    subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(installed_app)],
+        check=True, capture_output=True, text=True, timeout=120,
+    )
+
+    for candidate in (root / "dist" / "artifacts").glob("*/*/build-manifest.json"):
+        try:
+            data = read_json(candidate)
+            src = data.get("source") if isinstance(data.get("source"), dict) else {}
+            if not revisions_match(revision, str(src.get("revision") or "")):
+                continue
+            name = str(((data.get("artifacts") or {}).get("app") or {}).get("path") or "")
+            if not name:
+                continue
+            source_app = candidate.parent / name
+            if not source_app.is_dir():
+                continue
+            _, manifest = local_manifest_for(source_app, allow_identified=True)
+            config = manifest.get("configuration") or {}
+            if config.get("bundle_id", "com.closedroom.app") != "com.closedroom.app":
+                continue
+            verify_installed_copy(installed_app, manifest)
+            return installed_app, source_app, candidate, manifest
+        except (OSError, ValueError, RuntimeError):
+            continue
+
+    raise RuntimeError(
+        "The existing /Applications/ClosedRoom.app does not match any finalized, "
+        "clean artifact for this exact Git revision. Nothing was replaced. "
+        "Install the exact candidate with your stable signing identity first, "
+        "or use the separate test-app mode."
+    )
 
 
 def revisions_match(left: str, right: str) -> bool:
