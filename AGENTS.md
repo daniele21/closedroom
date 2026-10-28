@@ -36,6 +36,13 @@ Follow the closest scoped `AGENTS.md`. Extend one canonical owner before introdu
 | Missing deterministic remote gate | `skills/remote-preflight/SKILL.md` |
 | Persistent multi-session work | `skills/plan-workstream/SKILL.md` + active plan; finalize with `skills/finalize-workstream/SKILL.md` |
 
+## Shared Mac CI execution
+
+- All ClosedRoom macOS source and FULL_MEDIA integration tests execute via `daniele21/local-runner-infra`, **not** direct runner labels or GitHub-hosted `macos-14` in this repository.
+- `.github/workflows/preflight.yml` owns source PR checks and sends trusted exact-head SHA requests to central `repository_dispatch(run-ci)`; it **waits for a fresh `local-ci/mac` commit status**, failing on timeout/error rather than counting dispatch as PASS. Fork PRs must never execute code on the nonisolated shared Mac.
+- `.github/ci/local-test.sh` is the sole source-owned Mac test entrypoint; central repo owns runner registration, status publication and runner fleet. Browser binaries are portable and ephemeral; no global installation, user meeting data, model downloads or builds in this lane.
+- Central contract: `daniele21/local-runner-infra/docs/integration-guide.md`. Preserve selector-selected gates, independent release/target-Mac proof and exact head/base validation.
+
 ## Delivery and evidence
 
 - **ITERATION**: focused owner-local falsification; no exact-head/full-diff/docs/publication ceremony per edit.
