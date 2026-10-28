@@ -136,13 +136,23 @@ def verify_bucket(bucket: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=['prepare', 'verify-local', 'upload', 'restore'])
-    parser.add_argument('--directory', type=Path, required=True)
+    parser.add_argument('operation', choices=['check-bucket', 'prepare', 'verify-local', 'upload', 'restore'])
+    parser.add_argument('--directory', type=Path)
     parser.add_argument('--bucket', default=DEFAULT_BUCKET)
     parser.add_argument('--apply', action='store_true', help='Allow GCS network operations')
     args = parser.parse_args(argv)
     try:
-        if args.operation == 'prepare':
+        if args.operation == 'check-bucket':
+            create_command(args.bucket, DEFAULT_LOCATION)
+            if not args.apply:
+                output = {'status': 'dry_run', 'operation': args.operation, 'project': PROJECT, 'remote_changes': False}
+            else:
+                verify_bucket(args.bucket)
+                output = {'status': 'bucket_policy_verified', 'project': PROJECT,
+                          'bucket': args.bucket, 'remote_changes': False}
+        elif args.directory is None:
+            raise ValueError('A private --directory is required for fixture operations')
+        elif args.operation == 'prepare':
             result = prepare(args.directory, args.bucket)
             output = {'status': 'prepared', 'project': PROJECT, 'bucket': result['bucket'],
                       'object_created': False, 'encryption': 'AES-256-GCM'}
