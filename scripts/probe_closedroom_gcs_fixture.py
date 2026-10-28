@@ -46,7 +46,10 @@ def unseal(key: bytes, payload: bytes) -> bytes:
     if not payload.startswith(MAGIC) or len(payload) < len(MAGIC) + 12 + 16:
         raise ValueError('Invalid fixture envelope')
     start = len(MAGIC)
-    return crypto()(key).decrypt(payload[start:start + 12], payload[start + 12:], AAD)
+    try:
+        return crypto()(key).decrypt(payload[start:start + 12], payload[start + 12:], AAD)
+    except Exception:
+        raise ValueError('Fixture authentication failed') from None
 
 
 def sha256(payload: bytes) -> str:
