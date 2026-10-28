@@ -28,7 +28,7 @@ class LightweightRuntimeContractTests(unittest.TestCase):
         self.assertIn("lazy(() => import('./pages/MeetingDetailPage'))", source)
         # The retired detail page must never be loaded; recording setup is
         # the intentionally eager primary action, while heavy tools stay lazy.
-        self.assertNotIn("RecordingPage", source)
+        self.assertNotIn("pages/RecordingPage", source)
         self.assertIn("import NewRecordingPage from './pages/NewRecordingPage'", source)
         self.assertIn("lazy(() => import('./pages/TranscriptionPage'))", source)
         self.assertIn("lazy(() => import('./pages/ProjectsPage'))", source)
