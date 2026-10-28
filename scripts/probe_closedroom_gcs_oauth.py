@@ -57,8 +57,10 @@ def read_desktop_config(path: Path) -> tuple[str, str]:
                                code="CLIENT_FILE_INVALID")
     # Exact official Google endpoints only. Google may export the legacy
     # authorization URL, which remains supported; the runtime normalizes it.
-    if cfg.get("auth_uri") not in SUPPORTED_AUTH_URIS or (
-        cfg.get("token_uri") not in SUPPORTED_TOKEN_URIS
+    auth_uri, token_uri = cfg.get("auth_uri"), cfg.get("token_uri")
+    if (
+        not isinstance(auth_uri, str) or auth_uri not in SUPPORTED_AUTH_URIS
+        or not isinstance(token_uri, str) or token_uri not in SUPPORTED_TOKEN_URIS
     ):
         raise OAuthUnavailable("OAuth Desktop JSON contains unsupported endpoints",
                                code="CLIENT_ENDPOINT_UNSUPPORTED")
