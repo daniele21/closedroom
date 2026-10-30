@@ -63,6 +63,50 @@ class MeetingDataInventoryTests(unittest.TestCase):
                 self.assertEqual(audit.main(['--settings-file', str(settings)]), 0)
             self.assertNotIn(str(root), output.getvalue())
 
+    def test_readiness_exposes_missing_catalog_without_disclosing_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            records = root / 'recordings'
+            trans = root / 'trans'
+            records.mkdir()
+            trans.mkdir()
+            # Simulate the operator output: two data directories but no DB
+            # or SQLite optional sidecars.
+            settings = root / 'settings.json'
+            settings.write_text(json.dumps({
+                'recordings_dir': str(records),
+                'transcriptions_dir': str(trans),
+                'catalog_db_path': str(root / 'secret-catalog.db'),
+                'gemini_api_key': 'private-token',
+            }))
+            report = audit.inventory(audit.configured_roots(settings, [], []))
+            self.assertEqual(report['roots_missing'], 3)
+            self.assertEqual(report['root_status'], [
+                {'kind': 'recordings', 'status': 'present', 'optional': False},
+                {'kind': 'transcriptions', 'status': 'present', 'optional': False},
+                {'kind': 'catalog_db', 'status': 'missing', 'optional': False},
+                {'kind': 'catalog_wal', 'status': 'missing', 'optional': True},
+                {'kind': 'catalog_shm', 'status': 'missing', 'optional': True},
+            ])
+            serialized = json.dumps(report)
+            self.assertNotIn(str(root), serialized)
+            self.assertNotIn('private-token', serialized)
+            self.assertNotIn('secret-catalog', serialized)
+
+    def test_missing_sqlite_sidecars_are_optional(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            main = root / 'closedroom.db'
+            main.write_bytes(b'fixture')
+            report = audit.inventory([
+                ('catalog', main),
+                ('catalog', root / 'closedroom.db-wal'),
+                ('catalog', root / 'closedroom.db-shm'),
+            ])
+            self.assertEqual(report['roots_missing'], 2)
+            self.assertEqual(report['root_status'][0]['status'], 'present')
+            self.assertEqual([x['optional'] for x in report['root_status']], [False, True, True])
+
     def test_missing_roots_and_unreadable_settings_fail_closed(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
