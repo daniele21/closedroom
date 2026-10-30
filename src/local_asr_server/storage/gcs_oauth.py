@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
+import stat
 import re
 import sys
 from typing import Any
@@ -31,6 +33,61 @@ class OAuthUnavailable(RuntimeError):
     def __init__(self, message: str, *, code: str = "OAUTH_UNAVAILABLE"):
         super().__init__(message)
         self.code = code
+
+
+def read_desktop_config(path: Path) -> tuple[str, str]:
+    """Strict local config check with non-secret, actionable error categories."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        raise OAuthUnavailable(
+            "OAuth Desktop JSON not found at the supplied path",
+            code="CLIENT_FILE_MISSING",
+        ) from None
+    except OSError:
+        raise OAuthUnavailable("OAuth Desktop JSON cannot be accessed", code="CLIENT_FILE_UNREADABLE") from None
+
+    if not stat.S_ISREG(info.st_mode):
+        raise OAuthUnavailable("OAuth Desktop JSON must be a regular file, not a symlink",
+                               code="CLIENT_FILE_TYPE")
+    if info.st_mode & 0o077:
+        raise OAuthUnavailable("OAuth Desktop JSON must have private permissions (chmod 600)",
+                               code="CLIENT_FILE_PERMISSIONS")
+    if not 0 < info.st_size <= 8192:
+        raise OAuthUnavailable("OAuth Desktop JSON is empty or too large", code="CLIENT_FILE_INVALID")
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, UnicodeError, ValueError):
+        raise OAuthUnavailable("OAuth Desktop JSON is unreadable or malformed",
+                               code="CLIENT_FILE_INVALID") from None
+
+    if not isinstance(document, dict) or set(document) != {"installed"}:
+        raise OAuthUnavailable("Use Google OAuth client type 'Desktop app' (installed)",
+                               code="CLIENT_FILE_NOT_DESKTOP")
+    cfg = document["installed"]
+    if not isinstance(cfg, dict):
+        raise OAuthUnavailable("OAuth installed configuration is invalid",
+                               code="CLIENT_FILE_INVALID")
+    # Exact official Google endpoints only. Google may export the legacy
+    # authorization URL, which remains supported; the runtime normalizes it.
+    auth_uri, token_uri = cfg.get("auth_uri"), cfg.get("token_uri")
+    if (
+        not isinstance(auth_uri, str) or auth_uri not in SUPPORTED_AUTH_URIS
+        or not isinstance(token_uri, str) or token_uri not in SUPPORTED_TOKEN_URIS
+    ):
+        raise OAuthUnavailable("OAuth Desktop JSON contains unsupported endpoints",
+                               code="CLIENT_ENDPOINT_UNSUPPORTED")
+    client_id = cfg.get("client_id")
+    if not isinstance(client_id, str) or not CLIENT_ID_RE.fullmatch(client_id):
+        raise OAuthUnavailable("OAuth Desktop JSON has an invalid client ID",
+                               code="CLIENT_ID_INVALID")
+    secret = cfg.get("client_secret", "")
+    if not isinstance(secret, str):
+        raise OAuthUnavailable("OAuth Desktop client secret field is invalid",
+                               code="CLIENT_FILE_INVALID")
+    return client_id, secret
+
 
 
 def _token_info(value: str, client_id: str) -> dict[str, Any]:
