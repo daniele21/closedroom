@@ -9,6 +9,57 @@ from __future__ import annotations
 
 import re
 from typing import Any
+# One-off migration defaults are kept in this storage boundary so that app
+# modules never import operator scripts. These mirror settings.DEFAULT_SETTINGS.
+from pathlib import Path
+import json
+import stat
+
+TEST_PROJECT = "project-tests-498508"
+TEST_BUCKET = "project-tests-498508-closedroom-test"
+DEFAULT_MIGRATION_SETTINGS = Path.home() / "Library" / "Application Support" / "ClosedRoom" / "settings.json"
+DEFAULT_MIGRATION_RECORDINGS = Path.home() / "ClosedRoom" / "Recordings" / "ClosedRoom"
+DEFAULT_MIGRATION_TRANSCRIPTIONS = Path.home() / "ClosedRoom" / "Transcriptions" / "ClosedRoom"
+
+
+def migration_source_roots(settings_file: Path) -> tuple[Path, Path]:
+    """Strict read-only discovery; no settings writes, runtime app initialization.
+
+    Invalid/missing user-selected roots never silently fall back to other data.
+    A missing settings file uses only the same defaults as a fresh app.
+    Error codes are static, and never include private paths or values.
+    """
+    settings: dict[str, Any] = {}
+    try:
+        info = settings_file.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        raise ValueError("MIGRATION_SETTINGS_UNREADABLE") from None
+    else:
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+            raise ValueError("MIGRATION_SETTINGS_NOT_REGULAR_OR_TOO_LARGE")
+        try:
+            settings = json.loads(settings_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            raise ValueError("MIGRATION_SETTINGS_INVALID") from None
+        if not isinstance(settings, dict):
+            raise ValueError("MIGRATION_SETTINGS_INVALID")
+
+    def resolve(key: str, fallback: Path) -> Path:
+        value = settings.get(key)
+        if value is None or value == "":
+            return fallback
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("MIGRATION_SOURCE_ROOT_INVALID")
+        return Path(value).expanduser()
+
+    return (
+        resolve("recordings_dir", DEFAULT_MIGRATION_RECORDINGS),
+        resolve("transcriptions_dir", DEFAULT_MIGRATION_TRANSCRIPTIONS),
+    )
+
+
 
 LOCAL = "local"
 PREPARATION_ONLY = "preparation_only"
