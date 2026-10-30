@@ -217,3 +217,115 @@ restore on another Mac. All real-user uploads remain disabled at this stage.
 ## Blocking before real meeting backup
 
 Desktop OAuth identity and bucket access, native Keychain storage, portable recovery on a second Mac, dependency packaging, and the canonical RecordingStore/metadata backup lifecycle are still outstanding. `storage_mode=local` remains enforced; **no real media upload, eviction or remote deletion**.
+
+## One-shot cold migration — old Mac → GCS → second Mac (EXPERIMENTAL)
+
+**This is not the app's optional automatic GCS backup.** This operator-only
+MVP is specifically for migrating the old Mac without reconciling historical
+DB-only records first. It snapshots the *entire existing* configured recordings
+and transcriptions trees (including metadata, visuals, notes, finalized audio
+and placeholders) plus a **consistent SQLite online backup** of the explicitly
+selected local Application Support catalog. Missing on-disk metadata/JSONs
+remain represented in SQLite; this does not silently repair or discard them.
+
+The data are encrypted locally with AES-256-GCM **before** reaching GCS.
+The archive is stored as one opaque create-only object; generation and both
+SHA-256 hashes are saved in a **private local receipt**, not cloud settings.
+Key material stays in the real archive Keychain service, and a separate
+one-time recovery envelope and code allow an entirely different Mac to
+decrypt it. Neither OAuth credentials, settings tokens, nor the recovery code
+are uploaded. No cloud inferencing, sync, eviction or raw source upload.
+
+**Resource requirement:** for 8.98 GB of source data allow at least
+~19 GB spare scratch on Mac A and ~28 GB spare on Mac B, conservatively;
+choose a private scratch path on the volume with sufficient free space.
+The initial snapshot is one GCS object, **not independently resumable** after
+an interruption; if a backup fails, keep the original and create a fresh
+receipt/envelope for a retry. The returned status is
+`cold_snapshot_uploaded_pending_restore`, **not full recovery proven**.
+Stored objects are not deleted by the tool. This is a private **test**
+bucket owned by project `project-tests-498508`: only proceed after
+intentionally approving real meeting content at this destination.
+
+### Mac A — export/upload, ClosedRoom fully quit
+
+```bash
+cd ~/Personal/local-asr-server
+git switch feature/gcs-storage-discovery-project-tests
+git pull --ff-only
+umask 077
+mkdir -p "$HOME/ClosedRoom-Migration-Work" "$HOME/.config/closedroom"
+CLIENT_JSON="$HOME/.config/closedroom/oauth-desktop.json"
+PYTHONPATH=src uv run --no-project \
+  --with cryptography --with keyring --with google-auth --with google-auth-oauthlib \
+  --with google-cloud-storage \
+  python scripts/migrate_closedroom_gcs.py backup \
+  --client-json "$CLIENT_JSON" \
+  --catalog "$HOME/Library/Application Support/ClosedRoom/closedroom.db" \
+  --work-dir "$HOME/ClosedRoom-Migration-Work" \
+  --receipt "$HOME/.config/closedroom/cold-migration-receipt.json" \
+  --recovery-file "$HOME/.config/closedroom/cold-migration-recovery.json" \
+  --apply --allow-real-meeting-data
+```
+
+The archive upload requires the same Desktop OAuth identity already proven
+for the test bucket; it must be run interactively. **Record the real archive
+`CR1-` recovery code** shown once, separately from the other files.
+Never paste it in chat/issues/screenshots or put it alongside the two JSONs.
+The earlier **fixture** recovery code is unrelated to this real archive key.
+The local receipt and encrypted recovery JSON must be transferred privately
+to Mac B (e.g. AirDrop or removable media); the recovery code separately.
+
+### Mac B — isolated authenticated restore, ClosedRoom fully quit
+
+Check out the same branch. Install or copy the same *Desktop OAuth client*
+JSON privately (`chmod 600`) and authorize the relevant Google identity
+using `probe_closedroom_gcs_oauth.py connect` on Mac B before continuing.
+Transfer both private JSONs to `~/.config/closedroom/` and `chmod 600`
+them. Then:
+
+```bash
+cd ~/Projects/local-asr-server
+umask 077
+mkdir -p "$HOME/ClosedRoom-Migration-Work"
+CLIENT_JSON="$HOME/.config/closedroom/oauth-desktop.json"
+PYTHONPATH=src uv run --no-project \
+  --with cryptography --with keyring --with google-auth --with google-auth-oauthlib \
+  --with google-cloud-storage \
+  python scripts/migrate_closedroom_gcs.py restore \
+  --client-json "$CLIENT_JSON" \
+  --work-dir "$HOME/ClosedRoom-Migration-Work" \
+  --receipt "$HOME/.config/closedroom/cold-migration-receipt.json" \
+  --recovery-file "$HOME/.config/closedroom/cold-migration-recovery.json" \
+  --target "$HOME/ClosedRoom-Imported" --apply
+```
+
+Enter the **real** `CR1-` recovery code at the hidden terminal prompt.
+The target path must **not already exist**; no existing data is merged
+or overwritten. After byte-exact decryption/authentication and safe
+extraction, the status is `cold_snapshot_restored_to_isolated_directory`.
+At that point all originals on Mac A and existing app files on Mac B are
+untouched. Confirm the imported content/DB before activation.
+
+### Mac B — explicit activation in ClosedRoom (no merge)
+
+Only once the independent restore succeeds, and with ClosedRoom quit:
+
+```bash
+PYTHONPATH=src uv run --no-project \
+  --with cryptography --with keyring --with google-auth --with google-auth-oauthlib \
+  --with google-cloud-storage \
+  python scripts/migrate_closedroom_gcs.py activate \
+  --target "$HOME/ClosedRoom-Imported" --apply
+```
+
+This changes only the app's local `recordings_dir`, `transcriptions_dir`
+and `catalog_db_path` settings to the restored folder, while forcing
+`storage_mode=local`. A private `settings.pre-migration-*.json` backup
+is created next to existing settings. The old Mac B dataset is **not
+merged**; previously present local meetings may temporarily disappear from
+the UI until its original settings are restored. Activation does not
+delete or alter existing meeting files. Restart ClosedRoom and test the
+saved meeting/transcript/audio journeys; **UI validation on the real Mac
+is still pending**. No claim of product-ready backup until those pass.
+
