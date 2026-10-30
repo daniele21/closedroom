@@ -18,6 +18,8 @@ on:
       - "test/test_gcs_archive_transport.py"
       - "test/test_gcs_key_recovery.py"
       - "test/test_gcs_cross_mac_archive_fixture.py"
+      - "scripts/audit_meeting_data.py"
+      - "test/test_audit_meeting_data.py"
 
 permissions:
   contents: read
@@ -52,3 +54,5 @@ jobs:
           python3 -m unittest discover -s test -p 'test_gcs_archive_transport.py' -v
           python3 -m unittest discover -s test -p 'test_gcs_key_recovery.py' -v
           python3 -m unittest discover -s test -p 'test_gcs_cross_mac_archive_fixture.py' -v
+      - name: Privacy-safe migration root inventory tests
+        run: python3 -m unittest discover -s test -p 'test_audit_meeting_data.py' -v
