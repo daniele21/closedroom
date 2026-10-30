@@ -22,6 +22,8 @@ on:
       - "test/test_audit_meeting_data.py"
       - "scripts/inspect_closedroom_catalog.py"
       - "test/test_inspect_closedroom_catalog.py"
+      - "scripts/reconcile_closedroom_data.py"
+      - "test/test_reconcile_closedroom_data.py"
 
 permissions:
   contents: read
@@ -62,3 +64,5 @@ jobs:
         env:
           PYTHONPATH: src
         run: python3 -m unittest discover -s test -p 'test_inspect_closedroom_catalog.py' -v
+      - name: Offline recording and transcription reconciliation tests
+        run: python3 -m unittest discover -s test -p 'test_reconcile_closedroom_data.py' -v
