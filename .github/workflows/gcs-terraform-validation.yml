@@ -24,6 +24,9 @@ on:
       - "test/test_inspect_closedroom_catalog.py"
       - "scripts/reconcile_closedroom_data.py"
       - "test/test_reconcile_closedroom_data.py"
+      - "src/local_asr_server/storage/cold_migration.py"
+      - "scripts/migrate_closedroom_gcs.py"
+      - "test/test_gcs_cold_migration.py"
 
 permissions:
   contents: read
@@ -66,3 +69,7 @@ jobs:
         run: python3 -m unittest discover -s test -p 'test_inspect_closedroom_catalog.py' -v
       - name: Offline recording and transcription reconciliation tests
         run: python3 -m unittest discover -s test -p 'test_reconcile_closedroom_data.py' -v
+      - name: One-shot encrypted cold migration and isolated app restore tests
+        env:
+          PYTHONPATH: src
+        run: python3 -m unittest discover -s test -p 'test_gcs_cold_migration.py' -v
