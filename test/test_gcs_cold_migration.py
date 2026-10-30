@@ -8,6 +8,8 @@ import contextlib
 import io
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -96,6 +98,37 @@ def source_data(root: Path):
         "llm_provider": "mock",
     }))
     return rec, trans, catalog, settings
+
+
+class ColdMigrationCLITests(unittest.TestCase):
+    def test_operator_script_imports_with_exact_user_pythonpath(self):
+        # Reproduce: uv run --no-project sets PYTHONPATH=src and executes a
+        # file from scripts/, where the project root is NOT on sys.path.
+        root = Path(__file__).resolve().parents[1]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = "src"
+        env.pop("PYTHONSAFEPATH", None)
+        for cli in ("scripts/migrate_closedroom_gcs.py", "scripts/probe_closedroom_gcs_oauth.py"):
+            with self.subTest(cli=cli):
+                run = subprocess.run(
+                    [sys.executable, "-P", cli, "--help"],
+                    cwd=root, env=env, capture_output=True, text=True, timeout=15,
+                )
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertIn("usage:", run.stdout.lower())
+
+    def test_backup_cli_refuses_without_upload_consent(self):
+        root = Path(__file__).resolve().parents[1]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = "src"
+        result = subprocess.run(
+            [sys.executable, "-P", "scripts/migrate_closedroom_gcs.py", "backup", "--apply"],
+            cwd=root, env=env, capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(
+            json.loads(result.stderr)["error_code"], "REAL_MEETING_UPLOAD_CONSENT_REQUIRED"
+        )
 
 
 class ColdMigrationTests(unittest.TestCase):
