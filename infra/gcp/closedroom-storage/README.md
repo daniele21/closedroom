@@ -159,6 +159,32 @@ migration. If `configured` is missing, a DB at `application_support` or a
 legacy parent may explain the earlier inventory's missing catalog. Running
 the audit with an environment override can differ from the packaged app.
 
+On 2026-10-30 the old Mac's `--discover-catalog` showed exactly one
+candidate: `application_support=file_present`; the configured catalog and
+other known paths were missing. That does **not** prove this is the *active*
+catalog because fallback behavior and the packaged app environment differ.
+
+For the next read-only check, **quit ClosedRoom entirely first** so no
+process can write the database. Then from the repository root:
+
+```bash
+python3 scripts/inspect_closedroom_catalog.py
+```
+
+This explicit diagnostic opens only the existing `Application Support`
+candidate with SQLite `mode=ro&immutable=1`; it rejects WAL/SHM/journal
+sidecars instead of silently ignoring pending transactions. It reports
+schema presence, SQLite `quick_check`, aggregate recording/transcription/
+analysis counts and references to missing recording IDs, **not** titles,
+IDs, paths or transcript content. It does not construct CatalogStore (that
+would initialize/migrate/create files), open a cloud connection or upload.
+
+A `catalog_candidate_read_only_inspected` result is **not** proof the
+candidate is the DB used by the app; verify against the actual running
+app and consistent migration snapshot in a later dedicated gate. If a
+sidecar exists, quit the app properly and inspect the condition rather
+than deleting the sidecar.
+
 Do **not** upload the raw running SQLite DB or `-wal`/`-shm` files, blindly
 regenerate a catalog, or purge local originals. Take a SQLite online backup
 from the canonical owner only when the migration implementation is ready,
