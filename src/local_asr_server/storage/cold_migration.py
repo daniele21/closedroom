@@ -26,13 +26,17 @@ import tempfile
 from typing import Any
 from urllib.parse import quote
 
-from scripts.audit_meeting_data import configured_roots, DEFAULT_SETTINGS
+from local_asr_server.storage.config import (
+    migration_source_roots, DEFAULT_MIGRATION_SETTINGS, TEST_PROJECT, TEST_BUCKET,
+)
+from local_asr_server.storage.gcs_oauth import read_desktop_config
+
 from local_asr_server.storage.gcs_archive import EncryptedAsset, GCSArchiveTransport
 from local_asr_server.storage.gcs_oauth import GCSDesktopOAuth
 from local_asr_server.storage.key_recovery import (
     ArchiveKeyVault, create_recovery_envelope, load_recovery_file, save_recovery_file,
 )
-from scripts.probe_closedroom_gcs_oauth import read_desktop_config, TEST_PROJECT, TEST_BUCKET
+DEFAULT_SETTINGS = DEFAULT_MIGRATION_SETTINGS
 
 MIGRATION_FORMAT = "closedroom-cold-snapshot-v1"
 DEFAULT_CATALOG = Path.home() / "Library" / "Application Support" / "ClosedRoom" / "closedroom.db"
@@ -229,9 +233,10 @@ def upload_snapshot(
 ) -> tuple[dict[str, Any], str]:
     if receipt.exists() or recovery_file.exists():
         raise MigrationBlocked("OUTPUT_ALREADY_EXISTS")
-    roots = configured_roots(settings_file, [], [])
-    recordings = next(p for scope, p in roots if scope == "recordings")
-    transcriptions = next(p for scope, p in roots if scope == "transcriptions")
+    try:
+        recordings, transcriptions = migration_source_roots(settings_file)
+    except ValueError as exc:
+        raise MigrationBlocked(str(exc)) from None
     _root(work_dir)
     vault = vault or ArchiveKeyVault()
     key = vault.load()
