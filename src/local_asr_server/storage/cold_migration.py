@@ -98,22 +98,45 @@ def _save_private_json(path: Path, content: dict[str, Any]) -> None:
         raise
 
 
-def _assert_no_sqlite_sidecars(db: Path) -> None:
+def _catalog_sidecar_state(db: Path) -> tuple[tuple[str, tuple[int, int, int, int] | None], ...]:
+    """Treat *only* zero-byte WAL leftovers as inert, never ignore WAL frames.
+
+    A previous SQLite mode=ro reader may leave an empty -wal plus -shm
+    next to an otherwise idle source. A nonempty WAL might contain committed
+    transactions not checkpointed into the main DB: immutable must NOT read
+    past it. Journal presence or unusual sidecar layout is also unsafe.
+    We check sidecar identities before and after the snapshot.
+    """
+    states: dict[str, tuple[int, int, int, int] | None] = {}
     for ext in ("-wal", "-shm", "-journal"):
-        p = Path(str(db) + ext)
-        if p.exists() or p.is_symlink():
+        path = Path(str(db) + ext)
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            states[ext] = None
+            continue
+        except OSError:
+            raise MigrationBlocked("CATALOG_SIDECAR_UNREADABLE") from None
+        if not stat.S_ISREG(info.st_mode):
+            raise MigrationBlocked("CATALOG_SIDECAR_INVALID")
+        if ext == "-journal" or (ext == "-wal" and info.st_size != 0):
             raise MigrationBlocked("CATALOG_HAS_LIVE_SIDECAR_CLOSE_APP")
+        states[ext] = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+    if states["-shm"] is not None and states["-wal"] is None:
+        raise MigrationBlocked("CATALOG_HAS_LIVE_SIDECAR_CLOSE_APP")
+    return tuple((ext, states[ext]) for ext in ("-wal", "-shm", "-journal"))
 
 
 def _sqlite_backup(source: Path, destination: Path) -> None:
     before = _regular(source)
-    _assert_no_sqlite_sidecars(source)
+    sidecars_before = _catalog_sidecar_state(source)
     try:
         # An ordinary SQLite mode=ro connection can CREATE -wal/-shm files
         # merely by opening an idle WAL-mode catalog, spuriously triggering
         # the post-backup change guard and modifying the source directory.
-        # immutable=1 is safe ONLY with the prechecked absence of WAL,
-        # rollback journals and SHM, and an explicitly stopped application.
+        # immutable=1 is safe ONLY with the prechecked absence of WAL
+        # frames/rollback journal, or stable inert zero-byte WAL leftovers,
+        # and with an explicitly stopped application.
         # The post-backup stat + sidecar check below still rejects changes.
         uri = "file:" + quote(str(source.absolute()), safe="/") + "?mode=ro&immutable=1"
         with closing(sqlite3.connect(uri, uri=True, timeout=3.0)) as db:
@@ -145,9 +168,7 @@ def _sqlite_backup(source: Path, destination: Path) -> None:
     after = _regular(source)
     if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
         after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
-    ) or any(Path(str(source) + ext).exists() or
-             Path(str(source) + ext).is_symlink()
-             for ext in ("-wal", "-shm", "-journal")):
+    ) or _catalog_sidecar_state(source) != sidecars_before:
         raise MigrationBlocked("CATALOG_CHANGED_DURING_SNAPSHOT")
 
 
