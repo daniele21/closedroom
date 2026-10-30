@@ -107,6 +107,65 @@ class MeetingDataInventoryTests(unittest.TestCase):
             self.assertEqual(report['root_status'][0]['status'], 'present')
             self.assertEqual([x['optional'] for x in report['root_status']], [False, True, True])
 
+    def test_discover_catalog_when_configured_db_missing_but_app_support_exists(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d) / 'private-home-id'
+            recordings = home / 'ClosedRoom' / 'Recordings' / 'ClosedRoom'
+            transcripts = home / 'ClosedRoom' / 'Transcriptions' / 'ClosedRoom'
+            recordings.mkdir(parents=True)
+            transcripts.mkdir(parents=True)
+            app_support = home / 'Library' / 'Application Support' / 'ClosedRoom'
+            app_support.mkdir(parents=True)
+            (app_support / 'closedroom.db').write_bytes(b'fake-sqlite-header')
+            roots = [
+                ('recordings', recordings), ('transcriptions', transcripts),
+                ('catalog', home / 'ClosedRoom' / 'closedroom.db'),
+            ]
+            result = audit.discover_catalog_candidates(roots, home=home, environment={})
+            statuses = {r['location']: r['status'] for r in result['candidate_statuses']}
+            self.assertEqual(statuses['configured'], 'missing')
+            self.assertEqual(statuses['application_support'], 'file_present')
+            self.assertEqual(result['existing_candidate_count'], 1)
+            self.assertFalse(result['active_catalog_resolved'])
+            self.assertFalse(result['catalog_database_verified'])
+            self.assertNotIn(str(home), json.dumps(result))
+            self.assertNotIn('private-home-id', json.dumps(result))
+
+    def test_discover_catalog_reports_environment_override_without_leakage(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            recordings = home / 'r'
+            transcripts = home / 't'
+            db = home / 'secret-env-db-id.db'
+            db.write_bytes(b'x')
+            result = audit.discover_catalog_candidates(
+                [('recordings', recordings), ('transcriptions', transcripts),
+                 ('catalog', home / 'configured.db')],
+                home=home, environment={'CLOSEDROOM_CATALOG_DB': str(db)},
+            )
+            self.assertEqual(
+                next(v['status'] for v in result['candidate_statuses']
+                     if v['location'] == 'process_env_override'),
+                'file_present',
+            )
+            self.assertNotIn(str(db), json.dumps(result))
+            self.assertNotIn('secret-env-db-id', json.dumps(result))
+
+    def test_discover_catalog_does_not_follow_symlinks(self):
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            target = home / 'db-copy'
+            target.write_bytes(b'fake')
+            configured = home / 'closedroom.db'
+            configured.symlink_to(target)
+            result = audit.discover_catalog_candidates(
+                [('recordings', home / 'r'), ('transcriptions', home / 't'),
+                 ('catalog', configured)], home=home, environment={},
+            )
+            self.assertEqual(result['candidate_statuses'][0],
+                             {'location': 'configured', 'status': 'symlink_skipped'})
+            self.assertEqual(result['existing_candidate_count'], 0)
+
     def test_missing_roots_and_unreadable_settings_fail_closed(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
