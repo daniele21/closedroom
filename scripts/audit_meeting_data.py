@@ -164,18 +164,80 @@ def configured_roots(settings_file: Path, extra_recordings: list[Path], cache: l
     ] + [('cache', p) for p in cache]
 
 
+def discover_catalog_candidates(
+    roots: list[tuple[str, Path]], *, home: Path | None = None,
+    environment: dict[str, str] | None = None,
+) -> dict[str, object]:
+    """Read-only catalog discovery based on CatalogStore.default_db_path.
+
+    This is a list of candidate paths, NOT proof of active DB selection or
+    database integrity. It never constructs CatalogStore or opens SQLite.
+    Labels, never paths or settings values, are returned to the caller.
+    """
+    home = (home or Path.home()).expanduser()
+    environment = os.environ if environment is None else environment
+    recordings = next(path for role, path in roots if role == 'recordings').expanduser()
+    transcriptions = next(path for role, path in roots if role == 'transcriptions').expanduser()
+    configured = next(path for role, path in roots if role == 'catalog').expanduser()
+    choices = [('configured', configured)]
+    if environment.get('CLOSEDROOM_CATALOG_DB'):
+        choices.append(('process_env_override', Path(environment['CLOSEDROOM_CATALOG_DB']).expanduser()))
+    choices.extend([
+        ('home_closedroom', home / 'ClosedRoom' / 'closedroom.db'),
+        ('recordings_grandparent', recordings.parent.parent / 'closedroom.db'),
+        ('transcriptions_grandparent', transcriptions.parent.parent / 'closedroom.db'),
+        ('recordings_parent', recordings.parent / 'closedroom.db'),
+        ('transcriptions_parent', transcriptions.parent / 'closedroom.db'),
+        ('transcriptions_root', transcriptions / 'closedroom.db'),
+        ('recordings_root', recordings / 'closedroom.db'),
+        ('application_support', home / 'Library' / 'Application Support' / 'ClosedRoom' / 'closedroom.db'),
+    ])
+    # The canonical owner searches a few of the same paths through different
+    # relationships. Deduplicate without following symlinks or revealing paths.
+    seen: set[str] = set()
+    found: list[dict[str, object]] = []
+    for label, path in choices:
+        canonical = str(path.absolute())
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        try:
+            mode = path.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                state = 'symlink_skipped'
+            elif stat.S_ISREG(mode):
+                state = 'file_present'
+            else:
+                state = 'not_regular_file'
+        except FileNotFoundError:
+            state = 'missing'
+        except OSError:
+            state = 'unreadable'
+        found.append({'location': label, 'status': state})
+    return {
+        'kind': 'catalog_location_candidates',
+        'catalog_database_verified': False,
+        'active_catalog_resolved': False,
+        'candidate_statuses': found,
+        'existing_candidate_count': sum(x['status'] == 'file_present' for x in found),
+        'scope': 'known repository default paths only; no recursive filesystem scan',
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--settings-file', type=Path, default=DEFAULT_SETTINGS)
     parser.add_argument('--extra-recordings-root', type=Path, action='append', default=[])
     parser.add_argument('--cache-root', type=Path, action='append', default=[])
+    parser.add_argument('--discover-catalog', action='store_true', help='Read-only, anonymized catalog candidate lookup')
     args = parser.parse_args(argv)
     try:
         roots = configured_roots(args.settings_file, args.extra_recordings_root, args.cache_root)
     except (OSError, ValueError, json.JSONDecodeError):
         print('Cannot read ClosedRoom settings; no data was modified.', file=sys.stderr)
         return 2
-    print(json.dumps(inventory(roots), sort_keys=True, indent=2))
+    report = discover_catalog_candidates(roots) if args.discover_catalog else inventory(roots)
+    print(json.dumps(report, sort_keys=True, indent=2))
     return 0
 
 
