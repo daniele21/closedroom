@@ -192,6 +192,22 @@ def prepare_snapshot(
                         before.st_mtime_ns
                     ):
                         raise MigrationBlocked("SOURCE_CHANGED_DURING_SNAPSHOT")
+            # Catch newly added or removed source files while tar was built:
+            # a valid partial snapshot is not a complete backup.
+            again = _entries(recordings, "recordings") + _entries(
+                transcriptions, "transcriptions"
+            )
+            original = {
+                name: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+                for _, name, info in items
+                if name != "catalog/closedroom.db"
+            }
+            latest = {
+                name: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+                for _, name, info in again
+            }
+            if latest != original:
+                raise MigrationBlocked("SOURCE_TREE_CHANGED_DURING_SNAPSHOT")
         except BaseException:
             archive.unlink(missing_ok=True)
             raise
