@@ -46,23 +46,41 @@ def classify(relative: Path, scope: str) -> str:
     return 'other_meeting_data'
 
 
+def root_kind(scope: str, root: Path) -> str:
+    """Anonymous root labels; never include full paths or recording IDs."""
+    if scope == 'catalog':
+        if root.name.endswith('-wal'):
+            return 'catalog_wal'
+        if root.name.endswith('-shm'):
+            return 'catalog_shm'
+        return 'catalog_db'
+    return scope
+
+
 def inventory(roots: list[tuple[str, Path]]) -> dict:
     groups: dict[str, dict[str, int]] = defaultdict(lambda: {'files': 0, 'logical_bytes': 0, 'allocated_bytes_estimate': 0})
     seen: set[tuple[int, int]] = set()
+    root_status: list[dict[str, object]] = []
     missing = unreadable = symlinks = hardlinks = skipped_special = 0
     for scope, root in roots:
         root = root.expanduser()
+        kind = root_kind(scope, root)
+        optional = kind in ('catalog_wal', 'catalog_shm')
         try:
             mode = root.lstat().st_mode
         except FileNotFoundError:
+            root_status.append({'kind': kind, 'status': 'missing', 'optional': optional})
             missing += 1
             continue
         except OSError:
+            root_status.append({'kind': kind, 'status': 'unreadable', 'optional': optional})
             unreadable += 1
             continue
         if stat.S_ISLNK(mode):
+            root_status.append({'kind': kind, 'status': 'symlink_skipped', 'optional': optional})
             symlinks += 1
             continue
+        root_status.append({'kind': kind, 'status': 'present', 'optional': optional})
         if stat.S_ISREG(mode):
             entries = [(root, Path(root.name))]
         elif stat.S_ISDIR(mode):
@@ -116,6 +134,7 @@ def inventory(roots: list[tuple[str, Path]]) -> dict:
         'schema_version': 1, 'kind': 'closedroom_user_data_inventory',
         'measurement': 'metadata-only stat; allocated bytes approximate; APFS clones and active jobs not assessed',
         'roots_requested': len(roots), 'roots_missing': missing, 'roots_unreadable_or_scan_errors': unreadable,
+        'root_status': root_status,
         'symlinks_skipped': symlinks, 'duplicate_inode_entries_skipped': hardlinks,
         'special_files_skipped': skipped_special,
         'files_total': total('files'), 'logical_bytes_total': total('logical_bytes'),
