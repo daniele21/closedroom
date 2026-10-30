@@ -221,7 +221,7 @@ class ColdMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             rec, trans, catalog, settings = source_data(root)
-            with sqlite3.connect(catalog) as db:
+            with contextlib.closing(sqlite3.connect(catalog)) as db:
                 self.assertEqual(db.execute("PRAGMA journal_mode=WAL").fetchone()[0], "wal")
                 db.execute("INSERT INTO recordings VALUES (?, ?)", (
                     "wal-committed-row", "VERY_PRIVATE_ADDITIONAL_MEETING",
@@ -261,6 +261,51 @@ class ColdMigrationTests(unittest.TestCase):
                                       "WHERE id='wal-committed-row'").fetchone()[0],
                         "VERY_PRIVATE_ADDITIONAL_MEETING",
                     )
+
+    def test_old_readonly_probe_zero_wal_debris_does_not_block_safe_snapshot(self):
+        """Old mode=ro probe can leave zero-length WAL+SHM after app quit."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            rec, trans, catalog, settings = source_data(root)
+            with contextlib.closing(sqlite3.connect(catalog)) as db:
+                db.execute("PRAGMA journal_mode=WAL")
+                db.commit()
+            # Emulate an old read-only connection (the earlier operator run).
+            with contextlib.closing(sqlite3.connect(
+                "file:" + str(catalog) + "?mode=ro", uri=True,
+            )) as stale:
+                self.assertEqual(stale.execute("SELECT COUNT(*) FROM recordings").fetchone()[0], 2)
+            # SQLite's WAL implementation commonly leaves these empty files.
+            wal = Path(str(catalog) + "-wal")
+            shm = Path(str(catalog) + "-shm")
+            if not wal.exists():
+                wal.touch()
+            if not shm.exists():
+                shm.write_bytes(b"\x00" * 32768)
+            self.assertEqual(wal.stat().st_size, 0)
+            prior = ((wal.stat().st_size, wal.stat().st_mtime_ns),
+                     (shm.stat().st_size, shm.stat().st_mtime_ns))
+            work = root / "work"; work.mkdir()
+            summary = prepare_snapshot(rec, trans, catalog, work / "snapshot.tar", work)
+            self.assertGreaterEqual(summary["file_count"], 5)
+            self.assertEqual(
+                ((wal.stat().st_size, wal.stat().st_mtime_ns),
+                 (shm.stat().st_size, shm.stat().st_mtime_ns)), prior,
+            )
+            self.assertEqual(wal.stat().st_size, 0)
+
+    def test_nonempty_wal_is_rejected_even_if_other_source_files_valid(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            rec, trans, catalog, settings = source_data(root)
+            wal = Path(str(catalog) + "-wal")
+            wal.write_bytes(b"not empty; may contain uncheckpointed transactions")
+            work = root / "work"; work.mkdir()
+            with self.assertRaises(MigrationBlocked) as error:
+                prepare_snapshot(rec, trans, catalog, work / "snapshot.tar", work)
+            self.assertEqual(str(error.exception), "CATALOG_HAS_LIVE_SIDECAR_CLOSE_APP")
+            self.assertEqual(wal.read_bytes(), b"not empty; may contain uncheckpointed transactions")
+            self.assertFalse((work / "snapshot.tar").exists())
 
     def test_live_sqlite_sidecar_is_never_ignored_or_deleted(self):
         with tempfile.TemporaryDirectory() as d:
