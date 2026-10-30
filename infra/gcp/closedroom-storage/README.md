@@ -141,6 +141,30 @@ test key already exists on Mac B, don't delete it blindly; examine the
 fixture-service conflict first. This proves key portability only, not
 production backup/restore or independent recovery of a full meeting.
 
+## Legacy Mac migration preflight: locate actual catalog (read-only)
+
+Before any real meeting upload, run the anonymous catalog locator on the **old Mac**:
+
+```bash
+cd ~/Personal/local-asr-server
+python3 scripts/audit_meeting_data.py --discover-catalog
+```
+
+The command only reads local settings and stats known candidate DB paths from
+`CatalogStore.default_db_path`; it never opens or creates SQLite, initiates
+network requests, or outputs private full paths/meeting IDs. `file_present`
+is **not** proof that the file is the active SQLite catalog; inspect the app's
+actual configured/runtime DB and compare a consistent SQLite snapshot before
+migration. If `configured` is missing, a DB at `application_support` or a
+legacy parent may explain the earlier inventory's missing catalog. Running
+the audit with an environment override can differ from the packaged app.
+
+Do **not** upload the raw running SQLite DB or `-wal`/`-shm` files, blindly
+regenerate a catalog, or purge local originals. Take a SQLite online backup
+from the canonical owner only when the migration implementation is ready,
+then validate complete recording/transcription relationships and independent
+restore on another Mac. All real-user uploads remain disabled at this stage.
+
 ## Blocking before real meeting backup
 
 Desktop OAuth identity and bucket access, native Keychain storage, portable recovery on a second Mac, dependency packaging, and the canonical RecordingStore/metadata backup lifecycle are still outstanding. `storage_mode=local` remains enforced; **no real media upload, eviction or remote deletion**.
