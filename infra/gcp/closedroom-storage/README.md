@@ -247,6 +247,27 @@ Stored objects are not deleted by the tool. This is a private **test**
 bucket owned by project `project-tests-498508`: only proceed after
 intentionally approving real meeting content at this destination.
 
+### SQLite WAL regression and guarded recovery (2026-10-30)
+
+The first real Mac A attempt exited with
+`CATALOG_CHANGED_DURING_SNAPSHOT` **before encryption/upload**. Root
+cause reproduced: ordinary SQLite `mode=ro` on an idle database whose
+journal mode is WAL may itself create `-wal` and `-shm` files, and
+`sqlite3.Connection` used as a context manager does not actually close
+the connection. The migration now uses `mode=ro&immutable=1` only after
+confirming there are no potentially uncheckpointed WAL frames or journal
+transactions. It closes connections explicitly and validates the standalone
+SQLite backup after all destination connections have been closed.
+
+The operator's failed run can leave an **empty WAL** and a SHM file.
+The revised backup accepts only a *stable zero-byte WAL*, checking its
+identity and mtime through the snapshot; it still refuses non-empty WAL,
+unusual journals, source modification and new sidecars. No automatic
+checkpoint, deletion or modification of the original SQLite database.
+ClosedRoom must still be fully quit. If `CATALOG_HAS_LIVE_SIDECAR_CLOSE_APP`
+appears, **do not remove sidecar files**: they can contain committed
+transactions. Diagnose their state before another attempt.
+
 ### Mac A — export/upload, ClosedRoom fully quit
 
 ```bash
