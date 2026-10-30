@@ -20,6 +20,8 @@ on:
       - "test/test_gcs_cross_mac_archive_fixture.py"
       - "scripts/audit_meeting_data.py"
       - "test/test_audit_meeting_data.py"
+      - "scripts/inspect_closedroom_catalog.py"
+      - "test/test_inspect_closedroom_catalog.py"
 
 permissions:
   contents: read
@@ -56,3 +58,7 @@ jobs:
           python3 -m unittest discover -s test -p 'test_gcs_cross_mac_archive_fixture.py' -v
       - name: Privacy-safe migration root inventory tests
         run: python3 -m unittest discover -s test -p 'test_audit_meeting_data.py' -v
+      - name: Read-only SQLite catalog validation tests
+        env:
+          PYTHONPATH: src
+        run: python3 -m unittest discover -s test -p 'test_inspect_closedroom_catalog.py' -v
