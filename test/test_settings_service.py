@@ -160,5 +160,50 @@ class SettingsServiceTests(unittest.TestCase):
             self.assertIsNone(loaded[key])
 
 
+    def test_gcs_coordinates_can_be_staged_without_enabling_upload(self):
+        current = DEFAULT_SETTINGS.copy()
+        configured = {
+            **current,
+            "gcs_project_id": "project-tests-498508",
+            "gcs_bucket_name": "project-tests-498508-closedroom-test",
+            "gcs_region": "europe-west8",
+        }
+        with (
+            patch("local_asr_server.services.settings_service.load_settings", side_effect=[current, configured]),
+            patch("local_asr_server.services.settings_service.save_settings") as save,
+        ):
+            public = SettingsService().update(SettingsRequest(
+                gcs_project_id="project-tests-498508",
+                gcs_bucket_name="project-tests-498508-closedroom-test",
+            ))
+        stored = save.call_args.args[0]
+        self.assertEqual(stored["storage_mode"], "local")
+        self.assertEqual(stored["gcs_bucket_name"], "project-tests-498508-closedroom-test")
+        self.assertTrue(public["gcs_configuration_complete"])
+        self.assertEqual(public["storage_effective_mode"], "local")
+        self.assertEqual(public["storage_capability"], "preparation_only")
+
+    def test_gcs_mode_unsupported_and_never_persisted(self):
+        current = DEFAULT_SETTINGS.copy()
+        with (
+            patch("local_asr_server.services.settings_service.load_settings", return_value=current),
+            patch("local_asr_server.services.settings_service.save_settings") as save,
+        ):
+            with self.assertRaises(InvalidSettings):
+                SettingsService().update(SettingsRequest(storage_mode="gcs"))
+        save.assert_not_called()
+
+    def test_invalid_gcs_coordinates_never_persisted(self):
+        current = DEFAULT_SETTINGS.copy()
+        with (
+            patch("local_asr_server.services.settings_service.load_settings", return_value=current),
+            patch("local_asr_server.services.settings_service.save_settings") as save,
+        ):
+            with self.assertRaises(InvalidSettings):
+                SettingsService().update(SettingsRequest(gcs_bucket_name="gs://not-allowed"))
+        save.assert_not_called()
+
+
+
 if __name__ == "__main__":
     unittest.main()
