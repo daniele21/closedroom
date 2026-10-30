@@ -13,12 +13,14 @@ import sys
 from pathlib import Path
 import sqlite3
 import tempfile
+import tarfile
 import unittest
 
 from local_asr_server.storage.gcs_archive import GCSArchiveTransport, ArchiveIntegrityError
 from local_asr_server.storage.key_recovery import ArchiveKeyVault
 from local_asr_server.storage.cold_migration import (
     MigrationBlocked, upload_snapshot, restore_snapshot, activate_import,
+    prepare_snapshot,
 )
 from scripts.migrate_closedroom_gcs import main
 from scripts.probe_closedroom_gcs_oauth import TEST_BUCKET
@@ -208,6 +210,57 @@ class ColdMigrationTests(unittest.TestCase):
             self.assertEqual(json.loads(backups[0].read_text())["recordings_dir"],
                              "/existing/user/data")
             self.assertEqual(len(bucket.objects), 1)
+
+    def test_idle_wal_source_does_not_create_sidecars_during_cold_backup(self):
+        """Regression: SQLite mode=ro creates WAL/SHM for an idle WAL DB.
+
+        The earlier operator backup failed with CATALOG_CHANGED_DURING_SNAPSHOT.
+        Use the real WAL journal mode with last writer closed, then ensure
+        the SQLite source remains untouched and the archived DB is complete.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            rec, trans, catalog, settings = source_data(root)
+            with sqlite3.connect(catalog) as db:
+                self.assertEqual(db.execute("PRAGMA journal_mode=WAL").fetchone()[0], "wal")
+                db.execute("INSERT INTO recordings VALUES (?, ?)", (
+                    "wal-committed-row", "VERY_PRIVATE_ADDITIONAL_MEETING",
+                ))
+                db.commit()
+            self.assertFalse(Path(str(catalog) + "-wal").exists())
+            self.assertFalse(Path(str(catalog) + "-shm").exists())
+            before = catalog.stat()
+            work = root / "work"
+            work.mkdir()
+            archive = work / "snapshot.tar"
+            report = prepare_snapshot(rec, trans, catalog, archive, work)
+            self.assertGreaterEqual(report["file_count"], 5)
+            self.assertTrue(archive.exists())
+            after = catalog.stat()
+            self.assertEqual(
+                (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns),
+                (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns),
+            )
+            self.assertFalse(Path(str(catalog) + "-wal").exists())
+            self.assertFalse(Path(str(catalog) + "-shm").exists())
+            self.assertFalse(Path(str(catalog) + "-journal").exists())
+            with tempfile.TemporaryDirectory() as restored:
+                with tarfile.open(archive) as tar:
+                    extracted_db = tar.extractfile("catalog/closedroom.db")
+                    self.assertIsNotNone(extracted_db)
+                    (Path(restored) / "copy.db").write_bytes(extracted_db.read())
+                with sqlite3.connect(Path(restored) / "copy.db") as check:
+                    self.assertEqual(
+                        check.execute("PRAGMA quick_check(1)").fetchone(), ("ok",),
+                    )
+                    self.assertEqual(
+                        check.execute("SELECT COUNT(*) FROM recordings").fetchone()[0], 3,
+                    )
+                    self.assertEqual(
+                        check.execute("SELECT title FROM recordings "
+                                      "WHERE id='wal-committed-row'").fetchone()[0],
+                        "VERY_PRIVATE_ADDITIONAL_MEETING",
+                    )
 
     def test_live_sqlite_sidecar_is_never_ignored_or_deleted(self):
         with tempfile.TemporaryDirectory() as d:
