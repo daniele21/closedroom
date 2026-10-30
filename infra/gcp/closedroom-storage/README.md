@@ -185,6 +185,29 @@ app and consistent migration snapshot in a later dedicated gate. If a
 sidecar exists, quit the app properly and inspect the condition rather
 than deleting the sidecar.
 
+The operator's 2026-10-30 closed-app read-only catalog inspection returned
+`quick_check_pass=true`, 203 recording rows, 91 transcription rows, 73
+analysis runs, 89 transcripts linked to valid recording rows and 2 independent
+transcripts. The earlier file inventory counted 299 `metadata.json` files
+and 182 files in the transcriptions root: JSON+TXT is the normal export pair,
+but do **not** infer there are 91 matching pairs without checking. Catalog
+candidate is still **not proven to be the active runtime database**.
+
+Next, with ClosedRoom still fully quit and current branch checked out:
+
+```bash
+python3 scripts/reconcile_closedroom_data.py
+```
+
+This read-only scan compares in-memory IDs from `YYYY-MM-DD/UUID/metadata.json`
+and `transcript_*.json` against candidate SQLite tables. It reports **only
+aggregate difference counts** (files absent from catalog, catalog rows missing
+files, invalid metadata and mismatched transcription filenames); it does not
+send content to GCS, print names/IDs/text or write SQLite. It rejects WAL,
+SHM or journal sidecars to avoid stale immutable reads. Even a clean report
+does not authorize cloud migration: actual active DB, consistent snapshot,
+archive manifest and tested independent restore are separate blocking gates.
+
 Do **not** upload the raw running SQLite DB or `-wal`/`-shm` files, blindly
 regenerate a catalog, or purge local originals. Take a SQLite online backup
 from the canonical owner only when the migration implementation is ready,
