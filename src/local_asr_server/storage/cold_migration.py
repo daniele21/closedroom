@@ -12,6 +12,7 @@ unreferenced encrypted object, never the loss of an original.
 """
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import asdict
 from datetime import datetime, timezone
 import getpass
@@ -108,8 +109,15 @@ def _sqlite_backup(source: Path, destination: Path) -> None:
     before = _regular(source)
     _assert_no_sqlite_sidecars(source)
     try:
-        uri = "file:" + quote(str(source.absolute()), safe="/") + "?mode=ro"
-        with sqlite3.connect(uri, uri=True, timeout=3.0) as db:
+        # An ordinary SQLite mode=ro connection can CREATE -wal/-shm files
+        # merely by opening an idle WAL-mode catalog, spuriously triggering
+        # the post-backup change guard and modifying the source directory.
+        # immutable=1 is safe ONLY with the prechecked absence of WAL,
+        # rollback journals and SHM, and an explicitly stopped application.
+        # The post-backup stat + sidecar check below still rejects changes.
+        uri = "file:" + quote(str(source.absolute()), safe="/") + "?mode=ro&immutable=1"
+        with closing(sqlite3.connect(uri, uri=True, timeout=3.0)) as db:
+            db.execute("PRAGMA query_only=ON")
             if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
                 raise MigrationBlocked("CATALOG_INTEGRITY_FAILED")
             tables = {row[0] for row in db.execute(
@@ -117,10 +125,19 @@ def _sqlite_backup(source: Path, destination: Path) -> None:
             )}
             if not {"recordings", "transcriptions"} <= tables:
                 raise MigrationBlocked("CATALOG_SCHEMA_INCOMPATIBLE")
-            with sqlite3.connect(destination) as dest:
+            # sqlite3.Connection.__exit__ commits/rolls back but does NOT
+            # close. Closing both connections ensures any destination WAL
+            # pages are checkpointed before the file is added to the tar.
+            with closing(sqlite3.connect(destination)) as dest:
                 db.backup(dest, pages=256, sleep=0.05)
-                if dest.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
-                    raise MigrationBlocked("CATALOG_SNAPSHOT_INVALID")
+        if any(Path(str(destination) + ext).exists() for ext in ("-wal", "-shm", "-journal")):
+            raise MigrationBlocked("CATALOG_SNAPSHOT_SIDECAR_REMAINS")
+        with closing(sqlite3.connect(
+            "file:" + quote(str(destination.absolute()), safe="/") + "?mode=ro&immutable=1",
+            uri=True,
+        )) as verified:
+            if verified.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+                raise MigrationBlocked("CATALOG_SNAPSHOT_INVALID")
     except MigrationBlocked:
         raise
     except sqlite3.Error:
@@ -128,7 +145,9 @@ def _sqlite_backup(source: Path, destination: Path) -> None:
     after = _regular(source)
     if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
         after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
-    ) or any(Path(str(source) + ext).exists() for ext in ("-wal", "-shm", "-journal")):
+    ) or any(Path(str(source) + ext).exists() or
+             Path(str(source) + ext).is_symlink()
+             for ext in ("-wal", "-shm", "-journal")):
         raise MigrationBlocked("CATALOG_CHANGED_DURING_SNAPSHOT")
 
 
