@@ -27,6 +27,8 @@ on:
       - "src/local_asr_server/storage/cold_migration.py"
       - "scripts/migrate_closedroom_gcs.py"
       - "test/test_gcs_cold_migration.py"
+      - "scripts/run_gcs_backup_on_runner.py"
+      - "test/test_runner_gcs_backup.py"
 
 permissions:
   contents: read
@@ -73,3 +75,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: python3 -m unittest discover -s test -p 'test_gcs_cold_migration.py' -v
+      - name: Headless runner data and recovery secret safety tests
+        env:
+          PYTHONPATH: src
+        run: python3 -m unittest discover -s test -p 'test_runner_gcs_backup.py' -v
