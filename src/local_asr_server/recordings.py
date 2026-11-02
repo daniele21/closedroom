@@ -4,16 +4,21 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import threading
 import uuid
 import hashlib
 import time
+import wave
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from local_asr_server.catalog import CatalogStore
+from local_asr_server.recording_audio_recovery import (
+    AudioRecoveryError, checkpoint_frame_count, has_checkpoints, recover_checkpoint_audio,
+)
 from local_asr_server.recording_screenshot_artifacts import (
     MAX_SCREENSHOT_BYTES,
     MAX_SCREENSHOT_PIXELS,
@@ -43,6 +48,7 @@ _INTERNAL_TRACK_FIELDS = {
     "_content_sha256_size",
     "_content_sha256_mtime_ns",
     "_content_sha256_inode",
+    "_recovered_audio_file",
 }
 
 
@@ -1447,6 +1453,7 @@ class RecordingStore:
                 raise RecordingConflict(
                     f"Cannot stop recording in status {metadata['status']}"
                 )
+            self._recover_native_checkpoints(session_dir, metadata)
             # Allow empty recordings – the user may have stopped
             # before the first chunk interval elapsed.
 
@@ -1497,6 +1504,8 @@ class RecordingStore:
                 raise RecordingConflict(f"Cannot recover recording in status {metadata['status']}")
             if not self._has_recoverable_audio(session_dir, metadata):
                 raise RecordingConflict("Recording has no recoverable audio")
+
+            self._recover_native_checkpoints(session_dir, metadata)
 
             metadata["status"] = "recorded"
             metadata["partial"] = True
@@ -2022,10 +2031,70 @@ class RecordingStore:
         return session_dir / f"{self._track_file_stem(track['id'])}{track['extension']}.part"
 
     def _track_audio_path(self, session_dir: Path, track: dict[str, Any]) -> Path:
+        recovered = track.get("_recovered_audio_file")
+        if recovered is not None:
+            stem = re.escape(self._track_file_stem(track['id']))
+            if not isinstance(recovered, str) or not re.fullmatch(rf"{stem}\.recovered-[0-9a-f]{{64}}\.wav", recovered):
+                raise RecordingConflict("Invalid recovered audio file")
+            path = session_dir / recovered
+            if path.is_symlink():
+                raise RecordingConflict("Recovered audio must not be a symlink")
+            return path
         return session_dir / f"{self._track_file_stem(track['id'])}{track['extension']}"
 
     def _relative_track_audio_file(self, metadata: dict[str, Any], track: dict[str, Any]) -> str:
-        return f"{metadata['relative_dir']}/{self._track_file_stem(track['id'])}{track['extension']}"
+        name = self._track_audio_path(self._session_dir(metadata), track).name
+        return f"{metadata['relative_dir']}/{name}"
+
+    def _recover_native_checkpoints(self, session_dir: Path, metadata: dict[str, Any]) -> None:
+        if metadata.get('capture_backend') != 'native':
+            return
+        recovered_any = False
+        for track in metadata['audio_tracks']:
+            if track['id'] not in {'mic', 'system'}:
+                continue
+            try:
+                path = self._track_audio_path(session_dir, track)
+                horizon = checkpoint_frame_count(session_dir, track['id'])
+                complete_frames = self._complete_native_wav(path)
+                if complete_frames and horizon is not None and complete_frames >= horizon:
+                    continue
+                if not has_checkpoints(session_dir, track['id']):
+                    continue
+                recovered = recover_checkpoint_audio(session_dir, track['id'])
+                if recovered is not None:
+                    track['_recovered_audio_file'] = recovered.name
+                    recovered_any = True
+            except (AudioRecoveryError, OSError) as exc:
+                raise RecordingConflict('Native audio checkpoints could not be verified; original data preserved') from exc
+        if recovered_any:
+            metadata['partial'] = True
+            warnings = metadata.setdefault('warnings', [])
+            if 'native_audio_recovered_from_checkpoints' not in warnings:
+                warnings.append('native_audio_recovered_from_checkpoints')
+        primary = self._primary_track(metadata)
+        if not self._complete_native_wav(self._track_audio_path(session_dir, primary)):
+            for source in ('system', 'mic'):
+                candidate = next((t for t in metadata['audio_tracks'] if t['id'] == source), None)
+                if candidate and self._complete_native_wav(self._track_audio_path(session_dir, candidate)):
+                    metadata['primary_track_id'] = source
+                    break
+
+    @staticmethod
+    def _complete_native_wav(path: Path) -> int:
+        # A normally closed original needs no duplicate derivative. Check the
+        # final frame as well as the header before trusting an interrupted file.
+        if path.is_symlink():
+            return 0
+        try:
+            with wave.open(str(path), 'rb') as audio:
+                if audio.getnframes() > 0:
+                    audio.setpos(audio.getnframes() - 1)
+                    if len(audio.readframes(1)) == audio.getnchannels() * audio.getsampwidth():
+                        return audio.getnframes()
+        except (OSError, EOFError, wave.Error):
+            pass
+        return 0
 
     def _track_ids_for_mode(self, capture_mode: str) -> list[str]:
         if capture_mode == "both":
@@ -2225,6 +2294,12 @@ class RecordingStore:
 
     def _has_recoverable_audio(self, session_dir: Path, metadata: dict[str, Any]) -> bool:
         for track in metadata.get("audio_tracks", []):
+            if metadata.get('capture_backend') == 'native':
+                try:
+                    if has_checkpoints(session_dir, track['id']):
+                        return True
+                except (AudioRecoveryError, OSError):
+                    pass
             if track.get("bytes_written", 0) > 0 or track.get("chunk_count", 0) > 0:
                 return True
             for path in (

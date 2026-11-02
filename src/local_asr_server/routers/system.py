@@ -285,6 +285,8 @@ def start_capture(recording_id: str, request: Request, body: CaptureStartRequest
     store = get_services(request.app).recordings
     bound = False
     try:
+        if store.get(recording_id, include_result=False)["status"] != "recording":
+            raise RecordingConflict("Native capture can only start in a fresh recording session")
         session_dir = store.session_dir(recording_id)
         if body.visual_window_id is not None and not 0.1 <= body.visual_fps <= 2.0:
             raise ValueError("visual_fps must be between 0.1 and 2.0")

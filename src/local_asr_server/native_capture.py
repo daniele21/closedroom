@@ -773,6 +773,18 @@ class NativeCaptureManager:
     ) -> dict[str, Any]:
         if mode not in VALID_NATIVE_MODES:
             raise ValueError(f"Invalid native capture mode: {mode}")
+        # Check before capability probes or compilation. The helper also claims
+        # the destination exclusively, so separate API/helper processes cannot
+        # race this preflight and truncate a previous run's output.
+        for name in ('.native-capture-run', '.audio-recovery', 'mic.wav', 'system.wav', 'recording.wav',
+                     'mic.wav.part', 'system.wav.part', 'recording.wav.part'):
+            candidate = output_dir / name
+            if candidate.is_symlink() or (
+                candidate.exists() and (
+                    not name.endswith('.part') or not candidate.is_file() or candidate.stat().st_size > 0
+                )
+            ):
+                raise RuntimeError("Cannot start native capture over existing capture data; recover the session instead")
         self._refresh_dev_helper()
         if not self.capabilities().get("available"):
             raise RuntimeError("Native capture helper is not available")

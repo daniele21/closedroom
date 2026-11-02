@@ -420,7 +420,7 @@ interrogabile.
 `RecordingStore` governa file/catalogo e stati `recording`, `finalizing`,
 `recorded`, `interrupted`, `recoverable`, `transcribing`, `completed`, `failed`.
 `capture/cancel` arresta e rilascia la lease conservando dati recuperabili;
-solo discard esplicito li elimina. Mancano checkpoint nativi contro hard crash.
+solo discard esplicito li elimina. Checkpoint WAV da 1s con checksum e recovery separato.
 
 ## 11. Cattura e routing audio macOS
 
