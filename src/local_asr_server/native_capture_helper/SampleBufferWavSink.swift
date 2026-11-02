@@ -15,7 +15,7 @@ final class SampleBufferWavSink {
     private var failed = false
     private var recovery: AudioRecoverySegments?
     var onFailure: (() -> Void)?
-    
+
     private var droppedBuffers = 0
     private var lastEmitDroppedCount = 0
     private var lastEmitDroppedTime: Double = 0
@@ -65,7 +65,7 @@ final class SampleBufferWavSink {
                 try self.recovery?.append(sampleBuffer)
                 if self.writer == nil {
                     let writer = try AVAssetWriter(outputURL: self.url, fileType: .wav)
-                    
+
                     let audioSettings: [String: Any] = [
                         AVFormatIDKey: kAudioFormatLinearPCM,
                         AVSampleRateKey: 16000.0,
@@ -75,7 +75,7 @@ final class SampleBufferWavSink {
                         AVLinearPCMIsFloatKey: false,
                         AVLinearPCMIsBigEndianKey: false
                     ]
-                    
+
                     let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
                     input.expectsMediaDataInRealTime = true
                     guard writer.canAdd(input) else {
@@ -180,4 +180,3 @@ final class SampleBufferWavSink {
         }
     }
 }
-

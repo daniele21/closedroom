@@ -8,9 +8,9 @@ the normal WAV plus independent recovery segments; `AudioRecoverySegments`
 publishes checkpoints. `recording_audio_recovery.py` validates those checkpoints
 and builds a separate derivative through the existing store/recover API.
 
-This implementation is under iteration on the storage branch, not a qualified
-installed-app release. Physical microphone/TCC, long-session performance and
-storage exhaustion still require target-Mac evidence.
+This source implementation is separate from installed-app release qualification.
+Physical microphone/TCC, long-session performance and storage exhaustion still
+require target-Mac evidence.
 
 ## Start and retention contract
 
