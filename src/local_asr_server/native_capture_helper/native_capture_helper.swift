@@ -276,127 +276,6 @@ func diagnosticsPayload() -> [String: Any] {
     ]
 }
 
-final class SampleBufferWavSink {
-    let url: URL
-    let sourceName: String
-    private var writer: AVAssetWriter?
-    private var input: AVAssetWriterInput?
-    private var started = false
-    private var finished = false
-    private let queue = DispatchQueue(label: "closedroom.native.wav-sink")
-    
-    private var droppedBuffers = 0
-    private var lastEmitDroppedCount = 0
-    private var lastEmitDroppedTime: Double = 0
-
-    init(url: URL, sourceName: String) {
-        self.url = url
-        self.sourceName = sourceName
-        try? FileManager.default.removeItem(at: url)
-    }
-
-    func append(_ sampleBuffer: CMSampleBuffer) {
-        guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
-        queue.async {
-            if self.finished { return }
-            do {
-                if self.writer == nil {
-                    let writer = try AVAssetWriter(outputURL: self.url, fileType: .wav)
-                    
-                    let audioSettings: [String: Any] = [
-                        AVFormatIDKey: kAudioFormatLinearPCM,
-                        AVSampleRateKey: 16000.0,
-                        AVNumberOfChannelsKey: 1,
-                        AVLinearPCMBitDepthKey: 16,
-                        AVLinearPCMIsNonInterleaved: false,
-                        AVLinearPCMIsFloatKey: false,
-                        AVLinearPCMIsBigEndianKey: false
-                    ]
-                    
-                    let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
-                    input.expectsMediaDataInRealTime = true
-                    guard writer.canAdd(input) else {
-                        JSONEmitter.shared.emit([
-                            "type": "error",
-                            "message": "Cannot add WAV audio input",
-                            "file": self.url.path,
-                        ])
-                        return
-                    }
-                    writer.add(input)
-                    self.writer = writer
-                    self.input = input
-                }
-
-                guard let writer = self.writer, let input = self.input else { return }
-                if !self.started {
-                    writer.startWriting()
-                    writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-                    self.started = true
-                }
-                if input.isReadyForMoreMediaData {
-                    let ok = input.append(sampleBuffer)
-                    if !ok {
-                        JSONEmitter.shared.emit([
-                            "type": "error",
-                            "source": self.sourceName,
-                            "message": "AVAssetWriterInput append failed",
-                            "writer_status": "\(writer.status)",
-                            "error": writer.error?.localizedDescription ?? "unknown"
-                        ])
-                    }
-                } else {
-                    self.droppedBuffers += 1
-                    let now = Date().timeIntervalSince1970
-                    if self.droppedBuffers - self.lastEmitDroppedCount >= 10 || (now - self.lastEmitDroppedTime >= 2.0 && self.droppedBuffers > self.lastEmitDroppedCount) {
-                        self.lastEmitDroppedCount = self.droppedBuffers
-                        self.lastEmitDroppedTime = now
-                        JSONEmitter.shared.emit([
-                            "type": "health",
-                            "source": self.sourceName,
-                            "dropped_buffers": self.droppedBuffers
-                        ])
-                    }
-                }
-            } catch {
-                JSONEmitter.shared.emit([
-                    "type": "error",
-                    "message": "Failed to initialize WAV writer",
-                    "file": self.url.path,
-                    "error": String(describing: error),
-                ])
-            }
-        }
-    }
-
-    func finish(_ done: @escaping () -> Void) {
-        queue.async {
-            if self.finished {
-                done()
-                return
-            }
-            self.finished = true
-            guard let writer = self.writer, let input = self.input, self.started else {
-                FileManager.default.createFile(atPath: self.url.path, contents: Data())
-                done()
-                return
-            }
-            input.markAsFinished()
-            writer.finishWriting {
-                if writer.status == .failed {
-                    JSONEmitter.shared.emit([
-                        "type": "error",
-                        "message": "Failed to finish WAV writer",
-                        "file": self.url.path,
-                        "error": writer.error?.localizedDescription ?? "unknown",
-                    ])
-                }
-                done()
-            }
-        }
-    }
-}
-
 @available(macOS 13.0, *)
 final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     var onSample: ((CMSampleBuffer) -> Void)?
@@ -1673,12 +1552,16 @@ final class NativeCaptureRun {
 
     func start() async throws {
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        try CaptureOutputReservation.claim(outputDir, recordingID: recordingID)
 
         let needsMic = mode != "pc_only"
         let needsSystem = mode != "mic_only"
 
         if needsMic {
             let sink = SampleBufferWavSink(url: outputDir.appendingPathComponent("mic.wav"), sourceName: "mic")
+            sink.onFailure = { [weak self] in
+                DispatchQueue.main.async { self?.stopAndExit(cancelled: true, errorMsg: "audio_storage_failed") }
+            }
             sinks.append(sink)
             micSink = sink
 
@@ -1694,6 +1577,9 @@ final class NativeCaptureRun {
 
         if needsSystem {
             let sink = SampleBufferWavSink(url: outputDir.appendingPathComponent("system.wav"), sourceName: "system")
+            sink.onFailure = { [weak self] in
+                DispatchQueue.main.async { self?.stopAndExit(cancelled: true, errorMsg: "audio_storage_failed") }
+            }
             sinks.append(sink)
             systemSink = sink
 
@@ -1907,7 +1793,7 @@ final class NativeCaptureRun {
         let group = DispatchGroup()
         for sink in sinks {
             group.enter()
-            sink.finish {
+            sink.finish { _ in
                 group.leave()
             }
         }

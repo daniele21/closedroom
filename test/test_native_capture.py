@@ -160,6 +160,29 @@ else:
         self.assertEqual(started["status"], "starting")
         manager.cancel("rec-visual")
 
+    def test_start_refuses_existing_audio_or_previous_run_without_spawning(self) -> None:
+        for name, content in [('mic.wav', b'original'), ('system.wav', b''),
+                              ('recording.wav.part', b'partial'), ('.native-capture-run', b'previous')]:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                original = directory / name
+                original.write_bytes(content)
+                manager = NativeCaptureManager(helper_path=self.helper)
+                with patch('local_asr_server.native_capture.subprocess.Popen') as spawn:
+                    with self.assertRaisesRegex(RuntimeError, 'existing.*capture|capture.*existing'):
+                        manager.start('retry', directory, 'both')
+                    spawn.assert_not_called()
+                self.assertEqual(original.read_bytes(), content)
+
+    def test_start_allows_empty_recording_placeholders(self) -> None:
+        for name in ['mic.wav.part', 'system.wav.part', 'recording.wav.part']:
+            (self.root / name).touch()
+        manager = NativeCaptureManager(helper_path=self.helper)
+        try:
+            self.assertEqual(manager.start('empty-placeholders', self.root, 'both')['status'], 'starting')
+        finally:
+            manager.cancel('empty-placeholders')
+
 
     def test_manual_screenshot_uses_ready_uptime_and_persists_display_selection(self) -> None:
         manager = NativeCaptureManager(helper_path=self.helper)

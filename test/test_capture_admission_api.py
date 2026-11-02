@@ -5,7 +5,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
@@ -208,6 +208,32 @@ class CaptureAdmissionApiTests(unittest.TestCase):
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(saved.json()['status'], 'interrupted')
         self.assertTrue(saved.json()['error'])
+
+    def test_native_start_cannot_reuse_a_finalized_recording(self) -> None:
+        services = self.app.state.services
+        recording = self.client.post('/v1/recordings', json={
+            'title': 'Saved original', 'mime_type': 'audio/wav',
+            'capture_backend': 'native', 'capture_mode': 'mic_only',
+        }).json()
+        recording_id = recording['id']
+        session_dir = services.recordings.session_dir(recording_id)
+        (session_dir / 'mic.wav').write_bytes(b'original saved audio')
+        services.recordings.finalize(recording_id)
+        with patch.object(services.capture, 'start') as start:
+            response = self.client.post(f'/v1/recordings/{recording_id}/capture/start', json={})
+        self.assertEqual(response.status_code, 409)
+        start.assert_not_called()
+        self.assertEqual((session_dir / 'mic.wav').read_bytes(), b'original saved audio')
+
+    def test_recovery_refuses_a_live_helper_even_after_an_error_event(self) -> None:
+        services = self.app.state.services
+        session = Mock(stopped=True)
+        session.process.poll.return_value = None
+        with patch.object(services.capture, 'get_session', return_value=session), \
+             patch.object(services.recordings, 'recover') as recover:
+            response = self.client.post('/v1/recordings/active-session/recover')
+        self.assertEqual(response.status_code, 409)
+        recover.assert_not_called()
 
     def test_capture_cancel_persists_error_and_is_safe_to_retry_after_recovery(self) -> None:
         services = self.app.state.services
