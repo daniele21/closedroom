@@ -563,6 +563,9 @@ def expected_recording_track_sequence(recording_id: str, track_id: str, request:
 @router.post("/v1/recordings/{recording_id}/recover")
 def recover_recording(recording_id: str, request: Request):
     try:
+        session = get_services(request.app).capture.get_session(recording_id)
+        if session is not None and session.process.poll() is None:
+            raise RecordingConflict("Stop native capture before recovering its audio")
         return get_services(request.app).recordings.recover(recording_id)
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc

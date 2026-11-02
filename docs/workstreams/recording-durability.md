@@ -1,6 +1,6 @@
 # Recording durability — active implementation plan
 
-Status: ACTIVE — retention fix integrated in dev; crash-durability work READY.
+Status: ACTIVE — retention fix in dev; native checkpoint/recovery implemented in iteration, qualification pending.
 
 ## Observable outcome and contract
 
@@ -29,17 +29,19 @@ unmeasured zero-loss guarantee.
 
 ## Findings confirmed in source
 
-- Native capture uses one `AVAssetWriter` WAV per source and finishes it on stop;
-  it has no independent periodic recovery journal or durable checkpoint protocol.
+- Native capture now keeps the long-running WAV plus independently finalized,
+  synced one-second WAV/checksum pairs. See `../features/recording-durability.md`
+  for the protocol, recovery bounds and remaining qualification gaps.
 - Before PR #173, fatal native completion deleted sink WAVs.
   Frontend error handling also called `capture/cancel`, which discarded the whole
   session. Both automatic deletion paths are removed in dev through PR #173.
 - Browser chunk ingestion already flushes and fsyncs the audio before metadata;
   a crash between audio and metadata needs reconciliation before an upload retry
   can append the same chunk twice.
-- Native sink construction removes its destination before starting. A duplicate
-  or retried start must never reach that destructive initialization for existing
-  audio. Restart must create a new run/segment, not truncate an original.
+- Native initialization no longer deletes its destination; Python output guards,
+  exclusive persistent Swift run claims and API state checks block reuse. Empty
+  finish is non-destructive. Recovery refuses an actually live helper, including
+  after an error event has marked the session stopped.
 - Existing restart discovery depends on readable `metadata.json`; a damaged
   metadata/catalog entry must not make surviving audio undiscoverable.
 
@@ -48,13 +50,13 @@ unmeasured zero-loss guarantee.
 | ID | Observable outcome | State | Required evidence |
 | --- | --- | --- | --- |
 | RD-1 | Error/cancel retains native audio, visual evidence and recovery metadata | DONE | PR #173 merged in dev as `ceb8f82`. Exact-head Mac/source/browser gates and clean packaged build/smoke/retention probe PASS. Actual device failure and installed-app proof remain release obligations. |
-| RD-2 | Native capture has periodic durable recovery data independent of final WAV closure | READY | Select and implement an append-only PCM journal with reconstructible framing, or independent finalized segments. Durability means write + fsync + atomic checkpoint publication, including directory sync where applicable. Benchmark a proposed one-second checkpoint target; measure the actual unsaved window and I/O cost. Reject disk-write failure visibly and keep all earlier checkpoints. |
-| RD-3 | Duplicate start, stop and retry cannot truncate or delete original audio | READY | Exclusive destination creation, run identity, idempotent stop/cancel, repeated start with stale/failed process, concurrent stop and late error; byte-for-byte preservation. |
-| RD-4 | Crash/restart reconstructs the committed recording without trusting a final WAV header or SQLite alone | READY | `RecordingStore` discovers checkpoints/orphan audio, repairs or rebuilds into a new temporary derivative, validates it and atomically publishes it; original data stays intact on every failure. Recovery must be bounded, cancellable and safe to repeat. |
+| RD-2 | Native capture has periodic durable recovery data independent of final WAV closure | ACTIVE | Source implementation and synthetic writer/kill/permission-failure tests PASS; brief 16/48 kHz benchmark below. Long dual-source/device/packaged qualification pending.  Select and implement an append-only PCM journal with reconstructible framing, or independent finalized segments. Durability means write + fsync + atomic checkpoint publication, including directory sync where applicable. Benchmark a proposed one-second checkpoint target; measure the actual unsaved window and I/O cost. Reject disk-write failure visibly and keep all earlier checkpoints. |
+| RD-3 | Duplicate start, stop and retry cannot truncate or delete original audio | DONE | Source/native subprocess/API tests PASS for concurrent exclusive claims, preserved prior bytes, empty finish and saved-session start rejection.  Exclusive destination creation, run identity, idempotent stop/cancel, repeated start with stale/failed process, concurrent stop and late error; byte-for-byte preservation. |
+| RD-4 | Crash/restart reconstructs the committed recording without trusting a final WAV header or SQLite alone | ACTIVE | File-backed checkpoint recovery implemented and tested; missing metadata, legacy native track discovery and cancellation remain open.  `RecordingStore` discovers checkpoints/orphan audio, repairs or rebuilds into a new temporary derivative, validates it and atomically publishes it; original data stays intact on every failure. Recovery must be bounded, cancellable and safe to repeat. |
 | RD-5 | Browser retries after a crash neither duplicate nor silently omit audio | READY | Inject crashes between append/fsync, metadata replace and catalog update; reconcile acknowledged offsets/checksums before retry. Preserve the original tail as evidence if reconciliation is ambiguous. |
 | RD-6 | Device loss affects only the unavailable source and is visible immediately | READY | Existing healthy source continues where supported; keep the failed source's prefix and record the gap. Reconnection/new source uses a new segment. No silent device substitution or new permission grant. Hardware verification required. |
 | RD-7 | User sees saved duration, interruption/gaps and recovered recording | READY | Recovery cannot depend solely on a localStorage ID. Scan/reconcile at restart, list incomplete sessions, expose playable recovered audio, retained error and an explicit retry/export action. Use existing Meeting/recording UI owners. |
-| RD-8 | Storage exhaustion and downstream processing cannot destroy acquired audio | READY | Low-space preflight and ongoing write-failure handling; no success without durable acknowledgement, no automatic deletion of recovery data, finalization/mixing/ASR/catalog failures leave originals available. |
+| RD-8 | Storage exhaustion and downstream processing cannot destroy acquired audio | ACTIVE | Writer/checkpoint errors preserve earlier commits; low-space preflight and broader downstream fault matrix remain open.  Low-space preflight and ongoing write-failure handling; no success without durable acknowledgement, no automatic deletion of recovery data, finalization/mixing/ASR/catalog failures leave originals available. |
 | RD-9 | Updated installed app meets the durability contract under injected failures | READY | Coherent integration diff/docs/gates; build/finalize a new immutable artifact; exact artifact/head proof, FULL_MEDIA for affected material UI journeys and real target-Mac fault tests before release. |
 
 Implementation order: RD-3, RD-2, RD-4/RD-5, RD-6/RD-7/RD-8, RD-9. Validate the
@@ -81,9 +83,33 @@ small deletion fix as proof that crash/power-loss durability is complete.
 
 ## Resume checkpoint — 2026-11-02
 
-- GCS branch synchronized with remote `1d427b3` and dev via local merge `b3ffeae`.
-  Refresh head/tree/live base before resuming; this checkpoint precedes its own
-  documentation commit and is not exact-head proof for the combined GCS branch.
+Current iteration after `1264e21` (this checkpoint precedes its own source commit):
+
+- RD-2/3 and file-backed RD-4 implemented in `SampleBufferWavSink.swift`,
+  `AudioRecoverySegments.swift`, `Support.swift`, native manager/API and
+  `recording_audio_recovery.py` through the canonical RecordingStore. Recovery
+  compares verified sample counts, including valid-but-shorter original WAVs.
+  The producer and reader both enforce 4 MiB/segment and one-day source bounds.
+- Full local suite: 933 tests PASS, 6 skips for optional SDK/model availability;
+  cryptography installed in the test environment as already required by GCS tests.
+  A pre-existing GCS assertion compared `/var` and `/private/var`; `1264e21`
+  fixes expected paths to match the canonical resolver. No cloud behavior changed.
+- After final producer size/day bounds and ancestor-directory sync: 6 native subprocess tests
+  PASS; complete Swift typecheck PASS. Latest native source hash:
+  `87a6f2b673adb88d7ab920610422db36c73328e0639460982c57759b2c3d52fb`.
+- Synthetic benchmark: two four-second 16 kHz integer / 48 kHz float runs each
+  committed 4 checkpoints and recovered 64,000 frames. Publication max 5.27 ms,
+  acknowledgement lag after segment end max 148 ms in these brief fixtures.
+  These are informational synthetic measurements, not representative audio,
+  long-session, disk-full or power-loss guarantees.
+- Evidence: `.cache/recording-durability/20261102/`. New code is not installed,
+  packaged or integration-qualified; the inherited RD-1 CI below does not prove it.
+- Next: recover orphan/legacy-native checkpoints without relying on readable
+  metadata, reconcile browser append/metadata crash windows, expose durable
+  progress/recovery and perform low-space plus packaged target-Mac fault journeys.
+
+Prior RD-1 integration evidence (unchanged scope):
+
 - RD-1: PR [#173](https://github.com/daniele21/closedroom/pull/173), source head
   `b41390f02974f23d512d841d0715b062c7678c7c`, base `e9a2a82`, merged in dev as
   `ceb8f820f59beaee2c2024a51a772d5b9e3ff19d`; merge tree equals tested source tree
@@ -107,9 +133,8 @@ small deletion fix as proof that crash/power-loss durability is complete.
   runtime deletion sequence is inferred, not proven from an access log.
 - Existing installed `/Applications/ClosedRoom.app` has NOT been updated. Physical
   device failure/reconnection, disk-full and hard-crash guarantees remain unproven.
-- Next action: implement RD-3 with an exclusive-output regression; then choose the
-  RD-2 storage protocol using an actual write/kill/recover experiment before
-  changing the live recording path.
+- RD-1 installed-app/device evidence remains separate from the new synthetic
+  checkpoint tests. No new INTEGRATION or RELEASE readiness is claimed.
 
 Before completion transfer implemented behavior to the canonical feature and
 architecture documentation and target-Mac obligations to current-state/release

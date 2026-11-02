@@ -21,7 +21,7 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 
 The frontend reserves before capture, shows cancellable preparation and starts the timer only with real capture. `App.tsx` + `workspace.css` own the adaptive shell.
 
-Native cancel preserves data; device-loss recovery needs target-Mac release proof.
+Native retention integrated; checkpoint recovery is source-only pending target-Mac proof.
 
 PRS-18 has two target-Mac evidence paths:
 
