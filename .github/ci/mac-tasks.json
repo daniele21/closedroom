@@ -1,0 +1,11 @@
+{
+  "schema": "source-owned-mac-tasks/v1",
+  "tasks": {
+    "repository-smoke": {
+      "description": "Lightweight project repository and agent-context contract checks; excludes browser E2E, packaging and model inference",
+      "script": ".github/ci/tasks/repository-smoke.sh",
+      "cost_class": "free",
+      "manual_only": true
+    }
+  }
+}

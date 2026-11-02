@@ -1912,14 +1912,9 @@ final class NativeCaptureRun {
             }
         }
         group.notify(queue: .main) {
-            if let errorMsg = errorMsg {
-                for sink in self.sinks {
-                    try? FileManager.default.removeItem(at: sink.url)
-                }
-                try? FileManager.default.removeItem(at: self.outputDir.appendingPathComponent(".visual-staging"))
-            } else if cancelled {
-                try? FileManager.default.removeItem(at: self.outputDir.appendingPathComponent(".visual-staging"))
-            }
+            // A capture failure can occur after a long meeting. Keep finalized
+            // sinks and visual evidence for RecordingStore's recovery lifecycle;
+            // only an explicit discard may remove the session's data.
             if let errorMsg = errorMsg {
                 JSONEmitter.shared.emitAndExit([
                     "type": "error",

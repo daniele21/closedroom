@@ -417,9 +417,10 @@ interrogabile.
 
 ### Stati
 
-Gli stati validi sono `recording`, `finalizing`, `recorded`, `interrupted`,
-`recoverable`, `transcribing`, `completed` e `failed`. Le transizioni devono
-essere eseguite attraverso `RecordingStore`, mantenendo file e catalogo coerenti.
+`RecordingStore` governa file/catalogo e stati `recording`, `finalizing`,
+`recorded`, `interrupted`, `recoverable`, `transcribing`, `completed`, `failed`.
+`capture/cancel` arresta e rilascia la lease conservando dati recuperabili;
+solo discard esplicito li elimina. Mancano checkpoint nativi contro hard crash.
 
 ## 11. Cattura e routing audio macOS
 
