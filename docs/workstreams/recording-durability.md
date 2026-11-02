@@ -57,7 +57,7 @@ unmeasured zero-loss guarantee.
 | RD-6 | Device loss affects only the unavailable source and is visible immediately | READY | Existing healthy source continues where supported; keep the failed source's prefix and record the gap. Reconnection/new source uses a new segment. No silent device substitution or new permission grant. Hardware verification required. |
 | RD-7 | User sees saved duration, interruption/gaps and recovered recording | READY | Recovery cannot depend solely on a localStorage ID. Scan/reconcile at restart, list incomplete sessions, expose playable recovered audio, retained error and an explicit retry/export action. Use existing Meeting/recording UI owners. |
 | RD-8 | Storage exhaustion and downstream processing cannot destroy acquired audio | ACTIVE | Writer/checkpoint errors preserve earlier commits; low-space preflight and broader downstream fault matrix remain open.  Low-space preflight and ongoing write-failure handling; no success without durable acknowledgement, no automatic deletion of recovery data, finalization/mixing/ASR/catalog failures leave originals available. |
-| RD-9 | Updated installed app meets the durability contract under injected failures | ACTIVE | PR #174 INTEGRATION/STRONG and canonical build/smoke/assembled recovery PASS. App not installed; actual microphone/TCC/disconnect, long dual-source/storage pressure and power-loss confirmation remain required. |
+| RD-9 | Updated installed app meets the durability contract under injected failures | ACTIVE | PR #174 INTEGRATION/STRONG and canonical build/smoke/assembled recovery PASS. Stable-signed main app installed; actual audio/disconnect, long dual-source/storage pressure and power-loss confirmation remain required. |
 
 Implementation order: RD-3, RD-2, RD-4/RD-5, RD-6/RD-7/RD-8, RD-9. Validate the
 recording-storage protocol before extending UI claims. Do not ship the current
@@ -83,7 +83,15 @@ small deletion fix as proof that crash/power-loss durability is complete.
 
 ## Resume checkpoint — 2026-11-02
 
-Native checkpoint integration completed; this checkpoint precedes its own docs commit:
+Native checkpoint integration and local main-app upgrade completed; refresh live source on resume:
+
+- Installed/started `/Applications/ClosedRoom.app`, final display name `ClosedRoom`,
+  from clean identified build `local-20261102T151925Z-5708fd` (`b17780b3a250`).
+  Same `ClosedRoom Local Development` authority as prior app; canonical upgrade
+  kept the previous bundle as backup and verified exact installed bytes/signature.
+  Live UI/API online, mic authorized and screen capture granted. No real recording
+  performed: these checks do not prove physical audio continuity or power-loss safety.
+  Local backup/install/live evidence: `.cache/installation/closedroom/20261102/`.
 
 - PR [#174](https://github.com/daniele21/closedroom/pull/174) merged in dev as
   `5767e5d985868a0d85b5df6b7de36bcd980af892`. Tested head `b17780b3a250`,
@@ -98,7 +106,8 @@ Native checkpoint integration completed; this checkpoint precedes its own docs c
   original WAV/checkpoints, denied session reuse and survived another restart.
   This proves synthetic producer/API/storage, not bundled physical capture/TCC.
 - Immutable app delivered under `dist/artifacts/macos-arm64-local-app/` and indexed
-  by `dist/last-build.json`; copied bytes/signature verified. App not installed.
+  by `dist/last-build.json` at integration; copied bytes/signature verified. The
+  index now points to the stable-signed main-app build noted above.
   Evidence: `.cache/integration-evidence/native-checkpoints/b17780b/`.
 - GCS branch merged dev as `4e85fc9`; overlapping source/docs copies resolved to
   canonical dev. All 17 native integration paths match dev. This is not blanket
@@ -135,7 +144,7 @@ Prior RD-1 integration evidence (unchanged scope):
   ClosedRoom folders, no local Time Machine snapshots or matching open unlinked
   files found. Original application error/request is not retained, so the exact
   runtime deletion sequence is inferred, not proven from an access log.
-- Existing installed `/Applications/ClosedRoom.app` has NOT been updated. Physical
+- `/Applications/ClosedRoom.app` now includes the checkpoint implementation. Physical
   device failure/reconnection, disk-full and hard-crash guarantees remain unproven.
 - RD-1 installed-app/device evidence remains separate from the new synthetic
   checkpoint tests. No new INTEGRATION or RELEASE readiness is claimed.
