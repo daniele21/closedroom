@@ -1,0 +1,11 @@
+{
+  "schema": "source-owned-mac-tasks/v1",
+  "tasks": {
+    "template-smoke": {
+      "description": "Offline repository contract checks; native macOS app and real-environment suites remain separate",
+      "script": ".github/ci/local-test.sh",
+      "cost_class": "free",
+      "manual_only": true
+    }
+  }
+}
