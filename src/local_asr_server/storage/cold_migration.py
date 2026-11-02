@@ -287,8 +287,11 @@ def upload_snapshot(
         tar_path = Path(tmp) / "snapshot.tar"
         summary = prepare_snapshot(recordings, transcriptions, catalog, tar_path, work_dir)
         envelope, recovery_code = create_recovery_envelope(key)
-        save_recovery_file(recovery_file, envelope)
         transport = transport or _gcs_transport(client_json)
+        # Do not publish the recovery envelope before a successful upload:
+        # a failed/network-interrupted upload otherwise leaves an orphan
+        # envelope and blocks the next explicit attempt as OUTPUT_ALREADY_EXISTS.
+        # The archive key is already retained in the native Keychain.
         asset = transport.upload_encrypted(tar_path, work_dir, key, kind="catalog")
         receipt_data = {
             "format": MIGRATION_FORMAT,
@@ -297,7 +300,14 @@ def upload_snapshot(
             "source_catalog": "explicit_application_support_candidate",
             "verified_on_second_mac": False,
         }
-        _save_private_json(receipt, receipt_data)
+        save_recovery_file(recovery_file, envelope)
+        try:
+            _save_private_json(receipt, receipt_data)
+        except BaseException:
+            # Only this attempt created the private envelope (exclusive
+            # create). Do not leave half a receipt/envelope pair behind.
+            recovery_file.unlink(missing_ok=True)
+            raise
     return {"status": "cold_snapshot_uploaded_pending_restore",
             "file_count": summary["file_count"],
             "bucket": TEST_BUCKET, "encrypted": True, "originals_deleted": False,
