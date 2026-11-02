@@ -362,7 +362,14 @@ def cancel_capture(recording_id: str, request: Request):
     try:
         result = get_services(request.app).capture.cancel(recording_id)
         try:
-            get_services(request.app).recordings.discard(recording_id)
+            store = get_services(request.app).recordings
+            for event in result.get("events", []):
+                store.mark_capture_event(recording_id, event)
+            metadata = store.interrupt_capture(recording_id)
+            logger.warning(
+                "Native capture cancelled; session preserved: recording=%s status=%s",
+                recording_id, metadata["status"],
+            )
         finally:
             request.app.state.heavy_workload_arbiter.release_recording_capture(recording_id)
         return result
