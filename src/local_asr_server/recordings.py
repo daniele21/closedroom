@@ -1770,6 +1770,24 @@ class RecordingStore:
                         # Never re-expose staged data. The next startup will finish it.
                         logger.exception("Deferred staged deletion cleanup: %s", path)
 
+    def interrupt_capture(self, recording_id: str) -> dict[str, Any]:
+        """Stop the capture lifecycle without discarding already committed data."""
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            metadata = self._ensure_tracks(metadata)
+            if metadata["status"] not in {"recording", "finalizing"}:
+                return self.public_metadata(metadata)
+            has_audio = self._has_recoverable_audio(session_dir, metadata)
+            metadata["status"] = "recoverable" if has_audio else "interrupted"
+            metadata["capture_status"] = "stopped"
+            metadata["stopped_at"] = metadata.get("stopped_at") or _utc_now()
+            metadata["error"] = metadata.get("error") or "Native capture interrupted; session data preserved"
+            if not has_audio:
+                metadata["completed_at"] = _utc_now()
+            self._write_metadata(session_dir, metadata)
+            self._upsert_catalog(metadata)
+            return self.public_metadata(metadata)
+
     def discard(self, recording_id: str) -> None:
         with self._lock_for(recording_id):
             session_dir, metadata = self._load(recording_id)

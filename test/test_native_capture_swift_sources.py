@@ -25,6 +25,13 @@ class NativeCaptureSwiftSourceTests(unittest.TestCase):
         self.assertIn("Support.swift", expected_names)
         self.assertEqual(len(native_compile._swift_source_hash()), 64)
 
+    def test_failure_finalization_preserves_audio_and_visual_evidence(self) -> None:
+        source = native_compile._SWIFT_SOURCE.read_text(encoding="utf-8")
+        finish = source.split('private func finishSinks(', 1)[1].split('\nfunc runStart(', 1)[0]
+        self.assertIn('sink.finish', finish)
+        self.assertIn('"type": "error"', finish)
+        self.assertNotIn('removeItem', finish)
+
 
 if __name__ == "__main__":
     unittest.main()
