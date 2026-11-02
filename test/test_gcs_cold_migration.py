@@ -307,6 +307,91 @@ class ColdMigrationTests(unittest.TestCase):
             self.assertEqual(wal.read_bytes(), b"not empty; may contain uncheckpointed transactions")
             self.assertFalse((work / "snapshot.tar").exists())
 
+    def test_network_failure_before_remote_commit_leaves_retryable_outputs(self):
+        """A 9 GB transfer can fail; never strand a local recovery envelope."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            rec, trans, catalog, settings = source_data(root)
+            work = root / "work"
+            work.mkdir(mode=0o700)
+            receipt = root / "receipt.json"
+            envelope = root / "recovery.json"
+            bucket = BucketFake()
+            transport = GCSArchiveTransport(bucket, bucket_name=TEST_BUCKET)
+            keychain = KeychainFake()
+            vault = ArchiveKeyVault(backend=keychain)
+
+            class FailOnce:
+                def __init__(self):
+                    self.calls = 0
+
+                def upload_encrypted(self, *args, **kwargs):
+                    self.calls += 1
+                    if self.calls == 1:
+                        raise OSError("synthetic network interruption; no real GCS")
+                    return transport.upload_encrypted(*args, **kwargs)
+
+            transient = FailOnce()
+            options = {
+                "client_json": root / "never-used-client.json",
+                "settings_file": settings,
+                "catalog": catalog,
+                "work_dir": work,
+                "receipt": receipt,
+                "recovery_file": envelope,
+                "transport": transient,
+                "vault": vault,
+            }
+            with self.assertRaises(OSError):
+                upload_snapshot(**options)
+            self.assertFalse(receipt.exists())
+            self.assertFalse(envelope.exists())
+            self.assertTrue((rec / "2026-10-30/recording-abc/mic.wav").is_file())
+            self.assertEqual(len(bucket.objects), 0)
+            self.assertEqual(len(keychain.items), 1)
+
+            result, recovery_code = upload_snapshot(**options)
+            self.assertEqual(transient.calls, 2)
+            self.assertEqual(result["status"], "cold_snapshot_uploaded_pending_restore")
+            self.assertTrue(receipt.is_file())
+            self.assertTrue(envelope.is_file())
+            self.assertTrue(recovery_code.startswith("CR1-"))
+            self.assertEqual(len(bucket.objects), 1)
+
+    def test_receipt_commit_failure_does_not_strand_recovery_file(self):
+        """If private local receipt cannot be committed, next retry isn't blocked."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _, _, catalog, settings = source_data(root)
+            work = root / "work"; work.mkdir(mode=0o700)
+            receipt = root / "receipt.json"
+            recovery = root / "recovery.json"
+            bucket = BucketFake()
+            transport = GCSArchiveTransport(bucket, bucket_name=TEST_BUCKET)
+            import unittest.mock as mock
+            from local_asr_server.storage import cold_migration
+            options = dict(
+                client_json=root / "not-used.json", settings_file=settings,
+                catalog=catalog, work_dir=work, receipt=receipt,
+                recovery_file=recovery, transport=transport,
+                vault=ArchiveKeyVault(backend=KeychainFake()),
+            )
+            with mock.patch.object(
+                cold_migration, "_save_private_json", side_effect=OSError("fixture local IO failure")
+            ):
+                with self.assertRaises(OSError):
+                    upload_snapshot(**options)
+            self.assertFalse(receipt.exists())
+            self.assertFalse(recovery.exists())
+            # First object may already exist (immutable GCS create-only);
+            # it must not be deleted or reused without a receipt.
+            self.assertEqual(len(bucket.objects), 1)
+            report, code = upload_snapshot(**options)
+            self.assertEqual(report["status"], "cold_snapshot_uploaded_pending_restore")
+            self.assertTrue(receipt.exists())
+            self.assertTrue(recovery.exists())
+            self.assertEqual(len(bucket.objects), 2)
+
     def test_live_sqlite_sidecar_is_never_ignored_or_deleted(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
