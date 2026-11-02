@@ -121,23 +121,10 @@ Native checkpoint integration and local main-app upgrade completed; refresh live
   RD-8 low-space preflight. Actual device/long-session/storage-pressure and
   power-loss confirmation remain RD-9 release obligations.
 
-Prior RD-1 integration evidence (unchanged scope):
+Prior RD-1 evidence remains in [PR #173](https://github.com/daniele21/closedroom/pull/173)
+(merged `ceb8f82`; exact-head Mac/source/browser and packaged retention checks PASS)
+and `.cache/integration-evidence/recording-retention/b41390f/`.
 
-- RD-1: PR [#173](https://github.com/daniele21/closedroom/pull/173), source head
-  `b41390f02974f23d512d841d0715b062c7678c7c`, base `e9a2a82`, merged in dev as
-  `ceb8f820f59beaee2c2024a51a772d5b9e3ff19d`; merge tree equals tested source tree
-  `af8852872ae7c840181f7f873dd39681868ec3e1`.
-- INTEGRATION/STRONG: 83 focused tests; exact-head `local-ci/mac` PASS with 826
-  Python tests, frontend lint/typecheck and browser FULL_MEDIA; repository/docs
-  guards PASS. CI: `daniele21/local-runner-infra/actions/runs/41456530915` and
-  `daniele21/closedroom/actions/runs/41456446268`.
-- Clean canonical artifact `local-20261102T135006Z-5f0962` build/smoke PASS.
-  Packaged authenticated API probe retained an identical synthetic 32,044-byte
-  WAV through cancel, recovery, service restart and retry; no residual listener.
-  This is synthetic API/storage evidence, not physical native-audio proof.
-- Local JSON/test evidence: `.cache/integration-evidence/recording-retention/b41390f/`.
-  Finalized artifact remains unchanged under the isolated checkout
-  `/private/tmp/closedroom-recording-fix/dist/artifacts/`; temporary files may expire.
 - Incident: session `74b5b151-7789-4930-b5fe-87c870e91fb4`, started 12:02;
   exact helper PID 44981 reports input `Device 115 died` at 12:40:33, then exits.
   Session directory and catalog entry absent; no audio copies found in inspected
