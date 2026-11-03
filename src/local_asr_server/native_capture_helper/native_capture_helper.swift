@@ -1497,6 +1497,9 @@ final class NativeCaptureRun {
             capture.onSample = { [weak self] sampleBuffer in
                 self?.handleSample(sampleBuffer, source: .mic)
             }
+            capture.onInputDiscontinuity = { [weak self] in
+                self?.micSink?.markInputDiscontinuity()
+            }
             // Per-source microphone interruptions are handled within
             // MicrophoneCapture. Only the sink's storage failures stop the run.
             microphoneCapture = capture
