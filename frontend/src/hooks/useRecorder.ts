@@ -9,7 +9,7 @@ import {
 import { RECORDING_CHUNK_INTERVAL_MS } from '../api/config';
 import { useTranslation } from '../i18n/i18n';
 import { useToast } from '../context/ToastContext';
-import { useAudioDevices, AudioDevice, AudioRouteStatus } from './useAudioDevices';
+import { useAudioDevices, AudioDevice } from './useAudioDevices';
 import { drawAudioMeterOnCanvas } from '../utils/audioVisualizer';
 import { BrowserUploadBacklog } from '../utils/browserUploadBacklog';
 import {
@@ -18,7 +18,7 @@ import {
   recorderLifecycleReducer,
 } from './recorderLifecycle';
 
-export type { AudioDevice, AudioRouteStatus };
+export type { AudioDevice };
 
 const AUDIO_METER_RENDER_INTERVAL_MS = 80;
 const AUDIO_METER_REACT_INTERVAL_MS = 250;
@@ -26,6 +26,11 @@ const RECORDING_TIMER_INTERVAL_MS = 1000;
 const OVERLAY_STATUS_INTERVAL_MS = 500;
 const CAPTURE_RESERVATION_POLL_MS = 200;
 const CAPTURE_RESERVATION_STORAGE_KEY = 'closedroom-capture-reservation-id';
+
+export type AudioSourceRecoveryState = 'healthy' | 'interrupted' | 'recovering' | 'unavailable';
+export type AudioSourceHealth = Record<'mic' | 'system', AudioSourceRecoveryState>;
+const HEALTHY_SOURCES: AudioSourceHealth = { mic: 'healthy', system: 'healthy' };
+const SOURCE_RECOVERY_TYPES = new Set(['source_interrupted', 'source_recovering', 'source_unavailable', 'source_recovered']);
 
 export const openBrowserPopup = () => {
   const width = 420;
@@ -58,27 +63,22 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const [statusText, setStatusText] = useState(t('recording.statusReady'));
   const [statusState, setStatusState] = useState<'ready' | 'recording' | 'paused' | 'working' | 'error' | 'success'>('ready');
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const [audioSourceHealth, setAudioSourceHealth] = useState<AudioSourceHealth>(HEALTHY_SOURCES);
+  const audioSourceHealthRef = useRef<AudioSourceHealth>(HEALTHY_SOURCES);
+  const lastSourceNoticeRef = useRef('');
   
-  // Audio devices and routing state managed by custom hook
   const {
     microphones,
-    systemDevices,
     selectedMicrophone,
     setSelectedMicrophone,
-    selectedSystemDevice,
-    setSelectedSystemDevice,
-    audioRouteStatus,
     captureCapabilities,
     capturePermissions,
     setCapturePermissions,
-    isTestRouted,
-    setIsTestRouted,
     isVerifying,
     setIsVerifying,
     loadDevices,
-    refreshAudioStatus,
     refreshCaptureCapabilities,
-    refreshCapturePermissions
+    refreshCapturePermissions,
   } = useAudioDevices();
 
   const [permissionsErrorDetails, setPermissionsErrorDetails] = useState<{
@@ -110,7 +110,6 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const browserUploadBacklogRef = useRef(new BrowserUploadBacklog());
   const browserBackpressureTriggeredRef = useRef(false);
   const startedAtRef = useRef(0);
-  const routeActivatedRef = useRef(false);
   const captureBackendRef = useRef<'browser' | 'native'>('browser');
   const captureReservationIdRef = useRef<string | null>(null);
   const captureLeaseCommittedRef = useRef(false);
@@ -271,19 +270,6 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     }
   }, [stopAudioMeter]);
 
-  const restoreAudioRoute = useCallback(async () => {
-    if (!routeActivatedRef.current) return;
-    try {
-      await ApiClient.testAudioRestore();
-    } catch (error) {
-      console.warn('Unable to restore the original audio route:', error);
-    } finally {
-      routeActivatedRef.current = false;
-      setIsTestRouted(false);
-      refreshAudioStatus();
-    }
-  }, [refreshAudioStatus]);
-
   const stopRecording = useCallback(async () => {
     if (stopInFlightRef.current) return;
     const mediaRecorders = Array.from(mediaRecordersRef.current.values());
@@ -399,10 +385,9 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       browserUploadBacklogRef.current.reset();
       browserBackpressureTriggeredRef.current = false;
       captureLeaseCommittedRef.current = false;
-      await restoreAudioRoute();
       await releaseCaptureLease().catch(() => {});
     }
-  }, [t, onSaved, releaseMedia, restoreAudioRoute, showToast, releaseCaptureLease]);
+  }, [t, onSaved, releaseMedia, showToast, releaseCaptureLease]);
 
   // Listen for remote overlay command and status requests and hold persistent BroadcastChannel
   useEffect(() => {
@@ -442,9 +427,6 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   }, [stopRecording]);
 
   const getAudioStream = async (deviceId: string, voiceProcessing: boolean) => {
-    if (!deviceId && !voiceProcessing) {
-      throw new Error(t('recording.blackholeInputRequiredError'));
-    }
     const constraints: MediaTrackConstraints = {
       echoCancellation: voiceProcessing,
       noiseSuppression: voiceProcessing,
@@ -520,11 +502,6 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     requireNative = false,
   ) => {
     if (startInFlightRef.current || isRecordingRef.current) return;
-    if (!requireNative && (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia)) {
-      showToast(t('recording.unsupportedBrowser'), 'error');
-      return;
-    }
-
     startInFlightRef.current = true;
     cancelStartRequestedRef.current = false;
     captureLeaseCommittedRef.current = false;
@@ -547,9 +524,13 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         return null;
       });
 
-      // Notification starts must never silently use a browser/BlackHole fallback.
-      if (requireNative && !(capabilities?.default_backend === 'native' && capabilities.native.available)) {
-        throw new Error(t('recording.nativeCaptureUnavailableUnknown'));
+      // Screen/system audio has only a native capture owner. Do not start
+      // a silently degraded microphone-only meeting for a requested mix.
+      const nativeAvailable = capabilities?.default_backend === 'native' && capabilities.native.available;
+      if (!nativeAvailable && (requireNative || mode !== 'mic_only')) {
+        throw new Error(mode !== 'mic_only'
+          ? t('recording.nativeCaptureRequiredForComputerAudio')
+          : t('recording.nativeCaptureUnavailableUnknown'));
       }
 
       const initialReservation = await createCaptureReservation();
@@ -657,6 +638,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                   signalLevelMic: signalLevelMicRef.current,
                   signalLevelSystem: signalLevelSystemRef.current,
                   progressText: progressTextRef.current,
+                  audioSourceHealth: audioSourceHealthRef.current,
                   visualCaptureLabel: visualCaptureLabelRef.current
                 });
               };
@@ -677,12 +659,35 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
               } else if (data.source === 'system') {
                 currentSysDbRef.current = dbVal;
               }
-            } else if (data.type === 'error') {
-              void ApiClient.logClientEvent('error', 'recorder', 'Native capture error event received', { sessionId: session.id, data });
-              if (data.source === 'system' && mode === 'both') {
-                showToast(t('recording.systemAudioUnavailableContinuingMic') || 'Audio di sistema interrotto. La registrazione continua con il microfono.', 'warning');
-                return;
+            } else if (SOURCE_RECOVERY_TYPES.has(data.type) && (data.source === 'mic' || data.source === 'system')) {
+              const source = data.source as 'mic' | 'system';
+              const nextState: AudioSourceRecoveryState = data.type === 'source_recovered'
+                ? 'healthy'
+                : data.type.replace('source_', '') as AudioSourceRecoveryState;
+              const current = audioSourceHealthRef.current;
+              if (current[source] !== nextState) {
+                const next = { ...current, [source]: nextState };
+                audioSourceHealthRef.current = next;
+                setAudioSourceHealth(next);
+                if (source === 'mic' && nextState !== 'healthy') currentMicDbRef.current = -120;
+                if (source === 'system' && nextState !== 'healthy') currentSysDbRef.current = -120;
+                const sourceLabel = t(source === 'mic' ? 'recording.sourceMic' : 'recording.sourceSystem');
+                const notice = t(
+                  nextState === 'healthy' ? 'recording.sourceRecovered'
+                    : nextState === 'recovering' ? 'recording.sourceRecovering'
+                      : 'recording.sourceUnavailable',
+                  { source: sourceLabel },
+                );
+                if (lastSourceNoticeRef.current !== notice && (nextState === 'healthy' || nextState === 'unavailable' || nextState === 'recovering')) {
+                  showToast(notice, nextState === 'healthy' ? 'success' : 'warning');
+                  lastSourceNoticeRef.current = notice;
+                }
+                setStatusText(next.mic === 'healthy' && next.system === 'healthy'
+                  ? t('recording.statusRecording')
+                  : t('recording.sourceDegraded'));
               }
+            } else if (data.type === 'error' || data.type === 'capture_fatal') {
+              void ApiClient.logClientEvent('error', 'recorder', 'Native capture error event received', { sessionId: session.id, reason: data.reason, source: data.source });
               eventSource.close();
               releaseMedia();
               ApiClient.cancelNativeCapture(session.id).catch(() => {});
@@ -735,9 +740,10 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
 
         eventSource.onerror = (err) => {
           console.error('EventSource error:', err);
-          eventSource.close();
-          // If we haven't successfully started recording yet, handle it as start failure
+          // EventSource reconnects automatically after a transport drop once
+          // capture has started; transport loss is not a physical audio error.
           if (!isRecordingRef.current) {
+            eventSource.close();
             releaseMedia();
             ApiClient.cancelNativeCapture(session.id).catch(() => {});
             localStorage.removeItem('asr-active-recording-id');
@@ -764,40 +770,20 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       setFallbackNotice(captureFallbackMessage);
       showToast(captureFallbackMessage, 'warning');
 
-      // 1. Audio Routing
-      if (mode !== 'mic_only') {
-        const routing = await ApiClient.testAudioRoute();
-        if (routing.success) {
-          await new Promise((r) => setTimeout(r, 500));
-          await loadDevices();
-          routeActivatedRef.current = true;
-        } else {
-          throw new Error(t('recording.setupAudioError'));
-        }
+      // Explicitly selected browser microphone-only fallback.
+      if (mode !== 'mic_only') throw new Error(t('recording.nativeCaptureRequiredForComputerAudio'));
+      if (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error(t('recording.unsupportedBrowser'));
       }
-
-      // 2. Audio Streams setup
       setStatusText(t('recording.accessingSources'));
       sourceStreamsRef.current = [];
-      let micStream = null;
-
-      if (mode !== 'pc_only') {
-        micStream = await getAudioStream(selectedMicrophone, true);
-        sourceStreamsRef.current.push(micStream);
-        const track = micStream.getAudioTracks()[0];
-        if (track && isAggregateInput(track.label || '')) {
-          throw new Error(t('recording.aggregateDeviceError'));
-        }
-        await loadDevices();
-      } else if (!selectedSystemDevice) {
-        // Unlock permissions
-        const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        permissionStream.getTracks().forEach((track) => track.stop());
-        await loadDevices();
+      const micStream = await getAudioStream(selectedMicrophone, true);
+      sourceStreamsRef.current.push(micStream);
+      const micTrack = micStream.getAudioTracks()[0];
+      if (micTrack && isAggregateInput(micTrack.label || '')) {
+        throw new Error(t('recording.aggregateDeviceError'));
       }
-
-      const systemStream = mode !== 'mic_only' ? await getAudioStream(selectedSystemDevice, false) : null;
-      if (systemStream) sourceStreamsRef.current.push(systemStream);
+      await loadDevices();
 
       // 3. Audio graph mixing
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -838,7 +824,6 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       };
 
       const micNode = connectSourceTrack('mic', micStream);
-      const systemNode = connectSourceTrack('system', systemStream);
       mixBus.connect(destNode);
       keepDestinationClocked(destNode);
       silenceSource.start();
@@ -859,14 +844,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
         micAnalyserRef.current = null;
       }
 
-      if (systemNode) {
-        systemAnalyserRef.current = actx.createAnalyser();
-        systemAnalyserRef.current.fftSize = 512;
-        systemAnalyserRef.current.smoothingTimeConstant = 0.78;
-        systemNode.connect(systemAnalyserRef.current);
-      } else {
-        systemAnalyserRef.current = null;
-      }
+      systemAnalyserRef.current = null;
 
       drawAudioMeter();
 
@@ -893,19 +871,9 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
 
       // 5. Start MediaRecorder
       const recorderInputs: Array<{ trackId: string; stream: MediaStream }> = [];
-      if (mode === 'both') {
-        const micDest = trackDestinations.get('mic');
-        const systemDest = trackDestinations.get('system');
-        if (micDest) recorderInputs.push({ trackId: 'mic', stream: micDest.stream });
-        if (systemDest) recorderInputs.push({ trackId: 'system', stream: systemDest.stream });
-        recorderInputs.push({ trackId: 'mixed', stream: destNode.stream });
-      } else if (mode === 'mic_only') {
-        const micDest = trackDestinations.get('mic');
-        if (micDest) recorderInputs.push({ trackId: 'mic', stream: micDest.stream });
-      } else if (mode === 'pc_only') {
-        const systemDest = trackDestinations.get('system');
-        if (systemDest) recorderInputs.push({ trackId: 'system', stream: systemDest.stream });
-      }
+      const micDest = trackDestinations.get('mic');
+      if (!micDest) throw new Error(t('recording.readinessMicMissing'));
+      recorderInputs.push({ trackId: 'mic', stream: micDest.stream });
 
       const startTrackRecorder = (trackId: string, stream: MediaStream) => {
         const recorder = mimeType
@@ -1008,47 +976,15 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
       }
       visualCaptureLabelRef.current = '';
       releaseMedia();
-      await restoreAudioRoute();
       setStatusText(t('common.error'));
       setStatusState('error');
       showToast(t('recording.startFailed', { error: error.message }), 'error');
     }
-  }, [t, selectedMicrophone, selectedSystemDevice, captureCapabilities, setCapturePermissions, loadDevices, releaseMedia, restoreAudioRoute, showToast, stopRecording, drawAudioMeter, stopAudioMeter, releaseCaptureLease, setIsVerifying, requestRecordingOverlay]);
-
-  const toggleTestAudioRoute = async () => {
-    setIsVerifying(true);
-    try {
-      if (!isTestRouted) {
-        const data = await ApiClient.testAudioRoute();
-        if (data.success) {
-          setIsTestRouted(true);
-          routeActivatedRef.current = true;
-          showToast(t('recording.routingActive', { devices: `${data.output_device} / ${data.input_device}` }), 'success');
-        } else {
-          showToast(t('recording.routingActiveFailed'), 'error');
-        }
-      } else {
-        const data = await ApiClient.testAudioRestore();
-        if (data.success) {
-          setIsTestRouted(false);
-          routeActivatedRef.current = false;
-          showToast(t('recording.routingRestoreSuccess'), 'success');
-        } else {
-          showToast(t('recording.routingRestoreFailed'), 'error');
-        }
-      }
-      refreshAudioStatus();
-    } catch (error: any) {
-      showToast(t('recording.routingTestError', { error: error.message }), 'error');
-    } finally {
-      setIsVerifying(false);
-    }
-  };
+  }, [t, selectedMicrophone, captureCapabilities, setCapturePermissions, loadDevices, releaseMedia, showToast, stopRecording, drawAudioMeter, stopAudioMeter, releaseCaptureLease, setIsVerifying, requestRecordingOverlay]);
 
   const verifyAudioSetup = async () => {
     setIsVerifying(true);
     await loadDevices();
-    await refreshAudioStatus();
     await refreshCaptureCapabilities();
     setIsVerifying(false);
   };
@@ -1063,9 +999,6 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     };
 
     const handlePageHide = () => {
-      if (routeActivatedRef.current) {
-        navigator.sendBeacon?.('/v1/system/audio/restore');
-      }
       const reservationId = captureReservationIdRef.current;
       if (reservationId && !captureLeaseCommittedRef.current) {
         releaseCaptureReservationOnUnload(reservationId);
@@ -1095,23 +1028,17 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     refreshCapturePermissions,
     permissionsErrorDetails,
     fallbackNotice,
+    audioSourceHealth,
     statusText,
     statusState,
     microphones,
-    systemDevices,
     selectedMicrophone,
-    selectedSystemDevice,
-    audioRouteStatus,
-    isTestRouted,
     isVerifying,
     canvasRef,
     setSelectedMicrophone,
-    setSelectedSystemDevice,
     startRecording,
     cancelPendingStart,
     stopRecording,
-    toggleTestAudioRoute,
     verifyAudioSetup,
-    refreshAudioStatus,
   };
 }

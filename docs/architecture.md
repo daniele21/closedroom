@@ -104,12 +104,14 @@ solo l'ammissione: non possiede queue, worker, recording state o model lifecycle
 
 ClosedRoom dispone di due backend di cattura:
 
-1. nativo macOS, preferito, tramite AVFoundation e ScreenCaptureKit;
-2. browser, con `MediaRecorder` e BlackHole per l'audio di sistema.
+1. nativo macOS tramite AVFoundation e ScreenCaptureKit, unico percorso per microfono + audio computer;
+2. browser con `MediaRecorder`, solo microfono e solo se scelto esplicitamente quando la cattura nativa non è pronta.
 
 Nel normale New Meeting il frontend prova automaticamente microfono + audio
 computer. Backend, source mode e device non fanno parte del golden path e vengono
-mostrati solo come recovery quando la cattura automatica non è disponibile. Con
+mostrati solo come recovery quando la cattura automatica non è disponibile. Se
+ScreenCaptureKit manca, la UI impedisce di registrare l'audio computer e propone
+una scelta esplicita solo microfono; non altera l'uscita macOS. Con
 backend nativo pronto, `Contesto schermo` è una disclosure secondaria, disattivata
 per default: solo una finestra/schermo scelti esplicitamente abilitano la cattura
 di frame a bassa frequenza. Questa scelta non avvia alcun VLM durante recording.
@@ -146,13 +148,18 @@ sequenceDiagram
     R-->>F: stato recorded
 ```
 
+La cattura nativa ripristina sorgenti isolate tramite `MicrophoneCapture`;
+gli eventi `source_*` non fermano il meeting. `RecordingStore` conserva
+i gap e ricostruisce WAV derivati senza sovrascrivere gli originali.
+Recovery fisico macOS ancora da provare.
+
 Il contratto critico è la sequenza monotona dei chunk. Un retry identico è
 idempotente se dimensione e SHA-256 coincidono; un contenuto diverso per una
 sequenza già committata genera conflitto. Ogni sessione usa un lock dedicato e
 le scritture dei metadata sono atomiche. La selezione visuale è indipendente
 dalla scelta audio: nessuna sorgente visuale esplicita significa nessun frame.
 
-Durante una cattura nativa attiva l'overlay può richiedere anche uno screenshot manuale del monitor. È una one-shot ScreenCaptureKit separata dall'audio: il monitor è scelto esplicitamente quando ce n'è più di uno, le finestre ClosedRoom vengono escluse dal content filter e il timestamp canonico è `captured_uptime - recording_ready_uptime`. La risposta API arriva solo dopo il commit di originale, thumbnail e manifest nel `RecordingStore`; un `request_id` rende idempotente il retry. Stop chiude prima l'admission di nuovi screenshot e attende bounded gli scatti già ammessi, senza far dipendere la finalizzazione audio dall'inferenza.
+L'overlay può richiedere uno screenshot ScreenCaptureKit separato dall'audio: monitor esplicito se necessario, finestre ClosedRoom escluse e offset `captured_uptime - recording_ready_uptime`. `RecordingStore` conferma solo dopo il commit di originale, thumbnail e manifest; retry idempotente con `request_id`. Stop attende gli scatti ammessi.
 
 ### 5.2 Trascrizione e arricchimenti post-meeting
 
@@ -445,13 +452,6 @@ quando il backend nativo è pronto. La selezione esplicita di una sola sorgente
 abilita i frame a 0.5 fps; nessun VLM viene eseguito durante la registrazione.
 I workflow tecnici/legacy che dispongono già di frame restano compatibili.
 
-### AudioRouter
-
-`AudioRouter` e l'helper Core Audio gestiscono il dispositivo temporaneo usato
-dal fallback BlackHole. Il lifecycle comprende snapshot dell'output originale,
-attivazione, verifica, ripristino e cleanup dopo crash. Lo stato di recovery è
-salvato nella cache e gli aggregati orfani vengono rimossi all'avvio.
-
 ## 12. Trascrizione
 
 `TranscriptionService` possiede la policy applicativa; `transcriber.py` e i
@@ -721,7 +721,6 @@ macOS usa Python 3.10 e fissa `mlx 0.31.2` per la regressione GPU verificata in
 | Log LLM | `~/Library/Logs/ClosedRoom/llm-server.log` | `LocalLLMSidecar` | Append del processo sidecar |
 | Log applicativo | `~/Library/Logs/ClosedRoom/closedroom.log` | `app_logging.py`, `diagnostics.py` | Rotazione 5 MiB × 3, record correlati e redazione secret |
 | Modelli | `~/Library/Application Support/ClosedRoom/models/` | runtime ASR/FluidAudio | Riutilizzati tra aggiornamenti app |
-| Routing recovery | cache app/dev | `AudioRouter` | Ripristino post-crash |
 
 ### Tabelle SQLite
 
@@ -894,7 +893,7 @@ Non sono presenti metriche remote, tracing distribuito o telemetry SaaS.
 - la ROI visuale generica resta sperimentale finché non viene validata su Meet, Zoom e Teams; la cadenza 0.5 fps resta soggetta al benchmark F0 prima di qualsiasi semplificazione evidence-led;
 - il wizard tecnico/import `TranscriptionPage` usa ancora polling job; il normale Meeting usa eventi bounded e recovery GET;
 - gli arricchimenti, ASR/VAD, cattura nativa e overlay espongono fallback espliciti, verificati anche dalla `.app`; l'eseguibile congelato inoltra `inspect-meeting` alla CLI senza avviare la shell grafica;
-- la baseline test include casi storicamente non allineati per AudioRouter e directory recording, da distinguere dalle regressioni reali;
+- i test per l'audio del computer usano la cattura nativa; la prova fisica macOS/TCC resta distinta dalle fixture;
 - build, cattura nativa e diarizzazione sono intenzionalmente Apple Silicon/macOS.
 
 ## 24. Mappa delle fonti di verità

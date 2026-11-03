@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from local_asr_server.server import AudioRouter, create_app
+from local_asr_server.server import create_app
 from support import deterministic_settings
 
 
@@ -398,47 +398,28 @@ class RecordingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["transcription"])
 
-    @patch.object(AudioRouter, "route_to_multi_output")
-    def test_create_recording_does_not_change_audio_route(self, route) -> None:
-        created = self.client.post(
-            "/v1/recordings",
-            json={"title": "Call", "mime_type": "audio/webm"},
-        )
+    def test_legacy_audio_route_endpoints_are_removed(self) -> None:
+        # The app's catch-all GET page route legitimately returns 405 for
+        # unsupported POST methods. Check the actual route table as well as
+        # external rejection so no output-mutating endpoint can survive.
+        retired_paths = [
+            "/v1/system/audio/status",
+            "/v1/system/audio/activate",
+            "/v1/system/audio/restore",
+            "/v1/system/audio-route/test-route",
+            "/v1/system/audio-route/test-restore",
+        ]
+        registered_paths = {route.path for route in self.client.app.routes}
+        for endpoint in retired_paths:
+            with self.subTest(endpoint=endpoint):
+                self.assertNotIn(endpoint, registered_paths)
+                response = self.client.get(endpoint) if endpoint.endswith("/status") else self.client.post(endpoint)
+                self.assertEqual(response.status_code, 404 if endpoint.endswith("/status") else 405)
 
-        self.assertEqual(created.status_code, 201)
-        route.assert_not_called()
-
-    @patch.object(AudioRouter, "get_status")
-    def test_audio_status_endpoint(self, get_status) -> None:
-        get_status.return_value = {
-            "ok": True,
-            "platform": "darwin",
-            "ready_to_record": True,
-            "input_device": "MacBook Microphone",
-            "output_device": "Local ASR Output - MacBook Speakers",
-        }
-
-        response = self.client.get("/v1/system/audio/status")
-
+    def test_capture_capability_does_not_offer_virtual_device_fallback(self) -> None:
+        response = self.client.get("/v1/capture/capabilities")
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["ready_to_record"])
-
-    @patch.object(AudioRouter, "get_status")
-    @patch.object(AudioRouter, "route_to_multi_output", return_value=True)
-    def test_audio_activate_endpoint(self, route, get_status) -> None:
-        get_status.return_value = {
-            "ok": True,
-            "platform": "darwin",
-            "ready_to_record": True,
-            "input_device": "MacBook Microphone",
-            "output_device": "Local ASR Output - MacBook Speakers",
-        }
-
-        response = self.client.post("/v1/system/audio/activate")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["success"])
-        route.assert_called_once_with()
+        self.assertEqual(response.json()["fallbacks"], ["browser_microphone_only"])
 
     def test_protected_api_requires_local_session(self) -> None:
         app = create_app(

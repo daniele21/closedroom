@@ -13,6 +13,7 @@ final class SampleBufferWavSink {
     private let admissionLock = NSLock()
     private var pendingBytes = 0
     private var failed = false
+    private var mainWriterDisabledAfterSwitch = false
     private var recovery: AudioRecoverySegments?
     var onFailure: (() -> Void)?
 
@@ -43,6 +44,16 @@ final class SampleBufferWavSink {
         }
     }
 
+    // The original WAV becomes a valid, immutable prefix after an input
+    // switch. New audio goes exclusively to checkpoint segments; RecordingStore
+    // may publish a verified aligned derivative without overwriting the prefix.
+    func markInputDiscontinuity() {
+        queue.async {
+            self.recovery?.markDiscontinuity()
+            self.mainWriterDisabledAfterSwitch = true
+        }
+    }
+
     func append(_ sampleBuffer: CMSampleBuffer) {
         guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
         let size = max(1, CMSampleBufferGetTotalSampleSize(sampleBuffer))
@@ -63,6 +74,7 @@ final class SampleBufferWavSink {
             if self.finished { return }
             do {
                 try self.recovery?.append(sampleBuffer)
+                if self.mainWriterDisabledAfterSwitch { return }
                 if self.writer == nil {
                     let writer = try AVAssetWriter(outputURL: self.url, fileType: .wav)
 

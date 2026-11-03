@@ -175,10 +175,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Check the macOS audio capture configuration.",
     )
     subparsers.add_parser(
-        "setup-audio",
-        help="Install macOS audio routing prerequisites.",
-    )
-    subparsers.add_parser(
         "app",
         help="Launch ClosedRoom in menu bar mode (macOS only).",
     )
@@ -240,79 +236,24 @@ def _resolve_serve_port(args: argparse.Namespace) -> int:
 
 
 def _print_audio_status() -> bool:
-    """Check and display the audio routing configuration status."""
-    from local_asr_server.audio_router import AudioRouter
+    """Report native AVFoundation/ScreenCaptureKit capability without mutating the audio route."""
+    from local_asr_server.native_capture import NativeCaptureManager
 
-    status = AudioRouter.get_status()
+    capture = NativeCaptureManager()
+    capabilities = capture.capabilities()
+    available = capabilities.get("available") is True
+    print(f"{'OK' if available else 'MISSING':7} Native macOS capture")
+    if not available:
+        print(f"        Reason: {capabilities.get('reason') or 'unknown'}")
+        return False
 
-    # Check Swift audio helper
-    helper_ok = status.get("audio_helper_available", False)
-    swift_check = "OK" if helper_ok else "MISSING"
-
-    checks = (
-        ("macOS", status["platform"] == "darwin"),
-        ("BlackHole 2ch", status["blackhole_installed"]),
-        ("Audio Helper", helper_ok),
-    )
-    for label, passed in checks:
-        print(f"{'OK' if passed else 'MISSING':7} {label}")
-
-    if status.get("physical_output"):
-        print(f"        Current output: {status['physical_output']}")
-
-    routing_active = status.get("routing_active", False)
-    if routing_active:
-        print(f"        Routing:        Active (temporary device)")
-
-    if status["ready_to_record"]:
-        print(
-            "\nAudio routing is ready."
-            "\nMulti-Output devices are created automatically when recording."
-        )
-        return True
-
-    print("\nAudio routing is not ready.")
-    missing = status.get("missing", [])
-    if "audio_helper" in missing:
-        print("- Audio helper not available. Run: local-asr setup-audio")
-    if "blackhole" in missing:
-        print("- BlackHole 2ch not installed. Run: brew install blackhole-2ch")
-    return False
-
-
-def _setup_audio() -> None:
-    """Install audio prerequisites and compile the Swift helper."""
-    if sys.platform != "darwin":
-        raise SystemExit("setup-audio is supported only on macOS.")
-    brew = shutil.which("brew")
-    if not brew:
-        raise SystemExit("Homebrew is required: https://brew.sh")
-
-    # Install BlackHole (SwitchAudioSource no longer required)
-    print("Installing BlackHole 2ch...")
-    subprocess.run(
-        [brew, "install", "blackhole-2ch"],
-        check=True,
-    )
-
-    # Compile the Swift audio helper
-    print("\nCompiling Core Audio helper...")
-    try:
-        from local_asr_server.macos_audio_helper.compile import compile_helper
-        binary_path = compile_helper(force=True)
-        print(f"Audio helper compiled: {binary_path}")
-    except RuntimeError as exc:
-        print(f"WARNING: Failed to compile audio helper: {exc}")
-        print("You may need to install Xcode Command Line Tools:")
-        print("  xcode-select --install")
-        return
-
-    print(
-        "\nSetup complete! Multi-Output devices are now created "
-        "automatically when you start a recording.\n"
-        "No manual Audio MIDI Setup configuration is needed.\n"
-        "Run 'local-asr doctor' to verify."
-    )
+    permissions = capture.permissions()
+    mic_ok = permissions.get("microphone") == "authorized"
+    screen_ok = permissions.get("screen_capture") == "granted"
+    print(f"{'OK' if mic_ok else 'MISSING':7} Microphone permission")
+    print(f"{'OK' if screen_ok else 'MISSING':7} Screen/system audio permission")
+    print("        ClosedRoom captures computer audio natively; it never changes the system output.")
+    return mic_ok and screen_ok
 
 
 def main() -> None:
@@ -325,9 +266,6 @@ def main() -> None:
     if args.command == "doctor":
         if not _print_audio_status():
             raise SystemExit(1)
-        return
-    if args.command == "setup-audio":
-        _setup_audio()
         return
     if args.command == "app":
         _ensure_dev_frontend_bundle()

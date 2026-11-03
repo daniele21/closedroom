@@ -1,6 +1,6 @@
 # Audio Continuity & Auto-Recovery (ACR)
 
-Status: ACTIVE — PLAN ONLY; P0 recording reliability. Created 2026-11-03.
+Status: ACTIVE — implementation draft PR #176; P0 recording reliability. Created 2026-11-03.
 Base: dev 5767e5d985868a0d85b5df6b7de36bcd980af892 (refresh before implementation). Target: small convergent PRs to dev; dev -> main RELEASE.
 
 ## Product outcome and risk
@@ -8,7 +8,7 @@ Base: dev 5767e5d985868a0d85b5df6b7de36bcd980af892 (refresh before implementatio
 **User/job:** recording a meeting must continue if Bluetooth headphones disconnect, USB microphone vanishes, default input switches or an individual audio stream is interrupted.
 **Outcome:** same recording_id, same increasing capture clock, continued saving from every remaining permitted source, auto-recovery of the affected source without pressing REC. Preserve any captured speech and expose lost intervals truthfully.
 **Default UX:** native macOS auto-recovery with nonblocking, accessible per-source status; explicit recovery action if no source remains.
-**Non-goals:** synthesizing missing speech, literally gapless Bluetooth switches, new capture engine/session, cloud/network fallback, automatic output routing changes, changes to ASR/diarization, reboot-persistent live recording. Browser parity is a separate explicitly scoped follow-up.
+**Non-goals:** synthesizing missing speech, literally gapless Bluetooth switches, new capture engine/session, cloud/network fallback, automatic output routing changes, changes to ASR/diarization, reboot-persistent live recording. Browser device-switch parity is out of scope; browser system-audio capture is not supported.
 **Risks:** VALUE recording trust; USABILITY clear REC/degraded status; FEASIBILITY CoreAudio/AVCaptureSession/SCK, device changes, audio formats and PTS; VIABILITY bounded battery/CPU/disk use in long meetings.
 **Quality:** privacy-first and local by default; no raw content/device IDs in ordinary telemetry; no overwrite of finalized or in-progress audio, no fabricated silence/gaps.
 **Axes:** PRODUCT_FEATURE; DELIVERY ITERATION -> INTEGRATION (dev) -> RELEASE (main); VALIDATION LEAN planning, STRONG expected implementation (selector wins), FULL release; EXECUTION AGENT_LOCAL for deterministic, REMOTE_AUTOMATED for unavailable automatable gates, REAL_ENVIRONMENT for physical devices/TCC.
@@ -23,9 +23,9 @@ Verified on dev at planning:
 - frontend/src/hooks/useRecorder.ts: many native errors trigger cancel/reset; useAudioDevices.ts devicechange only refreshes browser enumeration.
 
 **Owners:** Swift helper for physical capture; NativeCaptureManager for one child process and event interpretation; RecordingStore for recording artifacts/timeline/recovery; routers for API/SSE; useRecorder/recorderLifecycle for UI state; HeavyWorkloadArbiter for resource admission. No second recording store, scheduler or supervisor.
-**Preserve:** one capture lease/ready epoch, mic/system dual tracks and canonical mic.wav/system.wav/recording.wav consumers, existing file reservations, immutable finalized artifacts, legacy recovery, screenshot flow, browser fallback, auth/TCC and graceful Stop/Cancel.
+**Preserve:** one capture lease/ready epoch, mic/system dual tracks and canonical mic.wav/system.wav/recording.wav consumers, existing file reservations, immutable finalized artifacts, legacy checkpoint recovery, screenshot flow, explicit browser microphone-only fallback, auth/TCC and graceful Stop/Cancel.
 
-## ACR-0 — Diagnose and freeze contract [SERIAL; READY]
+## ACR-0 — Diagnose and freeze contract [SERIAL; ACTIVE]
 
 1. Reproduce BT unplug, USB removal, default-input switch, SCK error and Stop during recovery. Record source-safe events, output sizes and missing intervals, not meeting audio in CI.
 2. Inspect SampleBufferWavSink, PTS/format behavior, capture exit, existing recovery, transcription/mix consumers and PR overlap before picking segment strategy.
@@ -42,11 +42,11 @@ ACR-0 (serial contract) -> parallel ACR-1/2/3/4 -> ACR-5 convergence -> ACR-6 re
 
 | Lane | State | Exclusive write boundary | Observable result |
 | --- | --- | --- | --- |
-| ACR-1 / A | READY | native_capture_helper/*.swift and Swift probes | Device events, independent source recovery and safe audio segment writer; no helper restart. |
-| ACR-2 / B | READY | native_capture.py, routers/system.py, recordings.py and Python tests | Nonfatal event propagation, persistent timeline/segments, composition and recovery. Coordinate RecordingStore with AC-4 workstream. |
-| ACR-3 / C | READY | frontend/src/hooks/useRecorder.ts, recorder UI/overlay, i18n/tests | Same REC/clock, honest source health and accessible auto-recovery notice. Coordinate AC-1/AC-2. |
-| ACR-4 / D | READY | new fixtures and harness scripts only | Deterministic device-change storm, source failure, gap/format/clock fixtures and privacy-safe probes. |
-| ACR-5 / integrator | BLOCKED | integrated contract + affected docs/E2E | One end-to-end native path; separate browser parity backlog item. |
+| ACR-1 / A | ACTIVE | native_capture_helper/*.swift and Swift probes | Device events, independent source recovery and safe audio segment writer; no helper restart. |
+| ACR-2 / B | ACTIVE | native_capture.py, routers/system.py, recordings.py and Python tests | Nonfatal event propagation, persistent timeline/segments, composition and recovery. Coordinate RecordingStore with AC-4 workstream. |
+| ACR-3 / C | ACTIVE | frontend/src/hooks/useRecorder.ts, recorder UI/overlay, i18n/tests | Same REC/clock, honest source health and accessible auto-recovery notice. Coordinate AC-1/AC-2. |
+| ACR-4 / D | ACTIVE | new fixtures and harness scripts only | Deterministic device-change storm, source failure, gap/format/clock fixtures and privacy-safe probes. |
+| ACR-5 / integrator | ACTIVE | integrated contract + affected docs/E2E | One end-to-end native path; separate browser parity backlog item. |
 | ACR-6 / target Mac | BLOCKED | real-machine evidence | Exact-candidate peripheral/TCC proof and rollout decision. |
 
 Worktrees/branches must not write the same file. Freeze JSON event/segment contract first and converge early; no conflicting long-lived stacks.
@@ -66,7 +66,7 @@ Extend test/test_native_capture.py, test/test_recording_api.py, RecordingStore/f
 4. Zero live sources: no false healthy REC; earlier audio preserved; restore or explicit Stop succeeds.
 5. Format/PTS/rate changes, delayed/duplicated events: non-overlapping aligned segments, playable mix, correct ASR/diarization offsets.
 6. Disk full, TCC denied, helper crash, SSE disconnect, backend restart, partial finalize and duplicate stop/cancel: recoverable files, no overwrite/lease leak.
-7. Screenshot/visual capture, heavy-AI priority and browser fallback unaffected.
+7. Screenshot/visual capture and heavy-AI priority unaffected; browser fallback remains microphone-only, explicitly chosen.
 
 Mock evidence proves contracts, never physical Bluetooth/CoreAudio or TCC reliability.
 
@@ -81,9 +81,9 @@ Mock evidence proves contracts, never physical Bluetooth/CoreAudio or TCC reliab
 
 ## Resume checkpoint
 
-PLAN ONLY: ACR-0 READY; no feature implementation or test/physical PASS.
+Draft PR #176: ACR-1..5 code and fixtures staged; ACR-0 physical evidence, automated gates and release proof PENDING.
 Source dev at planning: 5767e5d985868a0d85b5df6b7de36bcd980af892; refresh dev/head/tree/base/related PRs at resume.
 Confirmed: native mic runtime error ends capture; generic error terminates manager/SSE; UI cancellation; limited SCK retry.
 Unknown: actual sink/manifest feasibility, physical device event fidelity, latency/gap and browser parity.
-Next: inspect SampleBufferWavSink and reproduce BT unplug during live system capture; then freeze event + segment contract and failing tests.
+Next: resolve exact-head CI, compile Swift on Mac runner and reproduce BT unplug with system capture; validate segmented timing and recovery against physical audio.
 STRONG automated integration and REAL_ENVIRONMENT evidence: PENDING.

@@ -17,6 +17,8 @@ final class AudioRecoverySegments {
     private var current: SampleBufferWavSink?
     private var startPTS = 0.0
     private var endPTS = 0.0
+    private var nextDiscontinuity = false
+    private var currentDiscontinuity = false
     private var sequence = 0
     private var nextPublication = 0
     private var totalFrames: Int64 = 0
@@ -25,6 +27,13 @@ final class AudioRecoverySegments {
     init(directory: URL, source: String) {
         self.directory = directory
         self.source = source
+    }
+
+    // Called on the owning SampleBufferWavSink queue. A source handover
+    // seals the current immutable checkpoint before the new clock/rate starts.
+    func markDiscontinuity() {
+        if current != nil { seal() }
+        nextDiscontinuity = true
     }
 
     func append(_ sample: CMSampleBuffer) throws {
@@ -47,6 +56,8 @@ final class AudioRecoverySegments {
             sink.onFailure = { [weak self] in self?.fail() }
             current = sink
             startPTS = pts
+            currentDiscontinuity = nextDiscontinuity
+            nextDiscontinuity = false
         }
         var duration = CMSampleBufferGetDuration(sample).seconds
         if !duration.isFinite || duration <= 0 {
@@ -83,6 +94,7 @@ final class AudioRecoverySegments {
         let index = sequence
         let start = startPTS
         let end = endPTS
+        let discontinuity = currentDiscontinuity
         sequence += 1
         current = nil
         lock.lock()
@@ -136,6 +148,7 @@ final class AudioRecoverySegments {
                     "file": audio.lastPathComponent, "bytes": data.count,
                     "sha256": digest, "start_pts": start, "end_pts": end,
                     "frames": frameCount, "total_frames": committedFrames,
+                    "discontinuity_before": discontinuity,
                 ]
                 let payload = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
                 let pending = directory.appendingPathComponent(String(format: ".%08d.json.part", index))

@@ -24,7 +24,6 @@ from product_version import read_product_version
 APP_VERSION = read_product_version(PROJECT_ROOT)
 
 CACHE_DIR      = PROJECT_ROOT / ".cache"
-AUDIO_HELPER   = CACHE_DIR / "audio-helper" / "audio-helper"
 NATIVE_CAPTURE_HELPER = CACHE_DIR / "native-capture-helper" / "native-capture-helper"
 SPEAKER_DIARIZATION_HELPER = CACHE_DIR / "speaker-diarization-helper" / "speaker-diarization-helper"
 BUILD_ASSETS   = PROJECT_ROOT / "build_assets"                      # created by build.sh
@@ -49,12 +48,6 @@ except ImportError:
 
 # ── Pre-flight checks ──────────────────────────────────────────────────────────
 
-if not AUDIO_HELPER.exists():
-    raise FileNotFoundError(
-        f"Pre-compiled audio helper not found at {AUDIO_HELPER}.\n"
-        "Run: ./build.sh  (or: uv run local-asr setup-audio)"
-    )
-
 if not NATIVE_CAPTURE_HELPER.exists():
     raise FileNotFoundError(
         f"Pre-compiled native capture helper not found at {NATIVE_CAPTURE_HELPER}.\n"
@@ -74,12 +67,11 @@ if not ffmpeg_bin.exists():
         "Run: ./build.sh  to download and bundle it."
     )
 
-# ── Collect binaries: audio-helper + ffmpeg ────────────────────────────────────
+# ── Collect binaries: diarization helper + ffmpeg ────────────────────────────────────
 
 extra_binaries = [
     # PyInstaller may stage collected binaries under Contents/Frameworks in
     # macOS app bundles; build.sh discovers and signs the realized paths.
-    (str(AUDIO_HELPER), "."),
     (str(SPEAKER_DIARIZATION_HELPER), "."),
     (str(ffmpeg_bin), "."),
 ]
@@ -166,11 +158,8 @@ hidden_imports = [
     "local_asr_server.settings",
     "local_asr_server.recordings",
     "local_asr_server.transcriptions",
-    "local_asr_server.audio_router",
     "local_asr_server.llm",
     "local_asr_server.launchd",
-    "local_asr_server.macos_audio_helper",
-    "local_asr_server.macos_audio_helper.compile",
     "local_asr_server.native_capture",
     "local_asr_server.native_capture_helper",
     "local_asr_server.native_capture_helper.compile",

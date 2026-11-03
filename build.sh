@@ -209,31 +209,8 @@ pnpm run build
 cd "$SCRIPT_DIR"
 ok "React frontend built successfully"
 
-# ── Step 1: Compile Swift audio helper ────────────────────────────────────────
-log "Step 1/5: Compiling Swift audio helper..."
-
-HELPER_CACHE="$SCRIPT_DIR/.cache/audio-helper/audio-helper"
-HELPER_DEST="$BUILD_ASSETS/audio-helper"
-
-if [[ -f "$HELPER_CACHE" ]] && [[ -f "$SCRIPT_DIR/.cache/audio-helper/source.sha256" ]]; then
-    SOURCE_HASH=$(shasum -a 256 "$SCRIPT_DIR/src/local_asr_server/macos_audio_helper/audio_helper.swift" | awk '{print $1}')
-    CACHED_HASH=$(cat "$SCRIPT_DIR/.cache/audio-helper/source.sha256")
-    if [[ "$SOURCE_HASH" == "$CACHED_HASH" ]]; then
-        ok "Audio helper binary is up-to-date (cache hit)"
-        cp "$HELPER_CACHE" "$HELPER_DEST"
-    else
-        log "Source changed, recompiling..."
-        uv run --no-sync local-asr setup-audio
-        cp "$HELPER_CACHE" "$HELPER_DEST"
-    fi
-else
-    log "Compiling for the first time..."
-    uv run --no-sync local-asr setup-audio
-    cp "$HELPER_CACHE" "$HELPER_DEST"
-fi
-chmod +x "$HELPER_DEST"
-ok "Audio helper: $HELPER_DEST ($(du -sh "$HELPER_DEST" | cut -f1))"
-
+# ── Step 1: Compile native capture + diarization helpers ────────────────
+log "Step 1/5: Compiling native capture helpers..."
 NATIVE_HELPER_CACHE="$SCRIPT_DIR/.cache/native-capture-helper/native-capture-helper"
 NATIVE_HELPER_DEST="$BUILD_ASSETS/native-capture-helper"
 NATIVE_HELPER_APP="$BUILD_ASSETS/ClosedRoomNativeCapture.app"
@@ -487,16 +464,13 @@ find_bundled_binary() {
     find "$APP_PATH/Contents" -type f -name "$name" -print -quit
 }
 
-AUDIO_HELPER_IN_APP="$(find_bundled_binary "audio-helper")"
 SPEAKER_DIARIZATION_HELPER_IN_APP="$(find_bundled_binary "speaker-diarization-helper")"
 FFMPEG_IN_APP="$(find_bundled_binary "ffmpeg")"
 
-[[ -n "$AUDIO_HELPER_IN_APP" ]] || die "audio-helper not found in app bundle"
 [[ -n "$SPEAKER_DIARIZATION_HELPER_IN_APP" ]] || die "speaker-diarization-helper not found in app bundle"
 [[ -f "$NATIVE_HELPER_IN_APP" ]] || die "ClosedRoomNativeCapture executable not found in helper app"
 [[ -n "$FFMPEG_IN_APP" ]] || die "ffmpeg not found in app bundle"
 
-chmod +x "$AUDIO_HELPER_IN_APP"
 chmod +x "$SPEAKER_DIARIZATION_HELPER_IN_APP"
 chmod +x "$NATIVE_HELPER_IN_APP"
 chmod +x "$FFMPEG_IN_APP"
@@ -548,7 +522,6 @@ done < <(
 )
 
 # Sign inner binaries first, then their parent bundles (inside-out order).
-sign_entitled "$AUDIO_HELPER_IN_APP"
 sign_entitled "$SPEAKER_DIARIZATION_HELPER_IN_APP"
 sign_entitled "$NATIVE_HELPER_IN_APP"
 sign_entitled "$NATIVE_HELPER_APP_IN_APP"

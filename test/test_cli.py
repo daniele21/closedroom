@@ -27,6 +27,10 @@ class CliPortTests(unittest.TestCase):
         args = _build_parser().parse_args(["serve", "--reload", "--port", "1240"])
         self.assertEqual(_resolve_serve_port(args), 1240)
 
+    def test_obsolete_audio_setup_command_is_not_exposed(self) -> None:
+        with self.assertRaises(SystemExit):
+            _build_parser().parse_args(["setup-audio"])
+
     def test_recordings_directory_defaults_to_persisted_settings(self) -> None:
         args = _build_parser().parse_args(["serve"])
         self.assertIsNone(args.recordings_dir)

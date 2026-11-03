@@ -233,22 +233,6 @@ def get_ffprobe_path() -> str:
 
 
 
-def get_audio_helper_path() -> Path:
-    """
-    Return the path to the pre-compiled Swift audio helper binary.
-
-    In bundle mode the pre-compiled binary is included in Resources.
-    In dev mode we rely on the runtime compilation path managed by
-    ``macos_audio_helper.compile``.
-    """
-    if is_bundled():
-        return get_bundle_dir() / "audio-helper"
-
-    # Dev mode: use the compile-time cache location
-    from local_asr_server.macos_audio_helper.compile import _BINARY_PATH  # type: ignore
-    return _BINARY_PATH
-
-
 def get_native_capture_helper_path() -> Path:
     """
     Return the path to the native ScreenCaptureKit capture helper.

@@ -15,7 +15,6 @@ from fastapi.staticfiles import StaticFiles
 from local_asr_server.analysis_jobs import AnalysisJobManager
 from local_asr_server.app_services import AppServices, install_compatibility_aliases
 from local_asr_server.app_identity import get_app_version
-from local_asr_server.audio_router import AudioRouter
 from local_asr_server.catalog import CatalogStore
 from local_asr_server.jobs import JobStore
 from local_asr_server.native_capture import NativeCaptureManager
@@ -201,9 +200,6 @@ def create_app(
         transcriptions=transcription_store,
     )
     install_compatibility_aliases(app, services)
-
-    # Clean up any orphan aggregate devices from previous runs/crashes
-    AudioRouter.cleanup_orphans()
 
     # Set up static files serving — resolves correctly in both dev and bundle.
     static_dir = get_static_dir()
