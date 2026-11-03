@@ -102,4 +102,3 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 
 **Documentazione a integrazione:** `docs/architecture.md` owner/boundary, `docs/features.md` comportamento, `SECURITY.md` chiavi/deletion, `design/ux-contract.json` UX, README usage, `docs/current-state.md` solo quando vero. ADR per decisioni durevoli. Dopo completamento trasferire verità e obblighi REAL_ENVIRONMENT, quindi eliminare questo piano secondo `docs/workstreams/README.md`.
 
-Runner GCS user-login: [runbook operativo](../operations/gcs-local-login-broker.md).
