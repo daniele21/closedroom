@@ -38,7 +38,9 @@ class MeetingDetectionFrontendContractTests(unittest.TestCase):
 
     def test_native_only_request_fails_closed_without_fallback(self):
         hook = (ROOT / "frontend/src/hooks/useRecorder.ts").read_text()
-        self.assertIn("requireNative && !(capabilities?.default_backend === 'native'", hook)
+        self.assertIn("const nativeAvailable = capabilities?.default_backend === 'native'", hook)
+        self.assertIn("if (!nativeAvailable && (requireNative || mode !== 'mic_only'))", hook)
+        self.assertIn("nativeCaptureRequiredForComputerAudio", hook)
         self.assertIn("createCaptureReservation()", hook)
         self.assertIn("data.type === 'ready'", hook)
 

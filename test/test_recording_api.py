@@ -399,16 +399,22 @@ class RecordingApiTests(unittest.TestCase):
         self.assertIsNone(response.json()["transcription"])
 
     def test_legacy_audio_route_endpoints_are_removed(self) -> None:
-        for method, endpoint in [
-            ("get", "/v1/system/audio/status"),
-            ("post", "/v1/system/audio/activate"),
-            ("post", "/v1/system/audio/restore"),
-            ("post", "/v1/system/audio-route/test-route"),
-            ("post", "/v1/system/audio-route/test-restore"),
-        ]:
+        # The app's catch-all GET page route legitimately returns 405 for
+        # unsupported POST methods. Check the actual route table as well as
+        # external rejection so no output-mutating endpoint can survive.
+        retired_paths = [
+            "/v1/system/audio/status",
+            "/v1/system/audio/activate",
+            "/v1/system/audio/restore",
+            "/v1/system/audio-route/test-route",
+            "/v1/system/audio-route/test-restore",
+        ]
+        registered_paths = {route.path for route in self.client.app.routes}
+        for endpoint in retired_paths:
             with self.subTest(endpoint=endpoint):
-                response = getattr(self.client, method)(endpoint)
-                self.assertEqual(response.status_code, 404)
+                self.assertNotIn(endpoint, registered_paths)
+                response = self.client.get(endpoint) if endpoint.endswith("/status") else self.client.post(endpoint)
+                self.assertEqual(response.status_code, 404 if endpoint.endswith("/status") else 405)
 
     def test_capture_capability_does_not_offer_virtual_device_fallback(self) -> None:
         response = self.client.get("/v1/capture/capabilities")
