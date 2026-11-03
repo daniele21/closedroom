@@ -432,6 +432,16 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
               </div>
             </div>
           </div>
+          {Object.entries(recorder.audioSourceHealth).some(([, state]) => state !== 'healthy') && (
+            <p role="status" aria-live="polite" className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-text-primary">
+              {t('recording.sourceDegraded')}
+              {' '}
+              {Object.entries(recorder.audioSourceHealth)
+                .filter(([, state]) => state !== 'healthy')
+                .map(([source]) => t(source === 'mic' ? 'recording.sourceMic' : 'recording.sourceSystem'))
+                .join(', ')}
+            </p>
+          )}
           <canvas ref={recorder.canvasRef} width={900} height={70} className="mt-4 h-16 w-full rounded-lg bg-bg-surface" aria-hidden="true" />
         </section>
 
