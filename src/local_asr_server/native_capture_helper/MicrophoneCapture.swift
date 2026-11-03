@@ -6,6 +6,7 @@ import CoreMedia
 // run or recreates NativeCaptureRun; ScreenCaptureKit keeps recording normally.
 final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     var onSample: ((CMSampleBuffer) -> Void)?
+    var onInputDiscontinuity: (() -> Void)?
 
     private let control = DispatchQueue(label: "closedroom.native.microphone-control")
     private let samples = DispatchQueue(label: "closedroom.native.microphone-samples")
@@ -148,6 +149,7 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
         if !recovering {
             recovering = true
             emit("source_interrupted", reason: reason)
+            onInputDiscontinuity?()
             emit("source_recovering", reason: reason)
         }
         // The old session must be torn down before a replacement starts.
