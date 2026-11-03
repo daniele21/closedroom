@@ -25,8 +25,8 @@ Native retention/checkpoint recovery needs target-Mac release proof; no power-lo
 
 PRS-18 has two target-Mac evidence paths:
 
-- **production distribution evidence**: `release_build` produces the exact Developer-ID-signed, timestamped, notarized/stapled app + DMG and Gatekeeper proof; `release_evidence` exercises that immutable artifact through WKWebView/TCC FULL_MEDIA, local MLX/resource/thermal, PRS-9 and PRS-16 contention evidence;
-- **LOCAL REAL_ENVIRONMENT**: `python3 scripts/run_local_real_environment_suite.py` builds or reuses one exact finalized **ad-hoc** Apple-Silicon app and runs the same physical product/runtime evidence owners. Evidence lives under `dist/evidence/local-real-environment/<revision>/`. This can prove target-Mac behavior for stable-source promotion, never signed public distribution.
+- **Production**: `release_build` signs/notarizes the exact app + DMG; `release_evidence` covers WKWebView/TCC, MLX, thermal and contention on that artifact;
+- **Local**: `scripts/run_local_real_environment_suite.py` runs target-Mac checks on one exact finalized ad-hoc Apple-Silicon app. Evidence: `dist/evidence/local-real-environment/<revision>/`; not public distribution proof.
 
 Ad-hoc evidence never substitutes for production signing.
 
@@ -41,13 +41,13 @@ Still required where material:
 - representative CPU/RSS/thermal + local MLX completion and the PRS-9 dual-vs-mixed benchmark;
 - subjective VoiceOver/usability and representative production ASR/LLM quality or latency only when material.
 
-Apple distribution authority is **not** a stable-source prerequisite. It remains required before a normal downloadable macOS binary can be published: Developer ID + timestamp, app/DMG notarization/stapling and Gatekeeper acceptance.
+Stable source needs target-Mac evidence, not Apple distribution authority. A downloadable binary additionally needs Developer ID signing, notarization/stapling and Gatekeeper acceptance.
 
 A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligations for an exact stable candidate while public binary distribution remains externally blocked.
 
 ## Active workstreams
 
-- [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 source-switch/disconnection reliability; plan only, ACR-0 contract and real-Mac reproduction next; automated and hardware evidence pending.
+- [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 audio switching; ACR-0 pending; plan only.
 - [`meeting-detection.md`](workstreams/meeting-detection.md): Teams/menu-bar regressions on Mac; CoreAudio attribution fix under validation; physical proof pending.
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
@@ -56,7 +56,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 
 - Meeting Moments integrated through PR #100 (`4e159414`); INTEGRATION / STRONG preflight #659 passed on exact head `816da96a`. Target-Mac menu/focus/hotkey/TCC confirmation remains RELEASE evidence.
 
-PRS-18 owns product/runtime evidence; GitHub release productization owns version/release/publication mechanics.
+PRS-18 owns runtime evidence; GitHub release work owns publication.
 
 ## Next highest-value work
 
