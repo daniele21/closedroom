@@ -295,7 +295,7 @@ ClosedRoom is not a guarantee of perfect transcription, speaker identity or meet
 | --- | --- | --- |
 | Product UI | `frontend/src/` | Today, recording, meeting, project, settings and guided workflows |
 | API / composition | `src/local_asr_server/server.py`, `app_services.py` | FastAPI boundary, route wiring and long-lived services |
-| Recording / capture | `recordings.py`, native helpers, `audio_router.py` | Progressive capture, recovery, macOS audio and optional visual frames |
+| Recording / capture | `recordings.py`, AVFoundation/ScreenCaptureKit helpers | Progressive capture, recovery, macOS audio and optional visual frames |
 | Transcription / diarization | `transcriptions.py`, `asr_provider.py`, `speaker_diarization_helper/` | ASR providers, transcript persistence and speaker clustering |
 | Meeting intelligence | analysis jobs, templates, structured notes | Structured meeting outputs, source references, edits and revisions |
 | Local model runtime | [Korgis](https://github.com/daniele21/korgis) + internal `local-llm-server` integration | Local LLM/VLM lifecycle and inference |

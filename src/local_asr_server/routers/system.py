@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from local_asr_server.audio_router import AudioRouter
 from local_asr_server.app_identity import get_app_identity
 from local_asr_server.settings import load_settings
 from local_asr_server.prompts import load_prompts, save_prompts
@@ -94,9 +93,6 @@ def health(request: Request) -> dict:
             "POST /v1/runtime/services/llm/stop",
             "POST /v1/runtime/services/llm/restart",
             "GET /v1/runtime/services/llm/logs",
-            "GET /v1/system/audio/status",
-            "POST /v1/system/audio/activate",
-            "POST /v1/system/audio/restore",
             "GET /health",
         ],
         "recordings": True,
@@ -120,49 +116,13 @@ def session(request: Request, response: Response) -> dict:
     }
 
 
-@router.get("/v1/system/audio/status")
-def audio_status():
-    return AudioRouter.get_status()
-
-
-@router.post("/v1/system/audio/activate")
-def activate_audio_route():
-    success = AudioRouter.route_to_multi_output()
-    status = AudioRouter.get_status()
-    return {
-        **status,
-        "success": success,
-        "routing_active": success,
-    }
-
-
-@router.post("/v1/system/audio/restore")
-def restore_audio_route():
-    success = AudioRouter.restore_original_output()
-    return {
-        **AudioRouter.get_status(),
-        "success": success,
-        "routing_active": False,
-    }
-
-
-@router.post("/v1/system/audio-route/test-route")
-def test_audio_route():
-    return activate_audio_route()
-
-
-@router.post("/v1/system/audio-route/test-restore")
-def test_audio_restore():
-    return restore_audio_route()
-
-
 @router.get("/v1/capture/capabilities")
 def capture_capabilities(request: Request):
     native = get_services(request.app).capture.capabilities()
     return {
         "default_backend": "native" if native.get("available") else "browser",
         "native": native,
-        "fallbacks": ["browser_blackhole"],
+        "fallbacks": ["browser_microphone_only"],
     }
 
 
