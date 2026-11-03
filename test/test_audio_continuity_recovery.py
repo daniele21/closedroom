@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import shutil
 import struct
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ import wave
 from pathlib import Path
 
 from local_asr_server.recording_audio_recovery import AudioRecoveryError, checkpoint_frame_count, recover_checkpoint_audio
+from local_asr_server.recordings import RecordingStore
 
 
 def checkpoint(session: Path, index: int, start: float, sample_value: int, *, marked: bool):
@@ -72,3 +74,49 @@ class AudioContinuityRecoveryTests(unittest.TestCase):
             recovered = recover_checkpoint_audio(session, "mic")
             with wave.open(str(recovered), "rb") as reader:
                 self.assertEqual(reader.getnframes(), 2 * 16000)
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "Aligned mix requires bundled or system ffmpeg")
+    def test_store_rebuilds_mixed_derivative_without_overwriting_original_prefix(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = RecordingStore(Path(temp), use_settings_dir=False)
+            created = store.create(
+                title="Synthetic switch", mime_type="audio/wav",
+                model="test", language=None, capture_mode="both", capture_backend="native",
+            )
+            recording_id = created["id"]
+            session = store.session_dir(recording_id)
+            store.mark_capture_started(recording_id, backend="native")
+            store.mark_capture_event(recording_id, {"type": "ready", "recording_ready_uptime": 100.0})
+            store.mark_capture_event(recording_id, {
+                "type": "source_interrupted", "source": "mic", "uptime": 101.0,
+            })
+            store.mark_capture_event(recording_id, {
+                "type": "source_recovered", "source": "mic", "uptime": 104.0,
+            })
+            checkpoint(session, 0, 100, 400, marked=False)
+            checkpoint(session, 1, 104, 800, marked=True)
+            with wave.open(str(session / "mic.wav"), "wb") as mic:
+                mic.setnchannels(1)
+                mic.setsampwidth(2)
+                mic.setframerate(16000)
+                mic.writeframes(struct.pack("<h", 400) * 16000)
+            with wave.open(str(session / "system.wav"), "wb") as system:
+                system.setnchannels(1)
+                system.setsampwidth(2)
+                system.setframerate(16000)
+                system.writeframes(struct.pack("<h", 100) * (5 * 16000))
+            with wave.open(str(session / "recording.wav"), "wb") as legacy_mix:
+                legacy_mix.setnchannels(1)
+                legacy_mix.setsampwidth(2)
+                legacy_mix.setframerate(16000)
+                legacy_mix.writeframes(struct.pack("<h", 500) * (5 * 16000))
+            old = (session / "recording.wav").read_bytes()
+            completed, _ = store.finalize(recording_id)
+            self.assertEqual(completed["status"], "recorded")
+            self.assertEqual((session / "recording.wav").read_bytes(), old)
+            output = store.track_audio_path(recording_id, "mixed")
+            self.assertNotEqual(output, session / "recording.wav")
+            with wave.open(str(output), "rb") as audio:
+                self.assertEqual(audio.getframerate(), 16000)
+                self.assertGreaterEqual(audio.getnframes(), 5 * 16000)
+            self.assertIn("native_audio_gaps_marked_with_silence_for_alignment", completed["warnings"])
