@@ -325,8 +325,22 @@ def capture_events(recording_id: str, request: Request):
                 except Exception:
                     logger.warning("Failed to persist capture event", exc_info=True)
                 yield f"data: {json.dumps(event)}\n\n"
-                if event.get("type") in {"stopped", "error"}:
+                if event.get("type") in {"stopped", "error", "capture_fatal"}:
                     return
+            # A helper killed by the OS may exit without emitting a terminal
+            # JSON event. Do not leave a healthy REC or an open SSE indefinitely.
+            session = get_services(request.app).capture.get_session(recording_id)
+            if session is not None and session.stopped and session.process.poll() is not None:
+                interrupted = {
+                    "type": "capture_fatal", "source": "backend",
+                    "reason": "helper_exited", "message": "Native capture helper exited unexpectedly",
+                }
+                try:
+                    store.mark_capture_event(recording_id, interrupted)
+                except Exception:
+                    logger.warning("Failed to persist unexpected helper exit", exc_info=True)
+                yield f"data: {json.dumps(interrupted)}\n\n"
+                return
             time.sleep(0.5)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
