@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import secrets
 import sqlite3
 import subprocess
 import sys
@@ -55,10 +56,16 @@ def _check_app_closed() -> None:
 def preflight() -> dict[str, object]:
     # Never run a personal-data transfer from an arbitrary GitHub-hosted
     # machine, unknown local user or a generic central CI validation lane.
-    if sys.platform != "darwin" or not os.environ.get("RUNNER_NAME", "").startswith("local-mac-mini-"):
+    # A dedicated central CI job may run directly only if its Keychain is
+    # accessible. A separately installed *user login-session* LaunchAgent may
+    # run the same pinned entrypoint without inheriting CI's Keychain denial.
+    from_login_broker = os.environ.get("CLOSEDROOM_TRUSTED_LOGIN_BROKER") == "1"
+    from_dedicated_ci = (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("RUNNER_NAME", "").startswith("local-mac-mini-")
+    )
+    if sys.platform != "darwin" or not (from_login_broker or from_dedicated_ci):
         raise MigrationBlocked("UNAPPROVED_RUNNER_HOST")
-    if not os.environ.get("GITHUB_ACTIONS") == "true":
-        raise MigrationBlocked("DEDICATED_GITHUB_ACTION_REQUIRED")
     _check_app_closed()
 
     home = Path.home()
@@ -103,8 +110,26 @@ def preflight() -> dict[str, object]:
     if not GCSDesktopOAuth(client_id=client_id, client_secret=client_secret).is_connected():
         raise MigrationBlocked("MAC_USER_OAUTH_NOT_CONNECTED")
     backend = native_macos_keychain()
-    if backend.get_password(CODE_SERVICE, CODE_ACCOUNT) is not None:
-        raise MigrationBlocked("RECOVERY_CODE_ALREADY_STORED")
+    try:
+        if backend.get_password(CODE_SERVICE, CODE_ACCOUNT) is not None:
+            raise MigrationBlocked("RECOVERY_CODE_ALREADY_STORED")
+        # A failed post-upload Keychain write would strand the new archive's
+        # portable recovery code. Prove the login process can write, read and
+        # delete a *synthetic* secret before uploading a single meeting byte.
+        test_account = "preflight-" + secrets.token_hex(16)
+        test_secret = secrets.token_urlsafe(32)
+        backend.set_password(CODE_SERVICE, test_account, test_secret)
+        try:
+            if backend.get_password(CODE_SERVICE, test_account) != test_secret:
+                raise MigrationBlocked("RECOVERY_KEYCHAIN_NOT_WRITABLE")
+        finally:
+            backend.delete_password(CODE_SERVICE, test_account)
+        if backend.get_password(CODE_SERVICE, test_account) is not None:
+            raise MigrationBlocked("RECOVERY_KEYCHAIN_DELETE_FAILED")
+    except MigrationBlocked:
+        raise
+    except Exception:
+        raise MigrationBlocked("RECOVERY_KEYCHAIN_NOT_WRITABLE") from None
 
     return {
         "status": "mac_new_local_backup_preflight_pass",
