@@ -146,6 +146,20 @@ sequenceDiagram
     R-->>F: stato recorded
 ```
 
+Nel percorso nativo la vita della sessione non coincide con quella dei singoli input:
+`MicrophoneCapture` osserva la disponibilità e il microfono predefinito e tenta
+di ricostruire solo la sorgente interrotta. Gli eventi `source_interrupted`,
+`source_recovering`, `source_unavailable` e `source_recovered` sono non
+terminali e attraversano il manager e SSE fino al `RecordingStore`, che
+conserva lo stato e gli intervalli mancanti rispetto all'epoch iniziale.
+Quando una sorgente cambia, il sink conserva il WAV originale come prefisso e
+salva checkpoint separati con marker di discontinuità; un recupero verificato
+può creare una nuova traccia e un nuovo mix senza sostituire gli originali.
+I gap sono rappresentati da silenzio soltanto nelle derivate allineate e
+rimangono espliciti nei metadata: non sono audio acquisito. Un errore di
+storage o la terminazione del processo resta invece terminale. Questa capacità
+richiede ancora verifica REAL_ENVIRONMENT su dispositivi macOS.
+
 Il contratto critico è la sequenza monotona dei chunk. Un retry identico è
 idempotente se dimensione e SHA-256 coincidono; un contenuto diverso per una
 sequenza già committata genera conflitto. Ogni sessione usa un lock dedicato e
