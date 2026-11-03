@@ -47,6 +47,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 
 ## Active workstreams
 
+- [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 source-switch/disconnection reliability; plan only, ACR-0 contract and real-Mac reproduction next; automated and hardware evidence pending.
 - [`meeting-detection.md`](workstreams/meeting-detection.md): Teams/menu-bar regressions on Mac; CoreAudio attribution fix under validation; physical proof pending.
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
@@ -59,6 +60,7 @@ PRS-18 owns product/runtime evidence; GitHub release productization owns version
 
 ## Next highest-value work
 
-1. Complete remaining PRS-18 target-Mac evidence on the exact stable candidate and promote stable source only when RELEASE/FULL evidence agrees.
-2. Run `release_build` locally with Apple authority on the exact tag; create a draft with `release_draft`.
-3. Publish GRP-6 only after exact stable source and exact qualified artifact agree; add README download links only after a real GitHub Release exists.
+1. Start ACR-0: reproduce microphone disconnect/default-input switch, inspect sink/timeline compatibility, and freeze the source-recovery/event/segment contract before parallel implementation. Do not claim continuity until target-Mac proof.
+2. Complete remaining PRS-18 target-Mac evidence on the exact stable candidate and promote stable source only when RELEASE/FULL evidence agrees.
+3. Run `release_build` locally with Apple authority on the exact tag; create a draft with `release_draft`.
+4. Publish GRP-6 only after exact stable source and exact qualified artifact agree; add README download links only after a real GitHub Release exists.
