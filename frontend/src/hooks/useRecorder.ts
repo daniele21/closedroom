@@ -698,17 +698,20 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                 setAudioSourceHealth(next);
                 if (source === 'mic' && nextState !== 'healthy') currentMicDbRef.current = -120;
                 if (source === 'system' && nextState !== 'healthy') currentSysDbRef.current = -120;
-                const sourceLabel = source === 'mic' ? 'Microfono' : 'Audio computer';
-                const notice = nextState === 'healthy'
-                  ? `${sourceLabel} riconnesso: la registrazione continua.`
-                  : `${sourceLabel} ${nextState === 'recovering' ? 'in riconnessione' : 'non disponibile'}. La registrazione resta attiva.`;
+                const sourceLabel = t(source === 'mic' ? 'recording.sourceMic' : 'recording.sourceSystem');
+                const notice = t(
+                  nextState === 'healthy' ? 'recording.sourceRecovered'
+                    : nextState === 'recovering' ? 'recording.sourceRecovering'
+                      : 'recording.sourceUnavailable',
+                  { source: sourceLabel },
+                );
                 if (lastSourceNoticeRef.current !== notice && (nextState === 'healthy' || nextState === 'unavailable' || nextState === 'recovering')) {
                   showToast(notice, nextState === 'healthy' ? 'success' : 'warning');
                   lastSourceNoticeRef.current = notice;
                 }
                 setStatusText(next.mic === 'healthy' && next.system === 'healthy'
                   ? t('recording.statusRecording')
-                  : 'Registrazione attiva con audio ridotto o in riconnessione');
+                  : t('recording.sourceDegraded'));
               }
             } else if (data.type === 'error' || data.type === 'capture_fatal') {
               void ApiClient.logClientEvent('error', 'recorder', 'Native capture error event received', { sessionId: session.id, reason: data.reason, source: data.source });
