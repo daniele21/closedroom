@@ -6,6 +6,8 @@ import math
 import os
 import re
 import shutil
+import subprocess
+import tempfile
 import threading
 import uuid
 import hashlib
@@ -16,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from local_asr_server.catalog import CatalogStore
+from local_asr_server.paths import get_ffmpeg_path
 from local_asr_server.recording_audio_recovery import (
     AudioRecoveryError, checkpoint_frame_count, has_checkpoints, recover_checkpoint_audio,
 )
@@ -2101,6 +2104,15 @@ class RecordingStore:
             warnings = metadata.setdefault('warnings', [])
             if 'native_audio_recovered_from_checkpoints' not in warnings:
                 warnings.append('native_audio_recovered_from_checkpoints')
+            changed_sources = {
+                gap.get("source") for gap in (metadata.get("timeline") or {}).get("source_interruptions", [])
+                if isinstance(gap, dict) and gap.get("source") in {"mic", "system"}
+            }
+            if changed_sources:
+                if 'native_audio_gaps_marked_with_silence_for_alignment' not in warnings:
+                    warnings.append('native_audio_gaps_marked_with_silence_for_alignment')
+                if metadata.get('capture_mode') == 'both':
+                    self._rebuild_native_mix_for_source_recovery(session_dir, metadata)
         primary = self._primary_track(metadata)
         if not self._complete_native_wav(self._track_audio_path(session_dir, primary)):
             for source in ('system', 'mic'):
@@ -2108,6 +2120,52 @@ class RecordingStore:
                 if candidate and self._complete_native_wav(self._track_audio_path(session_dir, candidate)):
                     metadata['primary_track_id'] = source
                     break
+
+    def _rebuild_native_mix_for_source_recovery(self, session_dir: Path, metadata: dict[str, Any]) -> None:
+        """Produce a new verified mixed derivative; never replace run-owned WAVs.
+
+        A microphone switch leaves the original mic.wav as a valid prefix and
+        the original recording.wav (if any) as an earlier mix. Recovered
+        checkpoints include an explicit gap interval; mixing must use the
+        aligned recovered source, not the stale prefix.
+        """
+        tracks = {t.get("id"): t for t in metadata["audio_tracks"]}
+        mic, system, mixed = tracks.get("mic"), tracks.get("system"), tracks.get("mixed")
+        if not (mic and system and mixed):
+            return
+        mic_path = self._track_audio_path(session_dir, mic)
+        system_path = self._track_audio_path(session_dir, system)
+        mic_frames = self._complete_native_wav(mic_path)
+        system_frames = self._complete_native_wav(system_path)
+        if not (mic_frames and system_frames):
+            return
+        output_fd, output_name = tempfile.mkstemp(prefix=".native-mix-", suffix=".wav", dir=session_dir)
+        os.close(output_fd)
+        temporary = Path(output_name)
+        try:
+            timeout = max(120.0, min(3600.0, max(mic_frames, system_frames) / 16000 * 0.5))
+            cmd = [
+                get_ffmpeg_path(), "-y", "-i", str(mic_path), "-i", str(system_path),
+                "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0",
+                "-ar", "16000", "-ac", "1", str(temporary),
+            ]
+            subprocess.run(cmd, capture_output=True, check=True, timeout=timeout)
+            if not self._complete_native_wav(temporary):
+                raise RecordingConflict("Recovered native mix is not a valid WAV")
+            with temporary.open("rb") as handle:
+                os.fsync(handle.fileno())
+            digest = _sha256_path(temporary)
+            target = session_dir / f"recording.recovered-{digest}.wav"
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                if target.is_symlink() or _sha256_path(target) != digest:
+                    raise RecordingConflict("Existing recovered mix differs")
+            mixed["_recovered_audio_file"] = target.name
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RecordingConflict("Unable to rebuild aligned native mixed audio") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
 
     @staticmethod
     def _complete_native_wav(path: Path) -> int:
