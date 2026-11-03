@@ -22,7 +22,19 @@ class NewMeetingSimplicityContractTests(unittest.TestCase):
         self.assertIn("showAudioRecovery", self.source)
         self.assertIn("!nativeCaptureReady && nativeCaptureChecked", self.source)
         self.assertIn("new-meeting-audio-recovery", self.source)
-        self.assertIn("ClosedRoom could not configure audio automatically", self.source)
+        self.assertIn("Without native capture, you can explicitly select microphone-only recording", self.source)
+        self.assertIn("disabled={!nativeCaptureReady && option.value !== 'mic_only'}", self.source)
+        self.assertIn("setSourceMode('mic_only'); setShowAudioRecovery(true);", self.source)
+
+    def test_system_audio_requires_native_capture_without_legacy_audio_router(self) -> None:
+        recorder = (ROOT / "frontend/src/hooks/useRecorder.ts").read_text(encoding="utf-8")
+        api = (ROOT / "frontend/src/api/apiClient.ts").read_text(encoding="utf-8")
+        self.assertIn("mode !== 'mic_only'", recorder)
+        self.assertIn("nativeCaptureRequiredForComputerAudio", recorder)
+        self.assertNotIn("testAudioRoute", recorder)
+        self.assertNotIn("selectedSystemDevice", recorder)
+        self.assertNotIn("testAudioRestore", api)
+        self.assertNotIn("audioRouteStatus", self.source)
 
     def test_screen_context_is_optional_native_only_and_off_by_default(self) -> None:
         self.assertIn("showScreenContext", self.source)
