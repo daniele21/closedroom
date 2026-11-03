@@ -20,6 +20,7 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
     private var recovering = false
     private var unavailable = false
     private var awaitingSamples = false
+    private var ptsOffset: CMTime?
     private var lastAttemptUptime = 0.0
     private let retryIntervalSeconds = 1.5
     private let sampleReadyTimeoutSeconds = 4.0
@@ -131,6 +132,7 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
         output = target
         deviceID = device.uniqueID
         awaitingSamples = true
+        ptsOffset = nil
         lastAttemptUptime = ProcessInfo.processInfo.systemUptime
         runtimeObserver = NotificationCenter.default.addObserver(
             forName: .AVCaptureSessionRuntimeError,
@@ -194,6 +196,47 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
         }
     }
 
+    // Each AVCaptureSession may use a different presentation clock origin.
+    // Normalize at the source boundary to the same system-uptime epoch used
+    // by the recording timeline; keep each buffer's packet duration unchanged.
+    private func normalizedSample(_ sample: CMSampleBuffer) -> CMSampleBuffer? {
+        let presentation = CMSampleBufferGetPresentationTimeStamp(sample)
+        guard presentation.isValid && presentation.isNumeric else { return nil }
+        if ptsOffset == nil {
+            let uptime = CMTime(seconds: ProcessInfo.processInfo.systemUptime, preferredTimescale: 1_000_000)
+            ptsOffset = CMTimeSubtract(uptime, presentation)
+        }
+        guard let delta = ptsOffset else { return nil }
+        var count: CMItemCount = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count) == noErr,
+              count > 0 else { return nil }
+        var timings = Array(repeating: CMSampleTimingInfo(
+            duration: .invalid, presentationTimeStamp: .invalid, decodeTimeStamp: .invalid
+        ), count: count)
+        let status = timings.withUnsafeMutableBufferPointer { buffer in
+            CMSampleBufferGetSampleTimingInfoArray(
+                sample, entryCount: count, arrayToFill: buffer.baseAddress, entriesNeededOut: &count
+            )
+        }
+        guard status == noErr else { return nil }
+        for i in timings.indices {
+            timings[i].presentationTimeStamp = CMTimeAdd(timings[i].presentationTimeStamp, delta)
+            if timings[i].decodeTimeStamp.isValid {
+                timings[i].decodeTimeStamp = CMTimeAdd(timings[i].decodeTimeStamp, delta)
+            }
+        }
+        var translated: CMSampleBuffer?
+        let copyStatus = timings.withUnsafeBufferPointer { buffer in
+            CMSampleBufferCreateCopyWithNewTiming(
+                allocator: kCFAllocatorDefault, sampleBuffer: sample,
+                sampleTimingEntryCount: count, sampleTimingArray: buffer.baseAddress,
+                sampleBufferOut: &translated
+            )
+        }
+        guard copyStatus == noErr else { return nil }
+        return translated
+    }
+
     func captureOutput(
         _ output: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
@@ -211,7 +254,11 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
                     self.emit("source_recovered", reason: "microphone_samples_resumed")
                 }
             }
-            self.onSample?(sampleBuffer)
+            guard let normalized = self.normalizedSample(sampleBuffer) else {
+                self.beginRecovery(reason: "microphone_timing_invalid")
+                return
+            }
+            self.onSample?(normalized)
         }
     }
 }
