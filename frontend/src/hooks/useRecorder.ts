@@ -27,6 +27,11 @@ const OVERLAY_STATUS_INTERVAL_MS = 500;
 const CAPTURE_RESERVATION_POLL_MS = 200;
 const CAPTURE_RESERVATION_STORAGE_KEY = 'closedroom-capture-reservation-id';
 
+export type AudioSourceRecoveryState = 'healthy' | 'interrupted' | 'recovering' | 'unavailable';
+export type AudioSourceHealth = Record<'mic' | 'system', AudioSourceRecoveryState>;
+const HEALTHY_SOURCES: AudioSourceHealth = { mic: 'healthy', system: 'healthy' };
+const SOURCE_RECOVERY_TYPES = new Set(['source_interrupted', 'source_recovering', 'source_unavailable', 'source_recovered']);
+
 export const openBrowserPopup = () => {
   const width = 420;
   const height = 170;
@@ -58,6 +63,9 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
   const [statusText, setStatusText] = useState(t('recording.statusReady'));
   const [statusState, setStatusState] = useState<'ready' | 'recording' | 'paused' | 'working' | 'error' | 'success'>('ready');
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const [audioSourceHealth, setAudioSourceHealth] = useState<AudioSourceHealth>(HEALTHY_SOURCES);
+  const audioSourceHealthRef = useRef<AudioSourceHealth>(HEALTHY_SOURCES);
+  const lastSourceNoticeRef = useRef('');
   
   // Audio devices and routing state managed by custom hook
   const {
@@ -657,6 +665,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
                   signalLevelMic: signalLevelMicRef.current,
                   signalLevelSystem: signalLevelSystemRef.current,
                   progressText: progressTextRef.current,
+                  audioSourceHealth: audioSourceHealthRef.current,
                   visualCaptureLabel: visualCaptureLabelRef.current
                 });
               };
@@ -677,12 +686,32 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
               } else if (data.source === 'system') {
                 currentSysDbRef.current = dbVal;
               }
-            } else if (data.type === 'error') {
-              void ApiClient.logClientEvent('error', 'recorder', 'Native capture error event received', { sessionId: session.id, data });
-              if (data.source === 'system' && mode === 'both') {
-                showToast(t('recording.systemAudioUnavailableContinuingMic') || 'Audio di sistema interrotto. La registrazione continua con il microfono.', 'warning');
-                return;
+            } else if (SOURCE_RECOVERY_TYPES.has(data.type) && (data.source === 'mic' || data.source === 'system')) {
+              const source = data.source as 'mic' | 'system';
+              const nextState: AudioSourceRecoveryState = data.type === 'source_recovered'
+                ? 'healthy'
+                : data.type.replace('source_', '') as AudioSourceRecoveryState;
+              const current = audioSourceHealthRef.current;
+              if (current[source] !== nextState) {
+                const next = { ...current, [source]: nextState };
+                audioSourceHealthRef.current = next;
+                setAudioSourceHealth(next);
+                if (source === 'mic' && nextState !== 'healthy') currentMicDbRef.current = -120;
+                if (source === 'system' && nextState !== 'healthy') currentSysDbRef.current = -120;
+                const sourceLabel = source === 'mic' ? 'Microfono' : 'Audio computer';
+                const notice = nextState === 'healthy'
+                  ? `${sourceLabel} riconnesso: la registrazione continua.`
+                  : `${sourceLabel} ${nextState === 'recovering' ? 'in riconnessione' : 'non disponibile'}. La registrazione resta attiva.`;
+                if (lastSourceNoticeRef.current !== notice && (nextState === 'healthy' || nextState === 'unavailable' || nextState === 'recovering')) {
+                  showToast(notice, nextState === 'healthy' ? 'success' : 'warning');
+                  lastSourceNoticeRef.current = notice;
+                }
+                setStatusText(next.mic === 'healthy' && next.system === 'healthy'
+                  ? t('recording.statusRecording')
+                  : 'Registrazione attiva con audio ridotto o in riconnessione');
               }
+            } else if (data.type === 'error' || data.type === 'capture_fatal') {
+              void ApiClient.logClientEvent('error', 'recorder', 'Native capture error event received', { sessionId: session.id, reason: data.reason, source: data.source });
               eventSource.close();
               releaseMedia();
               ApiClient.cancelNativeCapture(session.id).catch(() => {});
@@ -735,9 +764,10 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
 
         eventSource.onerror = (err) => {
           console.error('EventSource error:', err);
-          eventSource.close();
-          // If we haven't successfully started recording yet, handle it as start failure
+          // EventSource reconnects automatically after a transport drop once
+          // capture has started; transport loss is not a physical audio error.
           if (!isRecordingRef.current) {
+            eventSource.close();
             releaseMedia();
             ApiClient.cancelNativeCapture(session.id).catch(() => {});
             localStorage.removeItem('asr-active-recording-id');
@@ -1095,6 +1125,7 @@ export function useRecorder(onSaved?: (recording: Recording) => void) {
     refreshCapturePermissions,
     permissionsErrorDetails,
     fallbackNotice,
+    audioSourceHealth,
     statusText,
     statusState,
     microphones,
