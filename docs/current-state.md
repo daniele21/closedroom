@@ -47,7 +47,7 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 
 ## Active workstreams
 
-- [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 audio continuity candidate PR #176; automated and target-Mac proof pending.
+- [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 audio continuity PR #176; eliminati routing virtual-device, setup e fallback audio computer browser. Test exact-head e prova fisica pendenti.
 - [`meeting-detection.md`](workstreams/meeting-detection.md): Teams/menu-bar regressions on Mac; CoreAudio attribution fix under validation; physical proof pending.
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.

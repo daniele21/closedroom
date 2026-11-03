@@ -8,7 +8,7 @@ Base: dev 5767e5d985868a0d85b5df6b7de36bcd980af892 (refresh before implementatio
 **User/job:** recording a meeting must continue if Bluetooth headphones disconnect, USB microphone vanishes, default input switches or an individual audio stream is interrupted.
 **Outcome:** same recording_id, same increasing capture clock, continued saving from every remaining permitted source, auto-recovery of the affected source without pressing REC. Preserve any captured speech and expose lost intervals truthfully.
 **Default UX:** native macOS auto-recovery with nonblocking, accessible per-source status; explicit recovery action if no source remains.
-**Non-goals:** synthesizing missing speech, literally gapless Bluetooth switches, new capture engine/session, cloud/network fallback, automatic output routing changes, changes to ASR/diarization, reboot-persistent live recording. Browser parity is a separate explicitly scoped follow-up.
+**Non-goals:** synthesizing missing speech, literally gapless Bluetooth switches, new capture engine/session, cloud/network fallback, automatic output routing changes, changes to ASR/diarization, reboot-persistent live recording. Browser device-switch parity is out of scope; browser system-audio capture is not supported.
 **Risks:** VALUE recording trust; USABILITY clear REC/degraded status; FEASIBILITY CoreAudio/AVCaptureSession/SCK, device changes, audio formats and PTS; VIABILITY bounded battery/CPU/disk use in long meetings.
 **Quality:** privacy-first and local by default; no raw content/device IDs in ordinary telemetry; no overwrite of finalized or in-progress audio, no fabricated silence/gaps.
 **Axes:** PRODUCT_FEATURE; DELIVERY ITERATION -> INTEGRATION (dev) -> RELEASE (main); VALIDATION LEAN planning, STRONG expected implementation (selector wins), FULL release; EXECUTION AGENT_LOCAL for deterministic, REMOTE_AUTOMATED for unavailable automatable gates, REAL_ENVIRONMENT for physical devices/TCC.
@@ -23,7 +23,7 @@ Verified on dev at planning:
 - frontend/src/hooks/useRecorder.ts: many native errors trigger cancel/reset; useAudioDevices.ts devicechange only refreshes browser enumeration.
 
 **Owners:** Swift helper for physical capture; NativeCaptureManager for one child process and event interpretation; RecordingStore for recording artifacts/timeline/recovery; routers for API/SSE; useRecorder/recorderLifecycle for UI state; HeavyWorkloadArbiter for resource admission. No second recording store, scheduler or supervisor.
-**Preserve:** one capture lease/ready epoch, mic/system dual tracks and canonical mic.wav/system.wav/recording.wav consumers, existing file reservations, immutable finalized artifacts, legacy recovery, screenshot flow, browser fallback, auth/TCC and graceful Stop/Cancel.
+**Preserve:** one capture lease/ready epoch, mic/system dual tracks and canonical mic.wav/system.wav/recording.wav consumers, existing file reservations, immutable finalized artifacts, legacy checkpoint recovery, screenshot flow, explicit browser microphone-only fallback, auth/TCC and graceful Stop/Cancel.
 
 ## ACR-0 — Diagnose and freeze contract [SERIAL; ACTIVE]
 
@@ -66,7 +66,7 @@ Extend test/test_native_capture.py, test/test_recording_api.py, RecordingStore/f
 4. Zero live sources: no false healthy REC; earlier audio preserved; restore or explicit Stop succeeds.
 5. Format/PTS/rate changes, delayed/duplicated events: non-overlapping aligned segments, playable mix, correct ASR/diarization offsets.
 6. Disk full, TCC denied, helper crash, SSE disconnect, backend restart, partial finalize and duplicate stop/cancel: recoverable files, no overwrite/lease leak.
-7. Screenshot/visual capture, heavy-AI priority and browser fallback unaffected.
+7. Screenshot/visual capture and heavy-AI priority unaffected; browser fallback remains microphone-only, explicitly chosen.
 
 Mock evidence proves contracts, never physical Bluetooth/CoreAudio or TCC reliability.
 
