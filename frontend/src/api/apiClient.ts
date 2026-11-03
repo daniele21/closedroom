@@ -1324,18 +1324,6 @@ export const ApiClient = {
     })).json();
   },
 
-  async testAudioRoute(): Promise<any> {
-    return (await request('/v1/system/audio/activate', { method: 'POST' })).json();
-  },
-
-  async testAudioRestore(): Promise<any> {
-    return (await request('/v1/system/audio/restore', { method: 'POST' })).json();
-  },
-  
-  async getAudioRouteStatus(): Promise<any> {
-    return (await request('/v1/system/audio/status')).json();
-  },
-
   async getActiveRecording(): Promise<{
     active: boolean;
     recording_id?: string;
