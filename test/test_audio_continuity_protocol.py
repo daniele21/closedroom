@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import stat
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +11,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from local_asr_server.recordings import RecordingStore
+from local_asr_server.native_capture import NativeCaptureManager
 from local_asr_server.server import create_app
 from unittest.mock import patch
 from support import deterministic_settings
@@ -63,6 +66,46 @@ class AudioContinuityProtocolTests(unittest.TestCase):
             "type": "capture_fatal", "source": "backend", "reason": "storage_failed",
         })
         self.assertEqual(self.store.get(self.recording_id)["capture_status"], "error")
+
+    def test_native_manager_survives_source_loss_until_explicit_stop(self):
+        helper = self.root / "synthetic-helper.py"
+        helper.write_text(
+            """#!/usr/bin/env python3
+import json, sys, time
+command = sys.argv[1]
+if command == 'capabilities':
+    print(json.dumps({'available': True}), flush=True)
+elif command == 'start':
+    for event in (
+        {'type': 'ready', 'recording_ready_uptime': 100.0},
+        {'type': 'source_interrupted', 'source': 'mic', 'uptime': 101.0},
+        {'type': 'source_recovering', 'source': 'mic', 'uptime': 101.1},
+        {'type': 'source_recovered', 'source': 'mic', 'uptime': 101.5},
+    ):
+        print(json.dumps(event), flush=True)
+    while True: time.sleep(0.1)
+""",
+            encoding="utf-8",
+        )
+        helper.chmod(helper.stat().st_mode | stat.S_IXUSR)
+        manager = NativeCaptureManager(helper_path=helper)
+        manager.start("synthetic-manager", self.root, "mic_only")
+        try:
+            received = []
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                received.extend(manager.drain_events("synthetic-manager"))
+                if any(event.get("type") == "source_recovered" for event in received):
+                    break
+                time.sleep(0.01)
+            self.assertIn("source_recovered", [event.get("type") for event in received])
+            active = manager.get_session("synthetic-manager")
+            self.assertIsNotNone(active)
+            self.assertFalse(active.stopped)
+            self.assertIsNone(active.process.poll())
+            self.assertEqual(active.source_health["mic"], "recovered")
+        finally:
+            manager.stop("synthetic-manager")
 
     def test_capture_sse_does_not_close_on_nonterminal_source_event(self):
         class FakeCapture:
