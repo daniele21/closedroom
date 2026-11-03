@@ -35,6 +35,26 @@ class RunnerGCSBackupTests(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("preflight", p.stdout)
 
+    def test_synthetic_recovery_keychain_roundtrip_proves_writable(self):
+        class WritableKeychain(MemoryKeychain):
+            def delete_password(self, service, account):
+                self.items.pop((service, account), None)
+        store = WritableKeychain()
+        cli.verify_recovery_keychain_writable(store)
+        self.assertEqual(store.items, {})
+        store.items[(cli.CODE_SERVICE, cli.CODE_ACCOUNT)] = "existing"
+        with self.assertRaises(cli.MigrationBlocked) as e:
+            cli.verify_recovery_keychain_writable(store)
+        self.assertEqual(str(e.exception), "RECOVERY_CODE_ALREADY_STORED")
+
+    def test_nonwritable_recovery_keychain_blocks_before_upload(self):
+        class ReadOnlyKeychain(MemoryKeychain):
+            def set_password(self, service, account, value):
+                raise OSError("private OS error; never emit to CI")
+        with self.assertRaises(cli.MigrationBlocked) as e:
+            cli.verify_recovery_keychain_writable(ReadOnlyKeychain())
+        self.assertEqual(str(e.exception), "RECOVERY_KEYCHAIN_NOT_WRITABLE")
+
     def test_preflight_fails_closed_on_unapproved_runner(self):
         with mock.patch.object(cli.sys, "platform", "linux"):
             with self.assertRaises(cli.MigrationBlocked) as error:
