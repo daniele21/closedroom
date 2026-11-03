@@ -53,6 +53,31 @@ def _check_app_closed() -> None:
             raise MigrationBlocked("PROCESS_CHECK_FAILED")
 
 
+def verify_recovery_keychain_writable(backend) -> None:
+    """No real upload until an independent synthetic Keychain write roundtrip.
+
+    A post-upload failure to preserve the one-time recovery code must never
+    be the first time a Keychain write has been attempted in this context.
+    """
+    try:
+        if backend.get_password(CODE_SERVICE, CODE_ACCOUNT) is not None:
+            raise MigrationBlocked("RECOVERY_CODE_ALREADY_STORED")
+        account = "preflight-" + secrets.token_hex(16)
+        value = secrets.token_urlsafe(32)
+        backend.set_password(CODE_SERVICE, account, value)
+        try:
+            if backend.get_password(CODE_SERVICE, account) != value:
+                raise MigrationBlocked("RECOVERY_KEYCHAIN_NOT_WRITABLE")
+        finally:
+            backend.delete_password(CODE_SERVICE, account)
+        if backend.get_password(CODE_SERVICE, account) is not None:
+            raise MigrationBlocked("RECOVERY_KEYCHAIN_DELETE_FAILED")
+    except MigrationBlocked:
+        raise
+    except Exception:
+        raise MigrationBlocked("RECOVERY_KEYCHAIN_NOT_WRITABLE") from None
+
+
 def preflight() -> dict[str, object]:
     # Never run a personal-data transfer from an arbitrary GitHub-hosted
     # machine, unknown local user or a generic central CI validation lane.
@@ -109,27 +134,7 @@ def preflight() -> dict[str, object]:
     client_id, client_secret = read_desktop_config(client_json)
     if not GCSDesktopOAuth(client_id=client_id, client_secret=client_secret).is_connected():
         raise MigrationBlocked("MAC_USER_OAUTH_NOT_CONNECTED")
-    backend = native_macos_keychain()
-    try:
-        if backend.get_password(CODE_SERVICE, CODE_ACCOUNT) is not None:
-            raise MigrationBlocked("RECOVERY_CODE_ALREADY_STORED")
-        # A failed post-upload Keychain write would strand the new archive's
-        # portable recovery code. Prove the login process can write, read and
-        # delete a *synthetic* secret before uploading a single meeting byte.
-        test_account = "preflight-" + secrets.token_hex(16)
-        test_secret = secrets.token_urlsafe(32)
-        backend.set_password(CODE_SERVICE, test_account, test_secret)
-        try:
-            if backend.get_password(CODE_SERVICE, test_account) != test_secret:
-                raise MigrationBlocked("RECOVERY_KEYCHAIN_NOT_WRITABLE")
-        finally:
-            backend.delete_password(CODE_SERVICE, test_account)
-        if backend.get_password(CODE_SERVICE, test_account) is not None:
-            raise MigrationBlocked("RECOVERY_KEYCHAIN_DELETE_FAILED")
-    except MigrationBlocked:
-        raise
-    except Exception:
-        raise MigrationBlocked("RECOVERY_KEYCHAIN_NOT_WRITABLE") from None
+    verify_recovery_keychain_writable(native_macos_keychain())
 
     return {
         "status": "mac_new_local_backup_preflight_pass",
