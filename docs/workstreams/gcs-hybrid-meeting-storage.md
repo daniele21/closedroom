@@ -102,10 +102,4 @@ Journey: opt-in/test → capture e processing locali → upload cifrato verifica
 
 **Documentazione a integrazione:** `docs/architecture.md` owner/boundary, `docs/features.md` comportamento, `SECURITY.md` chiavi/deletion, `design/ux-contract.json` UX, README usage, `docs/current-state.md` solo quando vero. ADR per decisioni durevoli. Dopo completamento trasferire verità e obblighi REAL_ENVIRONMENT, quindi eliminare questo piano secondo `docs/workstreams/README.md`.
 
-## Runner GCS e Keychain (2026-11-03)
-
-Il Terminale macOS ha verificato OAuth + accesso al bucket, ma i job GitHub
-self-hosted hanno `KEYCHAIN_READ_FAILED` per la sessione del servizio.
-L'esecutore user-login source-pinned è descritto in
-[docs/operations/gcs-local-login-broker.md](../operations/gcs-local-login-broker.md).
-Nessun backup reale dei meeting o restore è stato ancora verificato.
+Runner GCS user-login: [runbook operativo](../operations/gcs-local-login-broker.md).
