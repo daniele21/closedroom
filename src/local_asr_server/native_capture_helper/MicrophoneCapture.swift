@@ -246,6 +246,10 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
         // Only the current output may write after the serialized handover.
         control.async { [weak self] in
             guard let self = self, !self.stopped, self.output === output else { return }
+            guard let normalized = self.normalizedSample(sampleBuffer) else {
+                self.beginRecovery(reason: "microphone_timing_invalid")
+                return
+            }
             if self.awaitingSamples {
                 self.awaitingSamples = false
                 if self.recovering {
@@ -253,10 +257,6 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
                     self.unavailable = false
                     self.emit("source_recovered", reason: "microphone_samples_resumed")
                 }
-            }
-            guard let normalized = self.normalizedSample(sampleBuffer) else {
-                self.beginRecovery(reason: "microphone_timing_invalid")
-                return
             }
             self.onSample?(normalized)
         }
