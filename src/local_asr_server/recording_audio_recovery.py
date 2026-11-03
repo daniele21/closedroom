@@ -73,6 +73,7 @@ def _manifests(directory: Path) -> list[Path]:
 def _verified_segments(directory: Path, source: str, manifests: list[Path]):
     frames = 0
     previous_end: float | None = None
+    padded_frames = 0
     for index, manifest_path in enumerate(manifests):
         if manifest_path.name != f"{index:08d}.json":
             raise AudioRecoveryError("Non-contiguous recovery checkpoints")
@@ -110,20 +111,36 @@ def _verified_segments(directory: Path, source: str, manifests: list[Path]):
                 raise AudioRecoveryError("Invalid recovery timing")
             if abs(end - start - count / 16000) > .02:
                 raise AudioRecoveryError("Recovery timing does not match audio frames")
-            if previous_end is not None and abs(start - previous_end) > 1 / 16000 + 0.001:
-                raise AudioRecoveryError("Recovery audio contains a capture gap")
+            discontinuity = manifest.get('discontinuity_before', False)
+            if type(discontinuity) is not bool:
+                raise AudioRecoveryError("Invalid recovery discontinuity marker")
+            gap_frames = 0
+            if previous_end is not None:
+                difference = start - previous_end
+                if difference < -(1 / 16000 + 0.001):
+                    raise AudioRecoveryError("Recovery clocks overlapped or moved backwards")
+                if difference > 1 / 16000 + 0.001:
+                    # A missing interval is acceptable only after the native
+                    # source owner explicitly sealed a device switch. Silence
+                    # in the derivative reserves time; it is NOT captured speech.
+                    if discontinuity is not True:
+                        raise AudioRecoveryError("Unacknowledged recovery audio gap")
+                    gap_frames = round(difference * 16000)
+                    if gap_frames > 16000 * 86400:
+                        raise AudioRecoveryError("Recovery gap exceeds one-day bound")
             previous_end = end
             frames += count
-            if frames > 16000 * 86400:
+            padded_frames += gap_frames
+            if frames + padded_frames > 16000 * 86400:
                 raise AudioRecoveryError("Recovery audio exceeds one-day bound")
-        yield pcm, raw_manifest, data
+        yield pcm, raw_manifest, data, gap_frames
 
 
 def checkpoint_frame_count(session: Path, source: str) -> int:
     """Count actual verified samples, never trust an unverified JSON horizon."""
     directory = _directory(session, source)
     try:
-        return sum(len(pcm) // 2 for pcm, _, _ in _verified_segments(directory, source, _manifests(directory)))
+        return sum(len(pcm) // 2 + gap for pcm, _, _, gap in _verified_segments(directory, source, _manifests(directory)))
     except (OSError, ValueError, KeyError, TypeError, wave.Error) as exc:
         raise AudioRecoveryError("Invalid recovery frame horizon") from exc
 
@@ -151,7 +168,16 @@ def recover_checkpoint_audio(session: Path, source: str) -> Path | None:
             output.setnchannels(1)
             output.setsampwidth(2)
             output.setframerate(16000)
-            for pcm, manifest, data in _verified_segments(directory, source, manifests):
+            for pcm, manifest, data, gap in _verified_segments(directory, source, manifests):
+                # Keep playback/ASR offsets aligned with the source timeline.
+                # The original checkpoints stay immutable and the persisted
+                # source_interruption events explicitly identify missing audio.
+                if gap:
+                    silence = b"\x00\x00" * 8192
+                    while gap:
+                        batch = min(gap, 8192)
+                        output.writeframesraw(silence[:batch * 2])
+                        gap -= batch
                 output.writeframesraw(pcm)
                 digest.update(manifest)
                 digest.update(data)
