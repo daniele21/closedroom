@@ -16,12 +16,14 @@ import {
 } from 'lucide-react';
 import { ApiClient, CaptureDisplay } from '../api/apiClient';
 import { useTranslation } from '../i18n/i18n';
+import type { AudioSourceHealth } from '../hooks/useRecorder';
 
 export default function RecordingOverlayPage() {
   const { t } = useTranslation();
   const [timer, setTimer] = useState('00:00');
   const [signalLevelMic, setSignalLevelMic] = useState('-∞ dB');
   const [signalLevelSystem, setSignalLevelSystem] = useState('-∞ dB');
+  const [audioSourceHealth, setAudioSourceHealth] = useState<AudioSourceHealth>({ mic: 'healthy', system: 'healthy' });
   const [isRecording, setIsRecording] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
@@ -313,6 +315,7 @@ export default function RecordingOverlayPage() {
         setTimer(data.timer);
         setSignalLevelMic(data.signalLevelMic || '-∞ dB');
         setSignalLevelSystem(data.signalLevelSystem || '-∞ dB');
+        if (data.audioSourceHealth) setAudioSourceHealth(data.audioSourceHealth);
         setVisualCaptureLabel(data.visualCaptureLabel || '');
 
         if (data.isRecording) {
@@ -806,6 +809,9 @@ export default function RecordingOverlayPage() {
     ? displayName(selectedDisplay, selectedDisplayIndex)
     : (displays.length > 0 ? 'Choose screen' : 'Screen unavailable');
 
+  const degradedSources = (Object.entries(audioSourceHealth) as Array<[keyof AudioSourceHealth, AudioSourceHealth['mic']]>)
+    .filter(([, state]) => state !== 'healthy')
+    .map(([source]) => t(source === 'mic' ? 'recording.sourceMic' : 'recording.sourceSystem'));
   const micHealth = getDeviceHealth(signalLevelMic);
   const systemHealth = getDeviceHealth(signalLevelSystem);
 
@@ -838,6 +844,12 @@ export default function RecordingOverlayPage() {
           <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/60">
             {isStopping ? 'Finalizing' : isRecording ? 'REC' : 'Ready'}
           </span>
+          {isRecording && degradedSources.length > 0 && (
+            <span role="status" aria-live="polite" className="truncate rounded bg-amber-400/15 px-1.5 py-0.5 text-[10px] text-amber-200"
+              title={`${t('recording.sourceDegraded')} ${degradedSources.join(', ')}`}>
+              {t('recording.sourceDegraded')}
+            </span>
+          )}
           {isExpanded && (
             <span className="max-w-[150px] truncate text-[10px] text-white/55" title={title}>
               {title || t('recording.noActiveRecording')}
