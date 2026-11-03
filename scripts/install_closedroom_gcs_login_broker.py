@@ -84,6 +84,8 @@ def install() -> None:
     head, uv = validate_source(source)
     if PLIST.exists() or PLIST.is_symlink() or (BASE / "config.json").exists():
         raise RuntimeError("BROKER_ALREADY_INSTALLED")
+    # macOS need not have created LaunchAgents for a new user profile yet.
+    PLIST.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     _regular_directory(PLIST.parent)
     for parent in (Path.home() / ".config", Path.home() / ".config/closedroom"):
         _regular_directory(parent)
@@ -103,7 +105,7 @@ def install() -> None:
         "ProgramArguments": [sys.executable, "-P", str(source / PINNED_BROKER)],
         "RunAtLoad": True,
         "WatchPaths": [str(BASE)],
-        "ProcessType": "Background",
+        "ProcessType": "Interactive",
         "StandardOutPath": "/dev/null",
         "StandardErrorPath": "/dev/null",
         "EnvironmentVariables": {"CLOSEDROOM_TRUSTED_LOGIN_BROKER": "1"},
