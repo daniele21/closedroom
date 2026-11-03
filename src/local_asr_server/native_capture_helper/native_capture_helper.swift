@@ -1444,78 +1444,6 @@ func runScreenshot(
     dispatchMain()
 }
 
-final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
-    var onSample: ((CMSampleBuffer) -> Void)?
-    var onFatalError: ((String) -> Void)?
-    private let session = AVCaptureSession()
-    private let queue = DispatchQueue(label: "closedroom.native.microphone")
-
-    override init() {
-        super.init()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleRuntimeError),
-            name: .AVCaptureSessionRuntimeError,
-            object: session
-        )
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
-    @objc private func handleRuntimeError(notification: Notification) {
-        if let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error {
-            let msg = "Microphone session runtime error: \(error.localizedDescription)"
-            JSONEmitter.shared.emit([
-                "type": "error",
-                "source": "mic",
-                "message": msg
-            ])
-            onFatalError?(msg)
-        }
-    }
-
-    func start() throws {
-        session.beginConfiguration()
-        session.sessionPreset = .high
-
-        guard let device = AVCaptureDevice.default(for: .audio) else {
-            throw NSError(domain: "ClosedRoomNativeCapture", code: 20, userInfo: [
-                NSLocalizedDescriptionKey: "No default microphone is available"
-            ])
-        }
-        let input = try AVCaptureDeviceInput(device: device)
-        guard session.canAddInput(input) else {
-            throw NSError(domain: "ClosedRoomNativeCapture", code: 21, userInfo: [
-                NSLocalizedDescriptionKey: "Cannot add microphone input"
-            ])
-        }
-        session.addInput(input)
-
-        let output = AVCaptureAudioDataOutput()
-        output.setSampleBufferDelegate(self, queue: queue)
-        guard session.canAddOutput(output) else {
-            throw NSError(domain: "ClosedRoomNativeCapture", code: 22, userInfo: [
-                NSLocalizedDescriptionKey: "Cannot add microphone output"
-            ])
-        }
-        session.addOutput(output)
-        session.commitConfiguration()
-        session.startRunning()
-    }
-
-    func stop() {
-        if session.isRunning {
-            session.stopRunning()
-        }
-    }
-
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        onSample?(sampleBuffer)
-    }
-}
-
 final class NativeCaptureRun {
     private let recordingID: String
     private let outputDir: URL
@@ -1569,9 +1497,8 @@ final class NativeCaptureRun {
             capture.onSample = { [weak self] sampleBuffer in
                 self?.handleSample(sampleBuffer, source: .mic)
             }
-            capture.onFatalError = { [weak self] errMsg in
-                self?.stopAndExit(cancelled: true, errorMsg: errMsg)
-            }
+            // Per-source microphone interruptions are handled within
+            // MicrophoneCapture. Only the sink's storage failures stop the run.
             microphoneCapture = capture
         }
 
