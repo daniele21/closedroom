@@ -1,7 +1,7 @@
 # Audio Continuity & Auto-Recovery (ACR)
 
-Status: ACTIVE — implementation draft PR #176; P0 recording reliability. Created 2026-11-03.
-Base: dev 5767e5d985868a0d85b5df6b7de36bcd980af892 (refresh before implementation). Target: small convergent PRs to dev; dev -> main RELEASE.
+Status: ACTIVE — ACR-1..5 integrated to dev via PR #176; ACR-6 physical release proof pending. Created 2026-11-03.
+Integrated baseline: dev 772a5f68c25f6f1ef69096f57d537263d0cd91df. Next boundary: dev -> main RELEASE after target-Mac evidence.
 
 ## Product outcome and risk
 
@@ -42,11 +42,11 @@ ACR-0 (serial contract) -> parallel ACR-1/2/3/4 -> ACR-5 convergence -> ACR-6 re
 
 | Lane | State | Exclusive write boundary | Observable result |
 | --- | --- | --- | --- |
-| ACR-1 / A | ACTIVE | native_capture_helper/*.swift and Swift probes | Device events, independent source recovery and safe audio segment writer; no helper restart. |
-| ACR-2 / B | ACTIVE | native_capture.py, routers/system.py, recordings.py and Python tests | Nonfatal event propagation, persistent timeline/segments, composition and recovery. Coordinate RecordingStore with AC-4 workstream. |
-| ACR-3 / C | ACTIVE | frontend/src/hooks/useRecorder.ts, recorder UI/overlay, i18n/tests | Same REC/clock, honest source health and accessible auto-recovery notice. Coordinate AC-1/AC-2. |
-| ACR-4 / D | ACTIVE | new fixtures and harness scripts only | Deterministic device-change storm, source failure, gap/format/clock fixtures and privacy-safe probes. |
-| ACR-5 / integrator | ACTIVE | integrated contract + affected docs/E2E | One end-to-end native path; separate browser parity backlog item. |
+| ACR-1 / A | INTEGRATED | native_capture_helper/*.swift and Swift probes | Device events, independent source recovery and safe audio segment writer; no helper restart. |
+| ACR-2 / B | INTEGRATED | native_capture.py, routers/system.py, recordings.py and Python tests | Nonfatal event propagation, persistent timeline/segments, composition and recovery. Coordinate RecordingStore with AC-4 workstream. |
+| ACR-3 / C | INTEGRATED | frontend/src/hooks/useRecorder.ts, recorder UI/overlay, i18n/tests | Same REC/clock, honest source health and accessible auto-recovery notice. Coordinate AC-1/AC-2. |
+| ACR-4 / D | INTEGRATED | new fixtures and harness scripts only | Deterministic device-change storm, source failure, gap/format/clock fixtures and privacy-safe probes. |
+| ACR-5 / integrator | INTEGRATED | integrated contract + affected docs/E2E | One end-to-end native path; separate browser parity backlog item. |
 | ACR-6 / target Mac | BLOCKED | real-machine evidence | Exact-candidate peripheral/TCC proof and rollout decision. |
 
 Worktrees/branches must not write the same file. Freeze JSON event/segment contract first and converge early; no conflicting long-lived stacks.
@@ -81,9 +81,9 @@ Mock evidence proves contracts, never physical Bluetooth/CoreAudio or TCC reliab
 
 ## Resume checkpoint
 
-Draft PR #176: ACR-1..5 code and fixtures staged; ACR-0 physical evidence, automated gates and release proof PENDING.
+PR #176 merged to dev (`772a5f68`). ACR-1..5 implemented; 849 Python tests, Swift compile, browser FULL_MEDIA, Repository health and INTEGRATION/FULL remote preflight PASS at `d50aeef3`; ACR-6 hardware evidence PENDING.
 Source dev at planning: 5767e5d985868a0d85b5df6b7de36bcd980af892; refresh dev/head/tree/base/related PRs at resume.
 Confirmed: native mic runtime error ends capture; generic error terminates manager/SSE; UI cancellation; limited SCK retry.
 Unknown: actual sink/manifest feasibility, physical device event fidelity, latency/gap and browser parity.
-Next: resolve exact-head CI, compile Swift on Mac runner and reproduce BT unplug with system capture; validate segmented timing and recovery against physical audio.
-STRONG automated integration and REAL_ENVIRONMENT evidence: PENDING.
+Next: build/install exact candidate on representative Mac with TCC, unplug/replug BT and USB, verify timer, preserved system track, audible recovered mic/mix and timestamp gaps.
+Automated INTEGRATION/FULL: PASS on PR head; physical source-switch / target-Mac RELEASE evidence: PENDING.
