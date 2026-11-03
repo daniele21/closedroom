@@ -400,6 +400,35 @@ class RecordingStore:
             if not isinstance(events, list):
                 events = []
                 timeline["events"] = events
+            event_type = event.get("type")
+            if event_type in {"source_interrupted", "source_recovering", "source_unavailable", "source_recovered"}:
+                source = event.get("source")
+                if source not in {"mic", "system"}:
+                    raise RecordingConflict("Invalid recovery source")
+                # These are source-health transitions, never recording-wide errors.
+                states = timeline.setdefault("source_health", {})
+                new_state = event_type.removeprefix("source_")
+                if states.get(source) == new_state:
+                    return self.public_metadata(metadata)
+                states[source] = new_state
+                ready_uptime = timeline.get("recording_ready_uptime")
+                uptime = event.get("uptime")
+                if isinstance(uptime, (int, float)) and isinstance(ready_uptime, (int, float)):
+                    offset_ms = max(0, round((uptime - ready_uptime) * 1000))
+                    interruptions = timeline.setdefault("source_interruptions", [])
+                    if event_type == "source_interrupted":
+                        interruptions.append({"source": source, "start_ms": offset_ms, "end_ms": None})
+                    elif event_type == "source_recovered":
+                        for gap in reversed(interruptions):
+                            if gap["source"] == source and gap["end_ms"] is None:
+                                gap["end_ms"] = max(gap["start_ms"], offset_ms)
+                                break
+            elif event_type == "ready" and isinstance(event.get("recording_ready_uptime"), (int, float)):
+                timeline["recording_ready_uptime"] = event["recording_ready_uptime"]
+            # Compact repetitive meter events into the live state. They do not
+            # belong in durable timelines or catalog rewrites on every sample.
+            if event_type in {"volume", "health"}:
+                return self.public_metadata(metadata)
             events.append(event)
 
             if event.get("type") == "warning":
@@ -408,7 +437,7 @@ class RecordingStore:
                     warnings = []
                     metadata["warnings"] = warnings
                 warnings.append(event.get("message") or event.get("reason") or "capture_warning")
-            if event.get("type") == "error":
+            if event.get("type") in {"error", "capture_fatal"}:
                 metadata["capture_status"] = "error"
                 warnings = metadata.get("warnings")
                 if not isinstance(warnings, list):
