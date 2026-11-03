@@ -140,8 +140,9 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
             queue: nil
         ) { [weak self] _ in
             self?.control.async { [weak self] in
-                self?.beginRecovery(reason: "microphone_runtime_interruption")
-                self?.reconcileInput()
+                guard let self = self, self.session === replacement, !self.stopped else { return }
+                self.beginRecovery(reason: "microphone_runtime_interruption")
+                self.reconcileInput()
             }
         }
     }
