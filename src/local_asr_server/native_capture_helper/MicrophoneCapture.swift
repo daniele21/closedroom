@@ -211,12 +211,13 @@ final class MicrophoneCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDel
         var count: CMItemCount = 0
         guard CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count) == noErr,
               count > 0 else { return nil }
+        let capacity = count
         var timings = Array(repeating: CMSampleTimingInfo(
             duration: .invalid, presentationTimeStamp: .invalid, decodeTimeStamp: .invalid
-        ), count: count)
+        ), count: capacity)
         let status = timings.withUnsafeMutableBufferPointer { buffer in
             CMSampleBufferGetSampleTimingInfoArray(
-                sample, entryCount: count, arrayToFill: buffer.baseAddress, entriesNeededOut: &count
+                sample, entryCount: capacity, arrayToFill: buffer.baseAddress, entriesNeededOut: &count
             )
         }
         guard status == noErr else { return nil }
