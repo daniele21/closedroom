@@ -142,6 +142,31 @@ class ActionableMeetingNotificationContractTests(unittest.TestCase):
         self.assertEqual(results, [False, True])
         self.assertIsNone(center.last_error)
 
+    def test_unavailable_native_callbacks_fail_closed_without_crashing_shell(self):
+        def raise_native(*_args):
+            raise RuntimeError("native bridge unavailable")
+
+        center = MeetingNotificationCenter(lambda *_: None)
+        center._center = SimpleNamespace(
+            getNotificationSettingsWithCompletionHandler_=raise_native,
+            removeDeliveredNotificationsWithIdentifiers_=raise_native,
+        )
+        center._authorization = "checking"
+        with patch.dict(sys.modules, {
+            "local_asr_server.window": SimpleNamespace(run_on_main_thread=lambda fn: fn())
+        }):
+            center.refresh_authorization()
+            self.assertEqual(center.authorization, "unknown")
+            self.assertEqual(center.last_error, "notification_settings_query_failed")
+            center.dismiss("candidate")
+            self.assertEqual(center.last_error, "notification_dismiss_failed")
+
+        with patch.dict(sys.modules, {
+            "local_asr_server.window": SimpleNamespace(run_on_main_thread=raise_native)
+        }):
+            self.assertFalse(center.request_authorization())
+            self.assertEqual(center.last_error, "notification_permission_request_failed")
+
     def test_denied_permission_does_not_fake_submission(self):
         center = MeetingNotificationCenter(lambda *_: None)
         center._center = object()
