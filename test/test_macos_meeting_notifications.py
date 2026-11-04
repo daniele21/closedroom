@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from local_asr_server.macos_meeting_notifications import (
     CATEGORY_ID, IGNORE_ACTION, RECORD_ACTION, MeetingNotificationCenter,
@@ -63,7 +65,75 @@ class ActionableMeetingNotificationContractTests(unittest.TestCase):
         self.assertEqual(center.last_error, "notification_delivery_failed")
         center._set_authorization(1)
         self.assertEqual(center.authorization, "denied")
+        self.assertEqual(center.last_error, "notification_delivery_failed")
+        center._record_delivery_error(None)
         self.assertIsNone(center.last_error)
+
+    def test_os_submission_acknowledgement_is_async_and_failure_is_visible(self):
+        class FakeContent:
+            @classmethod
+            def alloc(cls):
+                return cls()
+
+            def init(self):
+                return self
+
+            def setTitle_(self, title):
+                self.title = title
+
+            def setBody_(self, body):
+                self.body = body
+
+            def setCategoryIdentifier_(self, category):
+                self.category = category
+
+        class FakeRequest:
+            @staticmethod
+            def requestWithIdentifier_content_trigger_(identifier, content, trigger):
+                return (identifier, content)
+
+        class FakeCenter:
+            def __init__(self):
+                self.complete = None
+                self.requests = []
+
+            def addNotificationRequest_withCompletionHandler_(self, request, completion):
+                self.requests.append(request)
+                self.complete = completion
+
+        fake = FakeCenter()
+        native = SimpleNamespace(
+            UNMutableNotificationContent=FakeContent, UNNotificationRequest=FakeRequest
+        )
+        center = MeetingNotificationCenter(lambda *_: None, native=native)
+        center._center = fake
+        center._authorization = "authorized"
+        results = []
+        with patch.dict(sys.modules, {
+            "local_asr_server.window": SimpleNamespace(run_on_main_thread=lambda fn: fn())
+        }):
+            self.assertTrue(center.notify("candidate-1", app_label="Zoom", on_result=results.append))
+        self.assertEqual(results, [])  # scheduling is NOT delivery acknowledgement
+        self.assertEqual(fake.requests[0][0], "closedroom.meeting.candidate-1")
+        fake.complete(RuntimeError("submission failed"))
+        self.assertEqual(results, [False])
+        self.assertEqual(center.last_error, "notification_delivery_failed")
+
+        with patch.dict(sys.modules, {
+            "local_asr_server.window": SimpleNamespace(run_on_main_thread=lambda fn: fn())
+        }):
+            self.assertTrue(center.notify("candidate-2", on_result=results.append))
+        fake.complete(None)
+        self.assertEqual(results, [False, True])
+        self.assertIsNone(center.last_error)
+
+    def test_denied_permission_does_not_fake_submission(self):
+        center = MeetingNotificationCenter(lambda *_: None)
+        center._center = object()
+        center._authorization = "denied"
+        results = []
+        self.assertFalse(center.notify("candidate", on_result=results.append))
+        self.assertEqual(results, [])
 
     def test_no_native_center_does_not_fake_delivery(self):
         center = MeetingNotificationCenter(lambda *_: None)
