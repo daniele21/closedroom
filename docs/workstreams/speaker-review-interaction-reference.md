@@ -73,13 +73,11 @@ No permanent waveforms or decorative avatar grid; an amplitude bar is allowed on
 
 ## Content and trust constraints
 
-- **Real identities vs audio tracks:** distinguish `speaker entity`, raw `provider_speaker` cluster, mic/system/mixed *track*, per-turn overrides, and display name. A label `Computer` or `Tu` can mean source/provenance; never silently count an internal source label as a separate human. Confirm if the mic is truly a stable single speaker before defaulting to `Tu`.
-- **Sample API:** return bounded intervals `{cluster_id,track_id,start,end,kind,provenance,revision}` from true transcript turns; if 0 turns use native timeline linked to this exact transcription diarization revision, *not* an arbitrary latest benchmark. Disallow stale/foreign recording IDs. Choose primary clean 3–8s, separated secondary samples, prefer low overlap and stable continuous speech; avoid fabricated waveforms. Audio is fetched on user play from existing authenticated loopback media endpoint; if locally absent due to opted-in storage tier, show unavailable and require explicit documented retrieval path rather than remote fallback.
-- **Speaker grouping:** original raw IDs and audio untouched. Canonical revision layer maps raw IDs to reviewed identities and stores ignored identities; merge groups original IDs, including mixed mic/system when explicitly confirmed, without rewriting `provider_speaker`. Segment-level correction (if implemented) overrides group mapping for that turn only.
-- **Text invariant:** ASR `text`, `words`, per-segment `start/end/text`, recording ID, media and original diarization output invariant. Speaker display projection affects transcript labels, search/export/analysis **where consumer contracts use speaker metadata**, never silently regenerate an existing analysis run or edit original canonical text.
-- **Conflict/undo:** versioned optimistic token tied to same recording/transcription, durable locally private atomic persistence, one-step `Annulla` after a committed speaker action. Community-1 preview/apply/undo and manual review must share one coherent speaker revision policy; stale operations return 409 and require refreshing. No separate frontend-only speaker store. A renamed speaker with an identical name to another never auto-merges.
-- **Queue:** source-track-aware, bounded list from canonical projection; exclude false identities; merged speaker includes all original clusters. Overlaps handled deterministically and marked; if source track cannot be played, stop with clear error, never play wrong audio. Clear audio/object URLs/listeners on interruption/navigation.
-- **Privacy:** 127.0.0.1 loopback auth/origin enforced; no cloud, remote fallback, telemetry of voice/text, external voice identity provider or generated audio asset. Full transcript and diarization evidence are private local data.
+- **Person ≠ raw cluster ≠ mic/system track:** `Computer` is often a source name, not a human. Keep cluster ID provenance in technical details; `Tu` only when backed by actual mic identity.
+- **Sample contract:** bounded `{cluster_id,track_id,start,end,kind,revision}`, true transcript turns or raw native timeline for the exact transcription engine/revision. Never use unrelated benchmark output, fake voice waveforms or silent cloud fallback. Audio loads only on explicit user play through authenticated loopback.
+- **Correction contract:** persist reviewed identity mapping while preserving raw `provider_speaker`, ASR text/words/times, source media and IDs. Merge reuses all original clusters; exclude nonempty voices into `Non identificato`. Any per-turn correction overrides the group only when explicitly implemented.
+- **Safety:** optimistic fingerprint, private atomic one-step undo from `TranscriptionStore`, stale 409 rather than overwrite, coherent Community-1 rollback. Playlist follows only canonical groups, checks track identity, stops on errors/navigation, and discloses overlapping voices. Never export local audio or text.
+- **Privacy:** no remote speaker detection, embeddings, telemetry, cloud read or remote fallback.
 
 ## State and accessibility matrix
 
@@ -100,14 +98,8 @@ Keyboard: tab order follows selected list→inspector→actions; Enter/Space act
 
 
 
-## Deliberate alternative considered
+## Design rationale and usability check
 
-The existing two-column grid of identical speaker forms is expensive to scan; a giant timeline-first design hides quick naming; a separate speaker-setup wizard creates unnecessary navigation. Choose a selected-person inspector instead. If a narrow screen makes split view cramped, collapse to an inline selected detail rather than shrinking the controls.
+The repeated form grid is slower to scan; a wizard adds navigation. Keep one inspector and inline compact details. Test naming, distinguishing sources from people, safe merge/undo, overlap caveat, and true timestamp seeking. Measure task success and error rates.
 
-## Validation questions for usability sessions
-
-Can a user: (1) name the first unfamiliar speaker without opening a diagnostic drawer; (2) understand that “Computer” may be a sound source; (3) compare two samples before merging; (4) recover a mistaken exclusion; (5) recognize that isolated *intervals* can still contain overlapping speech; and (6) return to transcript at the true timestamp? Gather task time, confusion points and wrong identity assignments; do not infer success from appearance.
-
-## References
-
-[Anthropic frontend design](https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md), [Vercel web guidelines](https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines), [UI UX Pro Max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill), [Apple split views](https://developer.apple.com/design/human-interface-guidelines/split-views), [Otter Speaker Management](https://help.otter.ai/hc/en-us/articles/40586357592471-Speaker-Management), [Fireflies speaker edits](https://guide.fireflies.ai/articles/4994477228-how-to-edit-speaker-labels-or-names-in-a-transcript).
+External patterns: [Anthropic](https://github.com/anthropics/skills), [Vercel](https://github.com/vercel-labs/agent-skills), [UI UX Pro Max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill), [Apple HIG](https://developer.apple.com/design/human-interface-guidelines/), [WCAG 2.2](https://www.w3.org/TR/WCAG22/).
