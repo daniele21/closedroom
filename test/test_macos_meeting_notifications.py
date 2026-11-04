@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from local_asr_server.macos_meeting_notifications import (
     CATEGORY_ID, IGNORE_ACTION, RECORD_ACTION, MeetingNotificationCenter,
-    decode_notification_action,
+    decode_notification_action, needs_initial_notification_consent,
     _native_framework,
 )
 
@@ -31,6 +31,21 @@ class ActionableMeetingNotificationContractTests(unittest.TestCase):
                     tuple(arg["type"] for arg in block["callable"]["arguments"][1:]),
                     argument_types,
                 )
+
+    def test_first_run_notification_consent_is_explicit_once_and_respects_off(self):
+        should_ask = needs_initial_notification_consent
+        self.assertTrue(should_ask(enabled=True, authorization="not_determined",
+                                   requested_this_launch=False))
+        for enabled, authorization, requested in (
+            (False, "not_determined", False),
+            (True, "authorized", False),
+            (True, "denied", False),
+            (True, "unknown", False),
+            (True, "not_determined", True),
+        ):
+            with self.subTest(enabled=enabled, authorization=authorization, requested=requested):
+                self.assertFalse(should_ask(enabled=enabled, authorization=authorization,
+                                            requested_this_launch=requested))
 
     def test_record_and_ignore_are_scoped_to_closedroom_candidate(self):
         self.assertEqual(
