@@ -10,6 +10,7 @@ import math
 from typing import Any
 
 from local_asr_server.speaker_labels import apply_speaker_labels
+from local_asr_server.recordings import RecordingConflict
 
 
 def _clusters(transcription: dict[str, Any]) -> list[str]:
@@ -153,7 +154,7 @@ def speaker_audio_samples(transcription: dict[str, Any], recordings: Any) -> dic
             continue
         try:
             recordings.track_audio_path(recording_id, track_id)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecordingConflict):
             continue
         track_ids.add(track_id)
 
@@ -200,7 +201,9 @@ def speaker_audio_samples(transcription: dict[str, Any], recordings: Any) -> dic
                 native = str(turn.get("speaker") or "")
                 cluster = native if native.startswith(f"{track}:") else f"{track}:{native}"
                 window = _finite_interval(turn.get("start"), turn.get("end"))
-                if cluster in candidates and not candidates[cluster] and window:
+                if cluster in candidates and not any(
+                    item["kind"] == "transcript" for item in candidates[cluster]
+                ) and window:
                     candidates[cluster].append({
                         "track_id": track, "start": window[0], "end": window[1],
                         "kind": "diarization", "overlap": False,

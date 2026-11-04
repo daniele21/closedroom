@@ -80,6 +80,45 @@ def apply_speaker_labels(
             "transcript_segment_count": segment_counts.get(cluster, 0),
         })
 
+    # A speaker review maps raw identities to resolved people. Raw provider
+    # clusters and ASR timings are never overwritten, even on merge/exclude.
+    review = (payload.get("stats") or {}).get("speaker_review") or {}
+    names = review.get("names") or {}
+    merged_into = review.get("merged_into") or {}
+    excluded = set(review.get("excluded") or [])
+
+    def root_of(raw: str) -> str:
+        current = raw
+        visited: set[str] = set()
+        while current in merged_into:
+            if current in visited:
+                raise ValueError("Cyclic speaker review mapping")
+            visited.add(current)
+            current = str(merged_into[current])
+        return current
+
+    by_cluster = {str(item["speaker_cluster"]): item for item in mappings}
+    for raw, item in by_cluster.items():
+        if raw in names:
+            item["display_name"] = str(names[raw])[:120]
+            item["status"] = "accepted"
+            item["source"] = "manual"
+    for raw, item in by_cluster.items():
+        canonical = root_of(raw)
+        resolved = by_cluster.get(canonical, item)
+        item["speaker_group"] = canonical
+        if raw != canonical:
+            item["merged_into"] = canonical
+        else:
+            item.pop("merged_into", None)
+        if canonical in excluded:
+            item["display_name"] = "Non identificato"
+            item["status"] = "excluded"
+        elif canonical != raw:
+            item["display_name"] = resolved["display_name"]
+            item["status"] = "merged"
+        labels[raw] = str(item["display_name"])
+
     text_lines = []
     for segment in segments:
         cluster = segment.get("provider_speaker") or segment.get("speaker_label")
@@ -87,6 +126,7 @@ def apply_speaker_labels(
             label = labels[str(cluster)]
             segment["speaker_name"] = label
             segment["speaker_label"] = label
+            segment["speaker_group"] = root_of(str(cluster))
         label = segment.get("speaker_name") or segment.get("speaker_label") or segment.get("source") or "Audio"
         text = (segment.get("text") or "").strip()
         if text:
