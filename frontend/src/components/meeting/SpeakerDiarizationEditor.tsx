@@ -61,7 +61,10 @@ export function SpeakerDiarizationEditor({
 
   const mappings = transcription.stats?.speaker_attribution?.mappings || [];
   const rows = useMemo<SpeakerRow[]>(() => {
-    const fromMetadata = mappings.length ? mappings : Array.from(
+    const fromMetadata: Array<{
+      speaker_cluster: string; display_name?: string | null; status: string;
+      speaker_group?: string; transcript_segment_count?: number;
+    }> = mappings.length ? mappings : Array.from(
       new Set((transcription.segments || []).map((s) => s.provider_speaker || s.speaker_label).filter(Boolean)),
     ).map((cluster) => ({
       speaker_cluster: cluster as string, display_name: cluster as string, status: 'unassigned',
