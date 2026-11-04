@@ -73,13 +73,17 @@ class MeetingDetectionTests(unittest.TestCase):
         candidate = p.observe(active(ZOOM), enabled=True, busy=False, now=14)[0]
         cid = candidate.candidate_id
         self.assertEqual(p.begin_notification(cid, now=14), 1)
+        p.observe(active(ZOOM), enabled=True, busy=False, now=33)
         self.assertIsNone(p.begin_notification(cid, now=34))  # timeout; retry delayed
         self.assertFalse(p.finish_notification(cid, 1, True, now=35))
         self.assertIsNone(p.begin_notification(cid, now=48))
+        p.observe(active(ZOOM), enabled=True, busy=False, now=45)
         self.assertEqual(p.begin_notification(cid, now=49), 2)
         self.assertTrue(p.finish_notification(cid, 2, False, now=50))
+        p.observe(active(ZOOM), enabled=True, busy=False, now=64)
         self.assertEqual(p.begin_notification(cid, now=65), 3)
         self.assertTrue(p.finish_notification(cid, 3, False, now=66))
+        p.observe(active(ZOOM), enabled=True, busy=False, now=89)
         self.assertIsNone(p.begin_notification(cid, now=90))
 
     def test_permission_denial_does_not_consume_attempt_or_repeat_suggestion(self):
