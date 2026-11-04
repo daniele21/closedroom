@@ -48,6 +48,15 @@ async function startSettingsFixture(port) {
   const settings = {
     transcriptions_dir: '/tmp/closedroom-transcriptions',
     recordings_dir: '/tmp/closedroom-recordings',
+    storage_preference: 'local',
+    storage_effective_mode: 'local',
+    storage_capability: 'preparation_only',
+    gcs_project_id: '',
+    gcs_bucket_name: '',
+    gcs_region: 'europe-west8',
+    gcs_configuration_complete: false,
+    audio_local_retention_days: 14,
+    audio_auto_cleanup_enabled: false,
     asr_provider: 'local',
     speechmatics_region: 'eu',
     speechmatics_model: 'enhanced',
@@ -108,6 +117,29 @@ async function startSettingsFixture(port) {
     if (request.method === 'GET' && pathname === '/v1/settings') {
       return sendJson(200, settings);
     }
+    if (request.method === 'POST' && pathname === '/v1/settings') {
+      let raw = '';
+      request.on('data', (chunk) => { raw += chunk; });
+      request.on('end', () => {
+        try {
+          const patch = JSON.parse(raw);
+          if (patch.storage_preference !== 'local' && patch.storage_preference !== 'gcs') {
+            return sendJson(400, { detail: 'Unsupported storage_preference' });
+          }
+          if (patch.audio_auto_cleanup_enabled !== false) {
+            return sendJson(400, { detail: 'Automatic audio cleanup remains disabled' });
+          }
+          Object.assign(settings, patch);
+          settings.storage_effective_mode = 'local';
+          settings.storage_capability = 'preparation_only';
+          settings.gcs_configuration_complete = Boolean(settings.gcs_project_id && settings.gcs_bucket_name);
+          return sendJson(200, settings);
+        } catch {
+          return sendJson(400, { detail: 'Invalid settings fixture request' });
+        }
+      });
+      return;
+    }
     if (request.method === 'GET' && pathname === '/v1/runtime/services/llm') {
       return sendJson(200, { name: 'llm', status: 'stopped', mode: 'disabled' });
     }
@@ -140,6 +172,7 @@ async function startSettingsFixture(port) {
   return {
     close: () => new Promise((resolve) => server.close(resolve)),
     getRefreshCount: () => refreshCount,
+    getStorageSettings: () => ({ ...settings }),
   };
 }
 
@@ -653,6 +686,35 @@ try {
   observations.menuBarSettings.refreshRoundTrip = true;
   observations.menuBarSettings.refreshCount = settingsFixture.getRefreshCount();
   await checkpoint(browser, '06-menubar-restored');
+
+  // Storage configuration is a user preference, not an authorization to upload.
+  // Browser-level round trip must keep the effective mode local after saving GCS intent.
+  await browser.click('#settings-storage-gcs');
+  await waitUntil(browser, 'GCS preparation disclosure', `
+    return Boolean(document.querySelector('[data-storage-gcs-preparation="true"]'))
+      && document.querySelector('#settings-storage-gcs')?.checked === true;
+  `);
+  await checkpoint(browser, '07-gcs-preparation-selection');
+  await browser.click('button[type="submit"]');
+  await waitUntil(browser, 'GCS preference saved with local effective mode', `
+    return document.querySelector('#settings-storage-gcs')?.checked === true
+      && document.querySelector('[data-storage-effective-mode="local"]') !== null
+      && document.querySelector('[data-storage-gcs-preparation="true"]') !== null;
+  `, 10000);
+  const storedSelection = settingsFixture.getStorageSettings();
+  observations.storageTarget = {
+    preferred: storedSelection.storage_preference,
+    effective: storedSelection.storage_effective_mode,
+    capability: storedSelection.storage_capability,
+    cleanupEnabled: storedSelection.audio_auto_cleanup_enabled,
+  };
+  if (observations.storageTarget.preferred !== 'gcs'
+      || observations.storageTarget.effective !== 'local'
+      || observations.storageTarget.capability !== 'preparation_only'
+      || observations.storageTarget.cleanupEnabled !== false) {
+    throw new Error(`storage configuration must not activate GCS: ${JSON.stringify(observations.storageTarget)}`);
+  }
+  await checkpoint(browser, '08-gcs-preference-saved-local-active');
 
   await browser.setWindow(780, 900);
   await sleep(350);
