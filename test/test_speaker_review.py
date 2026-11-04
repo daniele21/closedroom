@@ -138,7 +138,9 @@ class SpeakerReviewPersistenceTests(unittest.TestCase):
         again = TranscriptionStore(CatalogStore(self.db))
         current = again.get(self.original["id"])
         self.assertEqual(current["segments"][1]["speaker_group"], "system:S1")
-        self.assertEqual(current["text"], before["text"])
+        self.assertEqual(current["text"], self.original["text"])
+        raw_json = again.root / again._file_name_for(self.original["id"])
+        self.assertEqual(__import__("json").loads(raw_json.read_text())["text"], self.original["text"])
         self.assertEqual(again.reviewed_diarization_undo(self.original["id"]),
                          {"revision_id": committed["revision_id"]})
         with self.assertRaisesRegex(ValueError, "changed"):
@@ -195,6 +197,11 @@ class SpeakerReviewApiTests(unittest.TestCase):
             "expected_fingerprint": rev})
         self.assertEqual(saved.status_code, 200, saved.text)
         self.assertEqual(saved.json()["transcription"]["text"],
+                         "Original human-authored source text.")
+        from local_asr_server.app_services import get_services
+        store = get_services(self.app).transcriptions
+        raw_path = store.root / store._file_name_for(self.id)
+        self.assertEqual(__import__("json").loads(raw_path.read_text())["text"],
                          "Original human-authored source text.")
         self.assertEqual(self.client.post(self.url, json={
             "action": "exclude", "cluster": "system:S3",

@@ -712,6 +712,7 @@ def commit_speaker_review(
             transcription_id,
             candidate=candidate,
             expected_fingerprint=body.expected_fingerprint,
+            preserve_raw_text=True,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

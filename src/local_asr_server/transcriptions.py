@@ -297,8 +297,13 @@ class TranscriptionStore:
     def apply_reviewed_diarization(
         self, transcription_id: str, *,
         candidate: dict[str, Any], expected_fingerprint: str,
+        preserve_raw_text: bool = False,
     ) -> dict[str, Any]:
-        """One confirmation creates exactly one local, durable rollback point."""
+        """One confirmation creates exactly one local, durable rollback point.
+
+        Manual speaker corrections preserve the source export text byte-for-byte.
+        The older Community-1 revision contract remains unchanged.
+        """
         from local_asr_server.transcription_diarization_review import fingerprint
         with self._review_lock:
             current = self.get(transcription_id)
@@ -321,11 +326,17 @@ class TranscriptionStore:
             if not export_name:
                 raise FileNotFoundError("Transcription not found")
             raw_before = json.loads((self.root / export_name).read_text(encoding="utf-8"))
-            # Match the canonical transcript returned to the user (the catalog
-            # applies resolved speaker labels on read), while retaining fields
-            # that are only present in the original export for exact recovery.
+            # Reads may decorate transcript text with speaker labels; that
+            # presentation must not overwrite the original exported ASR text.
+            # Speaker-review candidates opt into exact source text preservation.
+            if preserve_raw_text:
+                if not candidate.get("stats", {}).get("review_preserve_canonical_text"):
+                    raise ValueError("Speaker correction must preserve original text")
+                candidate = dict(candidate)
+                candidate["text"] = raw_before.get("text", "")
+            else:
+                raw_before["text"] = current.get("text")
             raw_before.update({
-                "text": current.get("text"),
                 "segments": current.get("segments"),
                 "stats": current.get("stats"),
                 "speaker_attribution": current.get("speaker_attribution"),
