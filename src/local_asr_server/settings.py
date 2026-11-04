@@ -68,6 +68,10 @@ DEFAULT_SETTINGS: dict[str, any] = {
     "local_llm_ctx_size": None,
     "local_llm_startup_timeout": None,
     "local_llm_llama_server_bin": "",
+    # Safe local audio-retention preference only. GCS upload/hydration and
+    # automatic eviction are NOT integrated or enabled at this stage.
+    "audio_local_retention_days": 14,
+    "audio_auto_cleanup_enabled": False,
     "meeting_auto_analysis": False,
     "meeting_detection_enabled": False,
     "meeting_default_pipeline": "meeting_default",
