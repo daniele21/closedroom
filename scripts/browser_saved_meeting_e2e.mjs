@@ -1102,10 +1102,10 @@ try {
   await waitText(browser, ['Comparison finished', 'Confronto completato'], 20000, true);
   await waitCount('benchmark_window', 3);
   await browser.clickButton(['Next', 'Successiva']);
-  await waitCount('benchmark_window', 4);
-  if (lastBenchmarkWindowStart < 300) {
-    throw new Error('full-meeting navigation did not fetch a window beyond minute five');
-  }
+  // Wait for the request AND the rendered slider to land on 5:00.
+  // An obsolete request from the prior scope can increment the shared
+  // counter after Next; it must not be confused with completed navigation.
+  await waitBenchmarkWindow(browser, 300, 4);
   await checkpoint(browser, '14-comparison-full-timeline-next');
   const canFindSpeaker = await browser.execute(`
     const button = document.querySelector('[data-benchmark-jump="B"]');
