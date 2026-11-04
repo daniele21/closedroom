@@ -62,7 +62,7 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
 
 from local_asr_server.window import ClosedRoomWindowManager
 from local_asr_server.meeting_detection import CoreAudioInputObserver, MeetingSuggestionPolicy, SUPPORTED_APPS
-from local_asr_server.macos_meeting_notifications import MeetingNotificationCenter
+from local_asr_server.macos_meeting_notifications import MeetingNotificationCenter, needs_initial_notification_consent
 from local_asr_server.app_identity import get_app_identity
 from local_asr_server.paths import get_brand_asset_path
 from local_asr_server.runtime.models import (
@@ -333,6 +333,7 @@ class ClosedRoomApp(rumps.App):
         self._meeting_policy = MeetingSuggestionPolicy()
         self._meeting_notifications = MeetingNotificationCenter(self._on_meeting_notification)
         self._meeting_notifications.start()  # delegate installed at app launch
+        self._meeting_notification_permission_prompted = False
         self._meeting_capability = 'unknown'
         self._meeting_observation = None
         self._meeting_suggested_id: str | None = None
@@ -689,6 +690,9 @@ class ClosedRoomApp(rumps.App):
         return {
             "enabled": load_settings().get("meeting_detection_enabled") is True,
             "capability": self._meeting_capability,
+            "reason": self._meeting_observation.reason if self._meeting_observation else "",
+            "notification_delivery": self._meeting_policy.notification_status(self._meeting_suggested_id),
+            "suggestion_active": self._meeting_suggested_id is not None,
             "notifications": self._meeting_notifications.authorization,
             "notification_available": self._meeting_notifications.available,
             "notification_error": self._meeting_notifications.last_error,
@@ -726,9 +730,23 @@ class ClosedRoomApp(rumps.App):
             self._clear_meeting_suggestion()
             return
 
+        # Permission may be granted while a call is already in progress.
+        self._meeting_notifications.refresh_authorization()
+        if needs_initial_notification_consent(
+            enabled=True, authorization=self._meeting_notifications.authorization,
+            requested_this_launch=self._meeting_notification_permission_prompted,
+        ):
+            # The user must grant the macOS permission; local detection alone
+            # never gives ClosedRoom permission to show a native banner.
+            self._meeting_notification_permission_prompted = True
+            self._meeting_notifications.request_authorization()
         observation = self._meeting_observer.scan()
         self._meeting_capability = observation.capability
         self._meeting_observation = observation
+        if server_status == "unavailable":
+            # Keep local diagnostic visibility, but never offer a new recording
+            # until the canonical capture server can accept the action.
+            return
         with self._meeting_intent_lock:
             pending = any(
                 item["phase"] in {"issued", "claimed", "preparing"}
@@ -754,7 +772,23 @@ class ClosedRoomApp(rumps.App):
             self._detected_meeting_item.set_callback(
                 lambda _, cid=candidate.candidate_id: self._meeting_notification_action(cid, "record")
             )
-            self._meeting_notifications.notify(candidate.candidate_id, app_label=label)
+        # Notification delivery can fail asynchronously or remain unauthorized.
+        # Keep the menu-bar action, and retry only bounded OS submissions.
+        if self._meeting_suggested_id and self._meeting_notifications.authorization == "authorized":
+            current = self._meeting_policy.active_candidate(self._meeting_suggested_id)
+            if current is not None and current.bundle_id in observation.active_bundle_ids:
+                attempt = self._meeting_policy.begin_notification(current.candidate_id)
+                if attempt is not None:
+                    def on_result(accepted: bool, cid=current.candidate_id, seq=attempt) -> None:
+                        from local_asr_server.window import run_on_main_thread
+                        run_on_main_thread(
+                            lambda: self._meeting_policy.finish_notification(cid, seq, accepted)
+                        )
+                    if not self._meeting_notifications.notify(
+                        current.candidate_id, app_label=SUPPORTED_APPS[current.bundle_id],
+                        on_result=on_result,
+                    ):
+                        self._meeting_policy.finish_notification(current.candidate_id, attempt, False)
 
     def _on_meeting_notification(self, candidate_id: str, action: str) -> None:
         # UNUserNotificationCenter may invoke its delegate off the Cocoa thread.
@@ -877,7 +911,9 @@ class ClosedRoomApp(rumps.App):
             self._set_status_icon("error")
             self._update_status_item("ClosedRoom non disponibile")
             self._set_recording_actions(recording=False, available=False)
-            self._clear_meeting_suggestion()
+            # Detection is local CoreAudio observation: don't stop it merely
+            # because the loopback API is temporarily restarting.
+            self._refresh_meeting_detection("unavailable")
             return
 
         server_status = status.get("status", "idle")

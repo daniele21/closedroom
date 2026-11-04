@@ -29,6 +29,7 @@ def probe(seconds: float, sample_seconds: float, observer=None, clock=time.monot
     deadline = clock() + seconds
     total = 0
     counts = Counter()
+    reasons = Counter()
     observed = set()
     transitions = Counter()
     peak_active_inputs = 0
@@ -38,6 +39,8 @@ def probe(seconds: float, sample_seconds: float, observer=None, clock=time.monot
         sample = scanner.scan()
         total += 1
         counts[sample.capability] += 1
+        if sample.reason:
+            reasons[sample.reason] += 1
         peak_active_inputs = max(peak_active_inputs, sample.active_input_processes)
         peak_unattributed_inputs = max(peak_unattributed_inputs, sample.unattributed_input_processes)
         for app_id in sample.active_bundle_ids:
@@ -59,6 +62,7 @@ def probe(seconds: float, sample_seconds: float, observer=None, clock=time.monot
         "peak_active_input_processes": peak_active_inputs,
         "peak_unattributed_input_processes": peak_unattributed_inputs,
         "capability_counts": dict(counts),
+        "capability_reasons": dict(reasons),
         "observed_supported_apps": [SUPPORTED_APPS[app_id] for app_id in sorted(observed)],
         "transition_counts": {
             f"{SUPPORTED_APPS[app_id]}:{kind}": transitions[f"{app_id}:{kind}"]
@@ -82,12 +86,18 @@ def main() -> int:
     result["result"] = "PASS"
     if not result["capability_counts"].get("supported"):
         result["result"] = "INCONCLUSIVE"
+        result["diagnostic_reason"] = "coreaudio_not_observable"
     if args.expect_app and args.expect_app not in result["observed_supported_apps"]:
         result["result"] = "FAIL"
+        result["diagnostic_reason"] = (
+            "input_process_unattributed" if result["peak_unattributed_input_processes"]
+            else "no_supported_app_activity_observed"
+        )
     if args.require_on_off and args.expect_app:
         transitions = result["transition_counts"]
         if not (transitions.get(f"{args.expect_app}:on") and transitions.get(f"{args.expect_app}:off")):
             result["result"] = "FAIL"
+            result["diagnostic_reason"] = "missing_input_on_off_transition"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

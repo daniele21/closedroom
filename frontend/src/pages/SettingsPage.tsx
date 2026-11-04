@@ -34,6 +34,28 @@ import {
   type LocalLlmReasoning,
 } from '../features/config/llmConfig';
 
+function meetingDeliveryLabel(state: string, lang: string): string {
+  const it: Record<string, string> = {
+    idle: 'nessun suggerimento',
+    not_requested: 'da inviare',
+    pending: 'in corso',
+    failed: 'invio fallito',
+    timeout: 'nessuna risposta',
+    retry_exhausted: 'tentativi esauriti',
+    enqueued: 'accettata da macOS (banner non garantito)',
+  };
+  const en: Record<string, string> = {
+    idle: 'no suggestion',
+    not_requested: 'not sent yet',
+    pending: 'pending',
+    failed: 'submission failed',
+    timeout: 'no response',
+    retry_exhausted: 'retry limit reached',
+    enqueued: 'accepted by macOS (banner not guaranteed)',
+  };
+  return (lang === 'it' ? it : en)[state] ?? state;
+}
+
 export default function SettingsPage() {
   const { t, lang } = useTranslation();
   const { showToast } = useToast();
@@ -79,7 +101,7 @@ export default function SettingsPage() {
   const [llmLogs, setLlmLogs] = useState('');
 
   const [meetingAutoAnalysis, setMeetingAutoAnalysis] = useState(false);
-  const [meetingDetectionEnabled, setMeetingDetectionEnabled] = useState(false);
+  const [meetingDetectionEnabled, setMeetingDetectionEnabled] = useState(true);
   const [meetingDetectionWasEnabled, setMeetingDetectionWasEnabled] = useState(false);
   const [meetingDefaultPipeline, setMeetingDefaultPipeline] = useState('meeting_default');
   const [speakerDiarizationEnabled, setSpeakerDiarizationEnabled] = useState(false);
@@ -504,8 +526,8 @@ export default function SettingsPage() {
           />
           <p className="text-xs text-text-muted" role="status">
             {lang === 'it'
-              ? 'Disattivato inizialmente. Salva per attivare e richiedere il permesso per le notifiche; avvia ClosedRoom al login se vuoi ricevere i suggerimenti.'
-              : 'Off by default. Save to enable and request notification permission; start ClosedRoom at login for background suggestions.'}
+              ? 'Attivo per impostazione predefinita nelle nuove installazioni. Rileva solo attività delle app, senza ascoltare audio. Per i banner autorizza le notifiche; avvia ClosedRoom al login per monitorare in background. Le scelte già salvate restano valide.'
+              : 'On by default for new installations. Only app activity is checked, without listening to audio. Grant notification permission for banners and launch ClosedRoom at login for background monitoring. Saved choices remain intact.'}
           </p>
           {meetingDetectionEnabled && menuBarStatus?.meeting_detection && (
             <div className="space-y-2 text-xs text-text-secondary" data-meeting-detection-diagnostics="true">
@@ -526,6 +548,16 @@ export default function SettingsPage() {
                 {' · '}{lang === 'it' ? 'Notifiche: ' : 'Notifications: '}
                 {menuBarStatus.meeting_detection.notifications}
               </p>
+              {menuBarStatus.meeting_detection.suggestion_active && (
+                <p role="status">
+                  {lang === 'it' ? 'Suggerimento attivo' : 'Active suggestion'}
+                  {' · '}{lang === 'it' ? 'Invio a macOS' : 'OS submission'}: {meetingDeliveryLabel(menuBarStatus.meeting_detection.notification_delivery?.state ?? 'idle', lang)}
+                  {' · '}{lang === 'it' ? 'Tentativi' : 'Attempts'}: {menuBarStatus.meeting_detection.notification_delivery?.attempts ?? 0}
+                </p>
+              )}
+              {menuBarStatus.meeting_detection.reason && menuBarStatus.meeting_detection.capability !== 'supported' && (
+                <p role="status">{menuBarStatus.meeting_detection.reason}</p>
+              )}
               {menuBarStatus.meeting_detection.notifications !== 'authorized' && (
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" variant="secondary" onClick={handleMeetingNotificationPermission}>

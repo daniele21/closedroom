@@ -625,6 +625,9 @@ export interface MenuBarStatus {
   meeting_detection?: {
     enabled: boolean;
     capability: string;
+    reason?: string;
+    suggestion_active?: boolean;
+    notification_delivery?: { state: string; attempts: number };
     notifications: string;
     notification_available?: boolean;
     notification_error?: string | null;
