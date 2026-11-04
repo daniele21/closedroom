@@ -32,12 +32,7 @@ Integrated source from `5f60eca1a5b5f3253dd175f5f200c656fb58cf22` on 2026-10-10.
 4. No second prompt for the same call after ignore, dismiss or manual Stop, even across brief mute/reconnect/helper PID changes. Loss of detection never auto-stops recording; notification denial retains menu-bar access.
 5. Foreground ClosedRoom uses contextual in-app presentation; keyboard, VoiceOver, status feedback and reduced-motion are mandatory.
 
-**Transient internal contracts to freeze in MD-0** (no persisted/public detection API):
-- `ActivityObservation{bundle_id,pid?,monotonic_time,input_active,capability,reason}`.
-- `MeetingCandidate{ephemeral_id,source_kind,label?,created_monotonic,expires_monotonic}` with call epoch distinct from PID.
-- `SuggestionDecision{notify|suppress|close,reason,candidate_id?}` covers opt-out/ambiguity/active/pending/prior dismissal/expiry/denied notification.
-- `NotificationAction{candidate_id,record|ignore|body_open}` processed once, with epoch + canonical active-state revalidation.
-- `StartAcknowledgement{accepted|already_active|preparing|blocked|failed|cancelled|recording_ready}` tied to existing capture reservation/session; JS dispatch alone is **not** acknowledgement.
+**Transient contracts:** observation, ephemeral candidate, one-time notification action and authenticated recording acknowledgement. Only volatile session state; all native callbacks fail closed.
 
 Experimental tuning, not product SLO: event-driven or ~1 Hz sample, 3–5 s activation debounce, 20–30 s inactivity hysteresis, bounded expiry and one prompt/session; calibrate on Mac.
 
@@ -60,36 +55,9 @@ Experimental tuning, not product SLO: event-driven or ~1 Hz sample, 3–5 s acti
 
 **Status:** source/test changes staged on `fix/meeting-detection-default-reliability-20261104`; no exact-head CI or target-Mac PASS claim until collected. In particular an already-saved OFF preference will continue to require the user to turn detection ON.
 
-## Dependency graph and parallel execution
+## Integrated milestones
 
-```
-MD-0  Boundary/feasibility decision   [serial]
-  ├── MD-1  Native CoreAudio + policy  [Lane A]
-  ├── MD-2  Actionable notification    [Lane B]   FOUR PARALLEL LANES
-  ├── MD-3  Canonical recording start  [Lane C]
-  └── MD-4  Opt-in + settings UI       [Lane D]
-               ↓ merge early into refreshed dev, independent owners
-MD-5  Shell/menu bar/overlay integration [single integration owner]
-               ↓
-MD-6  E2E, physical Mac, UX docs, rollout
-```
-
-**MD-0 — CONTRACT CHOSEN (physical feasibility unproven).** Inspect `dev`, root/scoped guides, directly impacted consumers/tests and current PRs; in particular open PR #105 (macOS 26 menu bar and Settings) and `architectural-consolidation` AC-1 edits to `useRecorder`. Validate CoreAudio `kAudioHardwarePropertyProcessObjectList`/`kAudioProcessPropertyIsRunningInput` compatibility on candidate macOS and app IDs, per-process access constraints, and actionable UNUserNotificationCenter delivery in packaged app (feasibility probe, not product claims). Choose minimal reliable **shared** start owner/ack from any WKWebView route with hidden window. Freeze input/action/start interface, supported-app matrix and no-focus contract; if any assumption fails, explicitly narrow scope before W1.
-
-**W1 parallel lanes** (separate short-lived worktrees from refreshed `dev`; no shared-file simultaneous edits; experimental paths remain unused/disabled until integration):
-
-| ID / lane | State | Exclusive write boundary | Observable deliverable / test |
-| --- | --- | --- | --- |
-| MD-1 / A | INTEGRATED | New `src/local_asr_server/meeting_detection*.py` and new focused tests; isolated CoreAudio bridge only if feasibility requires it | Input activity/capability + pure deduplicating suggestion policy; start/end hysteresis, unsupported app, false positive, PID change, concurrent sources, session expiration, thread cleanup. Never write `menubar.py`/settings/recorder. |
-| MD-2 / B | INTEGRATED | New `macos_meeting_notifications.py` adapter and tests | UNUserNotificationCenter categories, Record/Not now/body/dismiss semantics, action IDs, callback completion, stale/duplicate handling, opt-in permission, no personal text; mockable native boundary. No `menubar.py` edits. |
-| MD-3 / C | INTEGRATED | `frontend/src/hooks/useRecorder.ts`, directly consumed recording controller/bridge or service/API contract, focused tests | Exactly one start owner shared by manual/menu-bar/notification, acknowledged despite hidden or non-recording route, atomic reservation, wait-for-AI cancel, correct error/ready, no duplicate session; browser/manual flow unchanged. Coordinate exclusive `useRecorder` ownership with AC-1. |
-| MD-4 / D | INTEGRATED | `settings.py`, Settings router/schema, `frontend/src/pages/SettingsPage.tsx`, related i18n/UI tests | `meeting_detection_enabled=false` default; user-readable privacy/capability and opt-in UI, clear status and diagnostics; permission request only after opt-in, opt-out persists; no modal/onboarding blocking recording. No `menubar.py` edits. |
-
-W1 branches: `feat/meeting-detection-{core,notifications,start,preferences}`. Owner-local tests and early convergence; handle PR #105 conflicts before integrating.
-
-**MD-5 — INTEGRATED (native behavior unverified).** Wire only this lane into `menubar.py` and `window.py` (and necessary app lifecycle/packaging), start/stop detector, keep delegate retained and Cocoa calls on main thread, ensure one monitor per process and bounded shutdown, expose contextual menu-bar action, actionable-notification start and fallback when notifications denied, foreground preservation, truthful preparing/ready/recovery and native overlay after real capture. Coordinate PR #105 changes; no competing edits to these files.
-
-**MD-6 — MENU VISIBILITY RESTORED.** `UserNotifications` fixes missing block metadata; signed build notifications authorized (2026-10-13). Menu recovery preserves the old item on failure; native geometry alone is not visibility proof. Recreation, Finder launch and ControlCenter restart failed. Registry confirms disabled `com.openai.codex.menuItemLocations` also contains ClosedRoom, overriding its allowed row. Removing that association and reloading user preferences/ControlCenter restored onscreen hosts; final registry matches the approved policy and the user confirms visibility. ChatGPT remains disabled; original backup retained. Evidence: `dist/evidence/menu-bar-policy-20261013/applied.json`. Native notification/capture proof and FULL_MEDIA integration remain pending; browser Meet unsupported.
+PR #108 integrated CoreAudio observation, native notifications, canonical one-time recording intent and Settings; PR #116 fixed Teams process attribution. Physical target-Mac proof remains open. Old parallel lane plans were superseded by code/tests.
 
 ## Acceptance and validation checklist
 
