@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import io
+import json
 import tempfile
 import unittest
 import wave
@@ -134,13 +135,14 @@ class SpeakerReviewPersistenceTests(unittest.TestCase):
         candidate = project_speaker_action(before, action="merge", cluster="system:S2",
                                           target="system:S1")
         committed = self.store.apply_reviewed_diarization(
-            self.original["id"], candidate=candidate, expected_fingerprint=fingerprint(before))
+            self.original["id"], candidate=candidate,
+            expected_fingerprint=fingerprint(before), preserve_raw_text=True)
         again = TranscriptionStore(CatalogStore(self.db))
         current = again.get(self.original["id"])
         self.assertEqual(current["segments"][1]["speaker_group"], "system:S1")
         self.assertEqual(current["text"], self.original["text"])
         raw_json = again.root / again._file_name_for(self.original["id"])
-        self.assertEqual(__import__("json").loads(raw_json.read_text())["text"], self.original["text"])
+        self.assertEqual(json.loads(raw_json.read_text())["text"], self.original["text"])
         self.assertEqual(again.reviewed_diarization_undo(self.original["id"]),
                          {"revision_id": committed["revision_id"]})
         with self.assertRaisesRegex(ValueError, "changed"):
@@ -201,7 +203,7 @@ class SpeakerReviewApiTests(unittest.TestCase):
         from local_asr_server.app_services import get_services
         store = get_services(self.app).transcriptions
         raw_path = store.root / store._file_name_for(self.id)
-        self.assertEqual(__import__("json").loads(raw_path.read_text())["text"],
+        self.assertEqual(json.loads(raw_path.read_text())["text"],
                          "Original human-authored source text.")
         self.assertEqual(self.client.post(self.url, json={
             "action": "exclude", "cluster": "system:S3",
