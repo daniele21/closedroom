@@ -58,6 +58,8 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 
 PRS-18 owns runtime evidence; GitHub release work owns publication.
 
+- [`speaker-review-workspace.md`](workstreams/speaker-review-workspace.md): PR #181 on `feature/speaker-review-workspace`, local audio samples and reversible speaker review under implementation/validation; no dev integration or physical-audio evidence claimed yet.
+
 ## Next highest-value work
 
 1. ACR: verificare switch reale BT/USB, gap, dual-track e permessi TCC su build installata; non dedurre la ripresa fisica dai test automatici.
