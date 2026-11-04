@@ -18,6 +18,9 @@ from pathlib import Path
 from typing import Any
 
 from local_asr_server.catalog import CatalogStore
+from local_asr_server.recording_storage_policy import (
+    DEFAULT_RETENTION_DAYS, RETENTION_DAYS, assess_audio_cleanup,
+)
 from local_asr_server.paths import get_ffmpeg_path
 from local_asr_server.recording_audio_recovery import (
     AudioRecoveryError, checkpoint_frame_count, has_checkpoints, recover_checkpoint_audio,
@@ -173,6 +176,14 @@ class RecordingStore:
         capture_mode: str = "legacy_mixed",
         capture_backend: str = "browser",
     ) -> dict[str, Any]:
+        # Freeze the retention preference when the meeting is created.
+        # The application does not yet enable automatic audio deletion.
+        retention_days = DEFAULT_RETENTION_DAYS
+        if self._use_settings_dir:
+            from local_asr_server.settings import load_settings
+            candidate = load_settings().get("audio_local_retention_days")
+            if type(candidate) is int and candidate in RETENTION_DAYS:
+                retention_days = candidate
         recording_id = str(uuid.uuid4())
         date_dir = datetime.now(timezone.utc).date().isoformat()
         session_dir = self.root / date_dir / recording_id
@@ -229,6 +240,7 @@ class RecordingStore:
             "note_count": 0,
             "note_manifest_version": NOTE_MANIFEST_VERSION,
             "note_revision": 0,
+            "audio_local_retention_days": retention_days,
         }
         for track in audio_tracks:
             self._track_part_path(session_dir, track).touch()
@@ -2002,7 +2014,7 @@ class RecordingStore:
         public = {
             key: value
             for key, value in metadata.items()
-            if key not in {"extension", "relative_dir", "audio_tracks"}
+            if key not in {"extension", "relative_dir", "audio_tracks", "_audio_cloud_proof"}
         } | {
             "audio_tracks": public_tracks,
             "audio_file": (
@@ -2014,6 +2026,17 @@ class RecordingStore:
         public["chunk_count"] = primary.get("chunk_count", public.get("chunk_count", 0))
         public["bytes_written"] = sum(track.get("bytes_written", 0) for track in metadata["audio_tracks"])
         public["mime_type"] = primary.get("mime_type") or public.get("mime_type")
+        # Inform the UI about the safety boundary without exposing bucket,
+        # object identifiers, digests or a false promise of automatic cleanup.
+        # The processing/lease owner cannot yet prove idle across runtimes:
+        # always fail closed on the execution and deletion capability gates.
+        public["audio_storage"] = assess_audio_cleanup(
+            metadata,
+            retention_days=metadata.get("audio_local_retention_days", DEFAULT_RETENTION_DAYS),
+            cleanup_enabled=False,
+            local_transcript_verified=(session_dir / "transcript.json").is_file(),
+            active_operations=True,
+        )
         return public
 
     def _load(self, recording_id: str) -> tuple[Path, dict[str, Any]]:
