@@ -25,9 +25,9 @@ from local_asr_server.runtime.models import (
 STORAGE_LOCAL = "local"
 STORAGE_GCS = "gcs"
 STORAGE_CAPABILITY = "preparation_only"
-_GCS_PROJECT = re.compile(r"[a-z][a-z0-9-]{4,28}[a-z0-9]\\Z")
-_GCS_BUCKET = re.compile(r"[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]\\Z")
-_GCS_REGION = re.compile(r"[a-z]+(?:-[a-z]+)*[0-9]+\\Z")
+_GCS_PROJECT = re.compile(r"[a-z][a-z0-9-]{4,28}[a-z0-9]\Z")
+_GCS_BUCKET = re.compile(r"[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]\Z")
+_GCS_REGION = re.compile(r"[a-z]+(?:-[a-z]+)*[0-9]+\Z")
 
 
 def validate_storage_selection(settings: dict[str, Any]) -> None:
@@ -46,7 +46,7 @@ def validate_storage_selection(settings: dict[str, Any]) -> None:
         ):
             raise InvalidSettings(f"Invalid {name}")
     if bucket and (bucket.startswith(("goog", "g00g")) or
-                   re.fullmatch(r"\\d{1,3}(?:\\.\\d{1,3}){3}", bucket)):
+                   re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", bucket)):
         raise InvalidSettings("Invalid gcs_bucket_name")
 
 
