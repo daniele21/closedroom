@@ -367,12 +367,40 @@ export interface TranscriptionSegment {
   speaker_label?: string;
   speaker_name?: string;
   provider_speaker?: string;
+  speaker_group?: string;
   pause_before?: number;
   speech_rate_wpm?: number;
   energy?: 'low' | 'medium_low' | 'medium' | 'high' | string | null;
   overlap?: boolean;
   words?: Array<{ word: string; start: number; end: number }>;
 }
+
+export interface SpeakerClip {
+  track_id: string;
+  start: number;
+  end: number;
+  kind: 'transcript' | 'diarization';
+  overlap: boolean;
+}
+
+export interface SpeakerReviewInfo {
+  fingerprint: string;
+  undo: { revision_id: string } | null;
+}
+
+export interface SpeakerReviewSamples {
+  recording_id: string;
+  transcription_id: string;
+  speakers: Array<{ speaker_cluster: string; samples: SpeakerClip[] }>;
+}
+
+export type SpeakerReviewAction = {
+  action: 'rename' | 'merge' | 'exclude' | 'restore';
+  cluster: string;
+  target?: string;
+  name?: string;
+  expected_fingerprint: string;
+};
 
 export interface AudioIntelligenceEvent {
   start: number;
@@ -538,6 +566,8 @@ export interface Transcription {
         temporal_support_seconds?: number;
         margin?: number;
         transcript_segment_count?: number;
+        speaker_group?: string;
+        merged_into?: string;
       }>;
     };
     [key: string]: unknown;
@@ -1316,6 +1346,27 @@ export const ApiClient = {
 
   async deleteScreenshot(recordingId: string, screenshotId: string): Promise<void> {
     await request(`/v1/recordings/${recordingId}/screenshots/${screenshotId}`, { method: 'DELETE' });
+  },
+
+  async getSpeakerReview(id: string): Promise<SpeakerReviewInfo> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review`)).json();
+  },
+
+  async getSpeakerReviewSamples(id: string): Promise<SpeakerReviewSamples> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review/samples`)).json();
+  },
+
+  async commitSpeakerReview(id: string, action: SpeakerReviewAction): Promise<{ transcription: Transcription; revision_id: string }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action),
+    })).json();
+  },
+
+  async undoSpeakerReview(id: string, revisionId: string): Promise<{ transcription: Transcription }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review/undo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision_id: revisionId }),
+    })).json();
   },
 
   async updateTranscriptionSpeakers(id: string, names: Record<string, string>): Promise<Transcription> {
