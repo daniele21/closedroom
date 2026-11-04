@@ -72,7 +72,8 @@ class StorageTargetSelectionTests(unittest.TestCase):
             SettingsRequest(gcs_region="../europe"),
         ]
         for body in invalid:
-            with self.subTest(body=body), (
+            with (
+                self.subTest(body=body),
                 patch("local_asr_server.services.settings_service.load_settings",
                       return_value=DEFAULT_SETTINGS.copy()),
                 patch("local_asr_server.services.settings_service.save_settings") as save,
