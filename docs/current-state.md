@@ -9,6 +9,7 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
 - PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio benchmark tooling; dual-track audio remains canonical pending representative evidence.
 - PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and adaptive Today/Meeting/Projects workspace.
+- Speaker Review integrato in `dev` via PR #181 (`dd430931`): campioni vocali locali, nomi, fusione/esclusione e undo; 871 test e browser FULL_MEDIA PASS. Prova su app macOS, audio reale/WKWebView e accessibilità restano da eseguire.
 - PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
 - GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata; runtime/install identity stays stable as `ClosedRoom.app` / `ClosedRoom` / `com.closedroom.app`, while DMGs/finalized artifacts carry version + build/source identity.
 - PR #137 consolidated UI/ASR; path/upload caches stay distinct. PRs #138–139 cut doc media and add read-only footprint audit; native dependency removal awaits Mac measurements.
@@ -28,8 +29,6 @@ PRS-18 has two target-Mac evidence paths:
 - **Production**: `release_build` signs/notarizes the exact app + DMG; `release_evidence` covers WKWebView/TCC, MLX, thermal and contention on that artifact;
 - **Local**: `scripts/run_local_real_environment_suite.py` runs target-Mac checks on one exact finalized ad-hoc Apple-Silicon app. Evidence: `dist/evidence/local-real-environment/<revision>/`; not public distribution proof.
 
-Ad-hoc evidence never substitutes for production signing.
-
 ## Stable-source evidence still pending
 
 Promotion `dev -> main` remains blocked until **RELEASE / FULL** automation and applicable target-environment observations agree on the exact candidate.
@@ -43,8 +42,6 @@ Still required where material:
 
 Stable source needs target-Mac evidence, not Apple distribution authority. A downloadable binary additionally needs Developer ID signing, notarization/stapling and Gatekeeper acceptance.
 
-A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligations for an exact stable candidate while public binary distribution remains externally blocked.
-
 ## Active workstreams
 
 - [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 integrato in `dev` via PR #176 (`772a5f68`): ripresa microfono e audio sistema solo nativo; FULL automated PASS, switch fisico/TCC ancora da provare.
@@ -55,8 +52,6 @@ A passing LOCAL REAL_ENVIRONMENT run may close physical product/runtime obligati
 - [`selective-efficiency.md`](workstreams/selective-efficiency.md): persisted audio fingerprint reuse and privacy-safe VAD comparison tooling; ONNX removal remains evidence-gated.
 
 - Meeting Moments integrated through PR #100 (`4e159414`); INTEGRATION / STRONG preflight #659 passed on exact head `816da96a`. Target-Mac menu/focus/hotkey/TCC confirmation remains RELEASE evidence.
-
-PRS-18 owns runtime evidence; GitHub release work owns publication.
 
 ## Next highest-value work
 
