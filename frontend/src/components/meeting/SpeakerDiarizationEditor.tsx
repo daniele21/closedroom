@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, CheckCircle2, ChevronDown, GitMerge, Headphones,
   MoreHorizontal, Pause, Play, RotateCcw, SkipBack, SkipForward, Volume2,
@@ -49,6 +49,7 @@ export function SpeakerDiarizationEditor({
   const [loadError, setLoadError] = useState('');
   const [selectedCluster, setSelectedCluster] = useState('');
   const [editedName, setEditedName] = useState('');
+  const skipBlurSaveRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [mutationError, setMutationError] = useState('');
   const [sampleIndex, setSampleIndex] = useState(0);
@@ -384,10 +385,21 @@ export function SpeakerDiarizationEditor({
                     value={editedName} maxLength={120}
                     disabled={!canEdit || selected.status === 'excluded' || selected.status === 'merged'}
                     onChange={(event) => setEditedName(event.target.value)}
-                    onBlur={saveName}
+                    onBlur={() => {
+                      if (skipBlurSaveRef.current) {
+                        skipBlurSaveRef.current = false;
+                        return;
+                      }
+                      saveName();
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); }
-                      if (event.key === 'Escape') { setEditedName(selected.name); event.currentTarget.blur(); }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        skipBlurSaveRef.current = true;
+                        setEditedName(selected.name);
+                        event.currentTarget.blur();
+                      }
                     }}
                   />
                   <span role="status" aria-live="polite" className="text-xs text-text-muted">
