@@ -23,7 +23,7 @@ REQUEST = {"schema": broker.SCHEMA, "nonce": NONCE, "source_sha": SHA,
 
 class LoginBrokerTests(unittest.TestCase):
     def test_synthetic_and_preflight_authorized_without_real_upload(self):
-        for action in ("oauth-verify", "preflight"):
+        for action in ("oauth-verify", "preflight", "restore-verify"):
             req = dict(REQUEST, action=action)
             broker.validate_request(req, CONFIG, 10000)
 
@@ -72,6 +72,23 @@ class LoginBrokerTests(unittest.TestCase):
             broker._status_from_output(
                 '{"status": "something-else", "token": "secret"}', "backup",
             )
+
+    def test_restore_result_proves_isolated_validation_but_not_external_custody(self):
+        raw = json.dumps({
+            "status": "cold_snapshot_restored_verified_isolated",
+            "restored_files": 26071,
+            "recordings_rows": 198,
+            "transcriptions_rows": 86,
+            "independent_code_custody_verified": False,
+            "verified_on_second_mac": False,
+            "recovery_code": "CR1-must-never-leak",
+            "source_recording_path": "/private/meeting",
+        })
+        result = broker._status_from_output(raw, "restore-verify")
+        self.assertEqual(result["status"], "cold_snapshot_restored_verified_isolated")
+        self.assertEqual(result["restored_files"], 26071)
+        self.assertNotIn("recovery_code", result)
+        self.assertNotIn("source_recording_path", result)
 
     def test_sanitized_backend_error_code(self):
         with self.assertRaises(broker.BrokerRefusal) as e:
