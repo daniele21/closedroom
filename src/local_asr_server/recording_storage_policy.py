@@ -112,7 +112,8 @@ def assess_audio_cleanup(
         blockers.append("audio_tracks_unverified")
     else:
         for track in tracks:
-            if not isinstance(track, dict) or track.get("id") not in {"mixed", "mic", "system"}:
+            if (not isinstance(track, dict) or not isinstance(track.get("id"), str)
+                    or track["id"] not in {"mixed", "mic", "system"}):
                 blockers.append("audio_tracks_unverified")
                 break
             track_id = track["id"]
