@@ -32,6 +32,8 @@ on:
       - "scripts/closedroom_gcs_login_broker.py"
       - "scripts/install_closedroom_gcs_login_broker.py"
       - "test/test_gcs_login_broker.py"
+      - "scripts/verify_closedroom_gcs_cold_restore.py"
+      - "test/test_gcs_cold_restore_verification.py"
 
 permissions:
   contents: read
@@ -82,6 +84,12 @@ jobs:
         env:
           PYTHONPATH: src
         run: python3 -m unittest discover -s test -p 'test_runner_gcs_backup.py' -v
+      - name: Isolated encrypted GCS cold restore safety tests
+        env:
+          PYTHONPATH: src
+        run: |
+          python3 -m py_compile scripts/verify_closedroom_gcs_cold_restore.py
+          python3 -m unittest discover -s test -p 'test_gcs_cold_restore_verification.py' -v
       - name: User-session login broker authorization and no-secrets tests
         run: |
           python3 -m py_compile scripts/closedroom_gcs_login_broker.py scripts/install_closedroom_gcs_login_broker.py scripts/run_gcs_backup_on_runner.py
