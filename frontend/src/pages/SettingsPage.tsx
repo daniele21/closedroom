@@ -43,6 +43,7 @@ export default function SettingsPage() {
 
   const [recordingsDir, setRecordingsDir] = useState('');
   const [transcriptionsDir, setTranscriptionsDir] = useState('');
+  const [audioRetentionDays, setAudioRetentionDays] = useState<7 | 14 | 30>(14);
   const [defaultModel, setDefaultModel] = useState('');
   const [defaultLanguage, setDefaultLanguage] = useState('it');
   const [defaultTask, setDefaultTask] = useState('transcribe');
@@ -186,6 +187,10 @@ export default function SettingsPage() {
 
       setRecordingsDir(settings.recordings_dir || '');
       setTranscriptionsDir(settings.transcriptions_dir || '');
+      setAudioRetentionDays(
+        settings.audio_local_retention_days === 7 || settings.audio_local_retention_days === 30
+          ? settings.audio_local_retention_days : 14
+      );
       setDefaultModel(asr.model);
       setDefaultLanguage(asr.language);
       setDefaultTask(asr.task);
@@ -292,6 +297,8 @@ export default function SettingsPage() {
       const payload: Partial<Settings> = {
         transcriptions_dir: transcriptionsDir.trim(),
         recordings_dir: recordingsDir.trim(),
+        audio_local_retention_days: audioRetentionDays,
+        audio_auto_cleanup_enabled: false,
         ...asrSettingsPatch({
           provider: asrProvider,
           model: defaultModel,
@@ -401,6 +408,37 @@ export default function SettingsPage() {
                 <Button type="button" variant="secondary" onClick={() => handleBrowse('transcriptions')}>{t('settings.btnBrowse')}</Button>
               </div>
             </div>
+          </div>
+          <div className="border-t border-border-subtle pt-4" data-storage-retention-preference="true">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-sm font-semibold text-text-primary">
+                {lang === 'it' ? 'Ridondanza audio su Mac' : 'Mac audio redundancy'}
+              </h4>
+              <Badge variant="warning">
+                {lang === 'it' ? 'Pulizia non disponibile' : 'Cleanup unavailable'}
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-text-secondary">
+              {lang === 'it'
+                ? 'Oggi audio e trascrizioni restano sul Mac. Il backup GCS esistente è manuale: non abilita la cancellazione delle registrazioni.'
+                : 'Audio and transcripts currently remain on your Mac. The existing GCS backup is manual and does not enable audio deletion.'}
+            </p>
+            <div className="mt-3 max-w-xs">
+              <Select
+                label={lang === 'it' ? 'Periodo di doppia copia futuro' : 'Future dual-copy retention window'}
+                value={String(audioRetentionDays)}
+                onChange={(event) => setAudioRetentionDays(Number(event.target.value) as 7 | 14 | 30)}
+              >
+                <option value="7">{lang === 'it' ? '7 giorni' : '7 days'}</option>
+                <option value="14">{lang === 'it' ? '14 giorni (consigliato)' : '14 days (recommended)'}</option>
+                <option value="30">{lang === 'it' ? '30 giorni' : '30 days'}</option>
+              </Select>
+            </div>
+            <p className="mt-2 text-xs text-text-muted" role="status">
+              {lang === 'it'
+                ? 'Questa preferenza viene salvata, ma non avvia upload o pulizia. La rimozione dell’audio sarà disponibile solo dopo verifica del recupero su GCS e dei lavori in corso.'
+                : 'This saves a future preference; it does not start an upload or cleanup. Audio removal will require verified GCS recovery and no active work.'}
+            </p>
           </div>
         </Card>
 
