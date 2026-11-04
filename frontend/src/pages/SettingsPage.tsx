@@ -443,7 +443,9 @@ export default function SettingsPage() {
           </fieldset>
           <div role="status" aria-live="polite" className="flex flex-wrap items-center gap-2 rounded-lg border border-border-subtle bg-bg-surface p-3" data-storage-effective-mode={storageEffectiveMode}>
             <Badge variant={storageEffectiveMode === 'local' ? 'success' : 'info'}>
-              {lang === 'it' ? 'Attivo ora: Solo Mac' : 'Active now: On this Mac'}
+              {storageEffectiveMode === 'local'
+                ? (lang === 'it' ? 'Attivo ora: Solo Mac' : 'Active now: On this Mac')
+                : (lang === 'it' ? 'Attivo ora: Google Cloud Storage' : 'Active now: Google Cloud Storage')}
             </Badge>
             <span className="text-xs text-text-secondary">
               {lang === 'it' ? 'La modifica della preferenza non sposta meeting esistenti e non cancella file.' : 'Changing the preference does not move existing meetings or delete files.'}
@@ -463,15 +465,15 @@ export default function SettingsPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <Input id="settings-gcs-project-id" label="GCP project ID"
                   placeholder="my-project-123456" value={gcsProjectId}
-                  onChange={(event) => setGcsProjectId(event.target.value)} autoComplete="off" />
+                  onChange={(event) => { setGcsProjectId(event.target.value); setGcsConfigurationComplete(false); }} autoComplete="off" />
                 <Input id="settings-gcs-bucket-name" label="GCS bucket"
                   placeholder="my-private-meetings" value={gcsBucketName}
-                  onChange={(event) => setGcsBucketName(event.target.value)} autoComplete="off" />
+                  onChange={(event) => { setGcsBucketName(event.target.value); setGcsConfigurationComplete(false); }} autoComplete="off" />
               </div>
               <div className="max-w-xs">
                 <Input id="settings-gcs-region" label={lang === 'it' ? 'Regione del bucket' : 'Bucket region'}
                   placeholder="europe-west8" value={gcsRegion}
-                  onChange={(event) => setGcsRegion(event.target.value)} autoComplete="off" />
+                  onChange={(event) => { setGcsRegion(event.target.value); setGcsConfigurationComplete(false); }} autoComplete="off" />
               </div>
               <p className="text-xs text-text-muted">
                 {gcsConfigurationComplete
