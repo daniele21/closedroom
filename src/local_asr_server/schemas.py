@@ -160,6 +160,8 @@ class SettingsRequest(BaseModel):
     local_llm_ctx_size: Optional[int] = None
     local_llm_startup_timeout: Optional[int] = None
     local_llm_llama_server_bin: Optional[str] = None
+    audio_local_retention_days: Optional[int] = None
+    audio_auto_cleanup_enabled: Optional[bool] = None
     meeting_auto_analysis: Optional[bool] = None
     meeting_detection_enabled: Optional[bool] = None
     meeting_default_pipeline: Optional[str] = None
