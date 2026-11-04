@@ -109,6 +109,16 @@ class SettingsService:
 
     @staticmethod
     def _validate_choices(settings: dict[str, Any]) -> None:
+        # Storing the retention preference is safe; activating deletion is
+        # forbidden until per-meeting GCS restore/hydration and leases exist.
+        retention = settings.get("audio_local_retention_days")
+        if type(retention) is not int or retention not in (7, 14, 30):
+            raise InvalidSettings("audio_local_retention_days must be 7, 14 or 30")
+        if settings.get("audio_auto_cleanup_enabled") is not False:
+            raise InvalidSettings(
+                "Automatic audio cleanup is unavailable until encrypted GCS restore "
+                "and local recovery are verified for every meeting"
+            )
         choices = {
             "llm_provider": LLM_PROVIDER_NAMES,
             "local_llm_mode": LOCAL_LLM_MODES,
