@@ -64,3 +64,60 @@ the code in GitHub Actions. Independently export the code into an offline
 password manager/recovery location through a user-authenticated on-Mac action:
 a Keychain item on the original Mac alone is insufficient disaster recovery.
 Keep originals; second-Mac restore/decrypt and app correctness remain pending.
+
+## Full restore verification via native login session (2026-11-04)
+
+The **one-shot actual encrypted GCS backup** completed on the target Mac,
+but successful upload alone is insufficient for automatic local audio eviction.
+The new source-pinned `broker-restore-verify` operation is distinct from
+`broker-backup` and is explicitly non-destructive:
+
+- In the logged-in macOS user session, read only the previously written
+  private receipt, encrypted recovery envelope and the recovery code from
+  native Keychain. Never print or export the code through GitHub Actions.
+- Use the envelope + code to derive a key in an **ephemeral recovery vault**,
+  *not* the current Mac's native archive-key Keychain entry. This tests the
+  portable recovery mechanism used on a different Mac.
+- Download the pinned GCS object generation, authenticate AES-GCM decryption
+  and hash checks, extract the entire 26,071-file snapshot into a fresh
+  **throwaway 0700 directory** below the user's home, run restored SQLite
+  `PRAGMA quick_check`, count recording and transcription rows, then clean
+  up only the isolated scratch files created by this operation.
+- Never touch existing ClosedRoom recordings, transcripts, catalog, settings,
+  the private recovery receipt or the GCS object. No eviction, activation,
+  remote deletion, nor cloud inference is performed.
+- On insufficient scratch, invalid Keychain access, missing receipt, or
+  any checksum/SQLite error: **fail closed** with a sanitized error code.
+- The success status `cold_snapshot_restored_verified_isolated` means
+  **same-Mac recovery materials worked**. It specifically does **not**
+  prove independent custody of the code or a complete recovery on a
+  different Mac. Keep all original meeting audio.
+
+The existing installed LaunchAgent is pinned to an older source SHA. A
+source update requires the operator to explicitly reinstall the private
+agent from the updated branch; CI must never rewrite that config or read
+Keychain itself. After updating `~/Projects/local-asr-server` on the
+target Mac and confirming no pending request, run:
+
+```bash
+cd ~/Projects/local-asr-server
+python3 scripts/install_closedroom_gcs_login_broker.py uninstall
+git fetch origin
+git switch feature/gcs-storage-discovery-project-tests
+git pull --ff-only origin feature/gcs-storage-discovery-project-tests
+python3 scripts/install_closedroom_gcs_login_broker.py install
+```
+
+Then the trusted central operator can pin the **exact newly installed source
+SHA** and dispatch a fresh `broker-restore-verify` request with
+`real_meeting_upload_approved=false`. The source and central broker
+trust-contract tests must PASS first. Do not dispatch `broker-backup`
+again: the one-shot source receipt already exists and an implicit re-upload
+would violate the existing migration lifecycle.
+
+**Further blocking gate before automatic audio eviction:** store the recovery
+code off-device (e.g. password manager) independently of the envelope and
+receipt, verify their availability from a second authenticated Mac or a
+completely isolated restored Keychain setup, and integrate per-meeting GCS
+asset refs/hydration with `RecordingStore`. This test only proves the
+existing *cold backup* and never grants eviction authority.
