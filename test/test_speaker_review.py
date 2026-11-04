@@ -59,6 +59,7 @@ class SpeakerReviewProjectionTests(unittest.TestCase):
         self.assertEqual(restored["segments"][1]["speaker_name"], "Paolo")
         unmerged = project_speaker_action(restored, action="restore", cluster="system:S2")
         self.assertEqual(unmerged["segments"][1]["speaker_group"], "system:S2")
+        self.assertNotEqual(unmerged["segments"][1]["speaker_name"], "Paolo")
         self.assertEqual(base, base_copy)
 
     def test_invalid_target_self_merge_cycle_and_duplicate_exclusion(self):

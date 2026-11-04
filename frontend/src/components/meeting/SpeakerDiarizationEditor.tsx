@@ -342,7 +342,12 @@ export function SpeakerDiarizationEditor({
 
               <div className="mt-4 rounded-lg border border-border-subtle bg-bg-surface p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="primary" disabled={!currentSample} onClick={() => currentSample && playClip(currentSample)}>
+                  <Button variant="primary" disabled={!currentSample} onClick={() => {
+                    if (!currentSample) return;
+                    if (playback.state.mode === 'sample' && playback.state.current?.start === currentSample.start &&
+                      playback.state.current?.track_id === currentSample.track_id) playback.toggle();
+                    else playClip(currentSample);
+                  }}>
                     {playback.state.playing && playback.state.mode === 'sample'
                       ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     {tr('Ascolta campione', 'Play sample')}

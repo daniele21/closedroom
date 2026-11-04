@@ -60,12 +60,17 @@ def apply_speaker_labels(
             if not str(cluster).startswith("Speaker "):
                 known_labels[str(cluster)] = label
 
+    review_baseline = ((payload.get("stats") or {}).get("speaker_review") or {}).get("original_mappings") or {}
     mappings = []
     labels: dict[str, str] = {}
     for index, cluster in enumerate(clusters, start=1):
-        previous = existing_mappings.get(cluster, {})
+        previous = {**existing_mappings.get(cluster, {}), **review_baseline.get(cluster, {})}
         accepted_name = previous.get("display_name") if previous.get("status") == "accepted" else None
-        display_name = manual.get(cluster) or accepted_name or known_labels.get(cluster) or f"Speaker {index}"
+        display_name = (
+            manual.get(cluster) or accepted_name
+            or (review_baseline.get(cluster) or {}).get("display_name")
+            or known_labels.get(cluster) or f"Speaker {index}"
+        )
         source = "manual" if cluster in manual else previous.get("source") or (
             "visual" if accepted_name else "diarization"
         )

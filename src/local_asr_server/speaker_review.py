@@ -64,6 +64,22 @@ def project_speaker_action(
     names = dict(review.get("names") or {})
     merges = dict(review.get("merged_into") or {})
     excluded = set(review.get("excluded") or [])
+    originals = dict(review.get("original_mappings") or {})
+    original_mappings = {
+        str(m.get("speaker_cluster")): m
+        for m in (
+            transcription.get("speaker_attribution")
+            or (transcription.get("stats") or {}).get("speaker_attribution")
+            or {}
+        ).get("mappings") or [] if m.get("speaker_cluster")
+    }
+    if cluster not in originals and cluster in original_mappings:
+        item = original_mappings[cluster]
+        originals[cluster] = {
+            "display_name": item.get("display_name"),
+            "status": item.get("status"),
+            "source": item.get("source"),
+        }
     root = _root(cluster, merges)
     if action == "rename":
         if cluster != root or root in excluded:
@@ -98,6 +114,7 @@ def project_speaker_action(
     # Only store validated, serializable review intent, never a second copy of
     # transcript segments, diarization audio or user voice characteristics.
     review["names"] = names
+    review["original_mappings"] = originals
     review["merged_into"] = merges
     review["excluded"] = sorted(excluded)
     stats["speaker_review"] = review
