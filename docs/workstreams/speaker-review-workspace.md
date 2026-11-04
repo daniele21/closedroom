@@ -1,82 +1,137 @@
-# Speaker Review Workspace — ascolta, identifica, unisci, verifica
+# Speaker Review Workspace — progettazione e delivery
 
-Status: ACTIVE — product/UX decision captured; implementation not started
-Owner: ClosedRoom saved Meeting (frontend + canonical transcription/recording owners)
-Read when: revising speaker identities, audio samples, timeline playback or speaker-only corrections
+Status: ACTIVE — UX/UI shaped; implementation NOT STARTED
+Owner: canonical saved Meeting + TranscriptionStore/RecordingStore; source `dev`
+Read when: speaker review audio, edits, queues, corrections, rollback, integration
 
-## Product outcome and boundaries
+## User, problem and outcome
 
-A professional opens **Meeting → Speaker** after local diarization and wants to recognize each voice, correct wrongly split or spurious speakers, and check the full result without replaying the entire meeting. Speaker review should be faster and less error-prone than renaming eight opaque `system:Sx` rows.
+**User:** a professional reviewing a completed private/local meeting.
+**Job:** recognize each detected voice from short audio, name it, correct false/duplicate clusters, and verify *all attributed interventions* without replaying the full recording.
+**Observed friction:** screenshot shows 8 equally weighted, two-column input cards with opaque `system:Sx` codes, technical `completed`/backend text, no embedded samples, no merge/exclude or per-speaker audition, tiny labels, and one global Save button unrelated to the current row. “Computer” may represent a *track/source* rather than a human: verify its origin, do not assert it is always a person. User must currently infer a name without evidence.
 
-**Outcome:** each speaker has a readily playable voice sample, a clear name and status, actions to merge/exclude without losing content, and a speaker-only playback/verification mode. Typical path: listen → name → next → verify (optionally merge/exclude) → saved.
+**Measurable result:** short path `select voice → play 3–8s → name → next`; a selected person can be heard through all attributed intervals; merge/exclude are reversible; original words, timings and audio never change. In a meeting like the supplied 7 detected speakers / 801 assigned segments, no requirement to inspect raw cluster IDs or a separate benchmarking page.
 
-**Non-goals:** re-run ASR or diarization for ordinary corrections; cloud transcription/analysis; audio cloning; auto-identification of people from voice; deleting transcript words, timestamps or raw audio; automatic speaker merging because names look identical; replacing advanced Community-1 preview/apply/undo or diarization benchmarks.
+**Non-goals:** new navigation root, external speaker recognition/voice enrollment, speaker embeddings, mixing/cloud transfer, automatic identity guesses, diarization or ASR reruns for manual edits, deleting source audio/text, or implying that overlapping voices have been separated. Do not replace Community-1 review or A/B benchmark.
 
-**Four axes:** PRODUCT_FEATURE / ITERATION initially (INTEGRATION for PR→dev; RELEASE only dev→main) / STRONG (speaker identity contracts, persistence and audio replay, plus material UI evidence at integration) / REMOTE_AUTOMATED for Mac/browser deterministic gates missing locally; REAL_ENVIRONMENT for target-Mac WKWebView, device-audio and qualitative VoiceOver evidence.
+**Four axes:** PRODUCT_FEATURE; ITERATION while planning/developing, INTEGRATION when preparing PR→dev; STRONG for data/API/privacy/media lifecycle (plus FULL_MEDIA on affected material UI integration); REMOTE_AUTOMATED for unavailable deterministic tests and REAL_ENVIRONMENT for authentic target-Mac audio/WKWebView, as independent evidence.
 
-### Risks and assumptions
+## Design decision — task model first
 
-- **VALUE:** users can identify voices more reliably with samples than with opaque IDs; compare per-speaker identification time/corrections against today's editor.
-- **USABILITY:** four primary capabilities, but only one default action (play sample); advanced merge/exclude behind per-row menu; no diagnostics codes in main row.
-- **FEASIBILITY:** current `frontend/src/components/meeting/SpeakerDiarizationEditor.tsx` is name-only. Segment timestamps/provider_speaker live in transcription; `/v1/recordings/{id}/tracks/{track}/audio` serves local audio, while `speaker-diarization.json` can retain the native diarization timeline. `TranscriptionStore` and Community-1 review own persistence and optimistic undo.
-- **VIABILITY:** no model inference or network call to listen; bounded playback intervals and metadata; keep CPU/memory negligible.
-- **PRIVACY/RELIABILITY:** respect localhost auth/origin policy; no remote audio, analytics or voice embeddings; fail explicitly if selected audio was offloaded or removed rather than silently fetching. Never change immutable source media.
+One **Meeting → Speaker** tab, not another flow/page. Main hierarchy:
+1. Header `Riconosci le voci` with truthful reviewed/remaining progress; status info below. No raw provider/engine in normal UI.
+2. At wide widths: compact **speaker navigator** (left, ~260–320px) + **selected speaker inspector** (right). Highlight selected voice, counts and status; scroll independently without losing selection.
+3. Inspector: large **Ascolta un campione** (play/pause, ~6s), **Altro campione** (up to 3 non-overlapping points), inline transcript excerpt + absolute timestamp and source, name input and commit feedback, `Ascolta gli interventi` playlist. Secondary `···` actions for merge/exclude.
+4. Plain rows show one short name, status (`Da identificare`, `Confermato`, `Da verificare`, `Ignorato`) and utterance count; hide raw cluster ID, track/model detail behind `Dettagli tecnici`.
+5. Below inspector, small chronological turn list `[timestamp] excerpt` for current person (bounded/virtualized). Selecting a turn seeks original audio. Benchmarking and manual engine review remain collapsed secondary tools.
+6. Compact app window: same list→expanded inline inspector, not miniature forced two-column grid or a second route. Remember selection when resizing/back.
 
-## Decision: task and information hierarchy
+### Reference wireframe — wide (conceptual, not implemented)
 
-Keep this **inside the canonical saved Meeting → Speaker** tab, not a new route, modal workflow or competing editor. Replace the current grid of eight inputs with an easy-to-scan vertical review list.
+```text
+Meeting / Speaker
+Riconosci le voci                 3 di 7 confermate   [Verifica rimanenti]
+────────────────────────────────────────────────────────────────────────
+ VOCI                                     VOCE SELEZIONATA
+ ▶ Mario Rossi             ✓ 128         Mario Rossi                 [•••]
+   Speaker 2               ·  93         [▶ Ascolta campione  0:06] [Altro]
+   Speaker 3               ·  45         «Possiamo rivedere il piano...»
+   Tu                      ✓ 201         14:26–14:32 · audio sistema
+   Speaker 5               ·  82
+   Speaker 6          ⚠ 0 segmenti       Nome [ Mario Rossi       ]  Salvato ✓
+   Da attribuire              12         [▶ Ascolta i suoi interventi]
+                                           1/128   14:26   [◀] [Ⅱ] [▶] [Vai al testo]
+                                           ─────────────────────────────────
+                                           14:26  «Possiamo rivedere...»
+                                           16:04  «Per il prossimo sprint...»
+                                           ...
+                                           [Dettagli tecnici] (closed)
+────────────────────────────────────────────────────────────────────────
+ [Rivedi diarizzazione Community-1]  [Confronta motori] (collapsed)
+```
 
-1. **Header:** “Riconosci le voci” and progress (e.g. 3/7 recognized). Primary contextual action “Ascolta tutte le voci”/“Verifica”, not a global “Salva” dominating a field grid. Save edits explicitly, with unsaved-state notice and keyboard support.
-2. **Speaker row:** prominent name/edit input, 3–8 s sample play/pause, 1–3 alternative samples (different points), transcript utterance count and duration, low-emphasis more menu; show generic `system:Sx` only under details. A row with zero transcript segments still gets a sample **when a matching saved diarization timeline exists**; otherwise clearly “Campione non disponibile” and explain why. `mic:S1` should be labelled “Tu” by default only where semantics support it.
-3. **More actions:** “Unisci con…” opens target selection + before/after counts + confirmation; “Escludi speaker” unassigns that identity but never removes utterances; “Ripristina”/Undo follows versioned canonical review state. Rows merged into another are collapsed with traceable source identity; avoid silent irreversible deletion.
-4. **Speaker-only check:** “Ascolta solo [nome]” starts a queue of that person's original timed utterances, skipping intervening speakers/silences (no new audio output file). Show current excerpt, source timestamp, index/total, prev/next/pause, optionally jump to transcript, clear exit back to ordinary meeting playback. Interleaved/overlap intervals are handled deterministically; one active player per Meeting.
-5. **Progressive disclosure:** raw cluster ID, provider, source track and model choice remain behind a diagnostic details disclosure; benchmarking/Community-1 remains advanced below ordinary review.
+Counts/names/times are **illustrative**, not app data. Never show a second "Computer" voice if its only origin is a track label: when ambiguous, show under source details until proven otherwise. A real cluster with 0 transcript turns is still reviewable from matching raw timeline evidence.
 
-### Interaction rules
+### Reference wireframe — compact
 
-- **Sample sourcing:** choose up to three bounded, intelligible clips per original cluster using transcript segment times where available, preferentially several separated points; avoid zero-duration, very short or overlap-heavy clips. If no linked transcript interval, use matching persisted raw diarization timeline from the same engine/revision. Return only timestamps, speaker IDs and track identifiers; audio is requested on deliberate play via existing local track endpoints.
-- **Tracks:** `system:Sx` uses system audio; `mic:S1` uses mic; legacy mixed uses its available track. Validate source track exists and matches the recording; no cross-recording access or UI guessing based on display names. Audio controls should seek safely and stop at interval end.
-- **Multiple examples:** offer short primary sample plus “Altro esempio”/next, not all waveforms at once. Keep active state per recording, cleanup on navigation/unmount, lost audio, missing permission or source removal.
-- **Merge:** source and target must be different valid identities from this transcription; prevent cycles/chains or canonicalize them. Preserve original `provider_speaker` IDs/provenance and group through one resolved attribution mapping; change visible name and grouped playback only. Combined playlist includes all source identities.
-- **Exclude:** show exact affected segment count. With zero matching segments, hide just the spurious row; with matching segments, label them “Speaker non identificato” pending reassignment. Do not delete ASR words, timestamps, recordings, diarization evidence or source clusters. No automatic exclusion because segment overlap is zero.
-- **Rename:** no automatic merge when two rows have same name. Use one canonical persisted projection for transcript, analysis context, exports and speaker-only queue; avoid divergent frontend-only identity groups.
-- **Version safety/Undo:** create a review candidate against exact transcription fingerprint; reject stale apply after a changed transcription, later Community-1 apply or manual names. Save an atomic, locally private snapshot with opaque undo token using the existing `TranscriptionStore` review ownership; one undo step after each committed action. Avoid silently invalidating Community-1 rollback.
-- **Text invariant:** review changes speaker attribution **only**. Canonical ASR text, word/segment start-end, per-segment text, audio bytes and recording IDs are unchanged. The display may re-render attributed lines; do not rewrite original transcript text.
-- **Accessibility:** button labels include speaker name + sample number; keyboard focus, Enter/Space, Escape to cancel merge, visible focus, reduced motion, ARIA live announcement for save/merge/undo and unavailable media; compact WKWebView becomes one column.
+```text
+Riconosci le voci   3/7
+[Da identificare · 4] [Tutte]
+▸ Mario Rossi                 ✓ 128
+▾ Speaker 2                    · 93
+    [▶ Ascolta 6s] [Altro]
+    [Nome _____________________]
+    [Ascolta i suoi interventi] [···]
+▸ Speaker 3                    · 45
+▸ Tu                          ✓ 201
+[Revisioni avanzate ▾]
+```
 
-## Executable work graph
+No permanent waveforms or decorative avatar grid; an amplitude bar is allowed only from real local media evidence and only if it improves scrubbing. Existing ClosedRoom semantic CSS tokens/Lucide icon set must be reused; no new UI kit or brand. Speaker names 14–16px+; metadata readable at 12–13px+, normal-case labels, visible focus, semantic status text instead of color only. Restrained 120–200ms transitions only where state continuity benefits; reduced motion disables them.
 
-| ID | Work | Canonical write owner | Dependency | Parallel | State |
-| --- | --- | --- | --- | --- | --- |
-| SR-0 | Confirm UX semantics, reproducible fixtures and this plan | this workstream, relevant UX contract | dev | yes | DONE |
-| SR-1 | Bounded sample references including unmatched raw-timeline speakers + read-only API; no audio copying or diarization rerun | `RecordingStore` timeline reader, focused `routers/recordings.py` or transcription endpoint, pure sample helper + backend tests | SR-0 | yes | READY |
-| SR-2 | Speaker-only canonical revision contract for rename/merge/exclude, optimistic lock, persisted projection and safe undo | `speaker_labels.py`, `transcriptions.py`, `routers/transcriptions.py`, API/contract tests | SR-0 | yes | READY |
-| SR-3 | Shared local playback controller: sample clips and one-speaker sequential queue; track alignment, stop/seek/error cleanup | new small meeting UI hook + tests | SR-1 API signature | no | BLOCKED |
-| SR-4 | Replace name-only row grid with speaker review list/actions; simple path plus explicit merge/exclude/undo, compact/a11y UX | `SpeakerDiarizationEditor.tsx`, scoped components/styles + browser tests | SR-2 contract, SR-3 | no | BLOCKED |
-| SR-5 | Integrate with saved Meeting and Community-1; no competing playback controller or undo surface | `MeetingDetailPage.tsx`, `CommunityOneReviewPanel.tsx`, affected journeys | SR-2..4 | no | BLOCKED |
-| SR-6 | Full relevant source, API, UI E2E FULL_MEDIA, docs and exact-head/base INTEGRATION proof | preflight + affected canonical feature/UX docs | SR-1..5 | no | BLOCKED |
+## Critical journeys and interaction copy
 
-Parallelize SR-1 and SR-2 only after freezing the shared speaker sample/revision response DTOs; no concurrent writes to `SpeakerDiarizationEditor.tsx` or the saved Meeting owner.
+| Intent | Input → feedback → outcome/recovery |
+| --- | --- |
+| Identify | Select unreviewed row → play sample → edit name → Enter/blur commits *one speaker* after validation → inline `Salvataggio…` → `Salvato`, focus stays logical; Escape reverts unsaved typing; conflict preserves input and offers reload/retry. No global Save for normal path. |
+| Hear other evidence | `Altro campione` rotates among up to 3 separated, genuinely available clips (3–8 seconds); show `Campione non disponibile` with explanation when no source evidence/audio. |
+| Merge | Contextual `Unisci con…` → select target → A/B listen each identity + before/after segment counts → explicit `Unisci` → collapse source under target and `Annulla modifica`. Prevent self/cycles/stale preview; show provenance on demand. |
+| Exclude | `Escludi questa voce` → preview count; 0 turns: hide the spurious identity; >0: move all its visible turns to `Da attribuire`, never delete words/time/audio → confirm, undo/restorable list. Label action honestly. |
+| Verify | `Ascolta i suoi interventi` → one media controller plays original source-track intervals in time order, skipping unassigned intervals; prev/next/pause, `n/N`, timestamps, excerpt, jump-to-transcript, clear `Torna all'ascolto completo`. Playback must end/stop on selection, route or recording change. |
+| Fix one passage | In speaker playback or transcript companion, select one timestamped passage → `Correggi speaker di questo intervento` (advanced) → choose existing/Unidentified and confirm; only identity metadata changes; rollback. Include as later scope if segment edits require separate contract. |
+| Recover | Local media missing, short/overlap sample, permission/range error, stale revision, imported text-only, recording deleted, demo read-only → no fake playback or silent network fallback; explain next available action and preserve edits. |
 
-## Contract and tests — acceptance
+**No autoplay** when opening Speaker or changing selection. Playing *all* turns requires explicit `Ascolta i suoi interventi`. Inline sample play stops at end; only one audio controller can be active in Meeting. Media labels must not imply separated sound: if mixed track contains overlapping voices, show `Contiene voci sovrapposte` where overlap evidence exists; playback follows detected intervals, not acoustic source separation.
 
-1. Meeting with 7 detected speakers/801 assigned segments: sample play from correct local track, rename and confirm an individual speaker in a few actions; no need to open developer tools, rerun ASR or memorize `system:Sx`.
-2. Transcript speaker with 0 matched ASR segments and raw diarization evidence: get a real sample from its source timeline; if evidence absent, show explicit unavailable status, never fabricate an example or play another voice.
-3. Merge two real clusters, reload app, see one combined name/playlist (all original utterances still present, times and words unchanged); Undo restores both identities. Reject unknown target, self-merge and cycles.
-4. Exclude a spurious/empty cluster: hide it from standard view, but show recoverable ignored status and preserve raw evidence; excluding cluster with segments leaves segments in visible “Non identificato” group, not lost.
-5. Speaker-only playback plays exactly eligible segments in chronological order across one or more original clusters, skips other speaker intervals, seeks/cancels cleanly and displays true timestamps; absence of selected local track fails with clear recovery.
-6. Concurrent stale review, Community-1 apply/undo, rename and another Meeting selection never overwrite newer edits or leak prior Meeting audio; exact recording/transcription ownership required at API.
-7. Local-first/privacy: no network endpoints other than app localhost, no generated voice assets, no cloud fallback, no leaking raw paths/metadata. Tests include import/no segments, no audio, mixed/mic/system, overlapping segments, short durations and transcript revision conflicts.
-8. Browser wide/compact and keyboard/focus journeys plus real WKWebView target-Mac playback/VoiceOver observation at RELEASE where applicable.
+## Content and trust constraints
 
-## Implementation boundary and evidence
+- **Real identities vs audio tracks:** distinguish `speaker entity`, raw `provider_speaker` cluster, mic/system/mixed *track*, per-turn overrides, and display name. A label `Computer` or `Tu` can mean source/provenance; never silently count an internal source label as a separate human. Confirm if the mic is truly a stable single speaker before defaulting to `Tu`.
+- **Sample API:** return bounded intervals `{cluster_id,track_id,start,end,kind,provenance,revision}` from true transcript turns; if 0 turns use native timeline linked to this exact transcription diarization revision, *not* an arbitrary latest benchmark. Disallow stale/foreign recording IDs. Choose primary clean 3–8s, separated secondary samples, prefer low overlap and stable continuous speech; avoid fabricated waveforms. Audio is fetched on user play from existing authenticated loopback media endpoint; if locally absent due to opted-in storage tier, show unavailable and require explicit documented retrieval path rather than remote fallback.
+- **Speaker grouping:** original raw IDs and audio untouched. Canonical revision layer maps raw IDs to reviewed identities and stores ignored identities; merge groups original IDs, including mixed mic/system when explicitly confirmed, without rewriting `provider_speaker`. Segment-level correction (if implemented) overrides group mapping for that turn only.
+- **Text invariant:** ASR `text`, `words`, per-segment `start/end/text`, recording ID, media and original diarization output invariant. Speaker display projection affects transcript labels, search/export/analysis **where consumer contracts use speaker metadata**, never silently regenerate an existing analysis run or edit original canonical text.
+- **Conflict/undo:** versioned optimistic token tied to same recording/transcription, durable locally private atomic persistence, one-step `Annulla` after a committed speaker action. Community-1 preview/apply/undo and manual review must share one coherent speaker revision policy; stale operations return 409 and require refreshing. No separate frontend-only speaker store. A renamed speaker with an identical name to another never auto-merges.
+- **Queue:** source-track-aware, bounded list from canonical projection; exclude false identities; merged speaker includes all original clusters. Overlaps handled deterministically and marked; if source track cannot be played, stop with clear error, never play wrong audio. Clear audio/object URLs/listeners on interruption/navigation.
+- **Privacy:** 127.0.0.1 loopback auth/origin enforced; no cloud, remote fallback, telemetry of voice/text, external voice identity provider or generated audio asset. Full transcript and diarization evidence are private local data.
 
-Source of truth: `frontend/src/` for UI, `TranscriptionStore` for durable speaker edits and undo, `RecordingStore` for bounded audio/timeline access. Never add a second speaker data store or playback audio export. Preserve existing Community-1 candidate/apply/rollback and benchmark isolation.
+## State and accessibility matrix
 
-Validate with repository-selected `scripts/select_validation_profile.py`; focus `test/test_speaker_labels.py`, `test/test_diarization_review.py`, `test/test_diarization_review_api.py`, new sample/revision API tests, frontend TypeScript/lint and UI journeys. At PR→dev select STRONG and affected automated FULL_MEDIA; exact-head source evidence required. On dev→main choose RELEASE/FULL and relevant real target-Mac TCC/audio/WKWebView checks. Neither a plan nor a merged PR proves product success.
+| State | Visible contract | Guard/proof |
+| --- | --- | --- |
+| New/unreviewed | `Speaker N`, `Da identificare`, active listen | no forced naming |
+| Selected / sampling | selected row + pause/seek/end label | one player; time-bounded source |
+| Named / saving / saved | field+inline status | Enter/blur commit, Escape discard |
+| Playlist playing | `Intervento n/N` + timestamp + transcript excerpt | only selected reviewed group |
+| Merge / exclude preview | 2 voice samples + impact count | confirm required, no source deletion |
+| Undo available | contextual `Annulla ultima modifica` | revision-bound, survives reopening |
+| Conflict | `Il meeting è cambiato`, keep draft + refresh action | no stale overwrite |
+| No ASR match | `Nessun intervento collegato al testo`, raw clip if safe | distinct from no speech |
+| No local audio | disabled listen + explanation | no fake sample / cloud fallback |
+| No diarization / imported text / demo | clear empty/read-only state | no controls advertising impossible work |
 
-## Checkpoint
+Keyboard: tab order follows selected list→inspector→actions; Enter/Space activate controls; Escape cancels rename/merge, merge dialog restores focus to trigger; focus cannot hide behind sticky controls. Accessible button names: `Ascolta campione 2 di Speaker 3`, `Unisci Speaker 3 con…`; status announcements with `aria-live` but not on every audio time tick. Source labels and speaker names distinguishable without color. Test long names, 200% text zoom, IT/EN, reduced motion, 1280/900/640 viewport *contexts* plus packaged WKWebView.
 
-Base: `dev` at `779009b2d6fbb1cdff40aa6f3b20419f760ca075` (2026-11-04). Observed: editor currently only supports manual names; `apply_speaker_labels` builds mappings and may rebuild display text; `speaker-diarization.json` retains native timeline; `TranscriptionStore.apply_reviewed_diarization` provides fingerprint-based apply and rollback; source audio endpoints already exist. Design is shaped but no implementation/evidence is yet claimed. Next discriminating action: define the bounded sample source and merge/exclude revision DTOs, then implement SR-1/SR-2 on disjoint owners and validate before UI integration.
+## Delivery graph — bounded owners and dependency
 
-Durable destinations after implementation: `design/ux-contract.json` for final task/navigation contract, `docs/features.md` for user capabilities, tests/code for exact request/state contracts; update `docs/current-state.md` and delete this plan after completion.
+| ID | State | Independently observable slice | Owner/write boundary | Depends |
+| --- | --- | --- | --- | --- |
+| SR-0 | DONE | Product task, UX/UI layout, microcopy, risk and acceptance modeled | this workstream + new `interaction-quality-review` local skill | dev source |
+| SR-1 | READY | Read-only sample refs for transcript and unmatched current diarization timeline; safe audio range/track behavior | `RecordingStore`/read API, sample selector, backend tests | SR-0 |
+| SR-2 | READY | Versioned speaker correction operations (rename/merge/exclude/reassign if feasible), same owner and rollback policy | `speaker_labels.py`, `TranscriptionStore`, transcription router, tests | SR-0 |
+| SR-3 | BLOCKED | One local playback controller for sample and selected-speaker queue, cleanup and truthful overlaps | meeting playback hook, focused frontend tests | SR-1 API |
+| SR-4 | BLOCKED | Wide/compact master-detail with row names, samples, merge preview, exclude, progress, undo | `SpeakerDiarizationEditor.tsx`, scoped components, UI tests | SR-2/3 |
+| SR-5 | BLOCKED | Integrate single player/revision with Meeting, Community-1 and transcript view; fix `Computer` classification by evidence | `MeetingDetailPage.tsx`, consumer tests, no parallel ownership | SR-2/3/4 |
+| SR-6 | BLOCKED | Required exact-head INTEGRATION evidence, visual/full-media + source gates, docs, UI acceptance and merge readiness | preflight, UX contract, feature docs | SR-1..5 |
+
+Parallel execution: SR-1 and SR-2 can run independently after shared DTO review; no concurrent edits to speaker editor or meeting shell. If per-turn override significantly expands scope, keep it as a dedicated follow-up rather than blocking fast identify/merge/exclude/playlist.
+
+## Evidence and acceptance
+
+**Core acceptance:** 1) recognize/name a voice via genuine local sample; 2) A/B-compare and merge two clusters with preserved original turn attribution, surviving reload and reversible; 3) exclude a spurious 0-turn cluster without data loss; exclude nonempty cluster only into Unidentified; 4) hear only selected intervals in order (with known overlap caveat), jump-to-transcript; 5) zero-match raw-timeline clip only when exact source proof exists; 6) one speaker row clearly distinguishable from source `Computer`; 7) stale edits cannot overwrite newer Community-1 or user changes; 8) no new network/telemetry/media-copy boundary.
+
+Run focused unit/API `test/test_speaker_labels.py`, `test/test_diarization_review.py`, `test/test_diarization_review_api.py`, new selector/revision/audio tests, frontend lint + TS; add browser journey on deterministic fixtures including 7+ speakers, zero turns, sample failure, merge preview/undo, compact keyboard. Use actual repo `scripts/select_validation_profile.py` (never downgrade selected profile). At PR→dev: full diff, exact source/base, STRONG gate selection and affected material UI `FULL_MEDIA`. At dev→main: RELEASE/FULL plus applicable interactive WKWebView, VoiceOver, TCC/real track seek evidence on target Mac; no synthetic browser pass presented as physical audio proof. Success metrics to measure: seconds and actions to recognize a voice, correction time, mistaken merges, completion rate, and recovery from error (baseline unknown, avoid invented targets).
+
+## References and resume checkpoint
+
+Internal: `AGENTS.md`, `skills/design-product-experience/SKILL.md`, `skills/interaction-quality-review/SKILL.md`, `design/ux-contract.json`, `design/brand-kit.json`, and native source/tests cited above. External pattern inspiration (do not copy design systems): [Anthropic frontend-design](https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md); [Vercel web-design-guidelines](https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines); [UI UX Pro Max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill); [Apple split view](https://developer.apple.com/design/human-interface-guidelines/split-views); [Otter speaker management](https://help.otter.ai/hc/en-us/articles/40586357592471-Speaker-Management); [Fireflies speaker edits](https://guide.fireflies.ai/articles/4994477228-how-to-edit-speaker-labels-or-names-in-a-transcript). Public examples describe workflow inspiration, not ClosedRoom implementation or local data processing.
+
+Base observed: `dev` `779009b2d6fbb1cdff40aa6f3b20419f760ca075` on 2026-11-04; refresh before implementation/integration. Confirmed: current editor only names, existing authenticated track audio endpoints and saved diarization summary, `TranscriptionStore` fingerprint/undo for Community-1. Pending: actual raw-timeline file consumer, `Computer` provenance, time alignment and media seek on packaged WKWebView, exact current integration head. Next discriminating action: inspect recording timeline storage and current catalog projections, freeze audio-sample DTO and speaker revision token, then begin SR-1/SR-2 in parallel. Transfer implemented UX to `design/ux-contract.json` and affected feature docs only when code is real; after completion update current-state and delete temporary workstream by default.
