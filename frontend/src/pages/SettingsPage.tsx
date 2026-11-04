@@ -526,8 +526,8 @@ export default function SettingsPage() {
           />
           <p className="text-xs text-text-muted" role="status">
             {lang === 'it'
-              ? 'Attivo per impostazione predefinita nelle nuove installazioni. Rileva solo attività delle app, senza ascoltare audio. Per i banner autorizza le notifiche; le preferenze già salvate restano valide.'
-              : 'On by default for new installations. Only app activity is checked, without listening to audio. Grant notification permission for banners; saved preferences remain intact.'}
+              ? 'Attivo per impostazione predefinita nelle nuove installazioni. Rileva solo attività delle app, senza ascoltare audio. Per i banner autorizza le notifiche; avvia ClosedRoom al login per monitorare in background. Le scelte già salvate restano valide.'
+              : 'On by default for new installations. Only app activity is checked, without listening to audio. Grant notification permission for banners and launch ClosedRoom at login for background monitoring. Saved choices remain intact.'}
           </p>
           {meetingDetectionEnabled && menuBarStatus?.meeting_detection && (
             <div className="space-y-2 text-xs text-text-secondary" data-meeting-detection-diagnostics="true">
