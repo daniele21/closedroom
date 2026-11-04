@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import math
+import re
 from typing import Any
 
 from local_asr_server.asr_provider import normalize_asr_provider, speechmatics_options_from_settings
@@ -16,6 +17,37 @@ from local_asr_server.runtime.models import (
     LLM_REASONING_POLICIES,
     LOCAL_LLM_MODES,
 )
+
+
+# Configuration preferences are intentionally separate from effective storage.
+# Runtime capture, ASR and metadata remain local until the canonical RecordingStore
+# owns validated upload, restore and hydration for individual meetings.
+STORAGE_LOCAL = "local"
+STORAGE_GCS = "gcs"
+STORAGE_CAPABILITY = "preparation_only"
+_GCS_PROJECT = re.compile(r"[a-z][a-z0-9-]{4,28}[a-z0-9]\\Z")
+_GCS_BUCKET = re.compile(r"[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]\\Z")
+_GCS_REGION = re.compile(r"[a-z]+(?:-[a-z]+)*[0-9]+\\Z")
+
+
+def validate_storage_selection(settings: dict[str, Any]) -> None:
+    if settings.get("storage_preference") not in (STORAGE_LOCAL, STORAGE_GCS):
+        raise InvalidSettings("Unsupported storage_preference")
+    project = settings.get("gcs_project_id")
+    bucket = settings.get("gcs_bucket_name")
+    region = settings.get("gcs_region")
+    for name, value, pattern in (
+        ("gcs_project_id", project, _GCS_PROJECT),
+        ("gcs_bucket_name", bucket, _GCS_BUCKET),
+        ("gcs_region", region, _GCS_REGION),
+    ):
+        if not isinstance(value, str) or (name == "gcs_region" and not value) or (
+            value and not pattern.fullmatch(value)
+        ):
+            raise InvalidSettings(f"Invalid {name}")
+    if bucket and (bucket.startswith(("goog", "g00g")) or
+                   re.fullmatch(r"\\d{1,3}(?:\\.\\d{1,3}){3}", bucket)):
+        raise InvalidSettings("Invalid gcs_bucket_name")
 
 
 PRIVATE_SETTING_KEYS = frozenset({"gemini_api_key", "speechmatics_api_key"})
@@ -48,8 +80,18 @@ class SettingsService:
         public_settings = {
             key: value for key, value in settings.items() if key not in PRIVATE_SETTING_KEYS
         }
+        # Never infer real GCS readiness from saved project/bucket identifiers
+        # or the success of an unrelated, manually operated cold backup.
+        try:
+            validate_storage_selection(settings)
+            configuration_complete = bool(settings.get("gcs_project_id") and settings.get("gcs_bucket_name"))
+        except InvalidSettings:
+            configuration_complete = False
         return {
             **public_settings,
+            "storage_effective_mode": STORAGE_LOCAL,
+            "storage_capability": STORAGE_CAPABILITY,
+            "gcs_configuration_complete": configuration_complete,
             "gemini_api_key_configured": bool(
                 settings.get("gemini_api_key") or get_env_var("GEMINI_API_KEY")
             ),
@@ -109,6 +151,7 @@ class SettingsService:
 
     @staticmethod
     def _validate_choices(settings: dict[str, Any]) -> None:
+        validate_storage_selection(settings)
         # Storing the retention preference is safe; activating deletion is
         # forbidden until per-meeting GCS restore/hydration and leases exist.
         retention = settings.get("audio_local_retention_days")
