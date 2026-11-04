@@ -1,7 +1,6 @@
 """Fail-closed audio retention policy; all tests offline and no file deletion."""
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import unittest
 
