@@ -34,6 +34,28 @@ import {
   type LocalLlmReasoning,
 } from '../features/config/llmConfig';
 
+function meetingDeliveryLabel(state: string, lang: string): string {
+  const it: Record<string, string> = {
+    idle: 'nessun suggerimento',
+    not_requested: 'da inviare',
+    pending: 'in corso',
+    failed: 'invio fallito',
+    timeout: 'nessuna risposta',
+    retry_exhausted: 'tentativi esauriti',
+    enqueued: 'accettata da macOS (banner non garantito)',
+  };
+  const en: Record<string, string> = {
+    idle: 'no suggestion',
+    not_requested: 'not sent yet',
+    pending: 'pending',
+    failed: 'submission failed',
+    timeout: 'no response',
+    retry_exhausted: 'retry limit reached',
+    enqueued: 'accepted by macOS (banner not guaranteed)',
+  };
+  return (lang === 'it' ? it : en)[state] ?? state;
+}
+
 export default function SettingsPage() {
   const { t, lang } = useTranslation();
   const { showToast } = useToast();
@@ -529,7 +551,7 @@ export default function SettingsPage() {
               {menuBarStatus.meeting_detection.suggestion_active && (
                 <p role="status">
                   {lang === 'it' ? 'Suggerimento attivo' : 'Active suggestion'}
-                  {' · '}{lang === 'it' ? 'Invio a macOS' : 'OS submission'}: {menuBarStatus.meeting_detection.notification_delivery?.state ?? 'idle'}
+                  {' · '}{lang === 'it' ? 'Invio a macOS' : 'OS submission'}: {meetingDeliveryLabel(menuBarStatus.meeting_detection.notification_delivery?.state ?? 'idle', lang)}
                   {' · '}{lang === 'it' ? 'Tentativi' : 'Attempts'}: {menuBarStatus.meeting_detection.notification_delivery?.attempts ?? 0}
                 </p>
               )}
