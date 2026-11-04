@@ -15,7 +15,7 @@ class StorageSelectionFrontendContractTests(unittest.TestCase):
 
     def test_accessible_mutually_exclusive_choices_with_local_default(self) -> None:
         self.assertIn("data-storage-target-selection", self.page)
-        self.assertIn("storagePreference] = useState<'local' | 'gcs'>('local')", self.page)
+        self.assertIn("[storagePreference, setStoragePreference] = useState<'local' | 'gcs'>('local')", self.page)
         self.assertIn('id="settings-storage-local"', self.page)
         self.assertIn('id="settings-storage-gcs"', self.page)
         self.assertEqual(self.page.count('name="storage-target"'), 2)
