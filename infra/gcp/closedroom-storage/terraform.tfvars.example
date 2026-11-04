@@ -1,0 +1,3 @@
+# Optional. Copy to terraform.tfvars (gitignored) only after reviewing the
+# user identity allowed to operate the private GCS test bucket.
+# oauth_user_email = "example@example.com"

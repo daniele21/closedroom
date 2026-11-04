@@ -129,6 +129,10 @@ class SettingsRequest(BaseModel):
     # the LLM provider without touching directory settings).
     transcriptions_dir: Optional[str] = None
     recordings_dir: Optional[str] = None
+    storage_mode: Optional[str] = None
+    gcs_project_id: Optional[str] = None
+    gcs_bucket_name: Optional[str] = None
+    gcs_region: Optional[str] = None
     asr_provider: Optional[str] = None
     speechmatics_api_key: Optional[str] = None
     speechmatics_region: Optional[str] = None

@@ -1,0 +1,96 @@
+name: GCS Terraform, OAuth and archive recovery validation
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - ".github/workflows/gcs-terraform-validation.yml"
+      - "infra/gcp/closedroom-storage/**"
+      - "scripts/verify_gcs_terraform_plan.py"
+      - "test/test_gcs_terraform_plan_guard.py"
+      - "scripts/probe_closedroom_gcs_oauth.py"
+      - "src/local_asr_server/storage/gcs_oauth.py"
+      - "test/test_gcs_oauth.py"
+      - "test/test_gcs_oauth_cli.py"
+      - "src/local_asr_server/storage/gcs_archive.py"
+      - "src/local_asr_server/storage/key_recovery.py"
+      - "scripts/verify_gcs_keychain_recovery.py"
+      - "test/test_gcs_archive_transport.py"
+      - "test/test_gcs_key_recovery.py"
+      - "test/test_gcs_cross_mac_archive_fixture.py"
+      - "scripts/audit_meeting_data.py"
+      - "test/test_audit_meeting_data.py"
+      - "scripts/inspect_closedroom_catalog.py"
+      - "test/test_inspect_closedroom_catalog.py"
+      - "scripts/reconcile_closedroom_data.py"
+      - "test/test_reconcile_closedroom_data.py"
+      - "src/local_asr_server/storage/cold_migration.py"
+      - "scripts/migrate_closedroom_gcs.py"
+      - "test/test_gcs_cold_migration.py"
+      - "scripts/run_gcs_backup_on_runner.py"
+      - "test/test_runner_gcs_backup.py"
+      - "scripts/closedroom_gcs_login_broker.py"
+      - "scripts/install_closedroom_gcs_login_broker.py"
+      - "test/test_gcs_login_broker.py"
+      - "scripts/verify_closedroom_gcs_cold_restore.py"
+      - "test/test_gcs_cold_restore_verification.py"
+
+permissions:
+  contents: read
+
+jobs:
+  gcs-terraform-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.12.2"
+      - name: Terraform formatting
+        run: terraform fmt -check -recursive infra/gcp/closedroom-storage
+      - name: Terraform provider initialization (NO backend, GCP auth or apply)
+        run: terraform -chdir=infra/gcp/closedroom-storage init -backend=false -input=false -no-color
+      - name: Terraform configuration validation (offline from GCP)
+        run: terraform -chdir=infra/gcp/closedroom-storage validate -no-color
+      - name: Terraform destructive-plan guard tests
+        run: python3 -m unittest discover -s test -p 'test_gcs_terraform_plan_guard.py' -v
+      - name: OAuth desktop probe regression tests (fake credentials, no browser)
+        env:
+          PYTHONPATH: src
+        run: python3 -m unittest discover -s test -p 'test_gcs_oauth*.py' -v
+      - name: Prepare synthetic archive encryption test dependency
+        run: python3 -m pip install --disable-pip-version-check cryptography
+      - name: Encryption transport, recovery and cross-Mac fixture tests (fake Keychains)
+        env:
+          PYTHONPATH: src
+        run: |
+          python3 -m unittest discover -s test -p 'test_gcs_archive_transport.py' -v
+          python3 -m unittest discover -s test -p 'test_gcs_key_recovery.py' -v
+          python3 -m unittest discover -s test -p 'test_gcs_cross_mac_archive_fixture.py' -v
+      - name: Privacy-safe migration root inventory tests
+        run: python3 -m unittest discover -s test -p 'test_audit_meeting_data.py' -v
+      - name: Read-only SQLite catalog validation tests
+        env:
+          PYTHONPATH: src
+        run: python3 -m unittest discover -s test -p 'test_inspect_closedroom_catalog.py' -v
+      - name: Offline recording and transcription reconciliation tests
+        run: python3 -m unittest discover -s test -p 'test_reconcile_closedroom_data.py' -v
+      - name: One-shot encrypted cold migration and isolated app restore tests
+        env:
+          PYTHONPATH: src
+        run: python3 -m unittest discover -s test -p 'test_gcs_cold_migration.py' -v
+      - name: Headless runner data and recovery secret safety tests
+        env:
+          PYTHONPATH: src
+        run: python3 -m unittest discover -s test -p 'test_runner_gcs_backup.py' -v
+      - name: Isolated encrypted GCS cold restore safety tests
+        env:
+          PYTHONPATH: src
+        run: |
+          python3 -m py_compile scripts/verify_closedroom_gcs_cold_restore.py
+          python3 -m unittest discover -s test -p 'test_gcs_cold_restore_verification.py' -v
+      - name: User-session login broker authorization and no-secrets tests
+        run: |
+          python3 -m py_compile scripts/closedroom_gcs_login_broker.py scripts/install_closedroom_gcs_login_broker.py scripts/run_gcs_backup_on_runner.py
+          python3 -m unittest discover -s test -p 'test_gcs_login_broker.py' -v

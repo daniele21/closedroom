@@ -36,6 +36,12 @@ DEFAULT_SETTINGS: dict[str, any] = {
     "transcriptions_dir": str(Path(f"~/ClosedRoom/Transcriptions/{APP_NAME}").expanduser()),
     "recordings_dir": str(Path(f"~/ClosedRoom/Recordings/{APP_NAME}").expanduser()),
     "catalog_db_path": str(Path(f"~/ClosedRoom/closedroom.db").expanduser()),
+    # GCS coordinates may be staged, but backup cannot be selected before
+    # OAuth, Keychain recovery and canonical RecordingStore integration.
+    "storage_mode": "local",
+    "gcs_project_id": "",
+    "gcs_bucket_name": "",
+    "gcs_region": "europe-west8",
     "asr_provider": ASR_PROVIDER_LOCAL,
     "speechmatics_api_key": "",
     "speechmatics_region": DEFAULT_SPEECHMATICS_REGION,
