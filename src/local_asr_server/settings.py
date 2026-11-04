@@ -73,7 +73,7 @@ DEFAULT_SETTINGS: dict[str, any] = {
     "audio_local_retention_days": 14,
     "audio_auto_cleanup_enabled": False,
     "meeting_auto_analysis": False,
-    "meeting_detection_enabled": False,
+    "meeting_detection_enabled": True,  # Content-free local app-activity observation; recording stays manual.
     "meeting_default_pipeline": "meeting_default",
     "speaker_diarization_enabled": False,
     "speaker_diarization_engine": "fluidaudio-community-1",
