@@ -127,11 +127,15 @@ const counts = {
   benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0, benchmark_window: 0,
   review_list: 0, review_start: 0, review_poll: 0, review_preview: 0,
   review_apply: 0, review_undo: 0,
+  speaker_sample_list: 0, speaker_merge: 0, speaker_undo: 0, speaker_audio_request: 0,
 };
 let benchmarkJob = null;
 let benchmarkRequest = null;
 let communityReviewJob = null;
 let communityReviewApplied = false;
+let speakerReviewFingerprint = 'a'.repeat(64);
+let speakerReviewBefore = null;
+let speakerReviewUndo = null;
 let lastBenchmarkWindowStart = null;
 const benchmarkWindowStarts = [];
 let failNextAlternateScreenshots = false;
@@ -290,6 +294,78 @@ function fixtureServer(port) {
     if (pathname === `/v1/recordings/${MEETING_ID}/screenshots`) {
       counts.screenshots += 1;
       return json(res, 200, { items: [screenshotFixture], total: 1 });
+    }
+
+    if (pathname === '/v1/transcriptions/e2e-transcription/speaker-review' && req.method === 'GET') {
+      return json(res, 200, {
+        fingerprint: speakerReviewFingerprint,
+        undo: speakerReviewUndo ? { revision_id: speakerReviewUndo } : null,
+      });
+    }
+    if (pathname === '/v1/transcriptions/e2e-transcription/speaker-review/samples' && req.method === 'GET') {
+      counts.speaker_sample_list += 1;
+      return json(res, 200, {
+        recording_id: MEETING_ID, transcription_id: 'e2e-transcription',
+        speakers: [
+          { speaker_cluster: 'system:S1', samples: [
+            { track_id: 'system', start: 0, end: 3.5, kind: 'transcript', overlap: false },
+          ] },
+          { speaker_cluster: 'system:S2', samples: [
+            { track_id: 'system', start: 20, end: 26, kind: 'diarization', overlap: false },
+          ] },
+        ],
+      });
+    }
+    if (pathname.startsWith('/v1/recordings/e2e-meeting/tracks/') && pathname.endsWith('/audio')) {
+      counts.speaker_audio_request += 1;
+      return json(res, 404, { detail: 'fixture does not play synthetic audio' });
+    }
+    if (pathname === '/v1/transcriptions/e2e-transcription/speaker-review' && req.method === 'POST') {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (body.expected_fingerprint !== speakerReviewFingerprint) {
+        return json(res, 409, { detail: 'stale review' });
+      }
+      speakerReviewBefore = structuredClone(meetingFixture.transcription);
+      if (body.action === 'merge' && body.cluster === 'system:S1' && body.target === 'system:S2') {
+        counts.speaker_merge += 1;
+        meetingFixture.transcription = {
+          ...meetingFixture.transcription,
+          segments: meetingFixture.transcription.segments.map((s) => ({
+            ...s, speaker_group: 'system:S2', speaker_name: 'Speaker 2',
+          })),
+          stats: {
+            ...meetingFixture.transcription.stats,
+            speaker_attribution: {
+              mappings: [
+                { speaker_cluster: 'system:S1', speaker_group: 'system:S2',
+                  display_name: 'Speaker 2', status: 'merged', merged_into: 'system:S2',
+                  transcript_segment_count: 1 },
+                { speaker_cluster: 'system:S2', speaker_group: 'system:S2',
+                  display_name: 'Speaker 2', status: 'unassigned',
+                  transcript_segment_count: 0 },
+              ],
+            },
+          },
+        };
+      } else {
+        return json(res, 409, { detail: 'Unexpected speaker review test action' });
+      }
+      speakerReviewFingerprint = 'b'.repeat(64);
+      speakerReviewUndo = 'synthetic-speaker-undo';
+      return json(res, 200, {
+        transcription: meetingFixture.transcription,
+        revision_id: speakerReviewUndo,
+      });
+    }
+    if (pathname === '/v1/transcriptions/e2e-transcription/speaker-review/undo' && req.method === 'POST') {
+      if (!speakerReviewUndo || !speakerReviewBefore) return json(res, 409, { detail: 'No undo' });
+      counts.speaker_undo += 1;
+      meetingFixture.transcription = speakerReviewBefore;
+      speakerReviewFingerprint = 'c'.repeat(64);
+      speakerReviewUndo = null;
+      return json(res, 200, { transcription: meetingFixture.transcription });
     }
 
     if (pathname === '/v1/transcriptions/e2e-transcription/diarization-reviews') {
@@ -1032,6 +1108,19 @@ try {
   await checkpoint(browser, '10-visual-context-demand-not-sticky');
 
 
+  // Seed a second raw cluster (without ASR overlap) to falsify sample/merge UX.
+  // This is synthetic UI evidence only, never proof of physical voice accuracy.
+  meetingFixture.transcription.segments[0].track_id = 'system';
+  meetingFixture.transcription.segments[0].provider_speaker = 'system:S1';
+  meetingFixture.transcription.stats.speaker_attribution = {
+    mappings: [
+      { speaker_cluster: 'system:S1', speaker_group: 'system:S1',
+        display_name: 'Speaker 1', status: 'unassigned', transcript_segment_count: 1 },
+      { speaker_cluster: 'system:S2', speaker_group: 'system:S2',
+        display_name: 'Speaker 2', status: 'unassigned', transcript_segment_count: 0 },
+    ],
+  };
+
   // Comparison is an explicit advanced action on a saved meeting. It must
   // not run during the normal read/analysis flows, or mutate transcript text.
   if (counts.benchmark_start !== 0) {
@@ -1040,6 +1129,39 @@ try {
   await setMeetingHash(MEETING_ID);
   await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
   await browser.clickCss('#meeting-tab-speakers');
+  await waitText(browser, ['Recognize the voices', 'Riconosci le voci']);
+  await waitCount('speaker_sample_list', 1);
+  if (counts.speaker_audio_request !== 0) {
+    throw new Error('Speaker review loaded private audio before user pressed Play');
+  }
+  const sampleReady = await browser.execute(`
+    const root = document.querySelector('[data-speaker-review-workspace]');
+    return Boolean(root && [...root.querySelectorAll('button')].some((b) =>
+      (b.innerText || '').includes('Ascolta campione') ||
+      (b.innerText || '').includes('Play sample') && !b.disabled));
+  `);
+  if (!sampleReady) throw new Error('Speaker sample control absent');
+  await checkpoint(browser, '11a-speaker-review-ready');
+  await browser.clickButton(['Merge voice', 'Unisci voce']);
+  const targetChanged = await browser.execute(`
+    const select = document.querySelector('[data-speaker-review-workspace] select');
+    if (!select) return false;
+    select.value = 'system:S2';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  `);
+  if (!targetChanged) throw new Error('Speaker merge target selection unavailable');
+  await sleep(120);
+  await browser.clickButton(['Confirm merge', 'Conferma unione']);
+  await waitCount('speaker_merge', 1);
+  await waitText(browser, ['Undo last correction', 'Annulla ultima modifica'], 6000, true);
+  if (meetingFixture.transcription.text !== 'Decision: ship the release after validation. Owner: Alex.') {
+    throw new Error('Speaker merge changed canonical text in fixture');
+  }
+  await checkpoint(browser, '11b-speaker-review-merged');
+  await browser.clickButton(['Undo last correction', 'Annulla ultima modifica']);
+  await waitCount('speaker_undo', 1);
+  await checkpoint(browser, '11c-speaker-review-undo');
   await waitText(browser, ['Compare diarization engines', 'Confronta motori di diarizzazione']);
   await browser.clickButton(['Compare engines', 'Confronta motori']);
   await waitText(browser, ['Start comparison', 'Avvia confronto']);
