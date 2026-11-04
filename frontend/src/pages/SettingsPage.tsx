@@ -79,7 +79,7 @@ export default function SettingsPage() {
   const [llmLogs, setLlmLogs] = useState('');
 
   const [meetingAutoAnalysis, setMeetingAutoAnalysis] = useState(false);
-  const [meetingDetectionEnabled, setMeetingDetectionEnabled] = useState(false);
+  const [meetingDetectionEnabled, setMeetingDetectionEnabled] = useState(true);
   const [meetingDetectionWasEnabled, setMeetingDetectionWasEnabled] = useState(false);
   const [meetingDefaultPipeline, setMeetingDefaultPipeline] = useState('meeting_default');
   const [speakerDiarizationEnabled, setSpeakerDiarizationEnabled] = useState(false);
@@ -504,8 +504,8 @@ export default function SettingsPage() {
           />
           <p className="text-xs text-text-muted" role="status">
             {lang === 'it'
-              ? 'Disattivato inizialmente. Salva per attivare e richiedere il permesso per le notifiche; avvia ClosedRoom al login se vuoi ricevere i suggerimenti.'
-              : 'Off by default. Save to enable and request notification permission; start ClosedRoom at login for background suggestions.'}
+              ? 'Attivo per impostazione predefinita nelle nuove installazioni. Rileva solo attività delle app, senza ascoltare audio. Per i banner autorizza le notifiche; le preferenze già salvate restano valide.'
+              : 'On by default for new installations. Only app activity is checked, without listening to audio. Grant notification permission for banners; saved preferences remain intact.'}
           </p>
           {meetingDetectionEnabled && menuBarStatus?.meeting_detection && (
             <div className="space-y-2 text-xs text-text-secondary" data-meeting-detection-diagnostics="true">
@@ -526,6 +526,16 @@ export default function SettingsPage() {
                 {' · '}{lang === 'it' ? 'Notifiche: ' : 'Notifications: '}
                 {menuBarStatus.meeting_detection.notifications}
               </p>
+              {menuBarStatus.meeting_detection.suggestion_active && (
+                <p role="status">
+                  {lang === 'it' ? 'Suggerimento attivo' : 'Active suggestion'}
+                  {' · '}{lang === 'it' ? 'Invio a macOS' : 'OS submission'}: {menuBarStatus.meeting_detection.notification_delivery?.state ?? 'idle'}
+                  {' · '}{lang === 'it' ? 'Tentativi' : 'Attempts'}: {menuBarStatus.meeting_detection.notification_delivery?.attempts ?? 0}
+                </p>
+              )}
+              {menuBarStatus.meeting_detection.reason && menuBarStatus.meeting_detection.capability !== 'supported' && (
+                <p role="status">{menuBarStatus.meeting_detection.reason}</p>
+              )}
               {menuBarStatus.meeting_detection.notifications !== 'authorized' && (
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" variant="secondary" onClick={handleMeetingNotificationPermission}>
