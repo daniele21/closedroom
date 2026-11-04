@@ -62,7 +62,7 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
 
 from local_asr_server.window import ClosedRoomWindowManager
 from local_asr_server.meeting_detection import CoreAudioInputObserver, MeetingSuggestionPolicy, SUPPORTED_APPS
-from local_asr_server.macos_meeting_notifications import MeetingNotificationCenter
+from local_asr_server.macos_meeting_notifications import MeetingNotificationCenter, needs_initial_notification_consent
 from local_asr_server.app_identity import get_app_identity
 from local_asr_server.paths import get_brand_asset_path
 from local_asr_server.runtime.models import (
@@ -333,6 +333,7 @@ class ClosedRoomApp(rumps.App):
         self._meeting_policy = MeetingSuggestionPolicy()
         self._meeting_notifications = MeetingNotificationCenter(self._on_meeting_notification)
         self._meeting_notifications.start()  # delegate installed at app launch
+        self._meeting_notification_permission_prompted = False
         self._meeting_capability = 'unknown'
         self._meeting_observation = None
         self._meeting_suggested_id: str | None = None
@@ -731,6 +732,14 @@ class ClosedRoomApp(rumps.App):
 
         # Permission may be granted while a call is already in progress.
         self._meeting_notifications.refresh_authorization()
+        if needs_initial_notification_consent(
+            enabled=True, authorization=self._meeting_notifications.authorization,
+            requested_this_launch=self._meeting_notification_permission_prompted,
+        ):
+            # The user must grant the macOS permission; local detection alone
+            # never gives ClosedRoom permission to show a native banner.
+            self._meeting_notification_permission_prompted = True
+            self._meeting_notifications.request_authorization()
         observation = self._meeting_observer.scan()
         self._meeting_capability = observation.capability
         self._meeting_observation = observation
