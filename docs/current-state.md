@@ -45,7 +45,7 @@ Stable source needs target-Mac evidence, not Apple distribution authority. A dow
 ## Active workstreams
 
 - [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 integrato in `dev` via PR #176 (`772a5f68`): ripresa microfono e audio sistema solo nativo; FULL automated PASS, switch fisico/TCC ancora da provare.
-- [`meeting-detection.md`](workstreams/meeting-detection.md): Teams/menu-bar regressions on Mac; CoreAudio attribution fix under validation; physical proof pending.
+- [`meeting-detection.md`](workstreams/meeting-detection.md): Teams CoreAudio attribution fix integrated; default-on local monitoring, bounded notification submission retries and local diagnostic probes in candidate branch `fix/meeting-detection-default-reliability-20261104` (NOT yet integrated); installed-Mac Teams/Zoom, notification delivery and TCC evidence pending.
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
