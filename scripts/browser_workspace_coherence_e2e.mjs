@@ -696,6 +696,11 @@ try {
   `);
   await checkpoint(browser, '07-gcs-preparation-selection');
   await browser.click('button[type="submit"]');
+  const storageSaveDeadline = Date.now() + 10000;
+  while (settingsFixture.getStorageSettings().storage_preference !== 'gcs'
+      && Date.now() < storageSaveDeadline) {
+    await sleep(100);
+  }
   await waitUntil(browser, 'GCS preference saved with local effective mode', `
     return document.querySelector('#settings-storage-gcs')?.checked === true
       && document.querySelector('[data-storage-effective-mode="local"]') !== null
