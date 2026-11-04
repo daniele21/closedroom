@@ -1983,6 +1983,19 @@ class RecordingStore:
             session_dir, _ = self._load(recording_id)
             self._write_json_atomic(session_dir / "speaker-diarization.json", payload)
 
+    def read_speaker_diarization(self, recording_id: str) -> dict[str, Any] | None:
+        """Read the canonical local native timeline; never fetch remote media."""
+        with self._lock_for(recording_id):
+            session_dir, _ = self._load(recording_id)
+            path = session_dir / "speaker-diarization.json"
+            if not path.is_file():
+                return None
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return None
+            return data if isinstance(data, dict) else None
+
     def fail(self, recording_id: str, error: str) -> None:
         with self._lock_for(recording_id):
             session_dir, metadata = self._load(recording_id)

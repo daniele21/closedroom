@@ -31,7 +31,7 @@ Follow the closest scoped `AGENTS.md`. Extend one canonical owner before introdu
 | --- | --- |
 | Pure docs/copy | affected source/links; `docs/README.md` only if ownership unclear |
 | Behavior/bug/contract | `skills/structured-change/SKILL.md`, `skills/validate-change/SKILL.md`, relevant commands |
-| Material UI | above + `skills/design-product-experience/SKILL.md`, relevant `design/*` |
+| Material UI | `skills/design-product-experience/SKILL.md` + `skills/interaction-quality-review/SKILL.md` |
 | Integration/release | `skills/preflight-change/SKILL.md`, commands, affected `.engineering/e2e.json` |
 | Missing deterministic remote gate | `skills/remote-preflight/SKILL.md` |
 | Persistent multi-session work | `skills/plan-workstream/SKILL.md` + active plan; finalize with `skills/finalize-workstream/SKILL.md` |

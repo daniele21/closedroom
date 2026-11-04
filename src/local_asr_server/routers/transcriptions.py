@@ -29,6 +29,9 @@ from local_asr_server.speaker_diarization_benchmark import (
 from local_asr_server.transcription_diarization_review import (
     REVIEW_JOB_TYPE, fingerprint, project_review,
 )
+from local_asr_server.speaker_review import (
+    project_speaker_action, speaker_audio_samples,
+)
 from local_asr_server.env import get_env_var
 from local_asr_server.services.transcription_service import TranscriptionService
 from local_asr_server.services.transcription_application import (
@@ -70,6 +73,14 @@ class SpeakerNamesRequest(BaseModel):
 
 class ReviewedDiarizationUndoRequest(BaseModel):
     revision_id: str
+
+
+class SpeakerReviewActionRequest(BaseModel):
+    action: Literal["rename", "merge", "exclude", "restore"]
+    cluster: str = Field(min_length=1, max_length=160)
+    target: str | None = Field(default=None, max_length=160)
+    name: str | None = Field(default=None, max_length=120)
+    expected_fingerprint: str = Field(min_length=64, max_length=64)
 
 
 class DiarizationBenchmarkRequest(BaseModel):
@@ -661,6 +672,67 @@ def _completed_review_job(transcription_id: str, job_id: str, app: Any):
     if job.get("recording_id") != transcription.get("recording_id"):
         raise HTTPException(status_code=404, detail="Speaker review belongs to another meeting")
     return services, transcription, job
+
+
+@router.get("/v1/transcriptions/{transcription_id}/speaker-review")
+def get_speaker_review(transcription_id: str, request: Request):
+    services, transcription = _transcription_review_context(transcription_id, request.app)
+    return {
+        "fingerprint": fingerprint(transcription),
+        "undo": services.transcriptions.reviewed_diarization_undo(transcription_id),
+    }
+
+
+@router.get("/v1/transcriptions/{transcription_id}/speaker-review/samples")
+def get_speaker_review_samples(transcription_id: str, request: Request):
+    services, transcription = _transcription_review_context(transcription_id, request.app)
+    try:
+        return speaker_audio_samples(transcription, services.recordings)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except (RecordingConflict, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/transcriptions/{transcription_id}/speaker-review")
+def commit_speaker_review(
+    transcription_id: str, body: SpeakerReviewActionRequest, request: Request,
+):
+    services, transcription = _transcription_review_context(transcription_id, request.app)
+    if fingerprint(transcription) != body.expected_fingerprint:
+        raise HTTPException(
+            status_code=409, detail="Speaker review is stale; reload the meeting before editing",
+        )
+    try:
+        candidate = project_speaker_action(
+            transcription, action=body.action, cluster=body.cluster,
+            target=body.target, name=body.name,
+        )
+        return services.transcriptions.apply_reviewed_diarization(
+            transcription_id,
+            candidate=candidate,
+            expected_fingerprint=body.expected_fingerprint,
+            preserve_raw_text=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/v1/transcriptions/{transcription_id}/speaker-review/undo")
+def undo_speaker_review(
+    transcription_id: str, body: ReviewedDiarizationUndoRequest, request: Request,
+):
+    services, _ = _transcription_review_context(transcription_id, request.app)
+    try:
+        return {
+            "transcription": services.transcriptions.undo_reviewed_diarization(
+                transcription_id, body.revision_id,
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/v1/transcriptions/{transcription_id}/diarization-reviews", status_code=202)
