@@ -44,12 +44,15 @@ class MeetingDetectionFrontendContractTests(unittest.TestCase):
         self.assertIn("createCaptureReservation()", hook)
         self.assertIn("data.type === 'ready'", hook)
 
-    def test_opt_in_is_off_by_default_and_explicit_in_settings(self):
+    def test_detection_default_is_visible_and_setting_stays_reversible(self):
         page = (ROOT / "frontend/src/pages/SettingsPage.tsx").read_text()
         self.assertIn("data-settings-meeting-detection", page)
         self.assertIn("checked={meetingDetectionEnabled}", page)
+        self.assertIn("setMeetingDetectionEnabled] = useState(true)", page)
+        self.assertIn("notification_delivery?.state", page)
         self.assertIn("meeting_detection_enabled: meetingDetectionEnabled", page)
         self.assertIn("meetingDetectionEnabled && !meetingDetectionWasEnabled", page)
+        self.assertIn("handleMeetingNotificationPermission", page)
 
 
 if __name__ == "__main__":
