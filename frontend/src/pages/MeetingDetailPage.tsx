@@ -1761,8 +1761,15 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                 {meeting.transcription ? (
                   <>
                     <SpeakerDiarizationEditor
+                      key={meeting.transcription.id || meeting.transcription.saved_id}
                       transcription={meeting.transcription}
+                      recordingId={meeting.id}
                       readOnly={demoMode}
+                      onPlaybackStart={() => audioRef.current?.pause()}
+                      onJumpToTranscript={(time) => {
+                        selectTab('transcript');
+                        handleTimestampClick(time);
+                      }}
                       onUpdated={(transcription) => setMeeting((current) => (
                         current ? { ...current, transcription } : current
                       ))}
