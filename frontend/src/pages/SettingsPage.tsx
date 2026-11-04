@@ -44,6 +44,12 @@ export default function SettingsPage() {
   const [recordingsDir, setRecordingsDir] = useState('');
   const [transcriptionsDir, setTranscriptionsDir] = useState('');
   const [audioRetentionDays, setAudioRetentionDays] = useState<7 | 14 | 30>(14);
+  const [storagePreference, setStoragePreference] = useState<'local' | 'gcs'>('local');
+  const [storageEffectiveMode, setStorageEffectiveMode] = useState<'local' | 'gcs'>('local');
+  const [gcsProjectId, setGcsProjectId] = useState('');
+  const [gcsBucketName, setGcsBucketName] = useState('');
+  const [gcsRegion, setGcsRegion] = useState('europe-west8');
+  const [gcsConfigurationComplete, setGcsConfigurationComplete] = useState(false);
   const [defaultModel, setDefaultModel] = useState('');
   const [defaultLanguage, setDefaultLanguage] = useState('it');
   const [defaultTask, setDefaultTask] = useState('transcribe');
@@ -187,6 +193,12 @@ export default function SettingsPage() {
 
       setRecordingsDir(settings.recordings_dir || '');
       setTranscriptionsDir(settings.transcriptions_dir || '');
+      setStoragePreference(settings.storage_preference === 'gcs' ? 'gcs' : 'local');
+      setStorageEffectiveMode(settings.storage_effective_mode === 'gcs' ? 'gcs' : 'local');
+      setGcsProjectId(settings.gcs_project_id || '');
+      setGcsBucketName(settings.gcs_bucket_name || '');
+      setGcsRegion(settings.gcs_region || 'europe-west8');
+      setGcsConfigurationComplete(Boolean(settings.gcs_configuration_complete));
       setAudioRetentionDays(
         settings.audio_local_retention_days === 7 || settings.audio_local_retention_days === 30
           ? settings.audio_local_retention_days : 14
@@ -298,6 +310,10 @@ export default function SettingsPage() {
         transcriptions_dir: transcriptionsDir.trim(),
         recordings_dir: recordingsDir.trim(),
         audio_local_retention_days: audioRetentionDays,
+        storage_preference: storagePreference,
+        gcs_project_id: gcsProjectId.trim(),
+        gcs_bucket_name: gcsBucketName.trim(),
+        gcs_region: gcsRegion.trim(),
         audio_auto_cleanup_enabled: false,
         ...asrSettingsPatch({
           provider: asrProvider,
@@ -390,9 +406,80 @@ export default function SettingsPage() {
           <div>
             <h3 className="text-sm font-semibold text-text-primary">{t('settings.storageTitle')}</h3>
             <p className="mt-1 text-xs text-text-muted">
-              {lang === 'it' ? 'Dove ClosedRoom conserva audio e trascrizioni locali.' : 'Where ClosedRoom stores local audio and transcripts.'}
+              {lang === 'it' ? 'Scegli dove desideri conservare le registrazioni, senza modificare il funzionamento locale.' : 'Choose where you want recordings stored, without changing local processing.'}
             </p>
           </div>
+          <fieldset className="flex flex-col gap-3" data-storage-target-selection="true" aria-describedby="storage-target-help">
+            <legend className="text-sm font-semibold text-text-primary">
+              {lang === 'it' ? 'Destinazione preferita' : 'Preferred destination'}
+            </legend>
+            <p id="storage-target-help" className="text-xs text-text-secondary">
+              {lang === 'it'
+                ? 'La preferenza GCS può essere preparata ora, ma non attiva upload automatici. La modalità effettiva resta Solo Mac.'
+                : 'You can prepare the GCS preference now, but it does not enable automatic upload. Effective storage remains on this Mac.'}
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label htmlFor="settings-storage-local" className={`flex cursor-pointer gap-3 rounded-xl border p-3 focus-within:ring-2 focus-within:ring-border-focus ${storagePreference === 'local' ? 'border-accent bg-accent/5' : 'border-border-subtle'}`}>
+                <input id="settings-storage-local" type="radio" name="storage-target" value="local"
+                  checked={storagePreference === 'local'} onChange={() => setStoragePreference('local')}
+                  className="mt-0.5 h-4 w-4 accent-accent" />
+                <span className="flex flex-col gap-1">
+                  <span className="text-sm font-semibold text-text-primary">{lang === 'it' ? 'Solo Mac' : 'On this Mac'}</span>
+                  <span className="text-xs text-text-secondary">{lang === 'it' ? 'Audio, trascrizioni e note restano locali.' : 'Audio, transcripts and notes stay local.'}</span>
+                </span>
+              </label>
+              <label htmlFor="settings-storage-gcs" className={`flex cursor-pointer gap-3 rounded-xl border p-3 focus-within:ring-2 focus-within:ring-border-focus ${storagePreference === 'gcs' ? 'border-accent bg-accent/5' : 'border-border-subtle'}`}>
+                <input id="settings-storage-gcs" type="radio" name="storage-target" value="gcs"
+                  checked={storagePreference === 'gcs'} onChange={() => setStoragePreference('gcs')}
+                  className="mt-0.5 h-4 w-4 accent-accent" />
+                <span className="flex flex-col gap-1">
+                  <span className="text-sm font-semibold text-text-primary">Google Cloud Storage</span>
+                  <span className="text-xs text-text-secondary">
+                    {lang === 'it' ? 'Prepara la destinazione cloud. Non ancora operativa.' : 'Prepare a cloud destination. Not operational yet.'}
+                  </span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+          <div role="status" aria-live="polite" className="flex flex-wrap items-center gap-2 rounded-lg border border-border-subtle bg-bg-surface p-3" data-storage-effective-mode={storageEffectiveMode}>
+            <Badge variant={storageEffectiveMode === 'local' ? 'success' : 'info'}>
+              {lang === 'it' ? 'Attivo ora: Solo Mac' : 'Active now: On this Mac'}
+            </Badge>
+            <span className="text-xs text-text-secondary">
+              {lang === 'it' ? 'La modifica della preferenza non sposta meeting esistenti e non cancella file.' : 'Changing the preference does not move existing meetings or delete files.'}
+            </span>
+          </div>
+          {storagePreference === 'gcs' && (
+            <div className="flex flex-col gap-3 rounded-xl border border-warning/30 bg-warning/5 p-4" data-storage-gcs-preparation="true">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-sm font-semibold text-text-primary">{lang === 'it' ? 'Preparazione GCS' : 'GCS preparation'}</h4>
+                <Badge variant="warning">{lang === 'it' ? 'Non attivo' : 'Not active'}</Badge>
+              </div>
+              <p className="text-xs text-text-secondary" role="status">
+                {lang === 'it'
+                  ? 'Salveremo solo gli identificativi del progetto e del bucket, non credenziali. Nessun nuovo audio sarà caricato automaticamente: servono ancora collegamento OAuth, upload cifrato per meeting e verifica di recupero.'
+                  : 'Only the project and bucket identifiers will be saved, never credentials. No new audio will upload automatically until OAuth, encrypted per-meeting upload and recovery checks are integrated.'}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input id="settings-gcs-project-id" label="GCP project ID"
+                  placeholder="my-project-123456" value={gcsProjectId}
+                  onChange={(event) => setGcsProjectId(event.target.value)} autoComplete="off" />
+                <Input id="settings-gcs-bucket-name" label="GCS bucket"
+                  placeholder="my-private-meetings" value={gcsBucketName}
+                  onChange={(event) => setGcsBucketName(event.target.value)} autoComplete="off" />
+              </div>
+              <div className="max-w-xs">
+                <Input id="settings-gcs-region" label={lang === 'it' ? 'Regione del bucket' : 'Bucket region'}
+                  placeholder="europe-west8" value={gcsRegion}
+                  onChange={(event) => setGcsRegion(event.target.value)} autoComplete="off" />
+              </div>
+              <p className="text-xs text-text-muted">
+                {gcsConfigurationComplete
+                  ? (lang === 'it' ? 'Identificativi salvati (connessione non verificata).' : 'Identifiers saved (connection not verified).')
+                  : (lang === 'it' ? 'Inserisci i dettagli e salva per preparare la destinazione.' : 'Enter details and save to prepare the destination.')}
+              </p>
+            </div>
+          )}
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="settings-recordings-dir" className="text-sm font-medium text-text-secondary">{t('settings.recordingsFolderLabel')}</label>
