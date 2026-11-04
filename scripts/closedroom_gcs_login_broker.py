@@ -19,7 +19,7 @@ from typing import Any
 
 SCHEMA = "closedroom-local-gcs-broker-v1"
 BUCKET = "project-tests-498508-closedroom-test"
-ACTIONS = ("oauth-verify", "preflight", "backup")
+ACTIONS = ("oauth-verify", "preflight", "backup", "restore-verify")
 MAX_AGE_SECONDS = 600
 RUN_TIMEOUT_SECONDS = 10800
 BROKER_DIR = Path.home() / ".config/closedroom/gcs-login-broker"
@@ -92,11 +92,12 @@ def _status_from_output(text: str, action: str) -> dict[str, Any]:
         "oauth-verify": "oauth_bucket_read_write_verified",
         "preflight": "mac_new_local_backup_preflight_pass",
         "backup": "cold_snapshot_uploaded_pending_restore",
+        "restore-verify": "cold_snapshot_restored_verified_isolated",
     }
     if status != allowed[action]:
         raise BrokerRefusal("BACKEND_UNEXPECTED_RESULT")
     result = {"status": status, "action": action}
-    for field in ("meeting_bytes", "meeting_files", "recordings_rows", "transcriptions_rows", "file_count"):
+    for field in ("meeting_bytes", "meeting_files", "recordings_rows", "transcriptions_rows", "file_count", "restored_files"):
         v = data.get(field)
         if type(v) is int and 0 <= v <= 10**14:
             result[field] = v
@@ -145,6 +146,11 @@ def run_action(request: dict[str, Any], config: dict[str, Any]) -> dict[str, Any
             "--client-json", str(Path.home() / ".config/closedroom/oauth-desktop.json"),
             "--apply",
         ]
+    elif action == "restore-verify":
+        # Full encrypted cloud download/decrypt into a private scratch
+        # directory in the login session. The existing app data remains
+        # untouched; never read the one-time recovery code in CI.
+        cmd = common + ["scripts/verify_closedroom_gcs_cold_restore.py"]
     else:
         cmd = common + ["scripts/run_gcs_backup_on_runner.py", action]
     try:
