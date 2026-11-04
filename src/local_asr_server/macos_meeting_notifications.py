@@ -29,6 +29,16 @@ def _native_framework():
     import UserNotifications
     return UserNotifications
 
+def needs_initial_notification_consent(*, enabled: bool, authorization: str,
+                                       requested_this_launch: bool) -> bool:
+    """Ask macOS once for user consent when default-on detection first starts.
+
+    macOS remains the authorization owner: no notification is sent without
+    granted permission, and an explicit saved Off is never overridden.
+    """
+    return enabled and authorization == "not_determined" and not requested_this_launch
+
+
 def decode_notification_action(identifier: str, action_identifier: str) -> tuple[str, str] | None:
     if not identifier.startswith(NOTIFICATION_PREFIX) or not identifier[len(NOTIFICATION_PREFIX):]:
         return None
@@ -150,7 +160,7 @@ class MeetingNotificationCenter:
             self._last_error = None
 
     def request_authorization(self) -> bool:
-        """Only call as the direct result of a deliberate user opt-in."""
+        """Request explicit macOS authorization, never infer permission from defaults."""
         if not self.start():
             return False
         from local_asr_server.window import run_on_main_thread
