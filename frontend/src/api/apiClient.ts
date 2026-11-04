@@ -638,6 +638,14 @@ export interface Settings {
   meeting_detection_enabled?: boolean;
   transcriptions_dir: string;
   recordings_dir: string;
+  /** Requested destination only. GCS is NOT enabled until the backend reports it as effective. */
+  storage_preference?: 'local' | 'gcs';
+  storage_effective_mode?: 'local' | 'gcs';
+  storage_capability?: 'preparation_only';
+  gcs_project_id?: string;
+  gcs_bucket_name?: string;
+  gcs_region?: string;
+  gcs_configuration_complete?: boolean;
   audio_local_retention_days?: 7 | 14 | 30;
   audio_auto_cleanup_enabled?: boolean;
   asr_provider?: 'local' | 'speechmatics' | string;
