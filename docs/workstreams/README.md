@@ -8,4 +8,3 @@ Do not move historical plans here merely to preserve them.
 
 - [Overlay chiamata e screenshot come fonti del meeting](call-overlay-screenshot-evidence.md): piano READY per scatti manuali, citazioni temporali nella trascrizione e analisi locale con fonti.
 - [Elaborazioni in background e Attività globali](background-processing.md): piano READY per importazione audio tramite job, recupero tra schermate e monitoraggio globale.
-- [Speaker Review Workspace](speaker-review-workspace.md): UX di ascolto campioni, identificazione, merge/esclusione reversibili e controcheck audio selettivo; [wireframe e stati](speaker-review-interaction-reference.md) (PROPOSED, non implementato).
