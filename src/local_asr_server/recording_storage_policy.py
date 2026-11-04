@@ -66,8 +66,10 @@ def assess_audio_cleanup(
         blockers.append("meeting_not_completed")
     if not local_transcript_verified:
         blockers.append("local_transcript_unverified")
-    if active_operations:
-        blockers.append("meeting_processing_active")
+    # Nobody has yet proven there are no jobs, playback or hydration leases.
+    # An unknown activity state must block cleanup, not be treated as idle.
+    if active_operations is not False:
+        blockers.append("meeting_operations_unverified")
 
     raw = meeting.get("_audio_cloud_proof")
     proof = raw if isinstance(raw, dict) else {}
@@ -122,7 +124,10 @@ def assess_audio_cleanup(
             if (not isinstance(item, dict)
                     or type(item.get("bytes")) is not int or item["bytes"] <= 0
                     or not isinstance(item.get("sha256"), str)
-                    or SHA256.fullmatch(item["sha256"]) is None):
+                    or SHA256.fullmatch(item["sha256"]) is None
+                    or type(track.get("bytes_written")) is not int
+                    or item["bytes"] != track["bytes_written"]
+                    or item["sha256"] != track.get("_content_sha256")):
                 blockers.append("audio_tracks_unverified")
                 break
         if set(verified) != track_ids:
@@ -139,7 +144,7 @@ def assess_audio_cleanup(
 
     distinct = tuple(dict.fromkeys(blockers))
     return {
-        "state": proof.get("state") if proof.get("state") in {
+        "state": proof.get("state") if isinstance(proof.get("state"), str) and proof["state"] in {
             REMOTE_PENDING, REMOTE_VERIFIED, RECOVERY_VERIFIED
         } else LOCAL_ONLY,
         "cleanup_candidate": not distinct,
