@@ -608,6 +608,8 @@ export interface Settings {
   meeting_detection_enabled?: boolean;
   transcriptions_dir: string;
   recordings_dir: string;
+  audio_local_retention_days?: 7 | 14 | 30;
+  audio_auto_cleanup_enabled?: boolean;
   asr_provider?: 'local' | 'speechmatics' | string;
   speechmatics_api_key?: string;
   speechmatics_api_key_configured?: boolean;
