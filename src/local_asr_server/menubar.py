@@ -743,6 +743,10 @@ class ClosedRoomApp(rumps.App):
         observation = self._meeting_observer.scan()
         self._meeting_capability = observation.capability
         self._meeting_observation = observation
+        if server_status == "unavailable":
+            # Keep local diagnostic visibility, but never offer a new recording
+            # until the canonical capture server can accept the action.
+            return
         with self._meeting_intent_lock:
             pending = any(
                 item["phase"] in {"issued", "claimed", "preparing"}
