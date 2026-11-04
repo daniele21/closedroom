@@ -146,7 +146,7 @@ class MeetingNotificationCenter:
         # UNAuthorizationStatus: notDetermined 0, denied 1, authorized 2, provisional 3.
         self._authorization = {0: "not_determined", 1: "denied",
                                2: "authorized", 3: "authorized", 4: "authorized"}.get(status, "unknown")
-        if self._authorization != "unknown":
+        if self._authorization != "unknown" and self._last_error == "notification_settings_query_failed":
             self._last_error = None
 
     def request_authorization(self) -> bool:
@@ -173,30 +173,52 @@ class MeetingNotificationCenter:
         run_on_main_thread(request)
         return True
 
-    def notify(self, candidate_id: str, *, app_label: str | None = None) -> bool:
+    def notify(self, candidate_id: str, *, app_label: str | None = None,
+               on_result: Callable[[bool], None] | None = None) -> bool:
+        """Queue an OS notification and asynchronously acknowledge its submission.
+
+        True means only that dispatch was scheduled, not that macOS displayed a
+        banner. The callback receives the OS submission result; Focus mode and
+        user presentation preferences can still suppress the visible banner.
+        """
         if not self._center or self._authorization != "authorized":
             return False
         from local_asr_server.window import run_on_main_thread
 
-        def deliver():
-            native = self._native or _native_framework()
-            content = native.UNMutableNotificationContent.alloc().init()
-            content.setTitle_("Una chiamata in corso?")
-            content.setBody_(f"{app_label} sta utilizzando il microfono. Vuoi registrare?"
-                             if app_label else "Vuoi registrare il meeting con ClosedRoom?")
-            content.setCategoryIdentifier_(CATEGORY_ID)
-            request = native.UNNotificationRequest.requestWithIdentifier_content_trigger_(
-                NOTIFICATION_PREFIX + candidate_id, content, None
-            )
-            self._center.addNotificationRequest_withCompletionHandler_(
-                request, lambda error: self._record_delivery_error(error)
-            )
-        run_on_main_thread(deliver)
+        def complete(error) -> None:
+            self._record_delivery_error(error)
+            if on_result is not None:
+                on_result(error is None)
+
+        def deliver() -> None:
+            try:
+                native = self._native or _native_framework()
+                content = native.UNMutableNotificationContent.alloc().init()
+                content.setTitle_("Una chiamata in corso?")
+                content.setBody_(f"{app_label} sta utilizzando il microfono. Vuoi registrare?"
+                                 if app_label else "Vuoi registrare il meeting con ClosedRoom?")
+                content.setCategoryIdentifier_(CATEGORY_ID)
+                request = native.UNNotificationRequest.requestWithIdentifier_content_trigger_(
+                    NOTIFICATION_PREFIX + candidate_id, content, None
+                )
+                self._center.addNotificationRequest_withCompletionHandler_(request, complete)
+            except Exception:
+                self._record_delivery_error(RuntimeError("native_submit_failed"))
+                if on_result is not None:
+                    on_result(False)
+
+        try:
+            run_on_main_thread(deliver)
+        except Exception:
+            self._record_delivery_error(RuntimeError("dispatch_failed"))
+            return False
         return True
 
     def _record_delivery_error(self, error) -> None:
         if error is not None:
             self._last_error = "notification_delivery_failed"
+        elif self._last_error == "notification_delivery_failed":
+            self._last_error = None
 
     def dismiss(self, candidate_id: str) -> None:
         if self._center:
