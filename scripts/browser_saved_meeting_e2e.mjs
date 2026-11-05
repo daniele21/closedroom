@@ -127,7 +127,7 @@ const counts = {
   benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0, benchmark_window: 0,
   review_list: 0, review_start: 0, review_poll: 0, review_preview: 0,
   review_apply: 0, review_undo: 0,
-  speaker_sample_list: 0, speaker_timeline: 0, speaker_merge: 0, speaker_undo: 0, speaker_audio_request: 0,
+  speaker_sample_list: 0, speaker_timeline: 0, speaker_merge: 0, speaker_restore: 0, speaker_undo: 0, speaker_audio_request: 0,
 };
 let benchmarkJob = null;
 let benchmarkRequest = null;
@@ -135,6 +135,7 @@ let communityReviewJob = null;
 let communityReviewApplied = false;
 let speakerReviewFingerprint = 'a'.repeat(64);
 let speakerReviewBefore = null;
+let speakerReviewUnmerged = null;
 let speakerReviewUndo = null;
 let lastBenchmarkWindowStart = null;
 const benchmarkWindowStarts = [];
@@ -373,6 +374,7 @@ function fixtureServer(port) {
       speakerReviewBefore = structuredClone(meetingFixture.transcription);
       if (body.action === 'merge' && body.cluster === 'system:S1' && body.target === 'system:S2') {
         counts.speaker_merge += 1;
+        speakerReviewUnmerged = structuredClone(speakerReviewBefore);
         meetingFixture.transcription = {
           ...meetingFixture.transcription,
           segments: meetingFixture.transcription.segments.map((s) => ({
@@ -394,6 +396,9 @@ function fixtureServer(port) {
             },
           },
         };
+      } else if (body.action === 'restore' && body.cluster === 'system:S1' && speakerReviewUnmerged) {
+        counts.speaker_restore += 1;
+        meetingFixture.transcription = structuredClone(speakerReviewUnmerged);
       } else {
         return json(res, 409, { detail: 'Unexpected speaker review test action' });
       }
@@ -1313,6 +1318,42 @@ try {
     throw new Error('undo failed to restore separate speaker lanes: ' + JSON.stringify(lanes));
   }
   await checkpoint(browser, '11c-speaker-review-undo');
+
+  // Undo and later restore are distinct recovery paths. A merged voice must
+  // remain actionable from the minimal UI without showing a duplicate lane.
+  await browser.clickCss('[data-speaker-lane="system:S1"] button[title="Speaker 1"]');
+  await browser.clickCss('[data-speaker-review-workspace] button[aria-label="Manage this voice"], [data-speaker-review-workspace] button[aria-label="Gestisci questa voce"]');
+  await browser.clickButton(['Merge voice', 'Unisci voce']);
+  const secondTarget = await browser.execute(`
+    const select = document.querySelector('[data-speaker-review-workspace] select');
+    if (!select) return false;
+    select.value = 'system:S2';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  `);
+  if (!secondTarget) throw new Error('second merge target selection unavailable');
+  await sleep(120);
+  await browser.clickButton(['Confirm merge', 'Conferma unione']);
+  await waitCount('speaker_merge', 2);
+  await browser.clickButton(['Show merged and excluded voices', 'Mostra voci unite ed escluse']);
+  await browser.clickCss('[data-speaker-merged-restore="system:S1"]');
+  await waitCount('speaker_restore', 1);
+  let restoredMergedVoice = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    restoredMergedVoice = await browser.execute(`
+      return Boolean(document.querySelector('[data-speaker-lane="system:S1"]') &&
+        document.querySelector('[data-speaker-lane="system:S2"]') &&
+        !document.querySelector('[data-speaker-merged-restore="system:S1"]'));
+    `);
+    if (restoredMergedVoice) break;
+    await sleep(100);
+  }
+  if (!restoredMergedVoice) throw new Error('restored merged voice did not regain its own lane');
+  if (meetingFixture.transcription.text !== 'Decision: ship the release after validation. Owner: Alex.') {
+    throw new Error('Restoring a merged voice changed the canonical transcript text');
+  }
+  await checkpoint(browser, '11d-speaker-review-restored');
+
   // Advanced engine controls stay reachable without dominating voice review.
   await browser.clickCss('[data-speaker-advanced-tools="true"] summary');
   await waitText(browser, ['Compare diarization engines', 'Confronta motori di diarizzazione']);
