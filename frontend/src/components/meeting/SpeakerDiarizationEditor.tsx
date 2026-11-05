@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, CheckCircle2, ChevronDown, GitMerge, Headphones,
-  MoreHorizontal, Pause, Play, RotateCcw, SkipBack, SkipForward, Volume2,
+  AlertCircle, ChevronDown, GitMerge, Headphones,
+  MoreHorizontal, Pause, Play, RotateCcw, SkipBack, SkipForward,
 } from 'lucide-react';
 import {
   ApiClient, type SpeakerClip, type SpeakerReviewAction,
