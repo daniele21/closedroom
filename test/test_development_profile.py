@@ -52,6 +52,16 @@ class DevelopmentProfileTests(unittest.TestCase):
                 self.root / "Library/Application Support/ClosedRoom/runtime-state.json",
             )
 
+    def test_symlinked_development_support_root_cannot_write_runtime_lock(self):
+        parent = self.root / "Library/Application Support/ClosedRoom"
+        parent.mkdir(parents=True, exist_ok=True)
+        production = self.root / "ClosedRoom"
+        production.mkdir()
+        (parent / "Development").symlink_to(production, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "support directory must not be a symlink"):
+            get_runtime_state_file()
+        self.assertFalse((production / "instance.lock").exists())
+
     def test_dev_defaults_use_isolated_recordings_transcriptions_and_catalog(self):
         defaults = load_settings()
         root = get_app_support_dir() / "Data"
