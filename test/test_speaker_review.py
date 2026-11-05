@@ -190,6 +190,26 @@ class SpeakerReviewApiTests(unittest.TestCase):
         self.setting_patch.stop()
         self.tmp.cleanup()
 
+    def test_read_only_speaker_timeline_without_asr_segments(self):
+        from local_asr_server.app_services import get_services
+        service = get_services(self.app)
+        payload = transcription()
+        payload["segments"] = []
+        payload["text"] = ""
+        saved = service.transcriptions.save(payload, recording_id=self.recording_id)
+        url = f"/v1/transcriptions/{saved['id']}/speaker-review"
+        timeline = self.client.get(url + "/timeline?start=0&end=1")
+        self.assertEqual(timeline.status_code, 200, timeline.text)
+        body = timeline.json()
+        self.assertEqual(body["coverage"], "none")
+        self.assertEqual(body["total_interval_count"], 0)
+        self.assertIn("duration_seconds", body)
+        self.assertEqual(len(body["overview"]), 3)
+        samples = self.client.get(url + "/samples")
+        self.assertEqual(samples.status_code, 200, samples.text)
+        # Editing requires timed ASR; only read-only evidence is relaxed.
+        self.assertEqual(self.client.get(url).status_code, 409)
+
     def test_revision_conflict_merge_and_undo(self):
         info = self.client.get(self.url)
         self.assertEqual(info.status_code, 200, info.text)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import math
+from datetime import datetime
 from typing import Any
 
 from local_asr_server.speaker_labels import apply_speaker_labels
@@ -235,6 +236,26 @@ def speaker_audio_samples(transcription: dict[str, Any], recordings: Any) -> dic
     }
 
 
+def _verified_recording_duration(metadata: dict[str, Any]) -> tuple[float | None, str]:
+    """Use persisted recording time when available, without fabricating a clock."""
+    for key in ("duration_seconds", "duration"):
+        try:
+            value = float(metadata.get(key))
+            if math.isfinite(value) and value > 0:
+                return value, "recording"
+        except (TypeError, ValueError):
+            pass
+    try:
+        started = datetime.fromisoformat(str(metadata.get("created_at") or "").replace("Z", "+00:00"))
+        stopped = datetime.fromisoformat(str(metadata.get("stopped_at") or "").replace("Z", "+00:00"))
+        elapsed = (stopped - started).total_seconds()
+        if math.isfinite(elapsed) and elapsed > 0:
+            return elapsed, "recording_clock"
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return None, "unknown"
+
+
 def speaker_timeline_window(
     transcription: dict[str, Any], recordings: Any, *,
     start_seconds: float, end_seconds: float,
@@ -356,26 +377,77 @@ def speaker_timeline_window(
             "playable": track_id in playable,
         })
 
-    all_intervals = [
-        item for items in by_cluster.values() for item in items
+    # Coverage and duration are properties of the *whole recording*, not the
+    # requested viewport. This remains true when the first minute is silent or
+    # the transcription has no speaker-attributed words at all.
+    all_evidence = [item for items in by_cluster.values() for item in items]
+    max_evidence_end = max((item["end"] for item in all_evidence), default=0.0)
+    recorded_duration, duration_source = _verified_recording_duration(metadata)
+    if max_evidence_end > (recorded_duration or 0):
+        duration_seconds: float | None = max_evidence_end
+        duration_source = "evidence"
+    else:
+        duration_seconds = recorded_duration
+    origins = {item["origin"] for item in all_evidence}
+    coverage = (
+        "mixed" if len(origins) > 1 else
+        "diarization" if "diarization" in origins else
+        "transcript" if "transcript" in origins else "none"
+    )
+
+    # At most 120 coarse presence buckets per cluster, regardless of meeting
+    # duration or raw interval count. These bins are explicitly a navigation
+    # overview, never clickable/fabricated per-second speech evidence.
+    bucket_count = 120
+    overview = []
+    for cluster in sorted(by_cluster):
+        items = by_cluster[cluster]
+        occupied: set[int] = set()
+        if duration_seconds and duration_seconds > 0:
+            for item in items:
+                first = min(bucket_count - 1, int(item["start"] / duration_seconds * bucket_count))
+                last = min(bucket_count - 1, int(math.nextafter(item["end"], 0.0) / duration_seconds * bucket_count))
+                if last >= first:
+                    occupied.update(range(max(0, first), last + 1))
+        overview.append({
+            "cluster": cluster,
+            "bins": sorted(occupied),
+            "interval_count": len(items),
+            "first_start": min((item["start"] for item in items), default=None),
+            "playable_count": sum(bool(item["playable"]) for item in items),
+        })
+
+    window_intervals = [
+        item for item in all_evidence
         if item["end"] > start_seconds and item["start"] < end_seconds
     ]
-    all_intervals.sort(key=lambda item: (item["start"], item["end"], item["cluster"]))
+    window_intervals.sort(key=lambda item: (item["start"], item["end"], item["cluster"]))
     limit = 5000
     clipped = [
         {**item,
          "start": max(start_seconds, item["start"]),
          "end": min(end_seconds, item["end"])}
-        for item in all_intervals[:limit]
+        for item in window_intervals[:limit]
     ]
-    native = sum(item["origin"] == "diarization" for item in clipped)
+    window_origins = {item["origin"] for item in window_intervals}
+    window_coverage = (
+        "mixed" if len(window_origins) > 1 else
+        "diarization" if "diarization" in window_origins else
+        "transcript" if "transcript" in window_origins else "none"
+    )
     return {
         "recording_id": recording_id,
         "transcription_id": transcription.get("id"),
         "start": start_seconds, "end": end_seconds,
         "intervals": clipped,
-        "truncated": len(all_intervals) > limit,
-        "coverage": "mixed" if native and native != len(clipped) else
-                    "diarization" if native else "transcript",
+        "truncated": len(window_intervals) > limit,
+        "coverage": coverage,
+        "window_coverage": window_coverage,
+        "duration_seconds": duration_seconds,
+        "duration_source": duration_source,
+        "max_evidence_end_seconds": max_evidence_end if max_evidence_end > 0 else None,
+        "total_interval_count": len(all_evidence),
+        "overview_bucket_count": bucket_count,
+        "overview": overview,
         "has_audio": bool(playable),
     }

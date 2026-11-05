@@ -53,6 +53,90 @@ class RecordingFixture:
 
 
 class SpeakerTimelineProjectionTests(unittest.TestCase):
+    def test_long_meeting_audio_only_speaker_appears_in_full_overview(self):
+        # Screenshot regression: an audio example at 25:15, no attributed
+        # phrases, but a full 30-minute saved recording.
+        case = {
+            "id": "transcription-1", "recording_id": "recording-1",
+            "segments": [], "text": "",
+            "stats": {"speaker_diarization": {
+                "status": "completed", "engine": "fluidaudio-community-1",
+                "clusters_by_track": {
+                    "system": [f"system:S{i}" for i in range(1, 6)],
+                },
+            }},
+        }
+        class LongRecording(RecordingFixture):
+            def get(self, recording_id, include_result=False):
+                return {**super().get(recording_id, include_result=include_result),
+                        "created_at": "2026-11-04T13:00:00+00:00",
+                        "stopped_at": "2026-11-04T13:30:00+00:00"}
+            def read_speaker_diarization(self, recording_id):
+                return {"engine": self.raw_engine, "tracks": {"system": {
+                    "segments": [
+                        {"speaker": "S1", "start": 0, "end": 10},
+                        {"speaker": "S2", "start": 120, "end": 130},
+                        {"speaker": "S3", "start": 1515, "end": 1521},
+                        {"speaker": "S4", "start": 1640, "end": 1650},
+                        {"speaker": "S5", "start": 1780, "end": 1790},
+                    ],
+                }}}
+        recording = LongRecording()
+        first_second = speaker_timeline_window(
+            case, recording, start_seconds=0, end_seconds=1,
+        )
+        self.assertEqual(first_second["duration_seconds"], 1800)
+        self.assertEqual(first_second["duration_source"], "recording_clock")
+        self.assertEqual(first_second["coverage"], "diarization")
+        self.assertEqual(first_second["window_coverage"], "diarization")
+        self.assertEqual(first_second["total_interval_count"], 5)
+        self.assertEqual(first_second["intervals"][0]["end"], 1)
+        self.assertEqual(first_second["overview_bucket_count"], 120)
+        giulia = next(item for item in first_second["overview"] if item["cluster"] == "system:S3")
+        self.assertEqual(giulia["interval_count"], 1)
+        self.assertGreater(giulia["first_start"], 1500)
+        self.assertTrue(giulia["bins"])
+        self.assertLessEqual(len(giulia["bins"]), 120)
+        off_window = speaker_timeline_window(
+            case, recording, start_seconds=60, end_seconds=80,
+        )
+        self.assertEqual(off_window["intervals"], [])
+        self.assertEqual(off_window["window_coverage"], "none")
+        self.assertEqual(off_window["coverage"], "diarization")
+        self.assertEqual(off_window["total_interval_count"], 5)
+        late = speaker_timeline_window(
+            case, recording, start_seconds=1500, end_seconds=1540,
+        )
+        self.assertEqual([r["cluster"] for r in late["intervals"]], ["system:S3"])
+
+    def test_unknown_duration_remains_explicit_until_evidence_exists(self):
+        case = transcript()
+        case["segments"] = []
+        case["stats"]["speaker_diarization"]["clusters_by_track"] = {}
+        no_data = speaker_timeline_window(
+            case, RecordingFixture(raw_engine="wrong"), start_seconds=0, end_seconds=60,
+        )
+        self.assertIsNone(no_data["duration_seconds"])
+        self.assertEqual(no_data["duration_source"], "unknown")
+        self.assertEqual(no_data["coverage"], "none")
+        self.assertEqual(no_data["overview_bucket_count"], 120)
+        self.assertTrue(all(not entry["bins"] for entry in no_data["overview"]))
+
+    def test_recording_metadata_duration_is_used_without_lying_about_audio(self):
+        case = transcript()
+        class ExplicitDuration(RecordingFixture):
+            def get(self, recording_id, include_result=False):
+                return {**super().get(recording_id, include_result=include_result),
+                        "duration_seconds": 3600, "created_at": "bad"}
+        result = speaker_timeline_window(
+            case, ExplicitDuration(), start_seconds=1000, end_seconds=1100,
+        )
+        self.assertEqual(result["duration_seconds"], 3600)
+        self.assertEqual(result["duration_source"], "recording")
+        self.assertEqual(result["coverage"], "diarization")
+        self.assertEqual(result["window_coverage"], "none")
+        self.assertEqual(result["total_interval_count"], 3)
+
     def test_full_native_timeline_includes_cluster_missing_from_asr(self):
         result = speaker_timeline_window(
             transcript(), RecordingFixture(), start_seconds=0, end_seconds=30)

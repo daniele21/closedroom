@@ -649,7 +649,7 @@ def list_jobs(
     }
 
 
-def _transcription_review_context(transcription_id: str, app: Any):
+def _transcription_review_context(transcription_id: str, app: Any, *, require_segments: bool = True):
     services = get_services(app)
     try:
         transcription = services.transcriptions.get(transcription_id)
@@ -657,7 +657,7 @@ def _transcription_review_context(transcription_id: str, app: Any):
         raise HTTPException(status_code=404, detail="Transcription not found") from exc
     if not transcription.get("recording_id") or transcription.get("merged_sources"):
         raise HTTPException(status_code=409, detail="Review requires an unmerged saved meeting")
-    if not transcription.get("segments"):
+    if require_segments and not transcription.get("segments"):
         raise HTTPException(status_code=409, detail="Review requires a timed transcription")
     return services, transcription
 
@@ -685,7 +685,9 @@ def get_speaker_review(transcription_id: str, request: Request):
 
 @router.get("/v1/transcriptions/{transcription_id}/speaker-review/samples")
 def get_speaker_review_samples(transcription_id: str, request: Request):
-    services, transcription = _transcription_review_context(transcription_id, request.app)
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
     try:
         return speaker_audio_samples(transcription, services.recordings)
     except RecordingNotFound as exc:
@@ -700,7 +702,9 @@ def get_speaker_review_timeline(
     start: float = Query(default=0.0, ge=0),
     end: float = Query(default=300.0, gt=0),
 ):
-    services, transcription = _transcription_review_context(transcription_id, request.app)
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
     diarization = (transcription.get("speaker_diarization")
                    or (transcription.get("stats") or {}).get("speaker_diarization") or {})
     job_id = str(diarization.get("applied_review_job_id") or "")
