@@ -221,21 +221,29 @@ cd closedroom
 ./run.sh
 ```
 
-Then open:
+Then open the source-run server (the `run.sh` script explicitly uses port `1230`):
 
 ```text
-http://127.0.0.1:1236
+http://127.0.0.1:1230
 ```
+
+The **installed** `ClosedRoom.app` normally uses port `1236` and is never
+terminated when starting the source server. Source-mode `local-asr serve` defaults
+to `1237`, including with `--reload`, and keeps settings, recordings, transcripts,
+catalog and local runtime state in
+`~/Library/Application Support/ClosedRoom/Development/`. Production data under
+`~/ClosedRoom/` and production settings are not touched. A second instance of the
+same profile or an explicitly requested occupied port **fails with an error**,
+without killing either app or recording. Close an existing instance normally
+before reopening the same profile.
 
 The repository still uses the internal Python package / CLI name `local-asr-server` / `local-asr` for the local backend. That is an implementation boundary inside the **ClosedRoom** product, not a separate repository to clone.
 
 ### Start the local API directly
 
 ```bash
-local-asr serve \
-  --model mlx-community/nemotron-3.5-asr-streaming-0.6b \
-  --recordings-dir ~/Recordings/local-asr \
-  --port 1236
+uv run local-asr serve \
+  --model mlx-community/nemotron-3.5-asr-streaming-0.6b
 ```
 
 For development with reload:
@@ -243,6 +251,11 @@ For development with reload:
 ```bash
 UV_CACHE_DIR=.cache/uv uv run local-asr serve --reload
 ```
+
+Open `http://127.0.0.1:1237`. Explicit `--recordings-dir` and
+`CLOSEDROOM_CATALOG_DB` overrides must remain inside
+`~/Library/Application Support/ClosedRoom/Development/Data/` in source mode;
+unsafe paths are refused before writable services start.
 
 ### Build the native macOS application
 
