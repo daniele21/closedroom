@@ -115,7 +115,11 @@ def validate_development_storage(
     """
     if not is_development_profile():
         return
-    root = (get_app_support_dir() / "Data").resolve()
+    support_dir = get_app_support_dir()
+    storage_dir = support_dir / "Data"
+    if support_dir.is_symlink() or storage_dir.is_symlink():
+        raise ValueError("Development data root must not be a symlink to another profile")
+    root = storage_dir.resolve()
     paths = {
         "recordings_dir": recordings_dir or settings.get("recordings_dir"),
         "transcriptions_dir": settings.get("transcriptions_dir"),
