@@ -279,6 +279,7 @@ export function SpeakerDiarizationEditor({
       {rows.length > 0 && id && meetingId && (
         <SpeakerTimeline
           transcription={transcription}
+          recordingId={meetingId}
           durationSeconds={durationSeconds}
           rows={rows}
           showHidden={showHidden}
