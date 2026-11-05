@@ -388,6 +388,8 @@ function fixtureServer(port) {
                 { speaker_cluster: 'system:S2', speaker_group: 'system:S2',
                   display_name: 'Speaker 2', status: 'unassigned',
                   transcript_segment_count: 0 },
+                ...speakerReviewBefore.stats.speaker_attribution.mappings.filter(
+                  (entry) => !['system:S1', 'system:S2'].includes(entry.speaker_cluster)),
               ],
             },
           },
@@ -1295,13 +1297,21 @@ try {
     undoTimeline = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
     return Boolean(
-      timeline?.querySelector('[data-speaker-lane="system:S1"] button[aria-label^="Explore"]') &&
-      timeline?.querySelector('[data-speaker-lane="system:S2"] button[aria-label^="Explore"]'));
+      timeline?.querySelector('[data-speaker-lane="system:S1"] button[aria-label^="Explore"], [data-speaker-lane="system:S1"] button[aria-label^="Esplora"]') &&
+      timeline?.querySelector('[data-speaker-lane="system:S2"] button[aria-label^="Explore"], [data-speaker-lane="system:S2"] button[aria-label^="Esplora"]'));
   `);
     if (undoTimeline) break;
     await sleep(100);
   }
-  if (!undoTimeline) throw new Error('undo failed to restore separate speaker lanes');
+  if (!undoTimeline) {
+    const lanes = await browser.execute(`
+      return [...document.querySelectorAll('[data-speaker-lane]')].map((row) => ({
+        cluster: row.getAttribute('data-speaker-lane'),
+        buttons: [...row.querySelectorAll('button')].map((button) => button.getAttribute('aria-label')),
+      }));
+    `);
+    throw new Error('undo failed to restore separate speaker lanes: ' + JSON.stringify(lanes));
+  }
   await checkpoint(browser, '11c-speaker-review-undo');
   // Advanced engine controls stay reachable without dominating voice review.
   await browser.clickCss('[data-speaker-advanced-tools="true"] summary');
