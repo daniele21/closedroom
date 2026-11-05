@@ -1481,15 +1481,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
               )}
             >
               <Users className="w-4 h-4" aria-hidden="true" />
-              <span>{t('meeting.tabSpeakers')}</span>
-              {speakerMappings.length > 0 && (
-                <span className={cn(
-                  'ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border',
-                  activeTab === 'speakers' ? 'bg-white/20 border-white/20 text-white' : 'bg-bg-elevated border-border-subtle text-text-secondary',
-                )}>
-                  {speakerMappings.length}
-                </span>
-              )}
+              <span>{lang === 'it' ? 'Voci' : 'Speakers'}</span>
+
             </button>
           </div>
 
@@ -1775,16 +1768,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                         current ? { ...current, transcription } : current
                       ))}
                     />
-                    {!demoMode && !meeting.transcription.merged_sources?.length && (
-                      <CommunityOneReviewPanel
-                        key={meeting.transcription.id || meeting.transcription.saved_id}
-                        transcriptionId={(meeting.transcription.id || meeting.transcription.saved_id)!}
-                        lang={lang}
-                        onUpdated={(transcription) => setMeeting((current) => (
-                          current ? { ...current, transcription } : current
-                        ))}
-                      />
-                    )}
                   </>
                 ) : (
                   <div className="text-center py-16 bg-bg-elevated rounded-xl border border-border-subtle">
@@ -1793,7 +1776,24 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                   </div>
                 )}
                 {!demoMode && meeting.recording.status !== 'recording' && (
-                  <DiarizationBenchmarkPanel recordingId={meeting.id} durationSeconds={recordingDuration} />
+                  <details data-speaker-advanced-tools="true" className="mt-3 rounded-xl border border-border-subtle bg-bg-surface/40">
+                    <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-text-secondary hover:text-text-primary focus-visible:outline-2 focus-visible:outline-border-focus">
+                      {lang === 'it' ? 'Migliora riconoscimento · opzioni avanzate' : 'Improve recognition · advanced options'}
+                    </summary>
+                    <div className="px-4 pb-4">
+                      {meeting.transcription && !meeting.transcription.merged_sources?.length && (
+                        <CommunityOneReviewPanel
+                          key={meeting.transcription.id || meeting.transcription.saved_id}
+                          transcriptionId={(meeting.transcription.id || meeting.transcription.saved_id)!}
+                          lang={lang}
+                          onUpdated={(transcription) => setMeeting((current) => (
+                            current ? { ...current, transcription } : current
+                          ))}
+                        />
+                      )}
+                      <DiarizationBenchmarkPanel recordingId={meeting.id} durationSeconds={recordingDuration} />
+                    </div>
+                  </details>
                 )}
               </div>
             )}
