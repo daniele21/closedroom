@@ -314,8 +314,6 @@ function fixtureServer(port) {
       const all = [
         { cluster: 'system:S1', track_id: 'system', start: 0, end: 3.5,
           origin: 'diarization', overlap: false, playable: true },
-        { cluster: 'system:S2', track_id: 'system', start: 20, end: 26,
-          origin: 'diarization', overlap: false, playable: true },
         // Deliberately straddles the first one-minute zoom boundary.
         { cluster: 'system:S2', track_id: 'system', start: 55, end: 65,
           origin: 'diarization', overlap: false, playable: true },
@@ -355,7 +353,7 @@ function fixtureServer(port) {
             { track_id: 'system', start: 0, end: 3.5, kind: 'transcript', overlap: false },
           ] },
           { speaker_cluster: 'system:S2', samples: [
-            { track_id: 'system', start: 20, end: 26, kind: 'diarization', overlap: false },
+            { track_id: 'system', start: 55, end: 65, kind: 'diarization', overlap: false },
           ] },
           { speaker_cluster: 'system:S3', samples: [
             { track_id: 'system', start: 1515, end: 1522, kind: 'diarization', overlap: true },
