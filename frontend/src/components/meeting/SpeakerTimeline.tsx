@@ -21,7 +21,7 @@ interface Props {
   pendingOnly?: boolean;
   selectedGroup: string | null;
   cursorSeconds: number | null;
-  selectedDetails?: ReactNode;
+  children?: ReactNode;
   onSelect: (cluster: string) => void;
   onPlaySample?: (cluster: string) => void;
   sampleAvailable?: (cluster: string) => boolean;
@@ -318,9 +318,9 @@ export function SpeakerTimeline({
                   )}
                 </div>
               </div>
-              {selectedGroup === row.group && selectedDetails && (
+              {selectedGroup === row.group && children && (
                 <div data-speaker-inline-editor={row.group} className="ml-0 rounded-lg border border-border-subtle bg-bg-elevated p-3 sm:ml-[112px] sm:p-4">
-                  {selectedDetails}
+                  {children}
                 </div>
               )}
             </Fragment>
