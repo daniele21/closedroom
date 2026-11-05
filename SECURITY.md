@@ -11,6 +11,7 @@ Do not publish credentials, private recordings, transcripts, API tokens or other
 - User audio/transcripts/prompts/generated content stay out of ordinary logs and telemetry by default.
 - Manual call screenshots are local recording artifacts. Capture requires the existing macOS Screen Recording authority, image pixels/OCR are not logged, and choosing a remote ASR/LLM provider does not implicitly authorize screenshot transfer.
 - Signing credentials, provider keys and other secrets must remain external to source control and distributable artifacts.
+- Storage selection in Settings is configuration-only: GCS project/bucket/region identifiers are nonsecret preferences, not permission to transfer data. Runtime recording/transcription/catalog remain on-device; the optional manual encrypted cold backup is a separate explicit operation. Saving a GCS preference never enables upload, cloud processing or automatic deletion of the last local copy.
 - Temporary native/audio/model resources must be released on failure, cancellation and shutdown when owned by ClosedRoom.
 
 When reporting a vulnerability, include the affected revision/version, platform, minimal reproduction steps and impact. Redact user content and secrets from logs or screenshots.

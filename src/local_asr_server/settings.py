@@ -68,6 +68,12 @@ DEFAULT_SETTINGS: dict[str, any] = {
     "local_llm_ctx_size": None,
     "local_llm_startup_timeout": None,
     "local_llm_llama_server_bin": "",
+    # User preference only. A GCS selection never changes runtime storage or
+    # starts network transfer until per-meeting upload/restore is integrated.
+    "storage_preference": "local",
+    "gcs_project_id": "",
+    "gcs_bucket_name": "",
+    "gcs_region": "europe-west8",
     # Safe local audio-retention preference only. GCS upload/hydration and
     # automatic eviction are NOT integrated or enabled at this stage.
     "audio_local_retention_days": 14,
