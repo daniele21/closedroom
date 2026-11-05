@@ -256,9 +256,13 @@ def speaker_timeline_window(
         raise ValueError("Timeline requires an unmerged saved meeting")
     metadata = recordings.get(recording_id, include_result=False)
     playable: set[str] = set()
+    known_tracks: set[str] = set()
     for track in metadata.get("audio_tracks") or []:
         tid = str(track.get("id") or "")
-        if not tid or not track.get("audio_file"):
+        if not tid:
+            continue
+        known_tracks.add(tid)
+        if not track.get("audio_file"):
             continue
         try:
             recordings.track_audio_path(recording_id, tid)
@@ -285,7 +289,7 @@ def speaker_timeline_window(
     raw_clusters: set[str] = set()
     if raw_ok:
         for track_id, track_data in (raw.get("tracks") or {}).items():
-            if track_id not in playable:
+            if track_id not in known_tracks:
                 continue
             expected = set(str(value) for value in (expected_by_track.get(track_id) or []))
             observed = {
@@ -305,7 +309,7 @@ def speaker_timeline_window(
                 by_cluster[cluster].append({
                     "cluster": cluster, "track_id": track_id,
                     "start": span[0], "end": span[1], "origin": "diarization",
-                    "overlap": False,
+                    "overlap": False, "playable": track_id in playable,
                 })
 
     # ASR projection is intentionally a fallback, not blended with a different
@@ -315,7 +319,7 @@ def speaker_timeline_window(
         if cluster not in known or cluster in raw_clusters:
             continue
         track_id = str(segment.get("track_id") or segment.get("source") or "")
-        if track_id not in playable:
+        if track_id not in known_tracks:
             continue
         span = _finite_interval(segment.get("start"), segment.get("end"))
         if span is None:
@@ -324,6 +328,7 @@ def speaker_timeline_window(
             "cluster": cluster, "track_id": track_id,
             "start": span[0], "end": span[1], "origin": "transcript",
             "overlap": bool(segment.get("overlap")),
+            "playable": track_id in playable,
         })
 
     all_intervals = [
