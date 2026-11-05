@@ -31,7 +31,6 @@ interface Props {
 }
 
 const COLORS = ['#63A6FF', '#73D5A1', '#CE9AFF', '#FFBC69', '#FF8698', '#71D6E0', '#E9D568', '#B7B4F5'];
-const MAX_QUERY_SECONDS = 28800;
 const OVERVIEW_BOOTSTRAP_SECONDS = 300;
 const ZOOMS = [0, 60, 300, 600] as const;
 
