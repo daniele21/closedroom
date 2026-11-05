@@ -206,6 +206,9 @@ export function SpeakerTimeline({
   const timeTicks = duration && windowSize
     ? [0, 0.25, 0.5, 0.75, 1].map((part) => clock((zoom ? viewedStart : 0) + (zoom ? windowSize : duration) * part))
     : [];
+  const hasTranscriptAtCursor = cursorSeconds !== null && (transcription.segments || []).some(
+    (segment) => Number(segment.start) <= cursorSeconds && Number(segment.end) >= cursorSeconds,
+  );
 
   return (
     <section data-speaker-review-timeline="true"
@@ -349,7 +352,7 @@ export function SpeakerTimeline({
           {zoom === 0 && knownBuckets > 0 && overviewBins.length > 0 && <span>
             {it ? 'Seleziona un blocco per ingrandire' : 'Choose a block to zoom in'}
           </span>}
-          {onJumpToTranscript && cursorSeconds !== null && (
+          {onJumpToTranscript && hasTranscriptAtCursor && cursorSeconds !== null && (
             <button type="button" onClick={() => onJumpToTranscript(cursorSeconds)}
               className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 hover:bg-bg-elevated focus-visible:outline-2 focus-visible:outline-border-focus">
               <ScanSearch className="h-3.5 w-3.5" />{it ? 'Vai al testo' : 'Go to transcript'} · {clock(cursorSeconds)}
