@@ -383,6 +383,25 @@ export interface SpeakerClip {
   overlap: boolean;
 }
 
+export interface SpeakerTimelineWindow {
+  recording_id: string;
+  transcription_id: string;
+  start: number;
+  end: number;
+  intervals: Array<{
+    cluster: string;
+    track_id: string;
+    start: number;
+    end: number;
+    origin: 'diarization' | 'transcript';
+    overlap: boolean;
+    playable: boolean;
+  }>;
+  coverage: 'diarization' | 'transcript' | 'mixed';
+  truncated: boolean;
+  has_audio: boolean;
+}
+
 export interface SpeakerReviewInfo {
   fingerprint: string;
   undo: { revision_id: string } | null;
@@ -1354,6 +1373,16 @@ export const ApiClient = {
   async getSpeakerReview(id: string): Promise<SpeakerReviewInfo> {
     return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review`)).json();
   },
+
+  async getSpeakerTimeline(
+    transcriptionId: string, start: number, end: number, signal?: AbortSignal,
+  ): Promise<SpeakerTimelineWindow> {
+    const params = new URLSearchParams({ start: String(start), end: String(end) });
+    return (await request(
+      `/v1/transcriptions/${encodeURIComponent(transcriptionId)}/speaker-review/timeline?${params}`,
+      { signal },
+    )).json();
+  }
 
   async getSpeakerReviewSamples(id: string): Promise<SpeakerReviewSamples> {
     return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review/samples`)).json();
