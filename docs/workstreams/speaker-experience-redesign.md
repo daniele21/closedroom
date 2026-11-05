@@ -1,6 +1,6 @@
 # Speaker experience — redesign minimale della diarizzazione
 
-> Piano di sviluppo · 2026-11-05 · PLANNED · base `dev@0924d0860fd4f80c05b77c33067779c948e259d8`
+> Piano di sviluppo · 2026-11-05 · ACTIVE · base `dev@0924d0860fd4f80c05b77c33067779c948e259d8`
 
 **Scope:** PRODUCT_FEATURE · DELIVERY: ITERATION → INTEGRATION (PR incrementali verso `dev`) · VALIDATION: selector repo, atteso STRONG per dati/audio/cross-boundary e FULL solo se selezionato · EXECUTION: REMOTE_AUTOMATED Mac CI, REAL_ENVIRONMENT solo per evidenza fisica. Le quattro dimensioni sono indipendenti.
 
@@ -38,12 +38,12 @@ Wide: una riga per speaker, una scala, nessuna seconda sidebar. Compact 640 px: 
 
 | ID | Deliverable (risultato verificabile) | Owner / file da modificare | Dipendenze | Stato |
 | --- | --- | --- | --- | --- |
-| **SPK-0 — P0: integrità temporale** | La timeline rappresenta la durata verificata del meeting, o dichiara chiaramente quella sconosciuta; il campione al minuto 25 resta raggiungibile anche con zero segmenti ASR. Copertura riferita al meeting intero, distinta dai risultati della finestra. | `MeetingDetailPage.tsx`, `SpeakerTimeline.tsx`, `utils/formatters.ts`; `speaker_review.py`, router timeline solo se serve un summary read-only. | Nessuna | READY |
-| **SPK-1 — P0: contratto voci/evidenze** | Normalizzare nel read-model UI persona/gruppo vs sorgente/cluster, stato identificazione, intervalli audio vs frasi ASR; preservare raw evidence e associazioni con JobStore Community-1. Correzioni/undo riconciliano gruppi senza mutare fonti. | `speaker_labels.py`/`speaker_review.py` come owner, client types; test owner/API | SPK-0, definire shape prima della UI | READY |
-| **SPK-2 — P1: vista unificata** | **Una riga per persona** con nome, stato, play e intervalli; overview compatta e dettaglio zoomato sulla stessa scala. Nessuna lista duplicata, «Computer» non è persona, sovrapposizioni distinguibili. Aggregazione visiva bounded per meeting lunghi; nessun segmento inventato. | `SpeakerTimeline.tsx` / nuovo componente presentazionale solo se davvero necessario; `SpeakerDiarizationEditor.tsx` come orchestratore | SPK-0 + SPK-1 (shape congelata) | BLOCKED |
-| **SPK-3 — P1: singolo player e correzioni** | Selezione, campioni 1/3, ascolto sequenziale di intervalli nativi anche con 0 segmenti ASR, rinomina inline, fusione/esclusione/recovery e undo; stato Playing sempre sincronizzato. Stop su cambio meeting. | `useSpeakerReviewPlayback.ts`, `SpeakerDiarizationEditor.tsx`, API esistenti | SPK-1; coordinare integrazione con SPK-2 | BLOCKED |
-| **SPK-4 — P2: progressive disclosure** | «Migliora riconoscimento» apre l'attuale preview→applica→rollback; benchmark A/B e dettagli tecnici restano in strumenti avanzati. Nessuna rimozione di capacità o job già esistenti. | `MeetingDetailPage.tsx`, `CommunityOneReviewPanel.tsx`, `DiarizationBenchmarkPanel.tsx`; UX contract | SPK-2 + SPK-3 | BLOCKED |
-| **SPK-5 — P2: rifinitura e integrazione** | Microcopy it/en, focus, tastiera, VoiceOver, riga selezionata/empty/error/loading/partial, contrasto, compact, 200% text, FULL_MEDIA, documentazione canonica e preflight. | design contract, test E2E, regression snapshots, docs | SPK-0..4 | BLOCKED |
+| **SPK-0 — P0: integrità temporale** | La timeline rappresenta la durata verificata del meeting, o dichiara chiaramente quella sconosciuta; il campione al minuto 25 resta raggiungibile anche con zero segmenti ASR. Copertura riferita al meeting intero, distinta dai risultati della finestra. | `MeetingDetailPage.tsx`, `SpeakerTimeline.tsx`, `utils/formatters.ts`; `speaker_review.py`, router timeline solo se serve un summary read-only. | Nessuna | DONE · PR #188 |
+| **SPK-1 — P0: contratto voci/evidenze** | Normalizzare nel read-model UI persona/gruppo vs sorgente/cluster, stato identificazione, intervalli audio vs frasi ASR; preservare raw evidence e associazioni con JobStore Community-1. Correzioni/undo riconciliano gruppi senza mutare fonti. | `speaker_labels.py`/`speaker_review.py` come owner, client types; test owner/API | SPK-0, definire shape prima della UI | DONE · PR #188 |
+| **SPK-2 — P1: vista unificata** | **Una riga per persona** con nome, stato, play e intervalli; overview compatta e dettaglio zoomato sulla stessa scala. Nessuna lista duplicata, «Computer» non è persona, sovrapposizioni distinguibili. Aggregazione visiva bounded per meeting lunghi; nessun segmento inventato. | `SpeakerTimeline.tsx` / nuovo componente presentazionale solo se davvero necessario; `SpeakerDiarizationEditor.tsx` come orchestratore | SPK-0 + SPK-1 (shape congelata) | ACTIVE · PR #189 |
+| **SPK-3 — P1: singolo player e correzioni** | Selezione, campioni 1/3, ascolto sequenziale di intervalli nativi anche con 0 segmenti ASR, rinomina inline, fusione/esclusione/recovery e undo; stato Playing sempre sincronizzato. Stop su cambio meeting. | `useSpeakerReviewPlayback.ts`, `SpeakerDiarizationEditor.tsx`, API esistenti | SPK-1; coordinare integrazione con SPK-2 | ACTIVE · PR #189 |
+| **SPK-4 — P2: progressive disclosure** | «Migliora riconoscimento» apre l'attuale preview→applica→rollback; benchmark A/B e dettagli tecnici restano in strumenti avanzati. Nessuna rimozione di capacità o job già esistenti. | `MeetingDetailPage.tsx`, `CommunityOneReviewPanel.tsx`, `DiarizationBenchmarkPanel.tsx`; UX contract | SPK-2 + SPK-3 | ACTIVE · PR #189 |
+| **SPK-5 — P2: rifinitura e integrazione** | Microcopy it/en, focus, tastiera, VoiceOver, riga selezionata/empty/error/loading/partial, contrasto, compact, 200% text, FULL_MEDIA, documentazione canonica e preflight. | design contract, test E2E, regression snapshots, docs | SPK-0..4 | ACTIVE · PR #189 |
 
 **Sequenza delle PR:** PR-A SPK-0 + read-model SPK-1; PR-B SPK-2 con nuovo layout; PR-C SPK-3 media/editing; PR-D SPK-4 + SPK-5 UX hardening. Tutte su branch feature dedicati basati sul `dev` aggiornato e verso `dev`, nessuna verso `main`. Sono milestone, non quattro implementazioni da avviare simultaneamente senza contratto.
 
@@ -90,9 +90,9 @@ Wide: una riga per speaker, una scala, nessuna seconda sidebar. Compact 640 px: 
 
 ## 8. Checkpoint e completamento
 
-**2026-11-05:** base `dev@0924d086`; branch `plan/speaker-experience-redesign-20261105`; PR #186 indipendente e aperta. Questo lavoro contiene solo un piano, nessun codice applicativo.
+**2026-11-05:** base originale `dev@0924d086`; SPK-0/1 integrati in `dev` via PR #188 (`d5abe344`), test Mac ARM64: 894 Python + FULL_MEDIA PASS. SPK-2..5 implementati nella PR #189 su branch `feat/speaker-minimal-meeting-workspace-20261105`; validazione exact-head e verifica reale ancora pendenti. PR #186 indipendente.
 
 **Verificato:** `recordingDuration` non passa all'editor; durata forzata a ≥1 sec; più componenti nello stesso tab; sample a 25:15 con timeline a 0:01. **Non verificato:** raw completo del meeting reale.
 
-**Primo step:** fixture dello screenshot e diagnosi privacy-safe `duration/interval_count/coverage/origin/job-present` senza audio/testo. Poi PR-A. Fine lavoro dopo PR su `dev`, gate esatti, FULL_MEDIA, owner/docs allineati e rilascio con evidenza REAL_ENVIRONMENT distinta. Trasferire decisioni consolidate a `design/ux-contract.json` e chiudere questo workstream.
+**Prossimo step:** controllare TypeScript/E2E di PR #189 e correggere solo regressioni motivate dai log; validare l'intero journey su Mac. La fixture 25:15/no-ASR e il summary read-only sono presenti in PR #188. Fine lavoro dopo PR su `dev`, gate esatti, FULL_MEDIA, owner/docs allineati e rilascio con evidenza REAL_ENVIRONMENT distinta. Trasferire decisioni consolidate a `design/ux-contract.json` e chiudere questo workstream.
 
