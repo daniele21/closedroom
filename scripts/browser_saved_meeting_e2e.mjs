@@ -309,17 +309,37 @@ function fixtureServer(port) {
       counts.speaker_timeline += 1;
       const url = new URL(req.url, `http://127.0.0.1:${port}`);
       const start = Number(url.searchParams.get('start') || 0);
-      const end = Number(url.searchParams.get('end') || 600);
+      const end = Number(url.searchParams.get('end') || 300);
       const all = [
         { cluster: 'system:S1', track_id: 'system', start: 0, end: 3.5,
           origin: 'diarization', overlap: false, playable: true },
         { cluster: 'system:S2', track_id: 'system', start: 20, end: 26,
           origin: 'diarization', overlap: false, playable: true },
+        { cluster: 'system:S3', track_id: 'system', start: 1515, end: 1522,
+          origin: 'diarization', overlap: true, playable: true },
       ];
       return json(res, 200, {
         recording_id: MEETING_ID, transcription_id: 'e2e-transcription',
         start, end, intervals: all.filter((row) => row.end > start && row.start < end),
-        coverage: 'diarization', truncated: false, has_audio: true,
+        duration_seconds: meetingFixture.recording.duration_seconds,
+        duration_source: 'recording',
+        max_evidence_end_seconds: 1522,
+        total_interval_count: all.length, overview_bucket_count: 120,
+        overview: ['system:S1', 'system:S2', 'system:S3'].map((cluster) => {
+          const rows = all.filter((row) => row.cluster === cluster);
+          return {
+            cluster, interval_count: rows.length, first_start: rows[0]?.start ?? null,
+            playable_count: rows.length,
+            bins: rows.flatMap((row) => {
+              const first = Math.floor(row.start / 1800 * 120);
+              const last = Math.floor((row.end - 0.00001) / 1800 * 120);
+              return Array.from({ length: last - first + 1 }, (_, n) => first + n);
+            }),
+          };
+        }),
+        coverage: 'diarization',
+        window_coverage: all.some((row) => row.end > start && row.start < end) ? 'diarization' : 'none',
+        truncated: false, has_audio: true,
       });
     }
     if (pathname === '/v1/transcriptions/e2e-transcription/speaker-review/samples' && req.method === 'GET') {
@@ -332,6 +352,9 @@ function fixtureServer(port) {
           ] },
           { speaker_cluster: 'system:S2', samples: [
             { track_id: 'system', start: 20, end: 26, kind: 'diarization', overlap: false },
+          ] },
+          { speaker_cluster: 'system:S3', samples: [
+            { track_id: 'system', start: 1515, end: 1522, kind: 'diarization', overlap: true },
           ] },
         ],
       });
@@ -365,6 +388,8 @@ function fixtureServer(port) {
                 { speaker_cluster: 'system:S2', speaker_group: 'system:S2',
                   display_name: 'Speaker 2', status: 'unassigned',
                   transcript_segment_count: 0 },
+                ...speakerReviewBefore.stats.speaker_attribution.mappings.filter(
+                  (entry) => !['system:S1', 'system:S2'].includes(entry.speaker_cluster)),
               ],
             },
           },
@@ -1128,8 +1153,11 @@ try {
   await checkpoint(browser, '10-visual-context-demand-not-sticky');
 
 
-  // Seed a second raw cluster (without ASR overlap) to falsify sample/merge UX.
-  // This is synthetic UI evidence only, never proof of physical voice accuracy.
+  // Synthetic browser evidence: a 30-minute meeting with a speaker whose
+  // only verified interval starts at 25:15 (zero ASR-attributed phrases).
+  meetingFixture.recording.duration_seconds = 1800;
+  meetingFixture.recording.stopped_at = '2026-09-05T10:30:00Z';
+  meetingFixture.transcription.source_tracks = [{ id: 'system', label: 'Computer' }];
   meetingFixture.transcription.segments[0].track_id = 'system';
   meetingFixture.transcription.segments[0].provider_speaker = 'system:S1';
   meetingFixture.transcription.stats.speaker_attribution = {
@@ -1138,6 +1166,10 @@ try {
         display_name: 'Speaker 1', status: 'unassigned', transcript_segment_count: 1 },
       { speaker_cluster: 'system:S2', speaker_group: 'system:S2',
         display_name: 'Speaker 2', status: 'unassigned', transcript_segment_count: 0 },
+      { speaker_cluster: 'system:S3', speaker_group: 'system:S3',
+        display_name: 'Giulia', status: 'accepted', transcript_segment_count: 0 },
+      { speaker_cluster: 'Computer', speaker_group: 'Computer',
+        display_name: 'Computer', status: 'unassigned', transcript_segment_count: 0 },
     ],
   };
 
@@ -1149,7 +1181,7 @@ try {
   await setMeetingHash(MEETING_ID);
   await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
   await browser.clickCss('#meeting-tab-speakers');
-  await waitText(browser, ['Recognize the voices', 'Riconosci le voci']);
+  await waitText(browser, ['Voices', 'Voci']);
   await waitCount('speaker_sample_list', 1);
   if (counts.speaker_audio_request !== 0) {
     throw new Error('Speaker review loaded private audio before user pressed Play');
@@ -1161,21 +1193,49 @@ try {
       (b.innerText || '').includes('Play sample') && !b.disabled));
   `);
   if (!sampleReady) throw new Error('Speaker sample control absent');
-  await waitCount('speaker_timeline', 2);
+  await waitCount('speaker_timeline', 1);
   let initialTimeline = false;
   for (let attempt = 0; attempt < 60; attempt += 1) {
     initialTimeline = await browser.execute(`
     const view = document.querySelector('[data-speaker-review-timeline]');
     return Boolean(view &&
       view.querySelector('[data-speaker-overview]') &&
-      view.querySelector('[data-speaker-lane="system:S1"] [data-interval-origin="diarization"]') &&
-      view.querySelector('[data-speaker-lane="system:S2"] [data-interval-origin="diarization"]') &&
-      view.querySelector('[data-timeline-coverage="diarization"]'));
+      view.querySelector('[data-speaker-lane="system:S1"] button[aria-label^="Explore"], [data-speaker-lane="system:S1"] button[aria-label^="Esplora"]') &&
+      view.querySelector('[data-speaker-lane="system:S2"] button[aria-label^="Explore"], [data-speaker-lane="system:S2"] button[aria-label^="Esplora"]') &&
+      view.querySelector('[data-speaker-lane="system:S3"] button[aria-label^="Explore"], [data-speaker-lane="system:S3"] button[aria-label^="Esplora"]') &&
+      !view.querySelector('[data-speaker-lane="Computer"]') &&
+      view.querySelector('[data-timeline-coverage="diarization"]') &&
+      (view.textContent || '').includes('30:00'));
   `);
     if (initialTimeline) break;
     await sleep(100);
   }
-  if (!initialTimeline) throw new Error('speaker timeline did not show both raw voices and shared overview');
+  if (!initialTimeline) throw new Error('speaker timeline did not show 30-minute overview and audio-only voice');
+  const located = await browser.execute(`
+    const lane = document.querySelector('[data-speaker-lane="system:S3"]');
+    const bin = lane?.querySelector('button[title*="25:"]');
+    if (!bin) return false;
+    bin.click(); return true;
+  `);
+  if (!located) throw new Error('audio-only voice at 25:15 not navigable from overview');
+  await waitCount('speaker_timeline', 2);
+  let lateSegment = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    lateSegment = await browser.execute(`
+      return Boolean(document.querySelector(
+        '[data-speaker-lane="system:S3"] [data-interval-origin="diarization"]'
+      ));
+    `);
+    if (lateSegment) break;
+    await sleep(100);
+  }
+  if (!lateSegment) throw new Error('native speaker interval at 25:15 was not shown after zoom');
+  await browser.execute(`
+    const timeline = document.querySelector('[data-speaker-review-timeline]');
+    [...timeline.querySelectorAll('button')].find((button) =>
+      ['All', 'Tutto'].includes((button.textContent || '').trim()))?.click();
+  `);
+  await waitCount('speaker_timeline', 3);
   if (counts.speaker_audio_request !== 0) throw new Error('timeline downloaded private audio without Play');
   const zoomed = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
@@ -1186,7 +1246,7 @@ try {
     return true;
   `);
   if (!zoomed) throw new Error('speaker timeline zoom unavailable');
-  await waitCount('speaker_timeline', 3);
+  await waitCount('speaker_timeline', 4);
   const zoomStatus = await browser.execute(`
     return document.querySelector('[data-speaker-review-timeline] button[aria-pressed="true"]')?.textContent?.trim() === '1 min';
   `);
@@ -1200,8 +1260,9 @@ try {
     return true;
   `);
   if (!restoredAll) throw new Error('cannot restore full-meeting speaker timeline');
-  await waitCount('speaker_timeline', 4);
+  await waitCount('speaker_timeline', 5);
   await checkpoint(browser, '11a-speaker-review-ready');
+  await browser.clickCss('[data-speaker-review-workspace] button[aria-label="Manage this voice"], [data-speaker-review-workspace] button[aria-label="Gestisci questa voce"]');
   await browser.clickButton(['Merge voice', 'Unisci voce']);
   const targetChanged = await browser.execute(`
     const select = document.querySelector('[data-speaker-review-workspace] select');
@@ -1222,7 +1283,7 @@ try {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     mergedTimeline = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
-    return Boolean(timeline?.querySelectorAll('[data-speaker-lane="system:S2"] [data-speaker-interval]').length === 2);
+    return Boolean(timeline?.querySelectorAll('[data-speaker-lane="system:S2"] button[aria-label^="Explore"], [data-speaker-lane="system:S2"] button[aria-label^="Esplora"]').length === 1);
   `);
     if (mergedTimeline) break;
     await sleep(100);
@@ -1236,14 +1297,24 @@ try {
     undoTimeline = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
     return Boolean(
-      timeline?.querySelectorAll('[data-speaker-lane="system:S1"] [data-speaker-interval]').length === 1 &&
-      timeline?.querySelectorAll('[data-speaker-lane="system:S2"] [data-speaker-interval]').length === 1);
+      timeline?.querySelector('[data-speaker-lane="system:S1"] button[aria-label^="Explore"], [data-speaker-lane="system:S1"] button[aria-label^="Esplora"]') &&
+      timeline?.querySelector('[data-speaker-lane="system:S2"] button[aria-label^="Explore"], [data-speaker-lane="system:S2"] button[aria-label^="Esplora"]'));
   `);
     if (undoTimeline) break;
     await sleep(100);
   }
-  if (!undoTimeline) throw new Error('undo failed to restore separate speaker lanes');
+  if (!undoTimeline) {
+    const lanes = await browser.execute(`
+      return [...document.querySelectorAll('[data-speaker-lane]')].map((row) => ({
+        cluster: row.getAttribute('data-speaker-lane'),
+        buttons: [...row.querySelectorAll('button')].map((button) => button.getAttribute('aria-label')),
+      }));
+    `);
+    throw new Error('undo failed to restore separate speaker lanes: ' + JSON.stringify(lanes));
+  }
   await checkpoint(browser, '11c-speaker-review-undo');
+  // Advanced engine controls stay reachable without dominating voice review.
+  await browser.clickCss('[data-speaker-advanced-tools="true"] summary');
   await waitText(browser, ['Compare diarization engines', 'Confronta motori di diarizzazione']);
   await browser.clickButton(['Compare engines', 'Confronta motori']);
   await waitText(browser, ['Start comparison', 'Avvia confronto']);
