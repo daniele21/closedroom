@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import os
-from local_asr_server.paths import APP_NAME, get_app_support_dir
+from local_asr_server.paths import APP_NAME, get_app_support_dir, is_development_profile
 from local_asr_server.settings import load_settings
 
 
@@ -55,6 +55,14 @@ class CatalogStore:
         transcriptions_dir: Path | None = None,
     ) -> Path:
         settings = load_settings()
+        if is_development_profile():
+            # Never fall through the legacy production DB discovery heuristics:
+            # a new development database must not accidentally open the user's
+            # ~/ClosedRoom/closedroom.db just because that file already exists.
+            from local_asr_server.settings import validate_development_storage
+            selected = os.environ.get("CLOSEDROOM_CATALOG_DB") or settings["catalog_db_path"]
+            validate_development_storage(settings, catalog_db=selected, recordings_dir=recordings_dir)
+            return Path(selected).expanduser().resolve()
         resolved_transcriptions = (
             transcriptions_dir.expanduser().resolve()
             if transcriptions_dir is not None
