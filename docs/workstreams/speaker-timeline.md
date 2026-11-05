@@ -17,7 +17,7 @@ VALUE: validate 1:1 usefulness through live review. USABILITY: color+name+time, 
 - `speaker_review.py`: bounded, read-only projection, local recording track identity and native provenance validation; never mutate audio, ASR, timestamps or user edits.
 - `routers/transcriptions.py`: existing review context/auth, bounded timeline window endpoint.
 - `SpeakerDiarizationEditor.tsx`: shared speaker selection/editing/playback; `SpeakerTimeline.tsx`: UI projection, zoom and navigation. Benchmark stays separate; raw clusters, source tracks and person names are not interchangeable.
-- Source transcript segments remain the only applied fallback for reviewed Community-1 runs, not their potentially unrelated raw recording. Explicit `coverage=transcript` makes this limitation visible.
+- Applied Community-1 runs reference their exact persisted JobStore job ID in the canonical transcription summary; the timeline endpoint validates job/transcription/recording identity and the full cluster set before displaying reviewed native turns. When the job is absent, corrupt or stale, it falls back to attributed ASR intervals with explicit `coverage=transcript` rather than using unrelated raw recording data. Neither full native timeline nor media is duplicated into transcript exports.
 - If local audio is moved/unavailable, show time intervals read-only; disable playback instead of pretending to play or silently fetching cloud audio. Gray marks are unattributed, not confirmed people.
 
 ## Observable acceptance
