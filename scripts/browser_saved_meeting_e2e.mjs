@@ -1177,6 +1177,30 @@ try {
   }
   if (!initialTimeline) throw new Error('speaker timeline did not show both raw voices and shared overview');
   if (counts.speaker_audio_request !== 0) throw new Error('timeline downloaded private audio without Play');
+  const zoomed = await browser.execute(`
+    const timeline = document.querySelector('[data-speaker-review-timeline]');
+    const button = Array.from(timeline?.querySelectorAll('button') || [])
+      .find((item) => (item.textContent || '').trim() === '1 min');
+    if (!button) return false;
+    button.click();
+    return true;
+  `);
+  if (!zoomed) throw new Error('speaker timeline zoom unavailable');
+  await waitCount('speaker_timeline', 3);
+  const zoomStatus = await browser.execute(`
+    return document.querySelector('[data-speaker-review-timeline] button[aria-pressed="true"]')?.textContent?.trim() === '1 min';
+  `);
+  if (!zoomStatus) throw new Error('speaker zoom button did not reflect selection');
+  const restoredAll = await browser.execute(`
+    const timeline = document.querySelector('[data-speaker-review-timeline]');
+    const button = Array.from(timeline?.querySelectorAll('button') || [])
+      .find((item) => ['Tutto', 'All'].includes((item.textContent || '').trim()));
+    if (!button) return false;
+    button.click();
+    return true;
+  `);
+  if (!restoredAll) throw new Error('cannot restore full-meeting speaker timeline');
+  await waitCount('speaker_timeline', 4);
   await checkpoint(browser, '11a-speaker-review-ready');
   await browser.clickButton(['Merge voice', 'Unisci voce']);
   const targetChanged = await browser.execute(`
