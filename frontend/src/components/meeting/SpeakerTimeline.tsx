@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Play, ScanSearch } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ScanSearch } from 'lucide-react';
 import { ApiClient, type SpeakerClip, type SpeakerTimelineWindow, type Transcription } from '../../api/apiClient';
 
 export interface TimelineSpeakerRow {
@@ -50,7 +50,7 @@ export function SpeakerTimeline({
 }: Props) {
   const it = lang === 'it';
   const transcriptionId = transcription.id || transcription.saved_id || '';
-  const lastSegment = Math.max(0, ...(transcription.segments || []).map((item) => Number(item.end) || 0));
+  const lastSegment = (transcription.segments || []).reduce((last, segment) => Math.max(last, Number(segment.end) || 0), 0);
   const duration = Math.min(MAX_DURATION, Math.max(1, Math.ceil(durationSeconds || 0), Math.ceil(lastSegment)));
   const [zoom, setZoom] = useState<number>(0);
   const [requestedStart, setRequestedStart] = useState(0);
