@@ -562,6 +562,19 @@ export function SpeakerDiarizationEditor({
             </div>
           )}
           </SpeakerTimeline>
+          {showHidden && rows.some((r) => r.status === 'merged') && (
+            <div className="mt-2 flex flex-wrap items-center gap-1 text-xs" aria-label={tr('Voci unite', 'Merged voices')}>
+              <span className="px-2 text-text-muted">{tr('Voci unite:', 'Merged voices:')}</span>
+              {rows.filter((r) => r.status === 'merged').map((r) => (
+                <button type="button" key={r.cluster}
+                  onClick={() => { playback.stop(); setSelectedCluster(r.cluster); }}
+                  aria-pressed={selected?.cluster === r.cluster}
+                  className="min-h-9 rounded-md border border-border-subtle px-2.5 text-text-secondary hover:bg-bg-elevated focus-visible:outline-2 focus-visible:outline-border-focus">
+                  {r.name} · {tr('Ripristinabile', 'Restorable')}
+                </button>
+              ))}
+            </div>
+          )}
           {rows.some((r) => r.status === 'merged' || r.status === 'excluded') && (
             <button type="button" aria-expanded={showHidden}
               onClick={() => { setShowHidden((value) => !value); setFilter('all'); }}
