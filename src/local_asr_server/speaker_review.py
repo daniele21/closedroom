@@ -238,6 +238,7 @@ def speaker_audio_samples(transcription: dict[str, Any], recordings: Any) -> dic
 def speaker_timeline_window(
     transcription: dict[str, Any], recordings: Any, *,
     start_seconds: float, end_seconds: float,
+    review_job: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Windowed, read-only timeline from authorized local meeting evidence.
 
@@ -276,12 +277,36 @@ def speaker_timeline_window(
         or {}
     )
     expected_by_track = diarization.get("clusters_by_track") or {}
-    raw = recordings.read_speaker_diarization(recording_id)
+    raw: dict[str, Any] | None = None
+    if diarization.get("source") == "reviewed_meeting":
+        result = (review_job or {}).get("result") or {}
+        runs = result.get("runs") or []
+        applied_id = str(diarization.get("applied_review_job_id") or "")
+        review_track = str(result.get("track_id") or "")
+        if (
+            applied_id and str((review_job or {}).get("id") or "") == applied_id
+            and review_job.get("type") == "diarization_review"
+            and review_job.get("status") == "completed"
+            and str(review_job.get("scope_id") or "") == str(transcription.get("id") or "")
+            and str(review_job.get("recording_id") or "") == recording_id
+            and result.get("scope") == "full"
+            and review_track in known_tracks
+            and len(runs) == 1
+            and runs[0].get("key") == "community-1"
+            and runs[0].get("status") == "completed"
+            and isinstance(runs[0].get("timeline"), list)
+        ):
+            # The reviewed native timeline is already persisted by JobStore.
+            # A missing/expired or unrelated job cannot produce claimed audio.
+            raw = {"engine": diarization.get("engine"), "tracks": {
+                review_track: {"segments": runs[0]["timeline"]},
+            }}
+    else:
+        raw = recordings.read_speaker_diarization(recording_id)
     raw_ok = (
         bool(raw)
         and str(diarization.get("status") or "completed") == "completed"
         and str(raw.get("engine") or "") == str(diarization.get("engine") or "")
-        and diarization.get("source") != "reviewed_meeting"
         and bool(expected_by_track)
     )
     known = set(_clusters(transcription))
