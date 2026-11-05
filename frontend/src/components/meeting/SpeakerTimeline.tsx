@@ -12,6 +12,7 @@ export interface TimelineSpeakerRow {
 
 interface Props {
   transcription: Transcription;
+  recordingId: string;
   durationSeconds: number;
   rows: TimelineSpeakerRow[];
   showHidden: boolean;
@@ -45,13 +46,24 @@ function intervalClip(item: SpeakerTimelineWindow['intervals'][number]): Speaker
 
 /** One common clock for all voices; source track is never silently a person. */
 export function SpeakerTimeline({
-  transcription, durationSeconds, rows, showHidden, selectedGroup,
+  transcription, recordingId, durationSeconds, rows, showHidden, selectedGroup,
   cursorSeconds, onSelect, onPlayInterval, onJumpToTranscript, lang,
 }: Props) {
   const it = lang === 'it';
   const transcriptionId = transcription.id || transcription.saved_id || '';
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  useEffect(() => {
+    let current = true;
+    setRecordingDuration(0);
+    if (recordingId) {
+      void ApiClient.getRecording(recordingId).then((recording) => {
+        if (current) setRecordingDuration(Number(recording.duration_seconds || recording.duration || recording.metadata?.duration_seconds || 0));
+      }).catch(() => { /* The transcription still provides a safe duration fallback. */ });
+    }
+    return () => { current = false; };
+  }, [recordingId]);
   const lastSegment = (transcription.segments || []).reduce((last, segment) => Math.max(last, Number(segment.end) || 0), 0);
-  const duration = Math.min(MAX_DURATION, Math.max(1, Math.ceil(durationSeconds || 0), Math.ceil(lastSegment)));
+  const duration = Math.min(MAX_DURATION, Math.max(1, Math.ceil(durationSeconds || 0), Math.ceil(recordingDuration || 0), Math.ceil(lastSegment)));
   const [zoom, setZoom] = useState<number>(0);
   const [requestedStart, setRequestedStart] = useState(0);
   const [timeline, setTimeline] = useState<SpeakerTimelineWindow | null>(null);
