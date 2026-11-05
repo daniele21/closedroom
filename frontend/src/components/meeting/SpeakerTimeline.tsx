@@ -149,8 +149,20 @@ export function SpeakerTimeline({
   }, [overviewData]);
   const position = (time: number) =>
     `${Math.max(0, Math.min(100, (time - viewedStart) / (windowSize || 1) * 100))}%`;
-  const intervalWidth = (start: number, end: number) =>
-    `${Math.max(0.3, (end - start) / (windowSize || 1) * 100)}%`;
+  // Intervals can cross the selected zoom window. Clip their *visual* span
+  // without changing the canonical timestamps used for local playback.
+  const visibleIntervalStyle = (start: number, end: number) => {
+    if (!windowSize || !Number.isFinite(start) || !Number.isFinite(end)) return null;
+    const visibleStart = Math.max(start, viewedStart);
+    const visibleEnd = Math.min(end, viewedEnd);
+    if (visibleEnd <= visibleStart) return null;
+    const left = (visibleStart - viewedStart) / windowSize * 100;
+    const width = (visibleEnd - visibleStart) / windowSize * 100;
+    return {
+      left: `${left}%`,
+      width: `${Math.min(100 - left, Math.max(0.3, width))}%`,
+    };
+  };
 
   const jumpToBucket = (bin: number) => {
     if (!duration || !knownBuckets) return;
@@ -187,7 +199,10 @@ export function SpeakerTimeline({
   }
 
   function paintIntervals(items: SpeakerTimelineWindow['intervals'], color: string, label: string, lane: string) {
-    return items.map((item, index) => (
+    return items.map((item, index) => {
+      const style = visibleIntervalStyle(item.start, item.end);
+      if (!style) return null;
+      return (
       <button key={`${lane}-${item.track_id}-${item.start}-${index}`} type="button"
         disabled={!item.playable}
         data-speaker-interval={lane}
@@ -198,8 +213,9 @@ export function SpeakerTimeline({
           : `${it ? 'Audio non disponibile' : 'Audio unavailable'}: ${label}, ${clock(item.start)}–${clock(item.end)}`}
         onClick={() => onPlayInterval(clipFor(item))}
         className="absolute inset-y-1.5 rounded-sm focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-border-focus disabled:cursor-default disabled:opacity-50"
-        style={{ left: position(item.start), width: intervalWidth(item.start, item.end), backgroundColor: color }} />
-    ));
+        style={{ ...style, backgroundColor: color }} />
+      );
+    });
   }
 
   const timeTicks = duration && windowSize
