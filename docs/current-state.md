@@ -9,8 +9,9 @@ Baseline: `repo-template-sw` **0.10.0**, **L2**, profiles Python/TypeScript/macO
 - Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
 - PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio benchmark tooling; dual-track audio remains canonical pending representative evidence.
 - PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and adaptive Today/Meeting/Projects workspace.
-- PR #186 candidate: source runtime on port 1237 with isolated Development data; collisions fail without killing apps. Hardware check pending.
+- PR #186 integrated (`9c7f86c`): source server port 1237, isolated Development data, non-destructive startup; physical check pending.
 - PR #189 (`03a6d6d`) integrated: minimal Voices timeline, shared player, restore; 894 tests + browser FULL_MEDIA PASS. WKWebView/real audio pending.
+- PR #183 candidate: optional GCS preference only; effective storage local. Upload/restore/eviction not enabled.
 - PR #181: local voice samples, rename/merge/exclude/undo integrated; packaged WKWebView/audio/accessibility proof pending.
 - PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
 - Release: root `VERSION=0.2.0` owns product version; app identity `ClosedRoom.app` / `com.closedroom.app` stays fixed. Final artifacts carry version/build/source SHA.

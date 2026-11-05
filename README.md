@@ -134,7 +134,9 @@ The default product path keeps the sensitive meeting workflow on the Mac. Cloud 
 | Speaker diarization | Local FluidAudio on supported Macs | Speechmatics when explicitly selected |
 | Meeting analysis | Local [Korgis](https://github.com/daniele21/korgis) runtime | Gemini when explicitly selected |
 | Visual speaker evidence | Local selected-window frames + local VLM path | Disabled unless explicitly enabled |
-| Persistence | Local filesystem + SQLite | No implicit remote persistence |
+| Persistence | Local filesystem + SQLite | You may preconfigure a GCS destination in Settings; automated upload/sync is not yet active |
+
+In **Settings → Storage**, select **On this Mac** (default) or **Google Cloud Storage (preparation only)**. For GCS you can save a project ID, bucket name and region without granting credentials or triggering transfers. The settings screen explicitly shows the **effective** storage mode, which remains local in this iteration; the existing one-shot GCS migration backup does not make live storage available. Never delete local recordings based on this preference.
 
 This is a product boundary, not a marketing label: provider selection, runtime ownership and failure states are explicit so a local failure does not silently move meeting content to a cloud API.
 

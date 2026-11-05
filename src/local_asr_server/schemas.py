@@ -160,6 +160,10 @@ class SettingsRequest(BaseModel):
     local_llm_ctx_size: Optional[int] = None
     local_llm_startup_timeout: Optional[int] = None
     local_llm_llama_server_bin: Optional[str] = None
+    storage_preference: Optional[str] = None
+    gcs_project_id: Optional[str] = None
+    gcs_bucket_name: Optional[str] = None
+    gcs_region: Optional[str] = None
     audio_local_retention_days: Optional[int] = None
     audio_auto_cleanup_enabled: Optional[bool] = None
     meeting_auto_analysis: Optional[bool] = None
