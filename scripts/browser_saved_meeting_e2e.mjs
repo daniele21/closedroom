@@ -1161,8 +1161,10 @@ try {
       (b.innerText || '').includes('Play sample') && !b.disabled));
   `);
   if (!sampleReady) throw new Error('Speaker sample control absent');
-  await waitCount('speaker_timeline', 1);
-  const initialTimeline = await browser.execute(`
+  await waitCount('speaker_timeline', 2);
+  let initialTimeline = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    initialTimeline = await browser.execute(`
     const view = document.querySelector('[data-speaker-review-timeline]');
     return Boolean(view &&
       view.querySelector('[data-speaker-overview]') &&
@@ -1170,6 +1172,9 @@ try {
       view.querySelector('[data-speaker-lane="system:S2"] [data-interval-origin="diarization"]') &&
       view.querySelector('[data-timeline-coverage="diarization"]'));
   `);
+    if (initialTimeline) break;
+    await sleep(100);
+  }
   if (!initialTimeline) throw new Error('speaker timeline did not show both raw voices and shared overview');
   if (counts.speaker_audio_request !== 0) throw new Error('timeline downloaded private audio without Play');
   await checkpoint(browser, '11a-speaker-review-ready');
@@ -1189,20 +1194,30 @@ try {
   if (meetingFixture.transcription.text !== 'Decision: ship the release after validation. Owner: Alex.') {
     throw new Error('Speaker merge changed canonical text in fixture');
   }
-  const mergedTimeline = await browser.execute(`
+  let mergedTimeline = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    mergedTimeline = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
     return Boolean(timeline?.querySelectorAll('[data-speaker-lane="system:S2"] [data-speaker-interval]').length === 2);
   `);
+    if (mergedTimeline) break;
+    await sleep(100);
+  }
   if (!mergedTimeline) throw new Error('merged speaker timeline did not regroup raw intervals');
   await checkpoint(browser, '11b-speaker-review-merged');
   await browser.clickButton(['Undo last correction', 'Annulla ultima modifica']);
   await waitCount('speaker_undo', 1);
-  const undoTimeline = await browser.execute(`
+  let undoTimeline = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    undoTimeline = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
     return Boolean(
       timeline?.querySelectorAll('[data-speaker-lane="system:S1"] [data-speaker-interval]').length === 1 &&
       timeline?.querySelectorAll('[data-speaker-lane="system:S2"] [data-speaker-interval]').length === 1);
   `);
+    if (undoTimeline) break;
+    await sleep(100);
+  }
   if (!undoTimeline) throw new Error('undo failed to restore separate speaker lanes');
   await checkpoint(browser, '11c-speaker-review-undo');
   await waitText(browser, ['Compare diarization engines', 'Confronta motori di diarizzazione']);
