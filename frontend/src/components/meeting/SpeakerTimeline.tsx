@@ -119,10 +119,9 @@ export function SpeakerTimeline({
   const width = (a: number, b: number) => `${Math.max(0.2, (b - a) / windowSize * 100)}%`;
   const jump = (item: SpeakerTimelineWindow['intervals'][number]) => {
     if (!item.playable) return;
-    const original = rows.find((row) => row.cluster === item.cluster);
-    const canonical = original && rows.find((row) =>
-      row.group === original.group && row.status !== 'merged' && row.status !== 'excluded' && !row.sourceOnly);
-    if (canonical) onSelect(canonical.cluster);
+    // Playing an interval must not change speaker selection: the editor's
+    // selection effect resets the shared audio player. Lane labels separately
+    // own selecting a person, preserving a single predictable playback owner.
     onPlayInterval(intervalClip(item));
   };
 
