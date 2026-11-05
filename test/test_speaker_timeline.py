@@ -92,6 +92,65 @@ class SpeakerTimelineProjectionTests(unittest.TestCase):
                          ["system:S1", "system:S2"])
         self.assertTrue(all(row["origin"] == "transcript" for row in result["intervals"]))
 
+    def test_applied_community_one_uses_exact_job_timeline_without_duplication(self):
+        case = transcript()
+        case["stats"]["speaker_diarization"].update({
+            "source": "reviewed_meeting", "applied_review_job_id": "job-applied",
+        })
+        job = {
+            "id": "job-applied", "type": "diarization_review",
+            "status": "completed", "scope_id": case["id"], "recording_id": case["recording_id"],
+            "result": {"scope": "full", "track_id": "system", "runs": [{
+                "key": "community-1", "status": "completed",
+                "timeline": [
+                    {"speaker": "S1", "start": 0, "end": 8},
+                    {"speaker": "S2", "start": 9, "end": 14},
+                    {"speaker": "S3", "start": 20, "end": 29},
+                ],
+            }]},
+        }
+        full = speaker_timeline_window(
+            case, RecordingFixture(raw_engine="different"), start_seconds=0, end_seconds=30,
+            review_job=job)
+        self.assertEqual(full["coverage"], "diarization")
+        self.assertEqual([item["cluster"] for item in full["intervals"]],
+                         ["system:S1", "system:S2", "system:S3"])
+        self.assertEqual(full["intervals"][0]["start"], 0)
+        self.assertTrue(all(item["origin"] == "diarization" for item in full["intervals"]))
+        # Missing or mismatched job links must not reuse an unrelated saved run.
+        for update in (
+            {"id": "some-other-job"},
+            {"scope_id": "other-transcription"},
+            {"recording_id": "other-meeting"},
+            {"status": "failed"},
+        ):
+            stale = {**job, **update}
+            fallback = speaker_timeline_window(
+                case, RecordingFixture(), start_seconds=0, end_seconds=30, review_job=stale)
+            self.assertEqual(fallback["coverage"], "transcript")
+            self.assertEqual(len(fallback["intervals"]), 2)
+        missing = speaker_timeline_window(
+            case, RecordingFixture(), start_seconds=0, end_seconds=30)
+        self.assertEqual(missing["coverage"], "transcript")
+
+    def test_review_job_rejects_mismatched_native_cluster_set(self):
+        case = transcript()
+        case["stats"]["speaker_diarization"].update({
+            "source": "reviewed_meeting", "applied_review_job_id": "job-applied",
+        })
+        job = {
+            "id": "job-applied", "type": "diarization_review",
+            "status": "completed", "scope_id": case["id"], "recording_id": case["recording_id"],
+            "result": {"scope": "full", "track_id": "system", "runs": [{
+                "key": "community-1", "status": "completed",
+                "timeline": [{"speaker": "S1", "start": 0, "end": 8}],
+            }]},
+        }
+        result = speaker_timeline_window(
+            case, RecordingFixture(), start_seconds=0, end_seconds=30, review_job=job)
+        self.assertEqual(result["coverage"], "transcript")
+        self.assertEqual(len(result["intervals"]), 2)
+
     def test_mismatched_raw_engine_falls_back_to_transcript(self):
         result = speaker_timeline_window(
             transcript(), RecordingFixture(raw_engine="other"), start_seconds=0, end_seconds=30)
