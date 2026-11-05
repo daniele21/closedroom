@@ -28,6 +28,42 @@ class RecordingStoreTests(unittest.TestCase):
             language="it",
         )
 
+    def test_legacy_meeting_reports_safe_local_only_storage(self) -> None:
+        recording = self.create_recording()
+        public = self.store.get(recording["id"], include_result=False)
+        self.assertEqual(public["audio_storage"]["state"], "local_only")
+        self.assertFalse(public["audio_storage"]["cleanup_candidate"])
+        self.assertFalse(public["audio_storage"]["automatic_eviction_implemented"])
+        self.assertTrue(public["audio_storage"]["transcriptions_kept_local"])
+        self.assertEqual(public["audio_local_retention_days"], 14)
+
+    def test_internal_proof_is_not_exposed_in_public_meeting_metadata(self) -> None:
+        recording = self.create_recording()
+        session_dir, metadata = self.store._load(recording["id"])
+        metadata["_audio_cloud_proof"] = {
+            "state": "remote_verified",
+            "bucket": "sensitive-bucket-name",
+            "object_name": "private-meeting-object",
+            "ciphertext_sha256": "secret-secret",
+        }
+        self.store._write_metadata(session_dir, metadata)
+        public = self.store.get(recording["id"], include_result=False)
+        self.assertNotIn("_audio_cloud_proof", public)
+        self.assertNotIn("sensitive-bucket-name", json.dumps(public))
+        self.assertNotIn("private-meeting-object", json.dumps(public))
+        self.assertFalse(public["audio_storage"]["cleanup_candidate"])
+
+    def test_recovered_legacy_meeting_does_not_gain_automatic_cleanup(self) -> None:
+        recording = self.create_recording()
+        session_dir, metadata = self.store._load(recording["id"])
+        metadata.pop("audio_local_retention_days")
+        self.store._write_metadata(session_dir, metadata)
+        public = RecordingStore(self.root, use_settings_dir=False).get(
+            recording["id"], include_result=False
+        )
+        self.assertFalse(public["audio_storage"]["cleanup_candidate"])
+        self.assertEqual(public["audio_storage"]["state"], "local_only")
+
     def test_atomic_json_writes_use_independent_temporary_files(self) -> None:
         target = self.root / "state.json"
         errors = []

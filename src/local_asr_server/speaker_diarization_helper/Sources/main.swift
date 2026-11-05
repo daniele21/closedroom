@@ -18,6 +18,7 @@ struct TrackOutput: Codable {
 
 struct HelperOutput: Codable {
     let engine: String
+    let preset: String?
     let tracks: [String: TrackOutput]
 }
 
@@ -43,16 +44,28 @@ enum ArgumentError: Error, CustomStringConvertible {
     }
 }
 
-func parseArguments(_ arguments: [String]) throws -> ([TrackInput], URL?) {
+func parseArguments(_ arguments: [String]) throws -> ([TrackInput], URL?, String, String) {
     guard arguments.first == "process" else {
         throw ArgumentError.invalid("usage: closedroom-speaker-diarizer process --input TRACK_ID=PATH [--input ...]")
     }
     var inputs: [TrackInput] = []
     var modelsDirectory: URL?
+    var engine = "fluidaudio-community-1"
+    var preset = "fast128"
     var index = 1
     while index < arguments.count {
         guard index + 1 < arguments.count else {
             throw ArgumentError.invalid("unsupported argument: \(arguments[index])")
+        }
+        if arguments[index] == "--engine" {
+            engine = arguments[index + 1]
+            index += 2
+            continue
+        }
+        if arguments[index] == "--preset" {
+            preset = arguments[index + 1]
+            index += 2
+            continue
         }
         if arguments[index] == "--models-dir" {
             modelsDirectory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
@@ -77,31 +90,72 @@ func parseArguments(_ arguments: [String]) throws -> ([TrackInput], URL?) {
     guard !inputs.isEmpty else {
         throw ArgumentError.invalid("at least one --input is required")
     }
-    return (inputs, modelsDirectory)
+    guard ["fluidaudio-community-1", "nemotron3-coreml"].contains(engine) else {
+        throw ArgumentError.invalid("unsupported diarization engine: \(engine)")
+    }
+    guard ["fast128", "c128-split-w8a8"].contains(preset) else {
+        throw ArgumentError.invalid("unsupported Nemotron 3 preset: \(preset)")
+    }
+    return (inputs, modelsDirectory, engine, preset)
 }
 
 @main
 struct ClosedRoomSpeakerDiarizer {
     static func main() async {
         do {
-            let (inputs, modelsDirectory) = try parseArguments(Array(CommandLine.arguments.dropFirst()))
-            // Prefer recall and stable short turns over the faster Community-1 defaults.
-            // FluidAudio documents this 0.1/0.0 profile for accuracy-critical offline use.
-            let manager = OfflineDiarizerManager(config: makeAccurateOfflineConfig())
-            try await manager.prepareModels(directory: modelsDirectory)
+            let (inputs, modelsDirectory, engine, preset) = try parseArguments(Array(CommandLine.arguments.dropFirst()))
             var tracks: [String: TrackOutput] = [:]
-            for input in inputs {
-                let result = try await manager.process(URL(fileURLWithPath: input.path))
-                let segments = result.segments.map {
-                    OutputSegment(
-                        speaker: String(describing: $0.speakerId),
-                        start: Double($0.startTimeSeconds),
-                        end: Double($0.endTimeSeconds)
+            if engine == "fluidaudio-community-1" {
+                // Existing Community-1 quality profile remains unchanged.
+                let manager = OfflineDiarizerManager(config: makeAccurateOfflineConfig())
+                try await manager.prepareModels(directory: modelsDirectory)
+                for input in inputs {
+                    let result = try await manager.process(URL(fileURLWithPath: input.path))
+                    tracks[input.id] = TrackOutput(segments: result.segments.map {
+                        OutputSegment(
+                            speaker: String(describing: $0.speakerId),
+                            start: Double($0.startTimeSeconds),
+                            end: Double($0.endTimeSeconds)
+                        )
+                    })
+                }
+            } else {
+                guard let modelsDirectory else {
+                    throw ArgumentError.invalid("Nemotron 3 requires a model cache directory")
+                }
+                guard let config = Nemotron3Config.preset(named: preset) else {
+                    throw ArgumentError.invalid("unsupported Nemotron 3 preset")
+                }
+                // Download only the requested model weights to ClosedRoom's local cache.
+                // The audio itself stays on device; no cloud diarization fallback.
+                let models = try await Nemotron3Models.loadFromHuggingFace(
+                    config: config, cacheDirectory: modelsDirectory
+                )
+                let diarizer = Nemotron3Diarizer(config: config, models: models)
+                for input in inputs {
+                    let audio = try AudioConverter().resampleAudioFile(
+                        URL(fileURLWithPath: input.path)
+                    )
+                    let (probabilities, frameCount) = try diarizer.processComplete(audio)
+                    // Preserve simultaneous speakers as overlapping intervals.
+                    tracks[input.id] = TrackOutput(segments:
+                        Nemotron3Diarizer.segments(
+                            probabilities: probabilities, frameCount: frameCount
+                        ).map {
+                            OutputSegment(
+                                speaker: String($0.speakerIndex),
+                                start: Double($0.startSeconds),
+                                end: Double($0.endSeconds)
+                            )
+                        }
                     )
                 }
-                tracks[input.id] = TrackOutput(segments: segments)
             }
-            let payload = HelperOutput(engine: "fluidaudio-community-1", tracks: tracks)
+            let payload = HelperOutput(
+                engine: engine,
+                preset: engine == "nemotron3-coreml" ? preset : nil,
+                tracks: tracks
+            )
             let data = try JSONEncoder().encode(payload)
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data("\n".utf8))

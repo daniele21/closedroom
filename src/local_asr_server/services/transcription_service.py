@@ -50,9 +50,11 @@ from local_asr_server.speaker_labels import apply_speaker_labels
 
 logger = logging.getLogger("uvicorn.error")
 
-RECORDING_PIPELINE_CACHE_VERSION = 2
+RECORDING_PIPELINE_CACHE_VERSION = 3
 RECORDING_PIPELINE_SETTING_KEYS = (
     "speaker_diarization_enabled",
+    "speaker_diarization_engine",
+    "speaker_diarization_nemotron_preset",
     "speaker_diarization_minimum_overlap",
     "visual_intelligence_enabled",
     "visual_llm_model",

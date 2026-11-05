@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 import sys
+import os
 from unittest.mock import Mock, patch
 
 if sys.platform == 'darwin':
@@ -72,6 +73,36 @@ class MenuBarRecoveryTests(unittest.TestCase):
         dispatch.assert_called_once()
         self.assertTrue(dispatch.call_args.kwargs['wait'])
         self.app._recreate_status_item.assert_called_once()
+
+    def test_direct_source_entrypoint_uses_development_profile(self):
+        from local_asr_server import menubar
+        with patch.dict(os.environ, {"CLOSEDROOM_DEV_PROFILE": "0"}), \
+             patch("local_asr_server.bundled_module_dispatch.dispatch_bundled_module",
+                   return_value=False), \
+             patch.object(menubar, "_RUMPS_AVAILABLE", True), \
+             patch.object(menubar, "is_bundled", return_value=False), \
+             patch.object(menubar, "runtime_instance_lock"), \
+             patch.object(menubar, "ClosedRoomApp") as app, \
+             patch.object(menubar, "clear_api_runtime") as clear:
+            menubar.main()
+            self.assertEqual(os.environ["CLOSEDROOM_DEV_PROFILE"], "1")
+            app.return_value.run.assert_called_once()
+            clear.assert_called_once_with(app.return_value.app_port)
+
+    def test_bundled_entrypoint_cannot_inherit_dev_profile(self):
+        from local_asr_server import menubar
+        with patch.dict(os.environ, {"CLOSEDROOM_DEV_PROFILE": "1"}), \
+             patch("local_asr_server.bundled_module_dispatch.dispatch_bundled_module",
+                   return_value=False), \
+             patch.object(menubar, "_RUMPS_AVAILABLE", True), \
+             patch.object(menubar, "is_bundled", return_value=True), \
+             patch.object(menubar, "runtime_instance_lock"), \
+             patch.object(menubar, "ClosedRoomApp"):
+            menubar.main()
+            # paths.is_development_profile ignores the environment in bundles.
+            from local_asr_server.paths import is_development_profile
+            with patch("local_asr_server.paths.is_bundled", return_value=True):
+                self.assertFalse(is_development_profile())
 
     def test_detached_button_is_reported_without_display_claim(self):
         button = Mock()

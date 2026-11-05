@@ -9,54 +9,96 @@ import { Dialog, DialogBody, DialogContent, DialogHeader } from '../ui/Dialog';
 
 const PAGE_SIZE = 25;
 const QUERY_STORAGE_KEY = 'closedroom.meeting-search.query';
+const VIEW_STORAGE_KEY = 'closedroom.meeting-search.view';
 
 interface MeetingSearchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenMeeting: (id: string) => void;
   lang: string;
+  initialView?: 'active' | 'archived';
   demoMeetings?: Meeting[];
 }
 
-export function MeetingSearchDialog({
+
+type MeetingArchiveExplorerProps = Pick<
+  MeetingSearchDialogProps,
+  'open' | 'onOpenMeeting' | 'lang' | 'initialView' | 'demoMeetings'
+> & { onOpenChange?: (open: boolean) => void; fullPage?: boolean };
+
+/** Cmd+K remains a quick-search modal; the library page reuses the exact same local query owner. */
+export function MeetingSearchDialog(props: MeetingSearchDialogProps) {
+  const { open, onOpenChange, lang } = props;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="lg" dataTour="dashboard-search-dialog-content" className="max-h-[78vh]">
+        <DialogHeader
+          title={lang === 'it' ? 'Cerca in tutti i meeting' : 'Search all meetings'}
+          description={lang === 'it'
+            ? 'Un’unica libreria per tutti i periodi. La ricerca resta locale sul Mac.'
+            : 'One library across all dates. Search stays local on your Mac.'}
+        />
+        <MeetingArchiveExplorer {...props} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** One bounded, abortable paged search surface shared by modal and full-page library. */
+export function MeetingArchiveExplorer({
   open,
   onOpenChange,
   onOpenMeeting,
   lang,
+  initialView,
   demoMeetings,
-}: MeetingSearchDialogProps) {
+  fullPage = false,
+}: MeetingArchiveExplorerProps) {
   const [query, setQuery] = useState(() => sessionStorage.getItem(QUERY_STORAGE_KEY) || '');
+  const [showArchived, setShowArchived] = useState(() => initialView ? initialView === 'archived' : sessionStorage.getItem(VIEW_STORAGE_KEY) === 'archived');
   const [items, setItems] = useState<Meeting[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const generationRef = useRef(0);
+
+  useEffect(() => {
+    if (open && initialView) setShowArchived(initialView === 'archived');
+  }, [open, initialView]);
 
   useEffect(() => {
     sessionStorage.setItem(QUERY_STORAGE_KEY, query);
   }, [query]);
 
   useEffect(() => {
+    if (open) sessionStorage.setItem(VIEW_STORAGE_KEY, showArchived ? 'archived' : 'active');
+  }, [open, showArchived]);
+
+  useEffect(() => {
     if (!open) return;
     const generation = ++generationRef.current;
     const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    setLoadMoreError(null);
     const timer = window.setTimeout(async () => {
-      setLoading(true);
-      setError(null);
       try {
         if (demoMeetings) {
           const needle = query.trim().toLocaleLowerCase(lang);
+          const source = demoMeetings.filter((meeting) => Boolean(meeting.recording.archived_at) === showArchived);
           const filtered = needle
-            ? demoMeetings.filter((meeting) =>
+            ? source.filter((meeting) =>
                 [meetingTitle(meeting), meeting.project_name, meeting.transcription?.text || '']
                   .join(' ')
                   .toLocaleLowerCase(lang)
                   .includes(needle),
               )
-            : demoMeetings;
+            : source;
           if (generation !== generationRef.current) return;
           setItems(filtered.slice(0, PAGE_SIZE));
           setTotal(filtered.length);
@@ -65,7 +107,7 @@ export function MeetingSearchDialog({
           return;
         }
 
-        const response = await searchMeetingArchive(query, 1, PAGE_SIZE, controller.signal);
+        const response = await searchMeetingArchive(query, 1, PAGE_SIZE, controller.signal, showArchived);
         if (generation !== generationRef.current) return;
         setItems(response.items);
         setTotal(response.total);
@@ -86,20 +128,21 @@ export function MeetingSearchDialog({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, query, demoMeetings, lang]);
+  }, [open, query, demoMeetings, lang, showArchived, retryKey]);
 
   const loadMore = async () => {
     if (loadingMore || !hasMore) return;
     if (demoMeetings) {
       const needle = query.trim().toLocaleLowerCase(lang);
+      const source = demoMeetings.filter((meeting) => Boolean(meeting.recording.archived_at) === showArchived);
       const filtered = needle
-        ? demoMeetings.filter((meeting) =>
+        ? source.filter((meeting) =>
             [meetingTitle(meeting), meeting.project_name, meeting.transcription?.text || '']
               .join(' ')
               .toLocaleLowerCase(lang)
               .includes(needle),
           )
-        : demoMeetings;
+        : source;
       const nextPage = page + 1;
       setItems(filtered.slice(0, nextPage * PAGE_SIZE));
       setPage(nextPage);
@@ -109,9 +152,9 @@ export function MeetingSearchDialog({
 
     const generation = generationRef.current;
     setLoadingMore(true);
-    setError(null);
+    setLoadMoreError(null);
     try {
-      const response = await searchMeetingArchive(query, page + 1, PAGE_SIZE);
+      const response = await searchMeetingArchive(query, page + 1, PAGE_SIZE, undefined, showArchived);
       if (generation !== generationRef.current) return;
       setItems((current) => {
         const known = new Set(current.map((meeting) => meeting.id));
@@ -122,7 +165,7 @@ export function MeetingSearchDialog({
       setHasMore(response.has_more);
     } catch (err) {
       if (generation === generationRef.current) {
-        setError(err instanceof Error ? err.message : String(err));
+        setLoadMoreError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       if (generation === generationRef.current) setLoadingMore(false);
@@ -130,16 +173,26 @@ export function MeetingSearchDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg" dataTour="dashboard-search-dialog-content" className="max-h-[78vh]">
-        <DialogHeader
-          title={lang === 'it' ? 'Cerca in tutti i meeting' : 'Search all meetings'}
-          description={
-            lang === 'it'
-              ? 'Titolo, progetto, trascrizione e note. La ricerca resta locale sul Mac.'
-              : 'Title, project, transcript and notes. Search stays local on your Mac.'
-          }
-        />
+    <section className="flex min-h-0 flex-col" data-meeting-library-explorer="true">
+        <div className="flex gap-2 border-b border-border-subtle px-4 py-2" role="group" aria-label={lang === 'it' ? 'Libreria meeting' : 'Meeting library'}>
+          <button
+            type="button"
+            onClick={() => setShowArchived(false)}
+            aria-pressed={!showArchived}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${!showArchived ? 'bg-bg-hover text-text-primary' : 'text-text-muted hover:text-text-primary'}`}
+          >
+            {lang === 'it' ? 'Attivi' : 'Active'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowArchived(true)}
+            aria-pressed={showArchived}
+            data-archived-meetings="true"
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${showArchived ? 'bg-bg-hover text-text-primary' : 'text-text-muted hover:text-text-primary'}`}
+          >
+            {lang === 'it' ? 'Archiviati' : 'Archived'}
+          </button>
+        </div>
         <div className="flex items-center gap-3 border-b border-border-subtle bg-bg-elevated px-4 py-3 pr-12">
           <Search className="h-5 w-5 shrink-0 text-text-muted" aria-hidden="true" />
           <label htmlFor="dashboard-meeting-search" className="sr-only">
@@ -147,7 +200,7 @@ export function MeetingSearchDialog({
           </label>
           <input
             id="dashboard-meeting-search"
-            autoFocus
+            autoFocus={!fullPage}
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -165,7 +218,7 @@ export function MeetingSearchDialog({
             </button>
           )}
         </div>
-        <DialogBody noScroll className="max-h-[58vh] overflow-y-auto p-2">
+        <DialogBody noScroll className={fullPage ? 'max-h-[min(70vh,760px)] min-h-[240px] overflow-y-auto p-2' : 'max-h-[58vh] overflow-y-auto p-2'}>
           <div aria-live="polite" className="sr-only">
             {loading
               ? (lang === 'it' ? 'Ricerca in corso' : 'Searching')
@@ -183,6 +236,9 @@ export function MeetingSearchDialog({
                 {lang === 'it' ? 'Ricerca non disponibile' : 'Search unavailable'}
               </p>
               <p className="mt-1 text-xs text-text-muted">{error}</p>
+              <Button variant="secondary" size="sm" onClick={() => setRetryKey((previous) => previous + 1)} className="mt-3">
+                {lang === 'it' ? 'Riprova ricerca' : 'Retry search'}
+              </Button>
             </div>
           ) : items.length === 0 ? (
             <div className="py-8 text-center text-sm text-text-muted">
@@ -199,7 +255,7 @@ export function MeetingSearchDialog({
                   type="button"
                   onClick={() => {
                     onOpenMeeting(meeting.id);
-                    onOpenChange(false);
+                    onOpenChange?.(false);
                   }}
                   className="group flex w-full items-center justify-between rounded-xl border border-transparent p-3 text-left transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 >
@@ -217,6 +273,11 @@ export function MeetingSearchDialog({
                   </div>
                 </button>
               ))}
+              {loadMoreError && (
+                <p role="alert" className="mx-3 rounded-lg border border-danger/30 p-3 text-xs text-danger">
+                  {lang === 'it' ? 'Impossibile caricare altri meeting' : 'Could not load more meetings'}: {loadMoreError}
+                </p>
+              )}
               {hasMore && (
                 <div className="flex justify-center p-3">
                   <Button variant="secondary" onClick={loadMore} disabled={loadingMore}>
@@ -228,7 +289,6 @@ export function MeetingSearchDialog({
             </div>
           )}
         </DialogBody>
-      </DialogContent>
-    </Dialog>
+    </section>
   );
 }

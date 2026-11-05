@@ -106,6 +106,39 @@ class NestedUIDiagnosticPropagationTests(unittest.TestCase):
             },
         )
 
+    def test_nested_status_reports_permission_separately_from_media_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            nested = directory / "ui-target-mac-report.json"
+            nested.write_text(json.dumps({
+                "status": "blocked_permission",
+                "errors": ["private meeting text"],
+            }), encoding="utf-8")
+            media_dir = directory / "ui-media" / nested.stem / "meeting-recording-ui"
+            media_dir.mkdir(parents=True)
+            (media_dir / "manifest.json").write_text(
+                json.dumps({"result": "blocked_permission", "private": "private meeting text"}),
+                encoding="utf-8",
+            )
+            parent = self._write_parent(directory, "ui_evidence_report", nested)
+            summary = suite.child_summary(parent, 1)
+        self.assertEqual(summary["ui_smoke_status"], "blocked_permission")
+        self.assertEqual(summary["ui_media_status"], "blocked_permission")
+        self.assertNotIn("private meeting text", json.dumps(summary))
+
+    def test_nested_ui_media_status_not_taken_from_other_child_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            nested = directory / "ui-target-mac-report.json"
+            nested.write_text(json.dumps({"status": "pass"}), encoding="utf-8")
+            other = directory / "ui-media" / "contention-seed-ui-report" / "meeting-recording-ui"
+            other.mkdir(parents=True)
+            (other / "manifest.json").write_text(json.dumps({"result": "PASS"}))
+            parent = self._write_parent(directory, "ui_evidence_report", nested)
+            summary = suite.child_summary(parent, 1)
+        self.assertEqual(summary["ui_smoke_status"], "pass")
+        self.assertNotIn("ui_media_status", summary)
+
     def test_nested_report_outside_parent_evidence_directory_is_not_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

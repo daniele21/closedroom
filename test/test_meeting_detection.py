@@ -54,6 +54,49 @@ class MeetingDetectionTests(unittest.TestCase):
         already_recording.observe(active(TEAMS), enabled=True, busy=True, now=0)
         self.assertEqual(already_recording.observe(active(TEAMS), enabled=True, busy=False, now=6), [])
 
+    def test_failed_notification_retries_with_backoff_and_stops_after_acceptance(self):
+        p = MeetingSuggestionPolicy()
+        p.observe(active(TEAMS), enabled=True, busy=False, now=100)
+        candidate = p.observe(active(TEAMS), enabled=True, busy=False, now=104)[0]
+        self.assertEqual(p.begin_notification(candidate.candidate_id, now=104), 1)
+        self.assertIsNone(p.begin_notification(candidate.candidate_id, now=105))
+        self.assertTrue(p.finish_notification(candidate.candidate_id, 1, False, now=105))
+        self.assertIsNone(p.begin_notification(candidate.candidate_id, now=119))
+        self.assertEqual(p.begin_notification(candidate.candidate_id, now=120), 2)
+        self.assertTrue(p.finish_notification(candidate.candidate_id, 2, True, now=120))
+        self.assertIsNone(p.begin_notification(candidate.candidate_id, now=200))
+        self.assertFalse(p.finish_notification(candidate.candidate_id, 2, False, now=121))
+
+    def test_no_callback_times_out_then_bounded_retry_exhausts(self):
+        p = MeetingSuggestionPolicy()
+        p.observe(active(ZOOM), enabled=True, busy=False, now=10)
+        candidate = p.observe(active(ZOOM), enabled=True, busy=False, now=14)[0]
+        cid = candidate.candidate_id
+        self.assertEqual(p.begin_notification(cid, now=14), 1)
+        p.observe(active(ZOOM), enabled=True, busy=False, now=33)
+        self.assertIsNone(p.begin_notification(cid, now=34))  # timeout; retry delayed
+        self.assertFalse(p.finish_notification(cid, 1, True, now=35))
+        self.assertIsNone(p.begin_notification(cid, now=48))
+        p.observe(active(ZOOM), enabled=True, busy=False, now=45)
+        self.assertEqual(p.begin_notification(cid, now=49), 2)
+        self.assertTrue(p.finish_notification(cid, 2, False, now=50))
+        p.observe(active(ZOOM), enabled=True, busy=False, now=64)
+        self.assertEqual(p.begin_notification(cid, now=65), 3)
+        self.assertTrue(p.finish_notification(cid, 3, False, now=66))
+        p.observe(active(ZOOM), enabled=True, busy=False, now=89)
+        self.assertIsNone(p.begin_notification(cid, now=90))
+
+    def test_permission_denial_does_not_consume_attempt_or_repeat_suggestion(self):
+        p = MeetingSuggestionPolicy()
+        p.observe(active(TEAMS), enabled=True, busy=False, now=0)
+        candidate = p.observe(active(TEAMS), enabled=True, busy=False, now=4)[0]
+        self.assertEqual(candidate.notification_attempts, 0)  # OS permission denied
+        self.assertEqual(p.observe(active(TEAMS), enabled=True, busy=False, now=10), [])
+        self.assertEqual(p.begin_notification(candidate.candidate_id, now=10), 1)
+        self.assertFalse(p.resolve_action(candidate.candidate_id, "ignore", now=11))
+        self.assertIsNone(p.begin_notification(candidate.candidate_id, now=11))
+        self.assertFalse(p.finish_notification(candidate.candidate_id, 1, True, now=12))
+
     def test_detector_has_no_non_macos_success_fallback(self):
         observation = CoreAudioInputObserver().scan()
         self.assertIn(observation.capability, {"unsupported", "unknown", "supported"})

@@ -31,16 +31,19 @@ class FrontendMeetingFastOpenContractTests(unittest.TestCase):
         self.assertIn("activeTab !== 'analysis'", self.source)
         self.assertIn("ApiClient.recordingVisualFrames(recordingId)", self.accessories)
         self.assertIn("visualResultAvailable && activeTab === 'analysis'", self.source)
-        self.assertIn("visualResultAvailable && keyMomentVisualRequested", self.source)
-        self.assertIn("setKeyMomentVisualRequested(true)", self.source)
+        self.assertIn("visualResultAvailable && selectedScreenshot !== null", self.source)
+        self.assertIn("selectedScreenshotKey?.meetingId === recordingId", self.source)
+        self.assertIn("setSelectedScreenshotKey({ meetingId: recordingId, id: shot.screenshot_id })", self.source)
+        self.assertNotIn("keyMomentVisualRequested", self.source)
         self.assertIn("visualData?.source_validity?.status === 'stale'", self.source)
 
     def test_stale_core_loads_are_ignored_and_terminal_reloads_are_coalesced(self) -> None:
-        self.assertIn("loadGenerationRef", self.source)
         self.assertIn("loadInFlightRef", self.source)
-        self.assertIn("loadQueuedRef", self.source)
-        self.assertIn("generation !== loadGenerationRef.current", self.source)
-        self.assertIn("loadQueuedRef.current = true", self.source)
+        self.assertIn("if (activeLoad?.key === key)", self.source)
+        self.assertIn("activeLoad.queued = true", self.source)
+        self.assertIn("if (loadInFlightRef.current !== request) return;", self.source)
+        self.assertIn("if (request.queued) void load();", self.source)
+        self.assertIn("loadInFlightRef.current = null", self.source)
 
     def test_accessory_failures_have_local_retry_state(self) -> None:
         self.assertIn("diagnosticsError", self.source)

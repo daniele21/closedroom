@@ -34,6 +34,28 @@ import {
   type LocalLlmReasoning,
 } from '../features/config/llmConfig';
 
+function meetingDeliveryLabel(state: string, lang: string): string {
+  const it: Record<string, string> = {
+    idle: 'nessun suggerimento',
+    not_requested: 'da inviare',
+    pending: 'in corso',
+    failed: 'invio fallito',
+    timeout: 'nessuna risposta',
+    retry_exhausted: 'tentativi esauriti',
+    enqueued: 'accettata da macOS (banner non garantito)',
+  };
+  const en: Record<string, string> = {
+    idle: 'no suggestion',
+    not_requested: 'not sent yet',
+    pending: 'pending',
+    failed: 'submission failed',
+    timeout: 'no response',
+    retry_exhausted: 'retry limit reached',
+    enqueued: 'accepted by macOS (banner not guaranteed)',
+  };
+  return (lang === 'it' ? it : en)[state] ?? state;
+}
+
 export default function SettingsPage() {
   const { t, lang } = useTranslation();
   const { showToast } = useToast();
@@ -43,6 +65,13 @@ export default function SettingsPage() {
 
   const [recordingsDir, setRecordingsDir] = useState('');
   const [transcriptionsDir, setTranscriptionsDir] = useState('');
+  const [audioRetentionDays, setAudioRetentionDays] = useState<7 | 14 | 30>(14);
+  const [storagePreference, setStoragePreference] = useState<'local' | 'gcs'>('local');
+  const [storageEffectiveMode, setStorageEffectiveMode] = useState<'local' | 'gcs'>('local');
+  const [gcsProjectId, setGcsProjectId] = useState('');
+  const [gcsBucketName, setGcsBucketName] = useState('');
+  const [gcsRegion, setGcsRegion] = useState('europe-west8');
+  const [gcsConfigurationComplete, setGcsConfigurationComplete] = useState(false);
   const [defaultModel, setDefaultModel] = useState('');
   const [defaultLanguage, setDefaultLanguage] = useState('it');
   const [defaultTask, setDefaultTask] = useState('transcribe');
@@ -78,10 +107,12 @@ export default function SettingsPage() {
   const [llmLogs, setLlmLogs] = useState('');
 
   const [meetingAutoAnalysis, setMeetingAutoAnalysis] = useState(false);
-  const [meetingDetectionEnabled, setMeetingDetectionEnabled] = useState(false);
+  const [meetingDetectionEnabled, setMeetingDetectionEnabled] = useState(true);
   const [meetingDetectionWasEnabled, setMeetingDetectionWasEnabled] = useState(false);
   const [meetingDefaultPipeline, setMeetingDefaultPipeline] = useState('meeting_default');
   const [speakerDiarizationEnabled, setSpeakerDiarizationEnabled] = useState(false);
+  const [diarizationEngine, setDiarizationEngine] = useState<"fluidaudio-community-1" | "nemotron3-coreml">("fluidaudio-community-1");
+  const [nemotronPreset, setNemotronPreset] = useState<"fast128" | "c128-split-w8a8">("fast128");
   const [visualIntelligenceEnabled, setVisualIntelligenceEnabled] = useState(false);
   const [accessibility, setAccessibility] = useState<AccessibilityStatus | null>(null);
   const [menuBarStatus, setMenuBarStatus] = useState<MenuBarStatus | null>(null);
@@ -184,6 +215,16 @@ export default function SettingsPage() {
 
       setRecordingsDir(settings.recordings_dir || '');
       setTranscriptionsDir(settings.transcriptions_dir || '');
+      setStoragePreference(settings.storage_preference === 'gcs' ? 'gcs' : 'local');
+      setStorageEffectiveMode(settings.storage_effective_mode === 'gcs' ? 'gcs' : 'local');
+      setGcsProjectId(settings.gcs_project_id || '');
+      setGcsBucketName(settings.gcs_bucket_name || '');
+      setGcsRegion(settings.gcs_region || 'europe-west8');
+      setGcsConfigurationComplete(Boolean(settings.gcs_configuration_complete));
+      setAudioRetentionDays(
+        settings.audio_local_retention_days === 7 || settings.audio_local_retention_days === 30
+          ? settings.audio_local_retention_days : 14
+      );
       setDefaultModel(asr.model);
       setDefaultLanguage(asr.language);
       setDefaultTask(asr.task);
@@ -218,6 +259,8 @@ export default function SettingsPage() {
       setMeetingDetectionWasEnabled(Boolean(settings.meeting_detection_enabled));
       setMeetingDefaultPipeline(settings.meeting_default_pipeline || 'meeting_default');
       setSpeakerDiarizationEnabled(Boolean(settings.speaker_diarization_enabled));
+      setDiarizationEngine(settings.speaker_diarization_engine || "fluidaudio-community-1");
+      setNemotronPreset(settings.speaker_diarization_nemotron_preset || "fast128");
       setVisualIntelligenceEnabled(Boolean(settings.visual_intelligence_enabled));
 
       void refreshLlmService();
@@ -288,6 +331,12 @@ export default function SettingsPage() {
       const payload: Partial<Settings> = {
         transcriptions_dir: transcriptionsDir.trim(),
         recordings_dir: recordingsDir.trim(),
+        audio_local_retention_days: audioRetentionDays,
+        storage_preference: storagePreference,
+        gcs_project_id: gcsProjectId.trim(),
+        gcs_bucket_name: gcsBucketName.trim(),
+        gcs_region: gcsRegion.trim(),
+        audio_auto_cleanup_enabled: false,
         ...asrSettingsPatch({
           provider: asrProvider,
           model: defaultModel,
@@ -321,6 +370,8 @@ export default function SettingsPage() {
         meeting_detection_enabled: meetingDetectionEnabled,
         meeting_default_pipeline: meetingDefaultPipeline,
         speaker_diarization_enabled: speakerDiarizationEnabled,
+        speaker_diarization_engine: diarizationEngine,
+        speaker_diarization_nemotron_preset: nemotronPreset,
         visual_intelligence_enabled: visualIntelligenceEnabled,
       };
       if (geminiApiKey.trim()) payload.gemini_api_key = geminiApiKey.trim();
@@ -377,9 +428,82 @@ export default function SettingsPage() {
           <div>
             <h3 className="text-sm font-semibold text-text-primary">{t('settings.storageTitle')}</h3>
             <p className="mt-1 text-xs text-text-muted">
-              {lang === 'it' ? 'Dove ClosedRoom conserva audio e trascrizioni locali.' : 'Where ClosedRoom stores local audio and transcripts.'}
+              {lang === 'it' ? 'Scegli dove desideri conservare le registrazioni, senza modificare il funzionamento locale.' : 'Choose where you want recordings stored, without changing local processing.'}
             </p>
           </div>
+          <fieldset className="flex flex-col gap-3" data-storage-target-selection="true" aria-describedby="storage-target-help">
+            <legend className="text-sm font-semibold text-text-primary">
+              {lang === 'it' ? 'Destinazione preferita' : 'Preferred destination'}
+            </legend>
+            <p id="storage-target-help" className="text-xs text-text-secondary">
+              {lang === 'it'
+                ? 'La preferenza GCS può essere preparata ora, ma non attiva upload automatici. La modalità effettiva resta Solo Mac.'
+                : 'You can prepare the GCS preference now, but it does not enable automatic upload. Effective storage remains on this Mac.'}
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label htmlFor="settings-storage-local" className={`flex cursor-pointer gap-3 rounded-xl border p-3 focus-within:ring-2 focus-within:ring-border-focus ${storagePreference === 'local' ? 'border-accent bg-accent/5' : 'border-border-subtle'}`}>
+                <input id="settings-storage-local" type="radio" name="storage-target" value="local"
+                  checked={storagePreference === 'local'} onChange={() => setStoragePreference('local')}
+                  className="mt-0.5 h-4 w-4 accent-accent" />
+                <span className="flex flex-col gap-1">
+                  <span className="text-sm font-semibold text-text-primary">{lang === 'it' ? 'Solo Mac' : 'On this Mac'}</span>
+                  <span className="text-xs text-text-secondary">{lang === 'it' ? 'Audio, trascrizioni e note restano locali.' : 'Audio, transcripts and notes stay local.'}</span>
+                </span>
+              </label>
+              <label htmlFor="settings-storage-gcs" className={`flex cursor-pointer gap-3 rounded-xl border p-3 focus-within:ring-2 focus-within:ring-border-focus ${storagePreference === 'gcs' ? 'border-accent bg-accent/5' : 'border-border-subtle'}`}>
+                <input id="settings-storage-gcs" type="radio" name="storage-target" value="gcs"
+                  checked={storagePreference === 'gcs'} onChange={() => setStoragePreference('gcs')}
+                  className="mt-0.5 h-4 w-4 accent-accent" />
+                <span className="flex flex-col gap-1">
+                  <span className="text-sm font-semibold text-text-primary">Google Cloud Storage</span>
+                  <span className="text-xs text-text-secondary">
+                    {lang === 'it' ? 'Prepara la destinazione cloud. Non ancora operativa.' : 'Prepare a cloud destination. Not operational yet.'}
+                  </span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+          <div role="status" aria-live="polite" className="flex flex-wrap items-center gap-2 rounded-lg border border-border-subtle bg-bg-surface p-3" data-storage-effective-mode={storageEffectiveMode}>
+            <Badge variant={storageEffectiveMode === 'local' ? 'success' : 'info'}>
+              {storageEffectiveMode === 'local'
+                ? (lang === 'it' ? 'Attivo ora: Solo Mac' : 'Active now: On this Mac')
+                : (lang === 'it' ? 'Attivo ora: Google Cloud Storage' : 'Active now: Google Cloud Storage')}
+            </Badge>
+            <span className="text-xs text-text-secondary">
+              {lang === 'it' ? 'La modifica della preferenza non sposta meeting esistenti e non cancella file.' : 'Changing the preference does not move existing meetings or delete files.'}
+            </span>
+          </div>
+          {storagePreference === 'gcs' && (
+            <div className="flex flex-col gap-3 rounded-xl border border-warning/30 bg-warning/5 p-4" data-storage-gcs-preparation="true">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-sm font-semibold text-text-primary">{lang === 'it' ? 'Preparazione GCS' : 'GCS preparation'}</h4>
+                <Badge variant="warning">{lang === 'it' ? 'Non attivo' : 'Not active'}</Badge>
+              </div>
+              <p className="text-xs text-text-secondary" role="status">
+                {lang === 'it'
+                  ? 'Salveremo solo gli identificativi del progetto e del bucket, non credenziali. Nessun nuovo audio sarà caricato automaticamente: servono ancora collegamento OAuth, upload cifrato per meeting e verifica di recupero.'
+                  : 'Only the project and bucket identifiers will be saved, never credentials. No new audio will upload automatically until OAuth, encrypted per-meeting upload and recovery checks are integrated.'}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input id="settings-gcs-project-id" label="GCP project ID"
+                  placeholder="my-project-123456" value={gcsProjectId}
+                  onChange={(event) => { setGcsProjectId(event.target.value); setGcsConfigurationComplete(false); }} autoComplete="off" />
+                <Input id="settings-gcs-bucket-name" label="GCS bucket"
+                  placeholder="my-private-meetings" value={gcsBucketName}
+                  onChange={(event) => { setGcsBucketName(event.target.value); setGcsConfigurationComplete(false); }} autoComplete="off" />
+              </div>
+              <div className="max-w-xs">
+                <Input id="settings-gcs-region" label={lang === 'it' ? 'Regione del bucket' : 'Bucket region'}
+                  placeholder="europe-west8" value={gcsRegion}
+                  onChange={(event) => { setGcsRegion(event.target.value); setGcsConfigurationComplete(false); }} autoComplete="off" />
+              </div>
+              <p className="text-xs text-text-muted">
+                {gcsConfigurationComplete
+                  ? (lang === 'it' ? 'Identificativi salvati (connessione non verificata).' : 'Identifiers saved (connection not verified).')
+                  : (lang === 'it' ? 'Inserisci i dettagli e salva per preparare la destinazione.' : 'Enter details and save to prepare the destination.')}
+              </p>
+            </div>
+          )}
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="settings-recordings-dir" className="text-sm font-medium text-text-secondary">{t('settings.recordingsFolderLabel')}</label>
@@ -395,6 +519,37 @@ export default function SettingsPage() {
                 <Button type="button" variant="secondary" onClick={() => handleBrowse('transcriptions')}>{t('settings.btnBrowse')}</Button>
               </div>
             </div>
+          </div>
+          <div className="border-t border-border-subtle pt-4" data-storage-retention-preference="true">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-sm font-semibold text-text-primary">
+                {lang === 'it' ? 'Ridondanza audio su Mac' : 'Mac audio redundancy'}
+              </h4>
+              <Badge variant="warning">
+                {lang === 'it' ? 'Pulizia non disponibile' : 'Cleanup unavailable'}
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-text-secondary">
+              {lang === 'it'
+                ? 'Oggi audio e trascrizioni restano sul Mac. Il backup GCS esistente è manuale: non abilita la cancellazione delle registrazioni.'
+                : 'Audio and transcripts currently remain on your Mac. The existing GCS backup is manual and does not enable audio deletion.'}
+            </p>
+            <div className="mt-3 max-w-xs">
+              <Select
+                label={lang === 'it' ? 'Periodo di doppia copia futuro' : 'Future dual-copy retention window'}
+                value={String(audioRetentionDays)}
+                onChange={(event) => setAudioRetentionDays(Number(event.target.value) as 7 | 14 | 30)}
+              >
+                <option value="7">{lang === 'it' ? '7 giorni' : '7 days'}</option>
+                <option value="14">{lang === 'it' ? '14 giorni (consigliato)' : '14 days (recommended)'}</option>
+                <option value="30">{lang === 'it' ? '30 giorni' : '30 days'}</option>
+              </Select>
+            </div>
+            <p className="mt-2 text-xs text-text-muted" role="status">
+              {lang === 'it'
+                ? 'Questa preferenza viene salvata, ma non avvia upload o pulizia. La rimozione dell’audio sarà disponibile solo dopo verifica del recupero su GCS e dei lavori in corso.'
+                : 'This saves a future preference; it does not start an upload or cleanup. Audio removal will require verified GCS recovery and no active work.'}
+            </p>
           </div>
         </Card>
 
@@ -460,8 +615,8 @@ export default function SettingsPage() {
           />
           <p className="text-xs text-text-muted" role="status">
             {lang === 'it'
-              ? 'Disattivato inizialmente. Salva per attivare e richiedere il permesso per le notifiche; avvia ClosedRoom al login se vuoi ricevere i suggerimenti.'
-              : 'Off by default. Save to enable and request notification permission; start ClosedRoom at login for background suggestions.'}
+              ? 'Attivo per impostazione predefinita nelle nuove installazioni. Rileva solo attività delle app, senza ascoltare audio. Per i banner autorizza le notifiche; avvia ClosedRoom al login per monitorare in background. Le scelte già salvate restano valide.'
+              : 'On by default for new installations. Only app activity is checked, without listening to audio. Grant notification permission for banners and launch ClosedRoom at login for background monitoring. Saved choices remain intact.'}
           </p>
           {meetingDetectionEnabled && menuBarStatus?.meeting_detection && (
             <div className="space-y-2 text-xs text-text-secondary" data-meeting-detection-diagnostics="true">
@@ -482,6 +637,16 @@ export default function SettingsPage() {
                 {' · '}{lang === 'it' ? 'Notifiche: ' : 'Notifications: '}
                 {menuBarStatus.meeting_detection.notifications}
               </p>
+              {menuBarStatus.meeting_detection.suggestion_active && (
+                <p role="status">
+                  {lang === 'it' ? 'Suggerimento attivo' : 'Active suggestion'}
+                  {' · '}{lang === 'it' ? 'Invio a macOS' : 'OS submission'}: {meetingDeliveryLabel(menuBarStatus.meeting_detection.notification_delivery?.state ?? 'idle', lang)}
+                  {' · '}{lang === 'it' ? 'Tentativi' : 'Attempts'}: {menuBarStatus.meeting_detection.notification_delivery?.attempts ?? 0}
+                </p>
+              )}
+              {menuBarStatus.meeting_detection.reason && menuBarStatus.meeting_detection.capability !== 'supported' && (
+                <p role="status">{menuBarStatus.meeting_detection.reason}</p>
+              )}
               {menuBarStatus.meeting_detection.notifications !== 'authorized' && (
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" variant="secondary" onClick={handleMeetingNotificationPermission}>
@@ -747,6 +912,35 @@ export default function SettingsPage() {
                   </p>
                 </div>
                 <Checkbox variant="toggle" label={t('settings.speakerDiarization')} checked={speakerDiarizationEnabled} onChange={(event) => setSpeakerDiarizationEnabled(event.target.checked)} />
+                {speakerDiarizationEnabled && (
+                  <div className="space-y-3" data-settings-diarization-engine="true">
+                    <Select
+                      label={lang === 'it' ? 'Motore diarizzazione locale' : 'Local diarization engine'}
+                      value={diarizationEngine}
+                      onChange={(event) => setDiarizationEngine(event.target.value as typeof diarizationEngine)}
+                    >
+                      <option value="fluidaudio-community-1">FluidAudio Community-1 · {lang === 'it' ? 'Stabile' : 'Stable'}</option>
+                      <option value="nemotron3-coreml">NVIDIA Nemotron 3 · {lang === 'it' ? 'Sperimentale' : 'Experimental'}</option>
+                    </Select>
+                    {diarizationEngine === 'nemotron3-coreml' && (
+                      <>
+                        <Select
+                          label={lang === 'it' ? 'Preset Nemotron 3' : 'Nemotron 3 preset'}
+                          value={nemotronPreset}
+                          onChange={(event) => setNemotronPreset(event.target.value as typeof nemotronPreset)}
+                        >
+                          <option value="fast128">fast128 · {lang === 'it' ? 'Precisione' : 'Accuracy'}</option>
+                          <option value="c128-split-w8a8">c128-split-w8a8 · {lang === 'it' ? 'Peso ridotto' : 'Smaller model'}</option>
+                        </Select>
+                        <p className="text-xs text-text-muted">
+                          {lang === 'it'
+                            ? 'Sperimentale: il primo utilizzo scarica solo i pesi del preset scelto. La registrazione non viene inviata online. Senza modello disponibile offline, la diarizzazione fallisce senza cambiare il transcript.'
+                            : 'Experimental: first use downloads only the selected model weights. No recording is uploaded. If the model is unavailable offline, diarization fails without changing the transcript.'}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
                 <Checkbox variant="toggle" label={t('settings.visualIntelligence')} checked={visualIntelligenceEnabled} onChange={(event) => setVisualIntelligenceEnabled(event.target.checked)} />
                 <Select label={t('settings.meetingDefaultPipeline')} value={meetingDefaultPipeline} onChange={(event) => setMeetingDefaultPipeline(event.target.value)}>
                   <option value="meeting_default">{t('settings.meetingPipelineDefault')}</option>

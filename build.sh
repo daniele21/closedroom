@@ -39,7 +39,7 @@ APP_NAME="${CLOSEDROOM_APP_NAME:-ClosedRoom}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_VERSION="$(python3 "$SCRIPT_DIR/scripts/product_version.py" --root "$SCRIPT_DIR")"
 BUNDLE_ID="${CLOSEDROOM_APP_BUNDLE_ID:-com.closedroom.app}"
-BUILD_PYTHON_VERSION="${CLOSEDROOM_BUILD_PYTHON_VERSION:-3.10}"
+BUILD_PYTHON_VERSION="${CLOSEDROOM_BUILD_PYTHON_VERSION:-3.12}"
 BUILD_ASSETS="$SCRIPT_DIR/build_assets"
 # uv refuses to build a source tree when its cache lives inside that same tree.
 # Keep the packaging cache outside the repository while still allowing callers
@@ -177,6 +177,25 @@ if $CLEAN_BUILD; then
     ok "Cleaned"
 fi
 
+# Vite writes into tracked src/local_asr_server/static. Reject preexisting
+# changes before it can overwrite them, and restore only this generated tree on
+# normal success/failure exits. This preserves the original build exit status.
+FRONTEND_BUILD_HEAD="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
+python3 "$SCRIPT_DIR/scripts/generated_frontend_state.py" check \
+    --root "$SCRIPT_DIR" --expected-head "$FRONTEND_BUILD_HEAD"
+
+restore_generated_frontend_on_exit() {
+    local build_status=$?
+    trap - EXIT
+    if ! python3 "$SCRIPT_DIR/scripts/generated_frontend_state.py" restore \
+        --root "$SCRIPT_DIR" --expected-head "$FRONTEND_BUILD_HEAD"; then
+        warn "Generated frontend cleanup failed; inspect Git status before the next build."
+        if [[ "$build_status" -eq 0 ]]; then build_status=1; fi
+    fi
+    exit "$build_status"
+}
+trap restore_generated_frontend_on_exit EXIT
+
 mkdir -p "$BUILD_ASSETS"
 
 # ── Step 0: Build React frontend ──────────────────────────────────────────────
@@ -190,31 +209,8 @@ pnpm run build
 cd "$SCRIPT_DIR"
 ok "React frontend built successfully"
 
-# ── Step 1: Compile Swift audio helper ────────────────────────────────────────
-log "Step 1/5: Compiling Swift audio helper..."
-
-HELPER_CACHE="$SCRIPT_DIR/.cache/audio-helper/audio-helper"
-HELPER_DEST="$BUILD_ASSETS/audio-helper"
-
-if [[ -f "$HELPER_CACHE" ]] && [[ -f "$SCRIPT_DIR/.cache/audio-helper/source.sha256" ]]; then
-    SOURCE_HASH=$(shasum -a 256 "$SCRIPT_DIR/src/local_asr_server/macos_audio_helper/audio_helper.swift" | awk '{print $1}')
-    CACHED_HASH=$(cat "$SCRIPT_DIR/.cache/audio-helper/source.sha256")
-    if [[ "$SOURCE_HASH" == "$CACHED_HASH" ]]; then
-        ok "Audio helper binary is up-to-date (cache hit)"
-        cp "$HELPER_CACHE" "$HELPER_DEST"
-    else
-        log "Source changed, recompiling..."
-        uv run --no-sync local-asr setup-audio
-        cp "$HELPER_CACHE" "$HELPER_DEST"
-    fi
-else
-    log "Compiling for the first time..."
-    uv run --no-sync local-asr setup-audio
-    cp "$HELPER_CACHE" "$HELPER_DEST"
-fi
-chmod +x "$HELPER_DEST"
-ok "Audio helper: $HELPER_DEST ($(du -sh "$HELPER_DEST" | cut -f1))"
-
+# ── Step 1: Compile native capture + diarization helpers ────────────────
+log "Step 1/5: Compiling native capture helpers..."
 NATIVE_HELPER_CACHE="$SCRIPT_DIR/.cache/native-capture-helper/native-capture-helper"
 NATIVE_HELPER_DEST="$BUILD_ASSETS/native-capture-helper"
 NATIVE_HELPER_APP="$BUILD_ASSETS/ClosedRoomNativeCapture.app"
@@ -402,7 +398,15 @@ log "  Installing wheel and dependencies into build_venv..."
 WHEEL_FILE=$(ls dist/wheels/local_asr_server-*.whl)
 # The opt-in Korgis consumer must be present in the frozen Python runtime,
 # despite legacy remaining the default transport. Git-SHA pin lives in pyproject.
-uv pip install --python build_venv "${WHEEL_FILE}[app,speechmatics,korgis-sdk]" "pyinstaller>=6.0"
+# macOS 27 dyld rejects the SciPy 1.15.3 PROPACK wheel loaded by mlx-whisper.
+# Python 3.12 permits fixed SciPy >=1.16; do not bundle the broken ABI.
+uv pip install --python build_venv "${WHEEL_FILE}[app,speechmatics,korgis-sdk]" "pyinstaller>=6.0" "scipy>=1.16"
+
+# Detect incompatible native wheels before PyInstaller runs its package hooks.
+# Fail explicitly rather than shipping an .app with broken local transcription.
+if ! build_venv/bin/python -c 'import scipy.signal; import scipy.sparse.linalg; import mlx_whisper'; then
+    die "Packaging dependency import failed (SciPy/MLX Whisper). Check macOS native wheels and Python $BUILD_PYTHON_VERSION; no app was finalized."
+fi
 
 log "  Running PyInstaller from build_venv..."
 CLOSEDROOM_APP_NAME="$APP_NAME" \
@@ -460,16 +464,13 @@ find_bundled_binary() {
     find "$APP_PATH/Contents" -type f -name "$name" -print -quit
 }
 
-AUDIO_HELPER_IN_APP="$(find_bundled_binary "audio-helper")"
 SPEAKER_DIARIZATION_HELPER_IN_APP="$(find_bundled_binary "speaker-diarization-helper")"
 FFMPEG_IN_APP="$(find_bundled_binary "ffmpeg")"
 
-[[ -n "$AUDIO_HELPER_IN_APP" ]] || die "audio-helper not found in app bundle"
 [[ -n "$SPEAKER_DIARIZATION_HELPER_IN_APP" ]] || die "speaker-diarization-helper not found in app bundle"
 [[ -f "$NATIVE_HELPER_IN_APP" ]] || die "ClosedRoomNativeCapture executable not found in helper app"
 [[ -n "$FFMPEG_IN_APP" ]] || die "ffmpeg not found in app bundle"
 
-chmod +x "$AUDIO_HELPER_IN_APP"
 chmod +x "$SPEAKER_DIARIZATION_HELPER_IN_APP"
 chmod +x "$NATIVE_HELPER_IN_APP"
 chmod +x "$FFMPEG_IN_APP"
@@ -521,7 +522,6 @@ done < <(
 )
 
 # Sign inner binaries first, then their parent bundles (inside-out order).
-sign_entitled "$AUDIO_HELPER_IN_APP"
 sign_entitled "$SPEAKER_DIARIZATION_HELPER_IN_APP"
 sign_entitled "$NATIVE_HELPER_IN_APP"
 sign_entitled "$NATIVE_HELPER_APP_IN_APP"

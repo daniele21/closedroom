@@ -124,6 +124,7 @@ class TranscriptionDiarizationService:
             track_id,
             timeline,
             minimum_overlap,
+            engine=engine,
         )
         if segments and not timeline:
             raise RuntimeError("No speaker clusters were returned for the uploaded audio.")
@@ -514,6 +515,7 @@ class TranscriptionDiarizationService:
                 track_id,
                 timeline,
                 minimum_overlap,
+                engine=SPEECHMATICS_DIARIZATION_ENGINE,
             )
         return {
             "status": "completed",

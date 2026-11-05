@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from local_asr_server.services.transcription_application import (
     SingleFileTranscriptionRequest,
@@ -184,6 +184,58 @@ class SingleFileTranscriptionUseCaseTests(unittest.TestCase):
             )
             self.assertEqual(store.saved[0][1:], ("meeting.wav", "rec-1"))
             save_cache.assert_called_once()
+
+
+    def test_initial_diarization_policy_is_disabled_idempotent_and_provider_aware(self) -> None:
+        """The same policy serves upload, path and streaming postprocessing."""
+        with tempfile.TemporaryDirectory() as temp:
+            audio = Path(temp) / "meeting.wav"
+            audio.write_bytes(b"audio")
+            use_case = SingleFileTranscriptionUseCase
+            app = SimpleNamespace()
+            unchanged = {"text": "ciao", "stats": {}}
+            disabled = use_case.apply_initial_diarization(
+                app, audio, unchanged, provider="none",
+                speechmatics_region=None, speechmatics_model=None,
+            )
+            self.assertIs(disabled, unchanged)
+
+            completed = {
+                "text": "ciao",
+                "stats": {"speaker_diarization": {"status": "completed", "provider": "local"}},
+            }
+            already_done = use_case.apply_initial_diarization(
+                app, audio, completed, provider="local",
+                speechmatics_region=None, speechmatics_model=None,
+            )
+            self.assertIs(already_done, completed)
+
+            def diarize(_audio_path, payload, *, provider, **_kwargs):
+                return {
+                    **payload,
+                    "stats": {
+                        **payload.get("stats", {}),
+                        "speaker_diarization": {"status": "completed", "provider": provider},
+                    },
+                }
+
+            processor = SimpleNamespace(process_audio_payload=Mock(side_effect=diarize))
+            with patch(
+                "local_asr_server.services.transcription_application.get_services",
+                return_value=SimpleNamespace(diarization=processor),
+            ):
+                newly_processed = use_case.apply_initial_diarization(
+                    app, audio, completed, provider="speechmatics",
+                    speechmatics_region="eu", speechmatics_model="enhanced",
+                )
+                again = use_case.apply_initial_diarization(
+                    app, audio, newly_processed, provider="speechmatics",
+                    speechmatics_region="eu", speechmatics_model="enhanced",
+                )
+            self.assertEqual(newly_processed["stats"]["speaker_diarization"]["provider"], "speechmatics")
+            self.assertIs(again, newly_processed)
+            self.assertEqual(processor.process_audio_payload.call_count, 1)
+            self.assertEqual(completed["stats"]["speaker_diarization"]["provider"], "local")
 
 
 if __name__ == "__main__":

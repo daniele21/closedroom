@@ -109,16 +109,8 @@ def bounded_ui_failure_diagnostic(errors: list[Any]) -> dict[str, Any] | None:
     return None
 
 
-def nested_ui_failure_diagnostic(
-    child_path: Path, payload: dict[str, Any]
-) -> dict[str, Any] | None:
-    """Read only canonical sibling UI reports and return a bounded diagnostic.
-
-    Parent target-Mac runners intentionally summarize a failed UI child as a
-    failed check. The detailed UI runner remains the owner of its raw errors, so
-    the aggregate follows only the two explicit report references and only when
-    they resolve inside the same evidence directory as the parent report.
-    """
+def canonical_nested_ui_path(child_path: Path, payload: dict[str, Any]) -> Path | None:
+    """Follow only a named sibling UI report, never arbitrary paths."""
     parent_dir = child_path.parent.resolve()
     for field in NESTED_UI_REPORT_FIELDS:
         raw_path = payload.get(field)
@@ -133,12 +125,37 @@ def nested_ui_failure_diagnostic(
             continue
         if candidate.parent != parent_dir:
             continue
-        nested = read_json(candidate)
-        errors = nested.get("errors") if isinstance(nested.get("errors"), list) else []
-        diagnostic = bounded_ui_failure_diagnostic(errors)
-        if diagnostic is not None:
-            return diagnostic
+        return candidate
     return None
+
+
+def nested_ui_failure_diagnostic(
+    child_path: Path, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    candidate = canonical_nested_ui_path(child_path, payload)
+    if candidate is None:
+        return None
+    nested = read_json(candidate)
+    errors = nested.get("errors") if isinstance(nested.get("errors"), list) else []
+    return bounded_ui_failure_diagnostic(errors)
+
+
+def nested_ui_stage_status(child_path: Path, payload: dict[str, Any]) -> dict[str, str]:
+    """Expose only allowlisted physical-UI statuses, never UI text or errors."""
+    candidate = canonical_nested_ui_path(child_path, payload)
+    if candidate is None:
+        return {}
+    nested = read_json(candidate)
+    result: dict[str, str] = {}
+    status = nested.get("status")
+    if status in {"pass", "fail", "blocked_permission"}:
+        result["ui_smoke_status"] = status
+    media_path = candidate.parent / "ui-media" / candidate.stem / "meeting-recording-ui" / "manifest.json"
+    media = read_json(media_path)
+    media_status = media.get("result")
+    if media_status in {"PASS", "E2E_EVIDENCE_INCOMPLETE", "fail", "blocked_permission"}:
+        result["ui_media_status"] = media_status
+    return result
 
 
 def child_summary(path: Path, returncode: int) -> dict[str, Any]:
@@ -162,6 +179,7 @@ def child_summary(path: Path, returncode: int) -> dict[str, Any]:
         ui_diagnostic = nested_ui_failure_diagnostic(path, payload)
     if ui_diagnostic is not None:
         summary["ui_failure_diagnostic"] = ui_diagnostic
+    summary.update(nested_ui_stage_status(path, payload))
     return summary
 
 
@@ -239,6 +257,10 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
         diagnostic = child.get("ui_failure_diagnostic")
         if diagnostic:
             print(f"  bounded UI diagnostic: {json.dumps(diagnostic, sort_keys=True)}")
+        if child.get("ui_smoke_status"):
+            print(f"  UI functional smoke: {child['ui_smoke_status'].upper()}")
+        if child.get("ui_media_status"):
+            print(f"  UI media evidence: {child['ui_media_status']}")
         if child.get("error_count"):
             print(f"  child errors: {child['error_count']} (see child evidence)")
         if child.get("timeout_seconds"):

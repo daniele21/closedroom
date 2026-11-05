@@ -16,7 +16,7 @@ const evidenceRoot = path.resolve(
 );
 const sourceRevision = process.env.E2E_SOURCE_REVISION || 'unknown';
 const checkpoints = [];
-const counts = { session: 0, health: 0, recent: 0, search: 0, detail: 0 };
+const counts = { session: 0, health: 0, recent: 0, search: 0, archived: 0, detail: 0 };
 let frameIndex = 0;
 
 function meeting(id, title, createdAt, transcript = '') {
@@ -68,6 +68,14 @@ const archiveMeeting = meeting(
   '2025-01-15T09:00:00Z',
   'The historical decision used the unique keyword sequoia and must remain discoverable.',
 );
+
+const archivedMeeting = {
+  ...meeting('archived-1', 'Archived client call', '2025-01-14T09:00:00Z', 'Historical sequoia review.'),
+  recording: {
+    ...meeting('archived-1', 'Archived client call', '2025-01-14T09:00:00Z').recording,
+    archived_at: '2025-03-01T12:00:00Z',
+  },
+};
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -153,13 +161,17 @@ function fixtureServer(port) {
         const query = (url.searchParams.get('q') || '').toLowerCase();
         const page = Number(url.searchParams.get('page') || '1');
         const limit = Number(url.searchParams.get('limit') || '25');
-        const items = query.includes('sequoia') ? [archiveMeeting] : recentMeetings;
+        const isArchived = url.searchParams.get('archived') === 'true';
+        if (isArchived) counts.archived += 1;
+        const items = isArchived
+          ? (query.includes('sequoia') ? [archivedMeeting] : [])
+          : (query.includes('sequoia') ? [archiveMeeting] : recentMeetings);
         return json(res, 200, {
           items: items.slice((page - 1) * limit, page * limit),
-          total: query.includes('sequoia') ? 1 : 130,
+          total: isArchived ? items.length : (query.includes('sequoia') ? 1 : 130),
           page,
           limit,
-          has_more: !query.includes('sequoia') && page === 1,
+          has_more: !isArchived && !query.includes('sequoia') && page === 1,
         });
       }
       counts.recent += 1;
@@ -215,6 +227,7 @@ class Browser {
         alwaysMatch: {
           browserName: 'chrome',
           'goog:chromeOptions': {
+            ...(process.env.CI_CHROME_BINARY ? { binary: process.env.CI_CHROME_BINARY } : {}),
             args: [
               '--headless=new',
               '--disable-gpu',
@@ -426,6 +439,60 @@ try {
   const restored = await browser.execute("return document.querySelector('#dashboard-meeting-search')?.value || ''; ");
   if (restored !== 'sequoia') throw new Error(`search query was not restored after back navigation: ${restored}`);
   await checkpoint(browser, '04-back-restores-search');
+
+  const archiveTab = await browser.execute(`
+    const tab = document.querySelector('[data-archived-meetings="true"]');
+    if (!tab) return false;
+    tab.click();
+    return true;
+  `);
+  if (!archiveTab) throw new Error('Unified library archived tab is missing');
+  await waitText(browser, ['Archived client call'], 8000, true);
+  if (counts.archived < 1) throw new Error('Archive filter did not reach local server-side search');
+  const archiveState = await browser.execute(`
+    return {
+      archivedSelected: document.querySelector('[data-archived-meetings="true"]')?.getAttribute('aria-pressed'),
+      query: document.querySelector('#dashboard-meeting-search')?.value || ''
+    };
+  `);
+  if (archiveState.archivedSelected !== 'true' || archiveState.query !== 'sequoia') {
+    throw new Error(`Unified library lost archive/search context: ${JSON.stringify(archiveState)}`);
+  }
+  await checkpoint(browser, '05-unified-archive-filter');
+
+  // Full library is a stable destination, powered by exactly the same search component.
+  await browser.navigate(`http://127.0.0.1:${vitePort}/#meetings`);
+  await waitText(browser, ['Archived client call'], 8000, true);
+  const library = await browser.execute(`
+    return {
+      path: window.location.hash,
+      present: Boolean(document.querySelector('[data-meetings-page="true"]')),
+      explorer: Boolean(document.querySelector('[data-meeting-library-explorer="true"]')),
+      query: document.querySelector('#dashboard-meeting-search')?.value || '',
+      activeNavigation: document.querySelector('[data-tour="nav-home"]')?.getAttribute('aria-current'),
+      archivedSelected: document.querySelector('[data-archived-meetings="true"]')?.getAttribute('aria-pressed')
+    };
+  `);
+  if (library.path !== '#meetings' || !library.present || !library.explorer
+      || library.query !== 'sequoia' || library.activeNavigation !== 'page' || library.archivedSelected !== 'true') {
+    throw new Error(`Full library does not reuse complete local search: ${JSON.stringify(library)}`);
+  }
+  await checkpoint(browser, '06-full-library-archived-view-restored');
+  await browser.execute(`
+    const active = document.querySelector('[data-archived-meetings="true"]')?.previousElementSibling;
+    if (active) active.click();
+    return Boolean(active);
+  `);
+  await waitText(browser, ['Archive source meeting'], 8000, true);
+  await checkpoint(browser, '06a-full-library-active-view');
+  await browser.clickButton(['Archive source meeting']);
+  await waitText(browser, ['historical decision used the unique keyword sequoia'], 10000, true);
+  await browser.execute('window.history.back(); return true;');
+  await waitText(browser, ['Archive source meeting'], 8000, true);
+  if (!(await browser.execute("return Boolean(document.querySelector('[data-meetings-page=true]'));"))) {
+    throw new Error('Back from saved meeting did not restore the library destination');
+  }
+  await checkpoint(browser, '07-library-roundtrip');
 
   video = await renderVideo();
 } catch (caught) {

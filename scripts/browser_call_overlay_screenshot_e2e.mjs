@@ -477,7 +477,8 @@ class Browser {
   async start() {
     const value = await webdriver(this.port, 'POST', '/session', { capabilities: { alwaysMatch: {
       browserName: 'chrome',
-      'goog:chromeOptions': { args: ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--window-size=1280,900', '--force-device-scale-factor=1', '--disable-background-networking', '--disable-default-apps'] },
+      'goog:chromeOptions': {
+            ...(process.env.CI_CHROME_BINARY ? { binary: process.env.CI_CHROME_BINARY } : {}), args: ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--window-size=1280,900', '--force-device-scale-factor=1', '--disable-background-networking', '--disable-default-apps'] },
     } } });
     this.sessionId = value.sessionId;
   }
@@ -619,6 +620,12 @@ try {
   if (!clickedShot) throw new Error('screenshot button unavailable');
   await waitText(browser, ['Saved', 'Screenshots 1'], 8000, true);
   await waitSelector(browser, 'button[data-screenshot-undo="true"]', 3000, true);
+  const screenshotFeedbackMatchesUndo = await browser.execute(`
+    const action = document.querySelector('button[data-screenshot-action="true"]');
+    const undo = document.querySelector('button[data-screenshot-undo="true"]');
+    return Boolean(action && undo && action.textContent.trim() === 'Saved');
+  `);
+  if (!screenshotFeedbackMatchesUndo) throw new Error('screenshot saved feedback and undo target diverged');
   if (counts.screenshots_post !== 1) throw new Error('unexpected screenshot POST count: ' + counts.screenshots_post);
   await checkpoint(browser, '03-screenshot-persisted');
 
@@ -640,6 +647,28 @@ try {
   if (!noteOpened) throw new Error('quick-note action unavailable');
   await waitSelector(browser, '[data-note-composer="true"] textarea', 5000, true);
   if (counts.note_anchor !== 1) throw new Error('note anchor was not captured exactly once: ' + counts.note_anchor);
+  const expandedNote = await browser.execute(`
+    return document.querySelector('button[data-note-action="true"]')?.getAttribute('aria-expanded') === 'true';
+  `);
+  if (!expandedNote) throw new Error('note composer is open but trigger is not expanded');
+
+  // Closing and reopening must discard the old anchor, without persisting a note.
+  await browser.clickCss('button[data-note-close="true"]');
+  const closeDeadline = Date.now() + 3000;
+  let noteClosed = false;
+  while (Date.now() < closeDeadline) {
+    noteClosed = await browser.execute(`
+      return !document.querySelector('[data-note-composer="true"]')
+        && document.querySelector('button[data-note-action="true"]')?.getAttribute('aria-expanded') === 'false';
+    `);
+    if (noteClosed) break;
+    await sleep(50);
+  }
+  if (!noteClosed) throw new Error('closing the composer left its anchor/expanded state behind');
+  if (counts.notes_post !== 0) throw new Error('closing an unsaved note persisted content');
+  await browser.clickCss('button[data-note-action="true"]');
+  await waitSelector(browser, '[data-note-composer="true"] textarea', 5000, true);
+  if (counts.note_anchor !== 2) throw new Error('reopening the composer did not request a new anchor: ' + counts.note_anchor);
   const noteEntered = await browser.execute(`
     const textarea = document.querySelector('[data-note-composer="true"] textarea');
     if (!textarea) return false;
@@ -660,6 +689,17 @@ try {
   }
   if (notes[0].timestamp !== 14) throw new Error('quick note did not preserve composer-open anchor');
   await waitText(browser, ['Notes 1', 'Saved'], 5000, true);
+  const noteFeedbackMatchesUndo = await browser.execute(`
+    const action = document.querySelector('button[data-note-action="true"]');
+    const undo = document.querySelector('button[data-note-undo="true"]');
+    return Boolean(action && undo && action.textContent.trim() === 'Saved');
+  `);
+  if (!noteFeedbackMatchesUndo) throw new Error('note saved feedback and undo target diverged');
+  const composerClosedAfterSave = await browser.execute(`
+    return !document.querySelector('[data-note-composer="true"]')
+      && document.querySelector('button[data-note-action="true"]')?.getAttribute('aria-expanded') === 'false';
+  `);
+  if (!composerClosedAfterSave) throw new Error('saved note retained a visible composer or stale anchor');
   await checkpoint(browser, '03c-user-note-persisted');
 
   await browser.clickCss('button[aria-label="Stop recording"]');

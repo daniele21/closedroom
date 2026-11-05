@@ -48,6 +48,15 @@ async function startSettingsFixture(port) {
   const settings = {
     transcriptions_dir: '/tmp/closedroom-transcriptions',
     recordings_dir: '/tmp/closedroom-recordings',
+    storage_preference: 'local',
+    storage_effective_mode: 'local',
+    storage_capability: 'preparation_only',
+    gcs_project_id: '',
+    gcs_bucket_name: '',
+    gcs_region: 'europe-west8',
+    gcs_configuration_complete: false,
+    audio_local_retention_days: 14,
+    audio_auto_cleanup_enabled: false,
     asr_provider: 'local',
     speechmatics_region: 'eu',
     speechmatics_model: 'enhanced',
@@ -108,6 +117,29 @@ async function startSettingsFixture(port) {
     if (request.method === 'GET' && pathname === '/v1/settings') {
       return sendJson(200, settings);
     }
+    if (request.method === 'POST' && pathname === '/v1/settings') {
+      let raw = '';
+      request.on('data', (chunk) => { raw += chunk; });
+      request.on('end', () => {
+        try {
+          const patch = JSON.parse(raw);
+          if (patch.storage_preference !== 'local' && patch.storage_preference !== 'gcs') {
+            return sendJson(400, { detail: 'Unsupported storage_preference' });
+          }
+          if (patch.audio_auto_cleanup_enabled !== false) {
+            return sendJson(400, { detail: 'Automatic audio cleanup remains disabled' });
+          }
+          Object.assign(settings, patch);
+          settings.storage_effective_mode = 'local';
+          settings.storage_capability = 'preparation_only';
+          settings.gcs_configuration_complete = Boolean(settings.gcs_project_id && settings.gcs_bucket_name);
+          return sendJson(200, settings);
+        } catch {
+          return sendJson(400, { detail: 'Invalid settings fixture request' });
+        }
+      });
+      return;
+    }
     if (request.method === 'GET' && pathname === '/v1/runtime/services/llm') {
       return sendJson(200, { name: 'llm', status: 'stopped', mode: 'disabled' });
     }
@@ -140,6 +172,7 @@ async function startSettingsFixture(port) {
   return {
     close: () => new Promise((resolve) => server.close(resolve)),
     getRefreshCount: () => refreshCount,
+    getStorageSettings: () => ({ ...settings }),
   };
 }
 
@@ -206,6 +239,7 @@ class Browser {
         alwaysMatch: {
           browserName: 'chrome',
           'goog:chromeOptions': {
+            ...(process.env.CI_CHROME_BINARY ? { binary: process.env.CI_CHROME_BINARY } : {}),
             args: [
               '--headless=new',
               '--disable-gpu',
@@ -449,6 +483,34 @@ try {
   }
   await checkpoint(browser, '02-meeting-child-of-today');
 
+  // Historical recording-detail bookmarks must show the same saved Meeting.
+  const canonicalMeetingHash = await browser.execute("return window.location.hash;");
+  const savedMeetingId = String(canonicalMeetingHash).startsWith('#meeting/')
+    ? String(canonicalMeetingHash).slice('#meeting/'.length)
+    : '';
+  if (!savedMeetingId) throw new Error(`Unable to identify canonical Meeting route: ${canonicalMeetingHash}`);
+  await browser.navigate(`http://127.0.0.1:${vitePort}/?demo=true#recording/${savedMeetingId}`);
+  await waitUntil(
+    browser,
+    'legacy saved recording redirects to Meeting',
+    `return window.location.hash === '#meeting/${savedMeetingId}'
+      && document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'meeting'
+      && Boolean(document.querySelector('#meeting-tab-transcript'));`,
+    10000,
+    true,
+  );
+  observations.legacyRecordingAlias = await browser.execute(`
+    return {
+      hash: window.location.hash,
+      page: document.querySelector('.workspace-content')?.getAttribute('data-workspace-page'),
+      primaryNavCurrent: document.querySelector('[data-tour="nav-home"]')?.getAttribute('aria-current'),
+    };
+  `);
+  if (observations.legacyRecordingAlias.primaryNavCurrent !== 'page') {
+    throw new Error(`Legacy saved recording left the canonical Meeting hierarchy: ${JSON.stringify(observations.legacyRecordingAlias)}`);
+  }
+  await checkpoint(browser, '02a-legacy-recording-alias');
+
   await browser.click('[data-tour="nav-projects"]');
   await waitUntil(
     browser,
@@ -468,6 +530,81 @@ try {
     throw new Error(`Projects navigation hierarchy is not exclusive: ${JSON.stringify(observations.projects)}`);
   }
   await checkpoint(browser, '03-projects-container');
+
+  const openedProjectMeeting = await browser.execute(`
+    const timeline = document.querySelector('[data-tour="project-timeline"]');
+    const open = Array.from(timeline?.querySelectorAll('button') || []).find((button) =>
+      /^(Open|Apri)$/i.test((button.textContent || '').trim())
+    );
+    if (!open) return false;
+    open.click();
+    return true;
+  `);
+  if (!openedProjectMeeting) throw new Error('Project meeting timeline lacked an Open action');
+  await waitUntil(
+    browser,
+    'Meeting from project preserves project hierarchy',
+    `return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'meeting'
+      && document.querySelector('[data-tour="nav-projects"]')?.getAttribute('aria-current') === 'page';`,
+    10000,
+    true,
+  );
+  observations.meetingFromProjects = await browser.execute(`
+    const workspace = document.querySelector('[data-workspace-page="meeting"]');
+    const back = workspace?.querySelector('section button');
+    return {
+      projectsCurrent: document.querySelector('[data-tour="nav-projects"]')?.getAttribute('aria-current'),
+      backLabel: back?.textContent?.trim() || '',
+    };
+  `);
+  if (!/Projects|Progetti/.test(observations.meetingFromProjects.backLabel)) {
+    throw new Error(`Meeting did not offer return to its project: ${JSON.stringify(observations.meetingFromProjects)}`);
+  }
+  await checkpoint(browser, '03a-project-meeting-context');
+
+  await browser.execute(`
+    const back = document.querySelector('[data-workspace-page="meeting"] section button');
+    if (back) back.click();
+    return Boolean(back);
+  `);
+  await waitUntil(
+    browser,
+    'Return to selected Project',
+    `return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'projects'
+      && document.querySelector('[data-tour="nav-projects"]')?.getAttribute('aria-current') === 'page'
+      && document.querySelector('[data-tour="project-situation"]')?.textContent?.includes('ClosedRoom Beta Launch');`,
+    10000,
+    true,
+  );
+  await checkpoint(browser, '03b-project-return-preserved');
+
+  // Job state remains shell-owned, but its entry point is a utility, not a third peer page.
+  const activityUtility = await browser.execute(`
+    const primary = document.querySelector('.workspace-primary-nav');
+    const utility = document.querySelector('[data-tour="utility-activities"]');
+    return {
+      utilityFound: Boolean(utility),
+      duplicatedInPrimary: Boolean(primary?.querySelector('[data-tour="nav-activities"]')),
+      utilityLabel: utility?.getAttribute('aria-label') || ''
+    };
+  `);
+  if (!activityUtility.utilityFound || activityUtility.duplicatedInPrimary || !activityUtility.utilityLabel) {
+    throw new Error(`Activity utility was not placed correctly: ${JSON.stringify(activityUtility)}`);
+  }
+  await browser.click('[data-tour="utility-activities"]');
+  await waitUntil(
+    browser,
+    'Activity utility opens canonical job page',
+    `return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'activities'
+      && Boolean(document.querySelector('[data-activities-page]'))
+      && document.querySelector('[data-tour="utility-activities"]')?.getAttribute('aria-current') === 'page';`,
+    10000,
+    true,
+  );
+  await checkpoint(browser, '03c-activity-utility');
+  await browser.click('[data-tour="nav-projects"]');
+  await waitUntil(browser, 'Project navigation after activity', `return document.querySelector('.workspace-content')?.getAttribute('data-workspace-page') === 'projects';`, 10000);
+
 
   const themeBefore = await browser.execute("return document.documentElement.getAttribute('data-theme');");
   await browser.click('.workspace-settings-trigger');
@@ -549,6 +686,40 @@ try {
   observations.menuBarSettings.refreshRoundTrip = true;
   observations.menuBarSettings.refreshCount = settingsFixture.getRefreshCount();
   await checkpoint(browser, '06-menubar-restored');
+
+  // Storage configuration is a user preference, not an authorization to upload.
+  // Browser-level round trip must keep the effective mode local after saving GCS intent.
+  await browser.click('#settings-storage-gcs');
+  await waitUntil(browser, 'GCS preparation disclosure', `
+    return Boolean(document.querySelector('[data-storage-gcs-preparation="true"]'))
+      && document.querySelector('#settings-storage-gcs')?.checked === true;
+  `);
+  await checkpoint(browser, '07-gcs-preparation-selection');
+  await browser.click('button[type="submit"]');
+  const storageSaveDeadline = Date.now() + 10000;
+  while (settingsFixture.getStorageSettings().storage_preference !== 'gcs'
+      && Date.now() < storageSaveDeadline) {
+    await sleep(100);
+  }
+  await waitUntil(browser, 'GCS preference saved with local effective mode', `
+    return document.querySelector('#settings-storage-gcs')?.checked === true
+      && document.querySelector('[data-storage-effective-mode="local"]') !== null
+      && document.querySelector('[data-storage-gcs-preparation="true"]') !== null;
+  `, 10000);
+  const storedSelection = settingsFixture.getStorageSettings();
+  observations.storageTarget = {
+    preferred: storedSelection.storage_preference,
+    effective: storedSelection.storage_effective_mode,
+    capability: storedSelection.storage_capability,
+    cleanupEnabled: storedSelection.audio_auto_cleanup_enabled,
+  };
+  if (observations.storageTarget.preferred !== 'gcs'
+      || observations.storageTarget.effective !== 'local'
+      || observations.storageTarget.capability !== 'preparation_only'
+      || observations.storageTarget.cleanupEnabled !== false) {
+    throw new Error(`storage configuration must not activate GCS: ${JSON.stringify(observations.storageTarget)}`);
+  }
+  await checkpoint(browser, '08-gcs-preference-saved-local-active');
 
   await browser.setWindow(780, 900);
   await sleep(350);

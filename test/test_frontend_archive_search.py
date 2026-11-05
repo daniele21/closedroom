@@ -27,10 +27,43 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
         self.assertIn("<MeetingSearchDialog", self.dashboard)
         self.assertIn("onOpenMeeting={(id) => navigateTo('meeting', id)}", self.dashboard)
 
+    def test_one_library_dialog_owns_full_search_and_archive(self) -> None:
+        self.assertNotIn("<MeetingListDialog", self.dashboard)
+        self.assertIn("const openLibrary = () =>", self.dashboard)
+        self.assertIn("onClick={openLibrary}", self.dashboard)
+        self.assertIn("initialView={libraryView}", self.dashboard)
+        self.assertIn("data-archived-meetings=\"true\"", self.dialog)
+        self.assertIn("setShowArchived(true)", self.dialog)
+        self.assertIn("searchMeetingArchive(query, 1, PAGE_SIZE, controller.signal, showArchived)", self.dialog)
+        self.assertIn("searchMeetingArchive(query, page + 1, PAGE_SIZE, undefined, showArchived)", self.dialog)
+        self.assertIn("if (archived) params.set('archived', 'true')", self.api)
+
+    def test_full_meeting_page_and_quick_search_share_one_query_owner(self) -> None:
+        page = (ROOT / "frontend/src/pages/MeetingsPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("<MeetingArchiveExplorer", page)
+        self.assertIn("getDemoMeetings(lang)", page)
+        self.assertIn("export function MeetingArchiveExplorer", self.dialog)
+        self.assertIn("<MeetingArchiveExplorer {...props} />", self.dialog)
+        self.assertIn("onOpenMeeting={(id) => navigateTo('meeting', id)}", page)
+        self.assertIn("onClick={() => navigateTo('meetings')}", self.dashboard)
+
+    def test_obsolete_competing_meeting_list_component_is_gone(self) -> None:
+        self.assertFalse((ROOT / "frontend/src/components/workspace/MeetingListDialog.tsx").exists())
+        self.assertNotIn("MeetingListDialog", self.dashboard)
+
+    def test_full_library_has_adaptive_height_without_dialog_autofocus(self) -> None:
+        page = (ROOT / "frontend/src/pages/MeetingsPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("<MeetingArchiveExplorer", page)
+        self.assertIn("fullPage", page)
+        self.assertIn("autoFocus={!fullPage}", self.dialog)
+        self.assertIn("min-h-[240px]", self.dialog)
+        self.assertIn("setRetryKey((previous) => previous + 1)", self.dialog)
+        self.assertIn("setLoadMoreError", self.dialog)
+
     def test_search_is_server_side_bounded_and_paged(self) -> None:
         self.assertIn("const PAGE_SIZE = 25", self.dialog)
         self.assertIn("searchMeetingArchive(query, 1, PAGE_SIZE", self.dialog)
-        self.assertIn("searchMeetingArchive(query, page + 1, PAGE_SIZE)", self.dialog)
+        self.assertIn("searchMeetingArchive(query, page + 1, PAGE_SIZE, undefined, showArchived)", self.dialog)
         self.assertIn("response.has_more", self.dialog)
         self.assertIn("Math.min(limit, 50)", self.api)
         self.assertIn("q: query", self.api)
@@ -50,6 +83,8 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
 
     def test_query_survives_navigation_without_loading_entire_archive(self) -> None:
         self.assertIn("sessionStorage.setItem(QUERY_STORAGE_KEY, query)", self.dialog)
+        self.assertIn("sessionStorage.setItem(VIEW_STORAGE_KEY, showArchived ? 'archived' : 'active')", self.dialog)
+        self.assertIn("sessionStorage.getItem(VIEW_STORAGE_KEY) === 'archived'", self.dialog)
         self.assertNotIn("ApiClient.listMeetings", self.dialog)
         self.assertNotIn("setMeetings", self.dialog)
 

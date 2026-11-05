@@ -28,6 +28,7 @@ from local_asr_server.paths import (
 
 
 VALID_NATIVE_MODES = {"both", "mic_only", "pc_only"}
+SOURCE_RECOVERY_EVENTS = {"source_interrupted", "source_recovering", "source_unavailable", "source_recovered"}
 
 logger = logging.getLogger("local_asr_server.native_capture")
 
@@ -65,6 +66,7 @@ class CaptureSession:
     track_ready: dict[str, dict[str, Any]] = field(default_factory=dict)
     track_written: dict[str, dict[str, Any]] = field(default_factory=dict)
     last_volume: dict[str, float] = field(default_factory=dict)
+    source_health: dict[str, str] = field(default_factory=dict)
     warnings: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=128))
     stopped: bool = False
     screenshot_display_id: int | None = None
@@ -773,6 +775,18 @@ class NativeCaptureManager:
     ) -> dict[str, Any]:
         if mode not in VALID_NATIVE_MODES:
             raise ValueError(f"Invalid native capture mode: {mode}")
+        # Check before capability probes or compilation. The helper also claims
+        # the destination exclusively, so separate API/helper processes cannot
+        # race this preflight and truncate a previous run's output.
+        for name in ('.native-capture-run', '.audio-recovery', 'mic.wav', 'system.wav', 'recording.wav',
+                     'mic.wav.part', 'system.wav.part', 'recording.wav.part'):
+            candidate = output_dir / name
+            if candidate.is_symlink() or (
+                candidate.exists() and (
+                    not name.endswith('.part') or not candidate.is_file() or candidate.stat().st_size > 0
+                )
+            ):
+                raise RuntimeError("Cannot start native capture over existing capture data; recover the session instead")
         self._refresh_dev_helper()
         if not self.capabilities().get("available"):
             raise RuntimeError("Native capture helper is not available")
@@ -953,13 +967,22 @@ class NativeCaptureManager:
                     session.track_written[event["source"]] = event
                 elif event.get("type") == "volume":
                     session.last_volume[event["source"]] = event.get("db", -120.0)
+                elif event.get("type") in SOURCE_RECOVERY_EVENTS:
+                    source = event.get("source")
+                    if source in {"mic", "system"}:
+                        session.source_health[source] = event["type"].removeprefix("source_")
+                    else:
+                        logger.warning("Ignoring source recovery event without valid source for %s", session.recording_id)
+                        continue
                 elif event.get("type") in {"warning", "error"}:
                     session.warnings.append(event)
                     if event.get("type") == "error":
                         session.stopped = True
 
                 session.events.put(event)
-                if event.get("type") in {"stopped", "error"}:
+                # Device loss is scoped to a source. Only helper exit, explicit
+                # Stop or a genuinely fatal write/capture error ends the session.
+                if event.get("type") in {"stopped", "error", "capture_fatal"}:
                     session.stopped = True
             session.process.wait()
         finally:
