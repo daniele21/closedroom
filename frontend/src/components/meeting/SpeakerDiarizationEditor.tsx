@@ -566,12 +566,14 @@ export function SpeakerDiarizationEditor({
             <div className="mt-2 flex flex-wrap items-center gap-1 text-xs" aria-label={tr('Voci unite', 'Merged voices')}>
               <span className="px-2 text-text-muted">{tr('Voci unite:', 'Merged voices:')}</span>
               {rows.filter((r) => r.status === 'merged').map((r) => (
-                <button type="button" key={r.cluster}
-                  onClick={() => { playback.stop(); setSelectedCluster(r.cluster); }}
-                  aria-pressed={selected?.cluster === r.cluster}
-                  className="min-h-9 rounded-md border border-border-subtle px-2.5 text-text-secondary hover:bg-bg-elevated focus-visible:outline-2 focus-visible:outline-border-focus">
-                  {r.name} · {tr('Ripristinabile', 'Restorable')}
-                </button>
+                <Button key={r.cluster} variant="ghost" size="sm"
+                  data-speaker-merged-restore={r.cluster}
+                  disabled={!canEdit || saving}
+                  onClick={() => { setSelectedCluster(r.cluster); void commit('restore', r.cluster); }}
+                  aria-label={tr(`Ripristina voce ${r.name}`, `Restore voice ${r.name}`)}>
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  {r.name} · {tr('Ripristina', 'Restore')}
+                </Button>
               ))}
             </div>
           )}
