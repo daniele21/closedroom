@@ -64,7 +64,7 @@ from local_asr_server.window import ClosedRoomWindowManager
 from local_asr_server.meeting_detection import CoreAudioInputObserver, MeetingSuggestionPolicy, SUPPORTED_APPS
 from local_asr_server.macos_meeting_notifications import MeetingNotificationCenter, needs_initial_notification_consent
 from local_asr_server.app_identity import get_app_identity
-from local_asr_server.paths import get_brand_asset_path, is_development_profile
+from local_asr_server.paths import get_brand_asset_path, is_development_profile, is_bundled
 from local_asr_server.runtime.models import (
     DEFAULT_API_PORT,
     DEFAULT_DEV_RELOAD_PORT,
@@ -1384,6 +1384,10 @@ def main() -> None:
 
     if dispatch_bundled_module():
         return
+    # "python -m local_asr_server.menubar" is also a supported source entry
+    # point; it must not inherit or write the installed app's production data.
+    if not is_bundled():
+        os.environ["CLOSEDROOM_DEV_PROFILE"] = "1"
     if not _RUMPS_AVAILABLE:
         raise SystemExit(
             "rumps is not installed. Install it with:\n"
