@@ -45,7 +45,7 @@ Wide: una riga per speaker, una scala, nessuna seconda sidebar. Compact 640 px: 
 | **SPK-4 — P2: progressive disclosure** | «Migliora riconoscimento» apre l'attuale preview→applica→rollback; benchmark A/B e dettagli tecnici restano in strumenti avanzati. Nessuna rimozione di capacità o job già esistenti. | `MeetingDetailPage.tsx`, `CommunityOneReviewPanel.tsx`, `DiarizationBenchmarkPanel.tsx`; UX contract | SPK-2 + SPK-3 | ACTIVE · PR #189 |
 | **SPK-5 — P2: rifinitura e integrazione** | Microcopy it/en, focus, tastiera, VoiceOver, riga selezionata/empty/error/loading/partial, contrasto, compact, 200% text, FULL_MEDIA, documentazione canonica e preflight. | design contract, test E2E, regression snapshots, docs | SPK-0..4 | ACTIVE · PR #189 |
 
-**Sequenza delle PR:** PR-A SPK-0 + read-model SPK-1; PR-B SPK-2 con nuovo layout; PR-C SPK-3 media/editing; PR-D SPK-4 + SPK-5 UX hardening. Tutte su branch feature dedicati basati sul `dev` aggiornato e verso `dev`, nessuna verso `main`. Sono milestone, non quattro implementazioni da avviare simultaneamente senza contratto.
+**Sequenza:** PR #188 SPK-0/1 integrata; PR #189 SPK-2..5 da validare verso `dev`. Nessun merge in `main`.
 
 **Parallelizzabile in sicurezza:** durante PR-A, un agente può preparare fixture/test E2E senza scrivere nei file del backend; durante PR-B, un altro può studiare i contratti di playback e scrivere test hook in un file distinto. Non assegnare contemporaneamente a due agenti `SpeakerDiarizationEditor.tsx` o `MeetingDetailPage.tsx`. Dopo ogni merge riallineare gli altri branch e rieseguire i gate invalidati. PR #186 (startup non distruttivo) è indipendente, ancora aperta; non assumerla integrata e non cambiare porte, packaging o runtime in questo workstream.
 
