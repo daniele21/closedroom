@@ -57,7 +57,7 @@ function clipFor(item: SpeakerTimelineWindow['intervals'][number]): SpeakerClip 
 /** One per-person row on one truthful recording clock; voice != audio source. */
 export function SpeakerTimeline({
   transcription, recordingId, durationSeconds, rows, showHidden, pendingOnly = false,
-  selectedGroup, cursorSeconds, selectedDetails, onSelect, onPlaySample, sampleAvailable,
+  selectedGroup, cursorSeconds, children, onSelect, onPlaySample, sampleAvailable,
   onPlayInterval, onJumpToTranscript, lang,
 }: Props) {
   const it = lang === 'it';
