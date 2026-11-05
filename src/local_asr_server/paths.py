@@ -84,6 +84,10 @@ def get_app_support_dir() -> Path:
     base = Path.home() / "Library" / "Application Support" / APP_NAME
     if is_development_profile():
         base = base / "Development"
+        # Runtime lock/state is created before the API loads settings.
+        # Refuse a symlinked root here, before opening any lock file.
+        if base.is_symlink():
+            raise ValueError("Development support directory must not be a symlink")
     base.mkdir(parents=True, exist_ok=True)
     return base
 
