@@ -11,7 +11,7 @@ Baseline: `repo-template-sw` **0.10.0**, **L2**, profiles Python/TypeScript/macO
 - PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and adaptive Today/Meeting/Projects workspace.
 - PR #186 integrated (`9c7f86c`): source server port 1237, isolated Development data, non-destructive startup; physical check pending.
 - PR #189 (`03a6d6d`) integrated: minimal Voices timeline, shared player, restore; 894 tests + browser FULL_MEDIA PASS. WKWebView/real audio pending.
-- PR #183 candidate: optional GCS preference only; effective storage local. Upload/restore/eviction not enabled.
+- PR #183 (`9df62d0`) integrated: optional GCS preference only; effective storage stays local. Upload/restore/eviction not enabled.
 - PR #181: local voice samples, rename/merge/exclude/undo integrated; packaged WKWebView/audio/accessibility proof pending.
 - PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
 - Release: root `VERSION=0.2.0` owns product version; app identity `ClosedRoom.app` / `com.closedroom.app` stays fixed. Final artifacts carry version/build/source SHA.
