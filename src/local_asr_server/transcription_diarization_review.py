@@ -109,6 +109,12 @@ def project_review(
         "assigned_segments": sum(bool(s.get("provider_speaker")) for s in segments),
         "text_preserved": True,
     }
+    # The canonical JobStore already persists the full Community-1 timeline.
+    # Link the applied revision to that exact job; do not duplicate the raw
+    # speech data inside the exported transcript JSON or use unrelated runs.
+    applied_job_id = str(job.get("id") or "").strip()
+    if applied_job_id:
+        summary["applied_review_job_id"] = applied_job_id
     candidate.pop("speaker_attribution", None)
     stats = dict(candidate.get("stats") or {})
     stats.pop("speaker_attribution", None)
