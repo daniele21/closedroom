@@ -30,7 +30,7 @@ from local_asr_server.transcription_diarization_review import (
     REVIEW_JOB_TYPE, fingerprint, project_review,
 )
 from local_asr_server.speaker_review import (
-    project_speaker_action, speaker_audio_samples,
+    project_speaker_action, speaker_audio_samples, speaker_timeline_window,
 )
 from local_asr_server.env import get_env_var
 from local_asr_server.services.transcription_service import TranscriptionService
@@ -688,6 +688,23 @@ def get_speaker_review_samples(transcription_id: str, request: Request):
     services, transcription = _transcription_review_context(transcription_id, request.app)
     try:
         return speaker_audio_samples(transcription, services.recordings)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except (RecordingConflict, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/v1/transcriptions/{transcription_id}/speaker-review/timeline")
+def get_speaker_review_timeline(
+    transcription_id: str, request: Request,
+    start: float = Query(default=0.0, ge=0),
+    end: float = Query(default=300.0, gt=0),
+):
+    services, transcription = _transcription_review_context(transcription_id, request.app)
+    try:
+        return speaker_timeline_window(
+            transcription, services.recordings, start_seconds=start, end_seconds=end,
+        )
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except (RecordingConflict, ValueError) as exc:
