@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, CheckCircle2, ChevronDown, GitMerge, Headphones,
-  MoreHorizontal, Pause, Play, RotateCcw, SkipBack, SkipForward, Volume2,
+  AlertCircle, ChevronDown, GitMerge, Headphones,
+  MoreHorizontal, Pause, Play, RotateCcw, SkipBack, SkipForward,
 } from 'lucide-react';
 import {
   ApiClient, type SpeakerClip, type SpeakerReviewAction,
@@ -61,7 +61,11 @@ export function SpeakerDiarizationEditor({
   const [advanced, setAdvanced] = useState(false);
   const [action, setAction] = useState<'none' | 'merge' | 'exclude'>('none');
   const [mergeTarget, setMergeTarget] = useState('');
+  const [showActions, setShowActions] = useState(false);
+  const [listenError, setListenError] = useState('');
   const playback = useSpeakerReviewPlayback(meetingId, onPlaybackStart);
+  const activeListenRequest = useRef<AbortController | null>(null);
+  const selectedGroupRef = useRef<string | null>(null);
   const [timelineCursor, setTimelineCursor] = useState<number | null>(null);
 
   const mappings = transcription.stats?.speaker_attribution?.mappings || [];
@@ -93,14 +97,17 @@ export function SpeakerDiarizationEditor({
   }, [mappings, transcription.segments, transcription.source_tracks]);
 
   const visible = rows.filter((r) =>
+    !r.sourceOnly &&
     (showHidden || (r.status !== 'merged' && r.status !== 'excluded')) &&
     (filter === 'all' || r.status !== 'accepted'),
   );
-  const selected = rows.find((r) => r.cluster === selectedCluster) || visible[0] || null;
+  const selected = visible.find((r) => r.cluster === selectedCluster) || visible[0] || null;
   const active = rows.filter((r) => r.status !== 'merged' && r.status !== 'excluded' && !r.sourceOnly);
   const confirmed = active.filter((r) => r.status === 'accepted').length;
   const pending = active.length - confirmed;
 
+  selectedGroupRef.current = selected?.group || null;
+  useEffect(() => () => activeListenRequest.current?.abort(), [meetingId]);
   const sampleList = useMemo(() => (
     samples?.speakers.find((item) => item.speaker_cluster === selected?.cluster)?.samples || []
   ), [samples, selected?.cluster]);
@@ -138,8 +145,8 @@ export function SpeakerDiarizationEditor({
     setEditedName(selected?.name || '');
     setSampleIndex(0);
     setAction('none');
+    setShowActions(false);
     setMergeTarget('');
-    playback.stop();
   }, [selected?.cluster, transcription.id]);
 
   useEffect(() => {
@@ -158,6 +165,8 @@ export function SpeakerDiarizationEditor({
     if (!review || !id || readOnly || saving) return;
     setSaving(true);
     setMutationError('');
+    setListenError('');
+    activeListenRequest.current?.abort();
     playback.stop();
     try {
       const response = await ApiClient.commitSpeakerReview(id, {
@@ -214,18 +223,46 @@ export function SpeakerDiarizationEditor({
     playback.playSample(clip);
   };
 
-  const playSelectedTurns = () => {
-    if (!selected) return;
-    const turns: SpeakerTurn[] = (transcription.segments || [])
-      .filter((s) =>
-        (s.speaker_group || s.provider_speaker || s.speaker_label) === selected.group &&
-        !!s.track_id && s.end > s.start,
-      )
-      .map((s) => ({
-        track_id: s.track_id as string, start: s.start, end: s.end,
-        kind: 'transcript' as const, overlap: !!s.overlap, text: s.text,
-      }));
-    playback.playTurns(turns);
+  const playSelectedTurns = async () => {
+    if (!selected || !id || saving) return;
+    setListenError('');
+    const group = selected.group;
+    activeListenRequest.current?.abort();
+    const abort = new AbortController();
+    activeListenRequest.current = abort;
+    try {
+      const maxSampleEnd = (samples?.speakers || []).reduce((last, item) =>
+        Math.max(last, ...item.samples.map((clip) => clip.end), 0), 0);
+      const lastAsr = (transcription.segments || []).reduce((last, segment) =>
+        Math.max(last, Number(segment.end) || 0), 0);
+      const end = Math.min(28800, Math.max(300, durationSeconds, maxSampleEnd, lastAsr));
+      const response = await ApiClient.getSpeakerTimeline(id, 0, end, abort.signal);
+      if (abort.signal.aborted || selectedGroupRef.current !== group) return;
+      if (response.truncated) {
+        setListenError(tr('Troppi intervalli: ascolta una finestra temporale dalla timeline.',
+          'Too many intervals: play a shorter timeline window.'));
+        return;
+      }
+      const groups = new Map(rows.map((row) => [row.cluster, row.group]));
+      const turns: SpeakerTurn[] = response.intervals
+        .filter((item) => groups.get(item.cluster) === group && item.playable)
+        .map((item) => ({
+          track_id: item.track_id, start: item.start, end: item.end,
+          kind: item.origin === 'diarization' ? 'diarization' : 'transcript',
+          overlap: item.overlap,
+        }));
+      if (turns.length) {
+        setTimelineCursor(turns[0].start);
+        playback.playTurns(turns);
+        return;
+      }
+      setListenError(tr('Nessun intervallo audio disponibile per questa voce.',
+        'No playable audio intervals for this voice.'));
+    } catch (reason) {
+      if (!abort.signal.aborted) setListenError(String(reason));
+    } finally {
+      if (activeListenRequest.current === abort) activeListenRequest.current = null;
+    }
   };
 
   const currentSample = sampleList[sampleIndex % Math.max(1, sampleList.length)];
@@ -245,9 +282,9 @@ export function SpeakerDiarizationEditor({
       />
       <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-text-primary">{tr('Riconosci le voci', 'Recognize the voices')}</h3>
+          <h3 className="text-base font-semibold text-text-primary">{tr('Voci', 'Voices')}</h3>
           <p className="mt-1 text-sm text-text-secondary">
-            {tr('Ascolta un campione, assegna un nome e verifica gli interventi.', 'Listen to a sample, name the person, and check their turns.')}
+            {tr('Ascolta e identifica le persone del meeting.', 'Listen and identify the people in the meeting.')}
           </p>
           <p className="mt-2 text-xs text-text-muted" aria-live="polite">
             {confirmed} / {active.length} {tr('voci confermate', 'voices confirmed')}
@@ -276,80 +313,50 @@ export function SpeakerDiarizationEditor({
         </div>
       )}
 
-      {rows.length > 0 && id && meetingId && (
-        <SpeakerTimeline
-          transcription={transcription}
-          recordingId={meetingId}
-          durationSeconds={durationSeconds}
-          rows={rows}
-          showHidden={showHidden}
-          selectedGroup={selected?.group || null}
-          cursorSeconds={timelineCursor}
-          lang={lang}
-          onSelect={(cluster) => { playback.stop(); setTimelineCursor(null); setSelectedCluster(cluster); }}
-          onPlayInterval={(clip) => { setTimelineCursor(clip.start); playback.playTurns([clip]); }}
-          onJumpToTranscript={onJumpToTranscript}
-        />
-      )}
-
       {!rows.length ? (
         <p className="rounded-lg bg-bg-surface p-4 text-sm text-text-muted">
-          {tr('Nessuna voce rilevata. Puoi rivedere la diarizzazione nelle opzioni avanzate.', 'No voices found. Review diarization under advanced options.')}
+          {tr('Nessuna voce rilevata. Puoi migliorarne il riconoscimento nelle opzioni.', 'No voices found. Improve voice recognition in options.')}
         </p>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(225px,280px)_minmax(0,1fr)]">
-          <nav className="min-w-0 rounded-xl border border-border-subtle bg-bg-surface p-2" aria-label={tr('Elenco voci', 'Voice list')}>
-            <div className="mb-2 flex flex-wrap items-center gap-1 px-1">
-              <button type="button" onClick={() => setFilter('all')}
-                aria-pressed={filter === 'all'}
-                className={'rounded-lg px-2.5 py-1.5 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-border-focus ' +
-                  (filter === 'all' ? 'bg-bg-elevated text-text-primary' : 'text-text-muted hover:text-text-primary')}>
-                {tr('Tutte', 'All')}
-              </button>
-              <button type="button" onClick={() => setFilter('pending')}
-                aria-pressed={filter === 'pending'}
-                className={'rounded-lg px-2.5 py-1.5 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-border-focus ' +
-                  (filter === 'pending' ? 'bg-bg-elevated text-text-primary' : 'text-text-muted hover:text-text-primary')}>
-                {tr('Da identificare', 'To identify')}
-              </button>
-            </div>
-            <div className="max-h-[440px] space-y-1 overflow-auto">
-              {visible.map((speaker) => (
-                <button key={speaker.cluster} type="button"
-                  aria-current={selected?.cluster === speaker.cluster ? 'true' : undefined}
-                  onClick={() => { playback.stop(); setSelectedCluster(speaker.cluster); }}
-                  className={'flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left focus-visible:outline-2 focus-visible:outline-border-focus ' +
-                    (selected?.cluster === speaker.cluster
-                      ? 'bg-accent/15 text-text-primary ring-1 ring-accent/35'
-                      : 'text-text-secondary hover:bg-bg-elevated hover:text-text-primary')}>
-                  {speaker.status === 'accepted' ? <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden="true" />
-                    : <Volume2 className="h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{speaker.name}</span>
-                    <span className="block text-xs text-text-muted">
-                      {speaker.sourceOnly ? tr('Origine audio da verificare', 'Audio source to review') :
-                        speaker.status === 'merged' ? tr('Voce unita', 'Merged voice') :
-                        speaker.status === 'excluded' ? tr('Voce esclusa', 'Excluded voice') :
-                        speaker.count === 0 ? tr('Nessun segmento trascritto attribuito', 'No attributed transcript segments') :
-                        speaker.count + ' ' + tr('segmenti trascritti', 'transcript segments')}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-            {rows.some((r) => r.status === 'merged' || r.status === 'excluded') && (
-              <button type="button" onClick={() => { setShowHidden((was) => !was); setFilter('all'); }}
-                aria-expanded={showHidden}
-                className="mt-2 w-full rounded-lg px-3 py-2 text-left text-xs text-text-secondary hover:bg-bg-elevated">
-                <ChevronDown className="mr-2 inline h-3.5 w-3.5" aria-hidden="true" />
-                {showHidden ? tr('Nascondi voci unite/escluse', 'Hide merged/excluded') :
-                  tr('Mostra voci unite/escluse', 'Show merged/excluded')}
-              </button>
-            )}
-          </nav>
-
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-1">
+            <button type="button" onClick={() => setFilter('all')} aria-pressed={filter === 'all'}
+              className={'min-h-9 rounded-lg px-3 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-border-focus ' +
+                (filter === 'all' ? 'bg-accent/15 font-semibold text-text-primary' : 'text-text-secondary hover:bg-bg-elevated')}>
+              {tr('Tutte le voci', 'All voices')}
+            </button>
+            <button type="button" onClick={() => setFilter('pending')} aria-pressed={filter === 'pending'}
+              className={'min-h-9 rounded-lg px-3 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-border-focus ' +
+                (filter === 'pending' ? 'bg-accent/15 font-semibold text-text-primary' : 'text-text-secondary hover:bg-bg-elevated')}>
+              {tr('Da identificare', 'To identify')}{pending > 0 ? ` · ${pending}` : ''}
+            </button>
+          </div>
+          <SpeakerTimeline
+            transcription={transcription}
+            recordingId={meetingId}
+            durationSeconds={durationSeconds}
+            rows={rows}
+            showHidden={showHidden}
+            pendingOnly={filter === 'pending'}
+            selectedGroup={selected?.group || null}
+            cursorSeconds={timelineCursor}
+            lang={lang}
+            onSelect={(cluster) => { activeListenRequest.current?.abort(); playback.stop(); setTimelineCursor(null); setSelectedCluster(cluster); }}
+            sampleAvailable={(cluster) => Boolean(samples?.speakers.find((s) => s.speaker_cluster === cluster)?.samples.length)}
+            onPlaySample={(cluster) => {
+              const clip = samples?.speakers.find((s) => s.speaker_cluster === cluster)?.samples[0];
+              if (!clip) return;
+              activeListenRequest.current?.abort();
+              setSelectedCluster(cluster);
+              setSampleIndex(0);
+              setTimelineCursor(clip.start);
+              playback.playSample(clip);
+            }}
+            onPlayInterval={(clip) => { activeListenRequest.current?.abort(); setTimelineCursor(clip.start); playback.playTurns([clip]); }}
+            onJumpToTranscript={onJumpToTranscript}
+          >
           {selected && (
-            <div className="min-w-0 rounded-xl border border-border-subtle bg-bg-elevated p-4 sm:p-5">
+            <div className="min-w-0">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h4 className="truncate text-base font-semibold text-text-primary">{selected.name}</h4>
@@ -361,7 +368,7 @@ export function SpeakerDiarizationEditor({
                   </p>
                 </div>
                 {canEdit && selected.status !== 'excluded' && selected.status !== 'merged' && (
-                  <Button variant="ghost" size="sm" onClick={() => setAction(action === 'none' ? 'merge' : 'none')}
+                  <Button variant="ghost" size="sm" onClick={() => setShowActions((value) => !value)}
                     aria-label={tr('Gestisci questa voce', 'Manage this voice')}>
                     <MoreHorizontal className="h-5 w-5" />
                   </Button>
@@ -434,8 +441,8 @@ export function SpeakerDiarizationEditor({
               </div>
 
               <div className="mt-4 border-t border-border-subtle pt-4">
-                <Button variant="secondary" onClick={playSelectedTurns}
-                  disabled={!selected.count || selected.status === 'excluded' || selected.status === 'merged'}>
+                <Button variant="secondary" onClick={() => void playSelectedTurns()}
+                  disabled={!selected || selected.sourceOnly || selected.status === 'excluded' || selected.status === 'merged'}>
                   <Headphones className="h-4 w-4" aria-hidden="true" />
                   {tr('Ascolta i suoi interventi', 'Listen to this speaker’s turns')}
                 </Button>
@@ -469,6 +476,7 @@ export function SpeakerDiarizationEditor({
                     </div>
                   </div>
                 )}
+                {listenError && <p role="alert" className="mt-2 text-xs text-warning">{listenError}</p>}
                 {playback.state.error && <p role="alert" className="mt-2 text-xs text-danger">{playback.state.error}</p>}
               </div>
 
@@ -522,7 +530,7 @@ export function SpeakerDiarizationEditor({
                   )}
                 </div>
               )}
-              {canEdit && action === 'none' && selected.status !== 'merged' && selected.status !== 'excluded' && (
+              {canEdit && showActions && action === 'none' && selected.status !== 'merged' && selected.status !== 'excluded' && (
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Button variant="ghost" size="sm" onClick={() => setAction('merge')}>
                     <GitMerge className="h-4 w-4" aria-hidden="true" />{tr('Unisci voce', 'Merge voice')}
@@ -539,7 +547,7 @@ export function SpeakerDiarizationEditor({
                   {tr('Ripristina voce', 'Restore voice')}
                 </Button>
               )}
-              <div className="mt-4 border-t border-border-subtle pt-2">
+              <div className="mt-3 border-t border-border-subtle pt-2">
                 <button type="button" className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary"
                   aria-expanded={advanced} onClick={() => setAdvanced((value) => !value)}>
                   <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
@@ -553,7 +561,32 @@ export function SpeakerDiarizationEditor({
               </div>
             </div>
           )}
-        </div>
+          </SpeakerTimeline>
+          {showHidden && rows.some((r) => r.status === 'merged') && (
+            <div className="mt-2 flex flex-wrap items-center gap-1 text-xs" aria-label={tr('Voci unite', 'Merged voices')}>
+              <span className="px-2 text-text-muted">{tr('Voci unite:', 'Merged voices:')}</span>
+              {rows.filter((r) => r.status === 'merged').map((r) => (
+                <Button key={r.cluster} variant="ghost" size="sm"
+                  data-speaker-merged-restore={r.cluster}
+                  disabled={!canEdit || saving}
+                  onClick={() => { setSelectedCluster(r.cluster); void commit('restore', r.cluster); }}
+                  aria-label={tr(`Ripristina voce ${r.name}`, `Restore voice ${r.name}`)}>
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  {r.name} · {tr('Ripristina', 'Restore')}
+                </Button>
+              ))}
+            </div>
+          )}
+          {rows.some((r) => r.status === 'merged' || r.status === 'excluded') && (
+            <button type="button" aria-expanded={showHidden}
+              onClick={() => { setShowHidden((value) => !value); setFilter('all'); }}
+              className="mt-3 inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-text-secondary hover:bg-bg-elevated focus-visible:outline-2 focus-visible:outline-border-focus">
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              {showHidden ? tr('Nascondi voci unite ed escluse', 'Hide merged and excluded voices') :
+                tr('Mostra voci unite ed escluse', 'Show merged and excluded voices')}
+            </button>
+          )}
+        </>
       )}
     </section>
   );
