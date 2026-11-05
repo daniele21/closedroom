@@ -1309,7 +1309,11 @@ try {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     mergedTimeline = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
-    return Boolean(timeline?.querySelectorAll('[data-speaker-lane="system:S2"] button[aria-label^="Explore"], [data-speaker-lane="system:S2"] button[aria-label^="Esplora"]').length === 1);
+    // The two source intervals are in distinct overview bins. The merged
+    // group must retain both, rather than requiring a single contiguous bar.
+    return Boolean(timeline &&
+      timeline.querySelectorAll('[data-speaker-lane="system:S2"] button[aria-label^="Explore"], [data-speaker-lane="system:S2"] button[aria-label^="Esplora"]').length === 2 &&
+      !timeline.querySelector('[data-speaker-lane="system:S1"]'));
   `);
     if (mergedTimeline) break;
     await sleep(100);
