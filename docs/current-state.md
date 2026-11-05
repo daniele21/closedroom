@@ -9,11 +9,9 @@ ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, wit
 - Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
 - PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio benchmark tooling; dual-track audio remains canonical pending representative evidence.
 - PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and adaptive Today/Meeting/Projects workspace.
-- Startup locale non distruttivo in sviluppo (PR in lavorazione): `prepare_api_port` rifiuta porte occupate senza uccidere la app; sorgente su `1237` e dati/profilo Development separati; lock del writer per istanza. Test E2E su Mac e prova con registrazione attiva ancora da validare.\n- Speaker Review integrato in `dev` via PR #181 (`dd430931`): campioni vocali locali, nomi, fusione/esclusione e undo; 871 test e browser FULL_MEDIA PASS. Prova su app macOS, audio reale/WKWebView e accessibilità restano da eseguire.
+- Startup locale in sviluppo, PR #186: porta dedicata, dati isolati e nessuna terminazione di processi; gate FULL/target Mac pendenti.
 - PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
 - GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata; runtime/install identity stays stable as `ClosedRoom.app` / `ClosedRoom` / `com.closedroom.app`, while DMGs/finalized artifacts carry version + build/source identity.
-- PR #137 consolidated UI/ASR; path/upload caches stay distinct. PRs #138–139 cut doc media and add read-only footprint audit; native dependency removal awaits Mac measurements.
-- GRP-3 stages immutable artifacts with source identity and checksums.
 - GRP-4/5 now build and draft releases locally from the exact tag; Actions release workflows are retired. Apple notarization remains mandatory.
 
 ## Current integration state
