@@ -64,6 +64,8 @@ export function SpeakerDiarizationEditor({
   const [showActions, setShowActions] = useState(false);
   const [listenError, setListenError] = useState('');
   const playback = useSpeakerReviewPlayback(meetingId, onPlaybackStart);
+  const activeListenRequest = useRef<AbortController | null>(null);
+  const selectedGroupRef = useRef<string | null>(null);
   const [timelineCursor, setTimelineCursor] = useState<number | null>(null);
 
   const mappings = transcription.stats?.speaker_attribution?.mappings || [];
@@ -95,14 +97,17 @@ export function SpeakerDiarizationEditor({
   }, [mappings, transcription.segments, transcription.source_tracks]);
 
   const visible = rows.filter((r) =>
+    !r.sourceOnly &&
     (showHidden || (r.status !== 'merged' && r.status !== 'excluded')) &&
     (filter === 'all' || r.status !== 'accepted'),
   );
-  const selected = rows.find((r) => r.cluster === selectedCluster) || visible[0] || null;
+  const selected = visible.find((r) => r.cluster === selectedCluster) || visible[0] || null;
   const active = rows.filter((r) => r.status !== 'merged' && r.status !== 'excluded' && !r.sourceOnly);
   const confirmed = active.filter((r) => r.status === 'accepted').length;
   const pending = active.length - confirmed;
 
+  selectedGroupRef.current = selected?.group || null;
+  useEffect(() => () => activeListenRequest.current?.abort(), [meetingId]);
   const sampleList = useMemo(() => (
     samples?.speakers.find((item) => item.speaker_cluster === selected?.cluster)?.samples || []
   ), [samples, selected?.cluster]);
@@ -161,6 +166,7 @@ export function SpeakerDiarizationEditor({
     setSaving(true);
     setMutationError('');
     setListenError('');
+    activeListenRequest.current?.abort();
     playback.stop();
     try {
       const response = await ApiClient.commitSpeakerReview(id, {
@@ -221,13 +227,17 @@ export function SpeakerDiarizationEditor({
     if (!selected || !id || saving) return;
     setListenError('');
     const group = selected.group;
+    activeListenRequest.current?.abort();
+    const abort = new AbortController();
+    activeListenRequest.current = abort;
     try {
       const maxSampleEnd = (samples?.speakers || []).reduce((last, item) =>
         Math.max(last, ...item.samples.map((clip) => clip.end), 0), 0);
       const lastAsr = (transcription.segments || []).reduce((last, segment) =>
         Math.max(last, Number(segment.end) || 0), 0);
       const end = Math.min(28800, Math.max(300, durationSeconds, maxSampleEnd, lastAsr));
-      const response = await ApiClient.getSpeakerTimeline(id, 0, end);
+      const response = await ApiClient.getSpeakerTimeline(id, 0, end, abort.signal);
+      if (abort.signal.aborted || selectedGroupRef.current !== group) return;
       if (response.truncated) {
         setListenError(tr('Troppi intervalli: ascolta una finestra temporale dalla timeline.',
           'Too many intervals: play a shorter timeline window.'));
@@ -249,7 +259,9 @@ export function SpeakerDiarizationEditor({
       setListenError(tr('Nessun intervallo audio disponibile per questa voce.',
         'No playable audio intervals for this voice.'));
     } catch (reason) {
-      setListenError(String(reason));
+      if (!abort.signal.aborted) setListenError(String(reason));
+    } finally {
+      if (activeListenRequest.current === abort) activeListenRequest.current = null;
     }
   };
 
@@ -329,17 +341,18 @@ export function SpeakerDiarizationEditor({
             selectedGroup={selected?.group || null}
             cursorSeconds={timelineCursor}
             lang={lang}
-            onSelect={(cluster) => { playback.stop(); setTimelineCursor(null); setSelectedCluster(cluster); }}
+            onSelect={(cluster) => { activeListenRequest.current?.abort(); playback.stop(); setTimelineCursor(null); setSelectedCluster(cluster); }}
             sampleAvailable={(cluster) => Boolean(samples?.speakers.find((s) => s.speaker_cluster === cluster)?.samples.length)}
             onPlaySample={(cluster) => {
               const clip = samples?.speakers.find((s) => s.speaker_cluster === cluster)?.samples[0];
               if (!clip) return;
+              activeListenRequest.current?.abort();
               setSelectedCluster(cluster);
               setSampleIndex(0);
               setTimelineCursor(clip.start);
               playback.playSample(clip);
             }}
-            onPlayInterval={(clip) => { setTimelineCursor(clip.start); playback.playTurns([clip]); }}
+            onPlayInterval={(clip) => { activeListenRequest.current?.abort(); setTimelineCursor(clip.start); playback.playTurns([clip]); }}
             onJumpToTranscript={onJumpToTranscript}
           >
           {selected && (
