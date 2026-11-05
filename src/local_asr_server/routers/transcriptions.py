@@ -676,7 +676,9 @@ def _completed_review_job(transcription_id: str, job_id: str, app: Any):
 
 @router.get("/v1/transcriptions/{transcription_id}/speaker-review")
 def get_speaker_review(transcription_id: str, request: Request):
-    services, transcription = _transcription_review_context(transcription_id, request.app)
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
     return {
         "fingerprint": fingerprint(transcription),
         "undo": services.transcriptions.reviewed_diarization_undo(transcription_id),
@@ -726,7 +728,9 @@ def get_speaker_review_timeline(
 def commit_speaker_review(
     transcription_id: str, body: SpeakerReviewActionRequest, request: Request,
 ):
-    services, transcription = _transcription_review_context(transcription_id, request.app)
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
     if fingerprint(transcription) != body.expected_fingerprint:
         raise HTTPException(
             status_code=409, detail="Speaker review is stale; reload the meeting before editing",
@@ -752,7 +756,9 @@ def commit_speaker_review(
 def undo_speaker_review(
     transcription_id: str, body: ReviewedDiarizationUndoRequest, request: Request,
 ):
-    services, _ = _transcription_review_context(transcription_id, request.app)
+    services, _ = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
     try:
         return {
             "transcription": services.transcriptions.undo_reviewed_diarization(

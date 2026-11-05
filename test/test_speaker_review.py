@@ -207,8 +207,39 @@ class SpeakerReviewApiTests(unittest.TestCase):
         self.assertEqual(len(body["overview"]), 3)
         samples = self.client.get(url + "/samples")
         self.assertEqual(samples.status_code, 200, samples.text)
-        # Editing requires timed ASR; only read-only evidence is relaxed.
-        self.assertEqual(self.client.get(url).status_code, 409)
+        # A person may be identified even when the transcription has no
+        # attributed ASR text. The revision still preserves text/words/timing.
+        review = self.client.get(url)
+        self.assertEqual(review.status_code, 200, review.text)
+        revision = review.json()["fingerprint"]
+        renamed = self.client.post(url, json={
+            "action": "rename", "cluster": "system:S3", "name": "Giulia",
+            "expected_fingerprint": revision,
+        })
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        changed = renamed.json()["transcription"]
+        mapping = next(entry for entry in changed["stats"]["speaker_attribution"]["mappings"]
+                       if entry["speaker_cluster"] == "system:S3")
+        self.assertEqual(mapping["display_name"], "Giulia")
+        self.assertEqual(mapping["status"], "accepted")
+        self.assertEqual(changed["text"], "")
+        self.assertEqual(changed["segments"], [])
+        self.assertEqual(self.client.post(url, json={
+            "action": "exclude", "cluster": "system:S3",
+            "expected_fingerprint": revision,
+        }).status_code, 409)
+        undone = self.client.post(url + "/undo", json={
+            "revision_id": renamed.json()["revision_id"],
+        })
+        self.assertEqual(undone.status_code, 200, undone.text)
+        restored = undone.json()["transcription"]
+        self.assertEqual(restored["segments"], [])
+        self.assertEqual(restored["text"], "")
+        self.assertNotEqual(
+            next(entry["display_name"] for entry in restored["stats"]["speaker_attribution"]["mappings"]
+                 if entry["speaker_cluster"] == "system:S3"),
+            "Giulia",
+        )
 
     def test_revision_conflict_merge_and_undo(self):
         info = self.client.get(self.url)
