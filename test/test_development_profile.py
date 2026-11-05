@@ -16,6 +16,8 @@ from local_asr_server.paths import (
 from local_asr_server.settings import (
     load_settings, save_settings, validate_development_storage,
 )
+from local_asr_server.schemas import SettingsRequest
+from local_asr_server.services.settings_service import InvalidSettings, SettingsService
 
 
 class DevelopmentProfileTests(unittest.TestCase):
@@ -98,6 +100,21 @@ class DevelopmentProfileTests(unittest.TestCase):
         bad = {**load_settings(), "recordings_dir": str(link)}
         with self.assertRaisesRegex(ValueError, "installed app"):
             save_settings(bad)
+
+    def test_ui_rejects_production_directory_without_even_creating_it(self):
+        production = self.root / "ClosedRoom" / "Recordings" / "ClosedRoom"
+        self.assertFalse(production.exists())
+        with self.assertRaises(InvalidSettings):
+            SettingsService().update(SettingsRequest(recordings_dir=str(production)))
+        self.assertFalse(production.exists())
+
+    def test_development_root_cannot_be_symlinked_to_production(self):
+        production = self.root / "ClosedRoom" / "Recordings"
+        production.mkdir(parents=True)
+        storage = get_app_support_dir() / "Data"
+        storage.symlink_to(production, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            load_settings()
 
     def test_valid_development_save_does_not_touch_production_preferences(self):
         production = self.root / "Library/Application Support/ClosedRoom/settings.json"
