@@ -701,9 +701,16 @@ def get_speaker_review_timeline(
     end: float = Query(default=300.0, gt=0),
 ):
     services, transcription = _transcription_review_context(transcription_id, request.app)
+    diarization = (transcription.get("speaker_diarization")
+                   or (transcription.get("stats") or {}).get("speaker_diarization") or {})
+    job_id = str(diarization.get("applied_review_job_id") or "")
+    review_job = services.transcription_jobs.get(job_id) if (
+        diarization.get("source") == "reviewed_meeting" and job_id
+    ) else None
     try:
         return speaker_timeline_window(
             transcription, services.recordings, start_seconds=start, end_seconds=end,
+            review_job=review_job,
         )
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
