@@ -1198,9 +1198,9 @@ try {
     const view = document.querySelector('[data-speaker-review-timeline]');
     return Boolean(view &&
       view.querySelector('[data-speaker-overview]') &&
-      view.querySelector('[data-speaker-lane="system:S1"] button[title]') &&
-      view.querySelector('[data-speaker-lane="system:S2"] button[title]') &&
-      view.querySelector('[data-speaker-lane="system:S3"] button[title]') &&
+      view.querySelector('[data-speaker-lane="system:S1"] button[aria-label^="Explore"], [data-speaker-lane="system:S1"] button[aria-label^="Esplora"]') &&
+      view.querySelector('[data-speaker-lane="system:S2"] button[aria-label^="Explore"], [data-speaker-lane="system:S2"] button[aria-label^="Esplora"]') &&
+      view.querySelector('[data-speaker-lane="system:S3"] button[aria-label^="Explore"], [data-speaker-lane="system:S3"] button[aria-label^="Esplora"]') &&
       !view.querySelector('[data-speaker-lane="Computer"]') &&
       view.querySelector('[data-timeline-coverage="diarization"]') &&
       (view.textContent || '').includes('30:00'));
@@ -1281,7 +1281,7 @@ try {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     mergedTimeline = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
-    return Boolean(timeline?.querySelectorAll('[data-speaker-lane="system:S2"] button[title]').length === 1);
+    return Boolean(timeline?.querySelectorAll('[data-speaker-lane="system:S2"] button[aria-label^="Explore"], [data-speaker-lane="system:S2"] button[aria-label^="Esplora"]').length === 1);
   `);
     if (mergedTimeline) break;
     await sleep(100);
@@ -1295,14 +1295,16 @@ try {
     undoTimeline = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
     return Boolean(
-      timeline?.querySelector('[data-speaker-lane="system:S1"] button[title]') &&
-      timeline?.querySelector('[data-speaker-lane="system:S2"] button[title]'));
+      timeline?.querySelector('[data-speaker-lane="system:S1"] button[aria-label^="Explore"]') &&
+      timeline?.querySelector('[data-speaker-lane="system:S2"] button[aria-label^="Explore"]'));
   `);
     if (undoTimeline) break;
     await sleep(100);
   }
   if (!undoTimeline) throw new Error('undo failed to restore separate speaker lanes');
   await checkpoint(browser, '11c-speaker-review-undo');
+  // Advanced engine controls stay reachable without dominating voice review.
+  await browser.clickCss('[data-speaker-advanced-tools="true"] summary');
   await waitText(browser, ['Compare diarization engines', 'Confronta motori di diarizzazione']);
   await browser.clickButton(['Compare engines', 'Confronta motori']);
   await waitText(browser, ['Start comparison', 'Avvia confronto']);
