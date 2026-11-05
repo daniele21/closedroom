@@ -1382,7 +1382,7 @@ export const ApiClient = {
       `/v1/transcriptions/${encodeURIComponent(transcriptionId)}/speaker-review/timeline?${params}`,
       { signal },
     )).json();
-  }
+  },
 
   async getSpeakerReviewSamples(id: string): Promise<SpeakerReviewSamples> {
     return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review/samples`)).json();
