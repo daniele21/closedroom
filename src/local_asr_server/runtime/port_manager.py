@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
-import signal
 import socket
-import subprocess
 import tempfile
-import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Iterator
+from contextlib import contextmanager
+import fcntl
 from urllib.request import urlopen
 
 from local_asr_server.app_identity import get_app_identity
@@ -18,16 +16,6 @@ from local_asr_server.paths import get_runtime_state_file
 from local_asr_server.runtime.models import LOCAL_SERVICE_HOST
 
 RUNTIME_STATE_SCHEMA_VERSION = 1
-PROCESS_STOP_TIMEOUT_SECONDS = 4.0
-PORT_RELEASE_TIMEOUT_SECONDS = 5.0
-_PROCESS_MARKERS = (
-    "closedroom",
-    "local-asr",
-    "local_asr_server",
-)
-_API_SUBCOMMANDS = {"serve", "app"}
-
-
 class PortInUseError(RuntimeError):
     """Raised when a requested port belongs to an unrelated process."""
 
@@ -94,132 +82,32 @@ def _write_state(path: Path, payload: dict[str, Any]) -> None:
             os.unlink(temporary)
 
 
-def _process_command(pid: int) -> str:
-    try:
-        result = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "command="],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=1.0,
-        )
-        return result.stdout.strip()
-    except Exception:
-        return ""
+@contextmanager
+def runtime_instance_lock(*, lock_path: Path | None = None) -> Iterator[None]:
+    """One local profile writer per process, without signalling other processes.
 
-
-def _list_processes() -> list[tuple[int, str]]:
+    The OS-managed advisory lock lives for the entire server/app lifetime.
+    Dev and bundled app use different profile paths. Closing or crashing the
+    owner releases the lock automatically; no stale PID may terminate a peer.
+    """
+    path = lock_path or get_runtime_state_file().with_name("instance.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    locked = False
     try:
-        result = subprocess.run(
-            ["ps", "-axo", "pid=,command="],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-        )
-    except Exception:
-        return []
-    processes = []
-    for line in result.stdout.splitlines():
-        fields = line.strip().split(maxsplit=1)
-        if len(fields) != 2:
-            continue
         try:
-            processes.append((int(fields[0]), fields[1]))
-        except ValueError:
-            continue
-    return processes
-
-
-def _is_closedroom_api_command(command: str) -> bool:
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        tokens = command.split()
-    if not tokens:
-        return False
-
-    if Path(tokens[0]).name.casefold() == "closedroom":
-        return True
-
-    for index, token in enumerate(tokens[:-1]):
-        if (
-            "/" in token
-            and Path(token).name.casefold() == "local-asr"
-            and tokens[index + 1].casefold() in _API_SUBCOMMANDS
-        ):
-            return True
-
-    for index in range(len(tokens) - 2):
-        if (
-            tokens[index] == "-m"
-            and tokens[index + 1] == "local_asr_server.cli"
-            and tokens[index + 2].casefold() in _API_SUBCOMMANDS
-        ):
-            return True
-    return False
-
-
-def _other_closedroom_api_processes() -> list[tuple[int, str]]:
-    current_pid = os.getpid()
-    return [
-        (pid, command)
-        for pid, command in _list_processes()
-        if pid != current_pid and _is_closedroom_api_command(command)
-    ]
-
-
-def _is_closedroom_process(pid: int, command: str | None = None) -> bool:
-    if pid <= 1 or pid == os.getpid():
-        return False
-    normalized = (command if command is not None else _process_command(pid)).casefold()
-    return any(marker in normalized for marker in _PROCESS_MARKERS)
-
-
-def _pid_is_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-
-
-def _wait_until(
-    predicate: Callable[[], bool],
-    *,
-    timeout: float,
-    sleep: Callable[[float], None] = time.sleep,
-) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        sleep(0.1)
-    return predicate()
-
-
-def terminate_closedroom_process(
-    pid: int,
-    *,
-    command: str | None = None,
-    kill: Callable[[int, int], None] = os.kill,
-) -> bool:
-    """Terminate only a process whose command identifies it as ClosedRoom."""
-    if not _is_closedroom_process(pid, command):
-        return False
-    try:
-        kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return True
-    if _wait_until(lambda: not _pid_is_alive(pid), timeout=PROCESS_STOP_TIMEOUT_SECONDS):
-        return True
-    try:
-        kill(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return True
-    return _wait_until(lambda: not _pid_is_alive(pid), timeout=1.0)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+        except BlockingIOError as exc:
+            raise PortInUseError(
+                "Another ClosedRoom instance is already using this data profile. "
+                "Keep the existing instance open or close it normally before retrying."
+            ) from exc
+        yield
+    finally:
+        if locked:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def prepare_api_port(
@@ -228,52 +116,25 @@ def prepare_api_port(
     host: str = LOCAL_SERVICE_HOST,
     state_path: Path | None = None,
 ) -> None:
-    """Enforce one ClosedRoom API instance and ensure the requested port is free."""
-    path = state_path or get_runtime_state_file()
-    state = _read_state(path)
-    entries = _api_entries(state)
+    """Reject occupied ports without touching any running process or state.
 
-    recorded_pids = {
-        int(api_state.get("pid") or 0)
-        for api_state in entries.values()
-        if int(api_state.get("pid") or 0) > 0
-    }
-    for recorded_pid in sorted(recorded_pids):
-        if recorded_pid == os.getpid() or not _pid_is_alive(recorded_pid):
-            continue
-        if not terminate_closedroom_process(recorded_pid):
-            raise PortInUseError(
-                f"Recorded runtime PID {recorded_pid} is not a verified ClosedRoom process."
-            )
-
-    path.unlink(missing_ok=True)
-
-    for orphan_pid, command in _other_closedroom_api_processes():
-        if orphan_pid in recorded_pids:
-            continue
-        if not terminate_closedroom_process(orphan_pid, command=command):
-            raise PortInUseError(
-                f"Previous ClosedRoom API PID {orphan_pid} could not be stopped safely."
-            )
-
+    A caller must hold runtime_instance_lock for the active profile before
+    creating writable services. A free port is not permission to take over
+    another profile's data and an HTTP health response is never kill authority.
+    """
+    if not (1 <= port <= 65535):
+        raise ValueError("API port must be between 1 and 65535")
     if not is_port_open(host, port):
         return
-
     health = query_closedroom_health(host, port)
-    owner_pid = int(health.get("pid") or 0)
-    if owner_pid and terminate_closedroom_process(owner_pid):
-        if _wait_until(
-            lambda: not is_port_open(host, port),
-            timeout=PORT_RELEASE_TIMEOUT_SECONDS,
-        ):
-            return
-
     if health:
         raise PortInUseError(
-            f"ClosedRoom on {host}:{port} could not be stopped safely."
+            f"ClosedRoom is already listening on {host}:{port}. "
+            "The existing app was left running; choose a different --port."
         )
     raise PortInUseError(
-        f"Port {host}:{port} is occupied by an unrelated process; it was not terminated."
+        f"Port {host}:{port} is occupied. The owning process was not stopped; "
+        "choose a different --port."
     )
 
 

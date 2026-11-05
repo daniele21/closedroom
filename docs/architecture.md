@@ -293,9 +293,12 @@ esportabili; SQLite evita scansioni ripetute e supporta query cross-feature.
 
 ### Sviluppo CLI
 
-`local-asr serve` avvia Uvicorn direttamente. La UI Vite compilata è servita da
-`src/local_asr_server/static/`. Con reload viene usata una porta di sviluppo
-separata.
+`local-asr serve` usa `1237`, `run.sh` usa `1230`, l'app usa `1236`.
+La CLI sorgente isola dati/settings/stato in
+`Application Support/ClosedRoom/Development/` e log in
+`Logs/ClosedRoom/Development/`; rifiuta path fuori da `Development/Data/`.
+Lock OS e porte occupate non terminano altri processi; il bundle usa il
+profilo produzione.
 
 ### App menu bar
 

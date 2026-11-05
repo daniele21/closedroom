@@ -12,7 +12,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from local_asr_server.paths import get_settings_file, APP_NAME
+from local_asr_server.paths import get_settings_file, get_app_support_dir, is_development_profile, APP_NAME
 from local_asr_server.runtime.models import (
     DEFAULT_LOCAL_LLM_URL,
     DEFAULT_LLM_QUALITY_PRESET,
@@ -90,6 +90,60 @@ DEFAULT_SETTINGS: dict[str, any] = {
 }
 
 
+def _profile_defaults() -> dict[str, any]:
+    defaults = DEFAULT_SETTINGS.copy()
+    if is_development_profile():
+        root = get_app_support_dir() / "Data"
+        defaults.update({
+            "recordings_dir": str(root / "Recordings"),
+            "transcriptions_dir": str(root / "Transcriptions"),
+            "catalog_db_path": str(root / "closedroom.db"),
+        })
+    return defaults
+
+
+def validate_development_storage(
+    settings: dict[str, any],
+    *,
+    recordings_dir: Path | str | None = None,
+    catalog_db: Path | str | None = None,
+) -> None:
+    """Fail closed if source-mode writable state escapes its own profile.
+
+    This also rejects symlinks that resolve into production. Only the explicit
+    source-run profile is confined; installed app paths remain unchanged.
+    """
+    if not is_development_profile():
+        return
+    support_dir = get_app_support_dir()
+    storage_dir = support_dir / "Data"
+    if support_dir.is_symlink() or storage_dir.is_symlink():
+        raise ValueError("Development data root must not be a symlink to another profile")
+    root = storage_dir.resolve()
+    paths = {
+        "recordings_dir": recordings_dir or settings.get("recordings_dir"),
+        "transcriptions_dir": settings.get("transcriptions_dir"),
+        "catalog_db_path": catalog_db or settings.get("catalog_db_path"),
+    }
+    normalized: dict[str, Path] = {}
+    for key, raw in paths.items():
+        if not raw:
+            raise ValueError(f"Development profile is missing {key}")
+        candidate = Path(raw).expanduser().resolve()
+        if root not in candidate.parents:
+            raise ValueError(
+                f"Development profile {key} must be inside {root}; "
+                "the installed app's data cannot be shared with source mode."
+            )
+        normalized[key] = candidate
+    if normalized["recordings_dir"] == normalized["transcriptions_dir"]:
+        raise ValueError("Development recordings and transcriptions directories must differ")
+    if normalized["catalog_db_path"] in (
+        normalized["recordings_dir"], normalized["transcriptions_dir"],
+    ):
+        raise ValueError("Development catalog must be a file, not a media directory")
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def load_settings() -> dict[str, any]:
@@ -100,28 +154,31 @@ def load_settings() -> dict[str, any]:
     internal state accidentally.
     """
     settings_file = get_settings_file()
+    defaults = _profile_defaults()
     if not settings_file.exists():
-        return DEFAULT_SETTINGS.copy()
+        validate_development_storage(defaults)
+        return defaults
     try:
         with open(settings_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Merge: defaults first, then on-disk values override
-        settings = {**DEFAULT_SETTINGS, **data}
-        # Normalize empty string values for fields that must be numbers/None
-        for key in (
-            "default_temperature",
-            "speechmatics_timeout_seconds",
-            "speechmatics_poll_interval_seconds",
-            "local_llm_temperature",
-            "local_llm_max_output_tokens",
-            "local_llm_ctx_size",
-            "local_llm_startup_timeout",
-        ):
-            if settings.get(key) == "":
-                settings[key] = None
-        return settings
-    except Exception:
-        return DEFAULT_SETTINGS.copy()
+        if not isinstance(data, dict):
+            raise ValueError("Settings must contain an object")
+    except (OSError, ValueError, TypeError):
+        data = {}
+    settings = {**defaults, **data}
+    for key in (
+        "default_temperature",
+        "speechmatics_timeout_seconds",
+        "speechmatics_poll_interval_seconds",
+        "local_llm_temperature",
+        "local_llm_max_output_tokens",
+        "local_llm_ctx_size",
+        "local_llm_startup_timeout",
+    ):
+        if settings.get(key) == "":
+            settings[key] = None
+    validate_development_storage(settings)
+    return settings
 
 
 def save_settings(settings: dict[str, any]) -> None:
@@ -130,6 +187,7 @@ def save_settings(settings: dict[str, any]) -> None:
 
     The parent directory is created if it does not exist.
     """
+    validate_development_storage({**_profile_defaults(), **settings})
     settings_file = get_settings_file()
     settings_file.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary_path = tempfile.mkstemp(prefix=f".{settings_file.name}.", suffix=".tmp", dir=settings_file.parent)

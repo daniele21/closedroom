@@ -7,7 +7,7 @@ from typing import Any
 from local_asr_server.asr_provider import normalize_asr_provider, speechmatics_options_from_settings
 from local_asr_server.env import get_env_var
 from local_asr_server.schemas import SettingsRequest
-from local_asr_server.settings import DEFAULT_SETTINGS, load_settings, save_settings
+from local_asr_server.settings import DEFAULT_SETTINGS, load_settings, save_settings, validate_development_storage
 from local_asr_server.speaker_diarization import DIARIZATION_ENGINES, NEMOTRON3_PRESETS
 from local_asr_server.analysis_templates import PIPELINES
 from local_asr_server.llm import LLM_PROVIDER_NAMES
@@ -65,6 +65,12 @@ class SettingsService:
         for key, value in patch.items():
             if key in DIRECTORY_SETTING_LABELS:
                 if value:
+                    # Check sandbox before _writable_directory creates/touches
+                    # anything. A Settings UI edit cannot write to production.
+                    try:
+                        validate_development_storage({**current, key: value})
+                    except ValueError as exc:
+                        raise InvalidSettings(str(exc)) from exc
                     current[key] = self._writable_directory(
                         value, label=DIRECTORY_SETTING_LABELS[key]
                     )
