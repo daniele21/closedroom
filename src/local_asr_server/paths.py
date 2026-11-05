@@ -32,6 +32,15 @@ def is_bundled() -> bool:
     return getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
 
 
+def is_development_profile() -> bool:
+    """The source-run CLI is isolated from the installed production bundle.
+
+    Bundled apps never inherit a source development profile, even if a shell
+    happens to export the variable. Child reload workers inherit this marker.
+    """
+    return not is_bundled() and os.environ.get("CLOSEDROOM_DEV_PROFILE") == "1"
+
+
 def get_bundle_dir() -> Path:
     """
     Return the directory that contains bundled resources.
@@ -73,6 +82,12 @@ def get_app_support_dir() -> Path:
     cache).  We create the directory on first access.
     """
     base = Path.home() / "Library" / "Application Support" / APP_NAME
+    if is_development_profile():
+        base = base / "Development"
+        # Runtime lock/state is created before the API loads settings.
+        # Refuse a symlinked root here, before opening any lock file.
+        if base.is_symlink():
+            raise ValueError("Development support directory must not be a symlink")
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -130,6 +145,8 @@ def get_runtime_state_file() -> Path:
 def get_logs_dir(create: bool = True) -> Path:
     """Return ``~/Library/Logs/ClosedRoom/``, creating it by default."""
     logs = Path.home() / "Library" / "Logs" / APP_NAME
+    if is_development_profile():
+        logs = logs / "Development"
     if create:
         logs.mkdir(parents=True, exist_ok=True)
     return logs

@@ -64,7 +64,7 @@ from local_asr_server.window import ClosedRoomWindowManager
 from local_asr_server.meeting_detection import CoreAudioInputObserver, MeetingSuggestionPolicy, SUPPORTED_APPS
 from local_asr_server.macos_meeting_notifications import MeetingNotificationCenter, needs_initial_notification_consent
 from local_asr_server.app_identity import get_app_identity
-from local_asr_server.paths import get_brand_asset_path
+from local_asr_server.paths import get_brand_asset_path, is_development_profile, is_bundled
 from local_asr_server.runtime.models import (
     DEFAULT_API_PORT,
     DEFAULT_DEV_RELOAD_PORT,
@@ -76,6 +76,7 @@ from local_asr_server.runtime.port_manager import (
     clear_api_runtime,
     prepare_api_port,
     register_api_runtime,
+    runtime_instance_lock,
 )
 
 logger = logging.getLogger(__name__)
@@ -252,11 +253,12 @@ def _select_app_port() -> int:
     This lets a versioned build run even while an older ``ClosedRoom.app`` still
     owns the default port.
     """
-    candidate_ports = [DEFAULT_API_PORT]
+    preferred = DEFAULT_DEV_RELOAD_PORT if is_development_profile() else DEFAULT_API_PORT
+    candidate_ports = [preferred]
     candidate_ports.extend(
         port
         for port in range(DEFAULT_API_PORT + 2, DEFAULT_API_PORT + 32)
-        if port not in {DEFAULT_DEV_RELOAD_PORT, DEFAULT_LOCAL_LLM_PORT}
+        if port not in {DEFAULT_API_PORT, DEFAULT_DEV_RELOAD_PORT, DEFAULT_LOCAL_LLM_PORT}
     )
 
     for port in candidate_ports:
@@ -1382,6 +1384,10 @@ def main() -> None:
 
     if dispatch_bundled_module():
         return
+    # "python -m local_asr_server.menubar" is also a supported source entry
+    # point; it must not inherit or write the installed app's production data.
+    if not is_bundled():
+        os.environ["CLOSEDROOM_DEV_PROFILE"] = "1"
     if not _RUMPS_AVAILABLE:
         raise SystemExit(
             "rumps is not installed. Install it with:\n"
@@ -1396,7 +1402,14 @@ def main() -> None:
         level=log_level,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
-    ClosedRoomApp().run()
+    # Own the profile for the entire native app lifecycle. Never replace a
+    # running app, including one with an active capture or transcription job.
+    with runtime_instance_lock():
+        app = ClosedRoomApp()
+        try:
+            app.run()
+        finally:
+            clear_api_runtime(app.app_port)
 
 
 if __name__ == "__main__":

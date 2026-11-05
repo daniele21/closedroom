@@ -2,16 +2,18 @@
 
 ## Engineering baseline
 
-ClosedRoom follows `daniele21/repo-template-sw` **0.10.0**, maturity **L2**, with `python`, `typescript`, `macos`, `local-ai`, `product-ui`. Changes integrate through `dev`; `dev -> main` is the stable-source RELEASE boundary. Applicable target-Mac product/runtime evidence blocks that boundary. Public binary distribution is separately qualified from an exact stable `main` commit/tag.
+Baseline: `repo-template-sw` **0.10.0**, **L2**, profiles Python/TypeScript/macOS/local-AI/product-UI. Integration → `dev`; `dev → main` requires RELEASE/FULL and target-Mac evidence. Distributable binaries need separate artifact qualification.
 
 ## Integrated baseline
 
 - Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
 - PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio benchmark tooling; dual-track audio remains canonical pending representative evidence.
 - PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and adaptive Today/Meeting/Projects workspace.
-- Speaker Review integrato in `dev` via PR #181 (`dd430931`): campioni vocali locali, nomi, fusione/esclusione e undo; 871 test e browser FULL_MEDIA PASS. Prova su app macOS, audio reale/WKWebView e accessibilità restano da eseguire.
+- PR #186 candidate: source runtime on port 1237 with isolated Development data; collisions fail without killing apps. Hardware check pending.
+- PR #189 (`03a6d6d`) integrated: minimal Voices timeline, shared player, restore; 894 tests + browser FULL_MEDIA PASS. WKWebView/real audio pending.
+- PR #181: local voice samples, rename/merge/exclude/undo integrated; packaged WKWebView/audio/accessibility proof pending.
 - PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
-- GitHub release productization separates stable source from binary publication. Root `VERSION` owns product version `0.2.0` independently from Python package metadata; runtime/install identity stays stable as `ClosedRoom.app` / `ClosedRoom` / `com.closedroom.app`, while DMGs/finalized artifacts carry version + build/source identity.
+- Release: root `VERSION=0.2.0` owns product version; app identity `ClosedRoom.app` / `com.closedroom.app` stays fixed. Final artifacts carry version/build/source SHA.
 - PR #137 consolidated UI/ASR; path/upload caches stay distinct. PRs #138–139 cut doc media and add read-only footprint audit; native dependency removal awaits Mac measurements.
 - GRP-3 stages immutable artifacts with source identity and checksums.
 - GRP-4/5 now build and draft releases locally from the exact tag; Actions release workflows are retired. Apple notarization remains mandatory.
@@ -45,13 +47,13 @@ Stable source needs target-Mac evidence, not Apple distribution authority. A dow
 ## Active workstreams
 
 - [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 integrato in `dev` via PR #176 (`772a5f68`): ripresa microfono e audio sistema solo nativo; FULL automated PASS, switch fisico/TCC ancora da provare.
-- [`meeting-detection.md`](workstreams/meeting-detection.md): Teams attribution integrated; default-on/retry improvements pending PR #184; installed-Mac Teams/Zoom, notification and TCC proof pending.
+- [`meeting-detection.md`](workstreams/meeting-detection.md): default-on/retry integrated (#184); real Teams/Zoom notifications/TCC pending.
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
 - [`selective-efficiency.md`](workstreams/selective-efficiency.md): persisted audio fingerprint reuse and privacy-safe VAD comparison tooling; ONNX removal remains evidence-gated.
 
-- Meeting Moments integrated through PR #100 (`4e159414`); INTEGRATION / STRONG preflight #659 passed on exact head `816da96a`. Target-Mac menu/focus/hotkey/TCC confirmation remains RELEASE evidence.
+- Meeting Moments (#100) integrated; Mac menu/focus/hotkey/TCC remains RELEASE evidence.
 
 ## Next highest-value work
 
