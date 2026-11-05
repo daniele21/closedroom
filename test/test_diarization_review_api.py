@@ -115,6 +115,18 @@ class ReviewedDiarizationApiTests(unittest.TestCase):
             [(s["start"], s["end"], s["text"]) for s in before["segments"]],
         )
         self.assertEqual(applied["transcription"]["segments"][0]["provider_speaker"], "system:S1")
+        self.assertEqual(
+            applied["transcription"]["stats"]["speaker_diarization"]["applied_review_job_id"], job_id,
+        )
+        native_timeline = self.client.get(
+            f"/v1/transcriptions/{self.id}/speaker-review/timeline?start=0&end=10"
+        )
+        self.assertEqual(native_timeline.status_code, 200, native_timeline.text)
+        self.assertEqual(native_timeline.json()["coverage"], "diarization")
+        self.assertEqual(native_timeline.json()["intervals"][0]["origin"], "diarization")
+        self.assertEqual(
+            native_timeline.json()["intervals"][0]["cluster"], "system:S1",
+        )
         self.assertEqual(self.client.get(self.path).json()["undo"]["revision_id"], applied["revision_id"])
         self.assertEqual(self.client.post(f"{self.path}/{job_id}/apply").status_code, 409)
         restored = self.client.post(f"{self.path}/undo", json={"revision_id": applied["revision_id"]})

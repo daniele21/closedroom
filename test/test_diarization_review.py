@@ -35,6 +35,9 @@ def _payload(recording_id="recording-id"):
 
 def _job(transcription):
     return {
+        "id": "review-job-fixture",
+        "recording_id": transcription.get("recording_id"),
+        "scope_id": transcription.get("id"),
         "type": REVIEW_JOB_TYPE,
         "status": "completed",
         "result": {
@@ -85,6 +88,10 @@ class CommunityReviewTests(unittest.TestCase):
         self.assertEqual(review["candidate"]["text"], old["text"])
         self.assertEqual(review["assigned_segments"], 2)
         self.assertEqual(review["cluster_count"], 3)  # two remote speakers plus mic
+        self.assertEqual(
+            review["candidate"]["stats"]["speaker_diarization"]["applied_review_job_id"],
+            job["id"],
+        )
         self.assertEqual(review["changed_segments"], 3)
         self.assertEqual(review["candidate"]["segments"][0]["provider_speaker"], "mic:S1")
         self.assertEqual([seg["provider_speaker"] for seg in review["candidate"]["segments"][1:]],

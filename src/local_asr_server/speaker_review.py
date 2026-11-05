@@ -233,3 +233,149 @@ def speaker_audio_samples(transcription: dict[str, Any], recordings: Any) -> dic
             for cluster in candidates
         ],
     }
+
+
+def speaker_timeline_window(
+    transcription: dict[str, Any], recordings: Any, *,
+    start_seconds: float, end_seconds: float,
+    review_job: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Windowed, read-only timeline from authorized local meeting evidence.
+
+    Prefer the persisted native diarization only when its engine and *whole*
+    per-track cluster sets match the applied transcription. Reviewed Community-1
+    timelines are not the canonical raw recording, so those use attributed ASR
+    intervals and are explicitly labelled as such. No synthesized voice or
+    separation, no transcript text and no audio bytes leave this endpoint.
+    """
+    if not all(math.isfinite(value) for value in (start_seconds, end_seconds)):
+        raise ValueError("Timeline range must contain finite timestamps")
+    if start_seconds < 0 or end_seconds <= start_seconds or end_seconds - start_seconds > 28800:
+        raise ValueError("Timeline range must be positive and at most eight hours")
+    recording_id = str(transcription.get("recording_id") or "")
+    if not recording_id or transcription.get("merged_sources"):
+        raise ValueError("Timeline requires an unmerged saved meeting")
+    metadata = recordings.get(recording_id, include_result=False)
+    playable: set[str] = set()
+    known_tracks: set[str] = set()
+    for track in metadata.get("audio_tracks") or []:
+        tid = str(track.get("id") or "")
+        if not tid:
+            continue
+        known_tracks.add(tid)
+        if not track.get("audio_file"):
+            continue
+        try:
+            recordings.track_audio_path(recording_id, tid)
+        except (OSError, ValueError, RecordingConflict):
+            continue
+        playable.add(tid)
+
+    diarization = (
+        transcription.get("speaker_diarization")
+        or (transcription.get("stats") or {}).get("speaker_diarization")
+        or {}
+    )
+    expected_by_track = diarization.get("clusters_by_track") or {}
+    raw: dict[str, Any] | None = None
+    if diarization.get("source") == "reviewed_meeting":
+        result = (review_job or {}).get("result") or {}
+        runs = result.get("runs") or []
+        applied_id = str(diarization.get("applied_review_job_id") or "")
+        review_track = str(result.get("track_id") or "")
+        if (
+            applied_id and str((review_job or {}).get("id") or "") == applied_id
+            and review_job.get("type") == "diarization_review"
+            and review_job.get("status") == "completed"
+            and str(review_job.get("scope_id") or "") == str(transcription.get("id") or "")
+            and str(review_job.get("recording_id") or "") == recording_id
+            and result.get("scope") == "full"
+            and review_track in known_tracks
+            and len(runs) == 1
+            and runs[0].get("key") == "community-1"
+            and runs[0].get("status") == "completed"
+            and isinstance(runs[0].get("timeline"), list)
+        ):
+            # The reviewed native timeline is already persisted by JobStore.
+            # A missing/expired or unrelated job cannot produce claimed audio.
+            raw = {"engine": diarization.get("engine"), "tracks": {
+                review_track: {"segments": runs[0]["timeline"]},
+            }}
+    else:
+        raw = recordings.read_speaker_diarization(recording_id)
+    raw_ok = (
+        bool(raw)
+        and str(diarization.get("status") or "completed") == "completed"
+        and str(raw.get("engine") or "") == str(diarization.get("engine") or "")
+        and bool(expected_by_track)
+    )
+    known = set(_clusters(transcription))
+    by_cluster: dict[str, list[dict[str, Any]]] = {key: [] for key in known}
+    raw_clusters: set[str] = set()
+    if raw_ok:
+        for track_id, track_data in (raw.get("tracks") or {}).items():
+            if track_id not in known_tracks:
+                continue
+            expected = set(str(value) for value in (expected_by_track.get(track_id) or []))
+            observed = {
+                str(turn.get("speaker")) if str(turn.get("speaker") or "").startswith(f"{track_id}:")
+                else f"{track_id}:{turn.get('speaker')}"
+                for turn in (track_data.get("segments") or []) if turn.get("speaker")
+            }
+            if not expected or expected != observed:
+                continue
+            for turn in (track_data.get("segments") or []):
+                voice = str(turn.get("speaker") or "")
+                cluster = voice if voice.startswith(f"{track_id}:") else f"{track_id}:{voice}"
+                span = _finite_interval(turn.get("start"), turn.get("end"))
+                if cluster not in known or span is None:
+                    continue
+                raw_clusters.add(cluster)
+                by_cluster[cluster].append({
+                    "cluster": cluster, "track_id": track_id,
+                    "start": span[0], "end": span[1], "origin": "diarization",
+                    "overlap": False, "playable": track_id in playable,
+                })
+
+    # ASR projection is intentionally a fallback, not blended with a different
+    # native timing source for the same identity.
+    for segment in transcription.get("segments") or []:
+        cluster = str(segment.get("provider_speaker") or "")
+        if cluster not in known or cluster in raw_clusters:
+            continue
+        track_id = str(segment.get("track_id") or segment.get("source") or "")
+        if track_id not in known_tracks:
+            continue
+        span = _finite_interval(segment.get("start"), segment.get("end"))
+        if span is None:
+            continue
+        by_cluster[cluster].append({
+            "cluster": cluster, "track_id": track_id,
+            "start": span[0], "end": span[1], "origin": "transcript",
+            "overlap": bool(segment.get("overlap")),
+            "playable": track_id in playable,
+        })
+
+    all_intervals = [
+        item for items in by_cluster.values() for item in items
+        if item["end"] > start_seconds and item["start"] < end_seconds
+    ]
+    all_intervals.sort(key=lambda item: (item["start"], item["end"], item["cluster"]))
+    limit = 5000
+    clipped = [
+        {**item,
+         "start": max(start_seconds, item["start"]),
+         "end": min(end_seconds, item["end"])}
+        for item in all_intervals[:limit]
+    ]
+    native = sum(item["origin"] == "diarization" for item in clipped)
+    return {
+        "recording_id": recording_id,
+        "transcription_id": transcription.get("id"),
+        "start": start_seconds, "end": end_seconds,
+        "intervals": clipped,
+        "truncated": len(all_intervals) > limit,
+        "coverage": "mixed" if native and native != len(clipped) else
+                    "diarization" if native else "transcript",
+        "has_audio": bool(playable),
+    }

@@ -8,6 +8,7 @@ import {
   type SpeakerReviewInfo, type SpeakerReviewSamples, type Transcription,
 } from '../../api/apiClient';
 import { useSpeakerReviewPlayback, type SpeakerTurn } from '../../hooks/useSpeakerReviewPlayback';
+import { SpeakerTimeline } from './SpeakerTimeline';
 import { useToast } from '../../context/ToastContext';
 import { useTranslation } from '../../i18n/i18n';
 import { Button } from '../ui/Button';
@@ -19,6 +20,7 @@ interface Props {
   onPlaybackStart?: () => void;
   onJumpToTranscript?: (time: number) => void;
   readOnly?: boolean;
+  durationSeconds?: number;
 }
 
 type SpeakerRow = {
@@ -38,6 +40,7 @@ function clock(seconds: number) {
 
 export function SpeakerDiarizationEditor({
   transcription, recordingId, onUpdated, onPlaybackStart, onJumpToTranscript, readOnly = false,
+  durationSeconds = 0,
 }: Props) {
   const { lang } = useTranslation();
   const tr = (it: string, en: string) => lang === 'it' ? it : en;
@@ -59,6 +62,7 @@ export function SpeakerDiarizationEditor({
   const [action, setAction] = useState<'none' | 'merge' | 'exclude'>('none');
   const [mergeTarget, setMergeTarget] = useState('');
   const playback = useSpeakerReviewPlayback(meetingId, onPlaybackStart);
+  const [timelineCursor, setTimelineCursor] = useState<number | null>(null);
 
   const mappings = transcription.stats?.speaker_attribution?.mappings || [];
   const rows = useMemo<SpeakerRow[]>(() => {
@@ -232,7 +236,10 @@ export function SpeakerDiarizationEditor({
     <section className="rounded-xl border border-border-subtle bg-bg-glass p-4 sm:p-5" data-speaker-review-workspace="true">
       <audio
         ref={playback.audioRef} preload="metadata"
-        onTimeUpdate={playback.onTimeUpdate} onEnded={playback.onEnded}
+        onTimeUpdate={() => {
+          setTimelineCursor(playback.audioRef.current?.currentTime ?? null);
+          playback.onTimeUpdate();
+        }} onEnded={playback.onEnded}
         onPlay={playback.onPlay} onPause={playback.onPause} onError={playback.onError}
         aria-label={tr('Riproduzione campioni speaker', 'Speaker sample playback')}
       />
@@ -267,6 +274,22 @@ export function SpeakerDiarizationEditor({
           <span className="flex-1">{mutationError}</span>
           <Button variant="secondary" size="sm" onClick={() => void reload()}>{tr('Ricarica', 'Reload')}</Button>
         </div>
+      )}
+
+      {rows.length > 0 && id && meetingId && (
+        <SpeakerTimeline
+          transcription={transcription}
+          recordingId={meetingId}
+          durationSeconds={durationSeconds}
+          rows={rows}
+          showHidden={showHidden}
+          selectedGroup={selected?.group || null}
+          cursorSeconds={timelineCursor}
+          lang={lang}
+          onSelect={(cluster) => { playback.stop(); setTimelineCursor(null); setSelectedCluster(cluster); }}
+          onPlayInterval={(clip) => { setTimelineCursor(clip.start); playback.playTurns([clip]); }}
+          onJumpToTranscript={onJumpToTranscript}
+        />
       )}
 
       {!rows.length ? (
@@ -307,7 +330,8 @@ export function SpeakerDiarizationEditor({
                       {speaker.sourceOnly ? tr('Origine audio da verificare', 'Audio source to review') :
                         speaker.status === 'merged' ? tr('Voce unita', 'Merged voice') :
                         speaker.status === 'excluded' ? tr('Voce esclusa', 'Excluded voice') :
-                        speaker.count + ' ' + tr('interventi', 'turns')}
+                        speaker.count === 0 ? tr('Nessun segmento trascritto attribuito', 'No attributed transcript segments') :
+                        speaker.count + ' ' + tr('segmenti trascritti', 'transcript segments')}
                     </span>
                   </span>
                 </button>

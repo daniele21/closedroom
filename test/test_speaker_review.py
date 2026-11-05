@@ -218,6 +218,16 @@ class SpeakerReviewApiTests(unittest.TestCase):
         samples = self.client.get(self.url + "/samples")
         self.assertEqual(samples.status_code, 200, samples.text)
         self.assertEqual(samples.json()["recording_id"], self.recording_id)
+        timeline = self.client.get(self.url + "/timeline?start=0&end=30")
+        self.assertEqual(timeline.status_code, 200, timeline.text)
+        self.assertEqual(timeline.json()["coverage"], "transcript")
+        self.assertEqual(timeline.json()["recording_id"], self.recording_id)
+        self.assertEqual([row["cluster"] for row in timeline.json()["intervals"]],
+                         ["system:S1", "system:S2", "system:S1"])
+        self.assertTrue(all("text" not in row for row in timeline.json()["intervals"]))
+        self.assertEqual(
+            self.client.get(self.url + "/timeline?start=30&end=10").status_code, 409)
+
 
 
 if __name__ == "__main__":
