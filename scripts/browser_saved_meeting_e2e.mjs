@@ -127,7 +127,7 @@ const counts = {
   benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0, benchmark_window: 0,
   review_list: 0, review_start: 0, review_poll: 0, review_preview: 0,
   review_apply: 0, review_undo: 0,
-  speaker_sample_list: 0, speaker_merge: 0, speaker_undo: 0, speaker_audio_request: 0,
+  speaker_sample_list: 0, speaker_timeline: 0, speaker_merge: 0, speaker_undo: 0, speaker_audio_request: 0,
 };
 let benchmarkJob = null;
 let benchmarkRequest = null;
@@ -300,6 +300,26 @@ function fixtureServer(port) {
       return json(res, 200, {
         fingerprint: speakerReviewFingerprint,
         undo: speakerReviewUndo ? { revision_id: speakerReviewUndo } : null,
+      });
+    }
+    if (pathname === '/v1/recordings/e2e-meeting' && req.method === 'GET') {
+      return json(res, 200, meetingFixture.recording);
+    }
+    if (pathname === '/v1/transcriptions/e2e-transcription/speaker-review/timeline' && req.method === 'GET') {
+      counts.speaker_timeline += 1;
+      const url = new URL(req.url, `http://127.0.0.1:${port}`);
+      const start = Number(url.searchParams.get('start') || 0);
+      const end = Number(url.searchParams.get('end') || 600);
+      const all = [
+        { cluster: 'system:S1', track_id: 'system', start: 0, end: 3.5,
+          origin: 'diarization', overlap: false, playable: true },
+        { cluster: 'system:S2', track_id: 'system', start: 20, end: 26,
+          origin: 'diarization', overlap: false, playable: true },
+      ];
+      return json(res, 200, {
+        recording_id: MEETING_ID, transcription_id: 'e2e-transcription',
+        start, end, intervals: all.filter((row) => row.end > start && row.start < end),
+        coverage: 'diarization', truncated: false, has_audio: true,
       });
     }
     if (pathname === '/v1/transcriptions/e2e-transcription/speaker-review/samples' && req.method === 'GET') {
@@ -1141,6 +1161,17 @@ try {
       (b.innerText || '').includes('Play sample') && !b.disabled));
   `);
   if (!sampleReady) throw new Error('Speaker sample control absent');
+  await waitCount('speaker_timeline', 1);
+  const initialTimeline = await browser.execute(`
+    const view = document.querySelector('[data-speaker-review-timeline]');
+    return Boolean(view &&
+      view.querySelector('[data-speaker-overview]') &&
+      view.querySelector('[data-speaker-lane="system:S1"] [data-interval-origin="diarization"]') &&
+      view.querySelector('[data-speaker-lane="system:S2"] [data-interval-origin="diarization"]') &&
+      view.querySelector('[data-timeline-coverage="diarization"]'));
+  `);
+  if (!initialTimeline) throw new Error('speaker timeline did not show both raw voices and shared overview');
+  if (counts.speaker_audio_request !== 0) throw new Error('timeline downloaded private audio without Play');
   await checkpoint(browser, '11a-speaker-review-ready');
   await browser.clickButton(['Merge voice', 'Unisci voce']);
   const targetChanged = await browser.execute(`
@@ -1158,9 +1189,21 @@ try {
   if (meetingFixture.transcription.text !== 'Decision: ship the release after validation. Owner: Alex.') {
     throw new Error('Speaker merge changed canonical text in fixture');
   }
+  const mergedTimeline = await browser.execute(`
+    const timeline = document.querySelector('[data-speaker-review-timeline]');
+    return Boolean(timeline?.querySelectorAll('[data-speaker-lane="system:S2"] [data-speaker-interval]').length === 2);
+  `);
+  if (!mergedTimeline) throw new Error('merged speaker timeline did not regroup raw intervals');
   await checkpoint(browser, '11b-speaker-review-merged');
   await browser.clickButton(['Undo last correction', 'Annulla ultima modifica']);
   await waitCount('speaker_undo', 1);
+  const undoTimeline = await browser.execute(`
+    const timeline = document.querySelector('[data-speaker-review-timeline]');
+    return Boolean(
+      timeline?.querySelectorAll('[data-speaker-lane="system:S1"] [data-speaker-interval]').length === 1 &&
+      timeline?.querySelectorAll('[data-speaker-lane="system:S2"] [data-speaker-interval]').length === 1);
+  `);
+  if (!undoTimeline) throw new Error('undo failed to restore separate speaker lanes');
   await checkpoint(browser, '11c-speaker-review-undo');
   await waitText(browser, ['Compare diarization engines', 'Confronta motori di diarizzazione']);
   await browser.clickButton(['Compare engines', 'Confronta motori']);
