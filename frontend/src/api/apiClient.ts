@@ -397,7 +397,20 @@ export interface SpeakerTimelineWindow {
     overlap: boolean;
     playable: boolean;
   }>;
-  coverage: 'diarization' | 'transcript' | 'mixed';
+  coverage: 'diarization' | 'transcript' | 'mixed' | 'none';
+  window_coverage?: 'diarization' | 'transcript' | 'mixed' | 'none';
+  duration_seconds?: number | null;
+  duration_source?: 'recording' | 'recording_clock' | 'evidence' | 'unknown';
+  max_evidence_end_seconds?: number | null;
+  total_interval_count?: number;
+  overview_bucket_count?: number;
+  overview?: Array<{
+    cluster: string;
+    bins: number[];
+    interval_count: number;
+    first_start: number | null;
+    playable_count: number;
+  }>;
   truncated: boolean;
   has_audio: boolean;
 }
