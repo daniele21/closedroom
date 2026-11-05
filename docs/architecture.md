@@ -294,8 +294,19 @@ esportabili; SQLite evita scansioni ripetute e supporta query cross-feature.
 ### Sviluppo CLI
 
 `local-asr serve` avvia Uvicorn direttamente. La UI Vite compilata è servita da
-`src/local_asr_server/static/`. Con reload viene usata una porta di sviluppo
-separata.
+`src/local_asr_server/static/`. Da sorgente, la porta è `1237` sia con
+`--reload` sia senza. `run.sh` sceglie esplicitamente `1230`. L'app installata
+usa normalmente `1236` e non viene mai terminata per liberare la porta.
+
+Il source launcher attiva `CLOSEDROOM_DEV_PROFILE=1`, isolando impostazioni,
+registrazioni, trascrizioni, catalogo, stato e log sotto
+`~/Library/Application Support/ClosedRoom/Development/` (log sotto
+`~/Library/Logs/ClosedRoom/Development/`). Il catalogo di sviluppo non utilizza
+la ricerca legacy di `~/ClosedRoom/closedroom.db`, e override fuori da
+`Development/Data/` sono rifiutati. Un lock `fcntl.flock` detenuto per tutto
+il lifecycle impedisce istanze concorrenti sullo stesso profilo; porta occupata
+o altro writer provocano un errore, **mai SIGTERM/SIGKILL** a un altro processo.
+L'app bundled ignora sempre il marker di sviluppo.
 
 ### App menu bar
 
