@@ -330,7 +330,8 @@ export function SpeakerDiarizationEditor({
                       {speaker.sourceOnly ? tr('Origine audio da verificare', 'Audio source to review') :
                         speaker.status === 'merged' ? tr('Voce unita', 'Merged voice') :
                         speaker.status === 'excluded' ? tr('Voce esclusa', 'Excluded voice') :
-                        speaker.count + ' ' + tr('interventi', 'turns')}
+                        speaker.count === 0 ? tr('Nessun segmento trascritto attribuito', 'No attributed transcript segments') :
+                        speaker.count + ' ' + tr('segmenti trascritti', 'transcript segments')}
                     </span>
                   </span>
                 </button>
