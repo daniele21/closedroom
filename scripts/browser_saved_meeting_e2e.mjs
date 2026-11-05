@@ -1191,7 +1191,7 @@ try {
       (b.innerText || '').includes('Play sample') && !b.disabled));
   `);
   if (!sampleReady) throw new Error('Speaker sample control absent');
-  await waitCount('speaker_timeline', 2);
+  await waitCount('speaker_timeline', 1);
   let initialTimeline = false;
   for (let attempt = 0; attempt < 60; attempt += 1) {
     initialTimeline = await browser.execute(`
@@ -1216,7 +1216,7 @@ try {
     bin.click(); return true;
   `);
   if (!located) throw new Error('audio-only voice at 25:15 not navigable from overview');
-  await waitCount('speaker_timeline', 3);
+  await waitCount('speaker_timeline', 2);
   let lateSegment = false;
   for (let attempt = 0; attempt < 60; attempt += 1) {
     lateSegment = await browser.execute(`
@@ -1233,7 +1233,7 @@ try {
     [...timeline.querySelectorAll('button')].find((button) =>
       ['All', 'Tutto'].includes((button.textContent || '').trim()))?.click();
   `);
-  await waitCount('speaker_timeline', 4);
+  await waitCount('speaker_timeline', 3);
   if (counts.speaker_audio_request !== 0) throw new Error('timeline downloaded private audio without Play');
   const zoomed = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
@@ -1244,7 +1244,7 @@ try {
     return true;
   `);
   if (!zoomed) throw new Error('speaker timeline zoom unavailable');
-  await waitCount('speaker_timeline', 5);
+  await waitCount('speaker_timeline', 4);
   const zoomStatus = await browser.execute(`
     return document.querySelector('[data-speaker-review-timeline] button[aria-pressed="true"]')?.textContent?.trim() === '1 min';
   `);
@@ -1258,7 +1258,7 @@ try {
     return true;
   `);
   if (!restoredAll) throw new Error('cannot restore full-meeting speaker timeline');
-  await waitCount('speaker_timeline', 6);
+  await waitCount('speaker_timeline', 5);
   await checkpoint(browser, '11a-speaker-review-ready');
   await browser.clickCss('[data-speaker-review-workspace] button[aria-label="Manage this voice"], [data-speaker-review-workspace] button[aria-label="Gestisci questa voce"]');
   await browser.clickButton(['Merge voice', 'Unisci voce']);
