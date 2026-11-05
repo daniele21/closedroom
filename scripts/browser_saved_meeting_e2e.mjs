@@ -316,6 +316,9 @@ function fixtureServer(port) {
           origin: 'diarization', overlap: false, playable: true },
         { cluster: 'system:S2', track_id: 'system', start: 20, end: 26,
           origin: 'diarization', overlap: false, playable: true },
+        // Deliberately straddles the first one-minute zoom boundary.
+        { cluster: 'system:S2', track_id: 'system', start: 55, end: 65,
+          origin: 'diarization', overlap: false, playable: true },
         { cluster: 'system:S3', track_id: 'system', start: 1515, end: 1522,
           origin: 'diarization', overlap: true, playable: true },
       ];
@@ -1256,6 +1259,26 @@ try {
     return document.querySelector('[data-speaker-review-timeline] button[aria-pressed="true"]')?.textContent?.trim() === '1 min';
   `);
   if (!zoomStatus) throw new Error('speaker zoom button did not reflect selection');
+  // An interval spanning 0:55–1:05 must occupy only the last five
+  // seconds of the 0:00–1:00 viewport, not run beyond its right edge.
+  let clippedBoundary = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    clippedBoundary = await browser.execute(`
+      const interval = document.querySelector(
+        '[data-speaker-lane="system:S2"] [data-speaker-interval][title*="0:55"]'
+      );
+      if (!interval) return false;
+      const left = Number.parseFloat(interval.style.left);
+      const width = Number.parseFloat(interval.style.width);
+      return Math.abs(left - (55 / 60 * 100)) < 0.1 &&
+        Math.abs(width - (5 / 60 * 100)) < 0.1 &&
+        left + width <= 100.001;
+    `);
+    if (clippedBoundary) break;
+    await sleep(100);
+  }
+  if (!clippedBoundary) throw new Error('speaker interval crossing zoom edge was not visually clipped');
+
   const restoredAll = await browser.execute(`
     const timeline = document.querySelector('[data-speaker-review-timeline]');
     const button = Array.from(timeline?.querySelectorAll('button') || [])
