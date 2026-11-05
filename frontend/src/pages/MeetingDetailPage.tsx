@@ -1764,6 +1764,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                       key={meeting.transcription.id || meeting.transcription.saved_id}
                       transcription={meeting.transcription}
                       recordingId={meeting.id}
+                      durationSeconds={recordingDuration}
                       readOnly={demoMode}
                       onPlaybackStart={() => audioRef.current?.pause()}
                       onJumpToTranscript={(time) => {
