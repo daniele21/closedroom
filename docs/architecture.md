@@ -293,13 +293,12 @@ esportabili; SQLite evita scansioni ripetute e supporta query cross-feature.
 
 ### Sviluppo CLI
 
-`local-asr serve` usa `1237` (anche senza reload); `run.sh` usa `1230`;
-l'app installata usa `1236`. Il profilo sorgente separa settings, registrazioni,
-trascrizioni, DB e stato sotto `Application Support/ClosedRoom/Development/`,
-con log `Logs/ClosedRoom/Development/`. I path modificabili devono restare
-in `Development/Data/`; il catalogo non cerca DB di produzione. Un lock OS
-impedisce due writer sullo stesso profilo. Porte occupate causano un errore,
-mai l'arresto di un altro processo. Il bundle ignora il profilo sviluppo.
+`local-asr serve` usa `1237`, `run.sh` usa `1230`, l'app usa `1236`.
+La CLI sorgente isola dati/settings/stato in
+`Application Support/ClosedRoom/Development/` e log in
+`Logs/ClosedRoom/Development/`; rifiuta path fuori da `Development/Data/`.
+Lock OS e porte occupate non terminano altri processi; il bundle usa il
+profilo produzione.
 
 ### App menu bar
 
