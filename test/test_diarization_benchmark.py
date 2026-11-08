@@ -30,9 +30,10 @@ class FakeRecordingStore:
         return self.metadata
 
     def transcribable_tracks(self, recording_id):
-        if self.dual:
-            return [({"id": "mic"}, self.path), ({"id": "system"}, self.path)]
-        return [({"id": "mixed"}, self.path)]
+        raise AssertionError("Diarization must not request all ASR input tracks")
+
+    def diarization_track(self, recording_id):
+        return ({"id": "system" if self.dual else "mixed"}, self.path)
 
 
 class FakeDiarizer:
