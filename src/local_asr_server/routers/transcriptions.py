@@ -781,9 +781,6 @@ def start_community_review(transcription_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except RecordingConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if not any(track.get("id") in {"system", "mixed"} for track, _path in tracks):
-        raise HTTPException(status_code=409, detail="No system or mixed track can be diarized")
-
     # A staged result is scoped to its exact transcription and checks for
     # concurrent modifications at both preview and explicit apply time.
     pending = services.transcription_jobs.list(
