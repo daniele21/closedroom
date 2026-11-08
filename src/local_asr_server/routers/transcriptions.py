@@ -776,7 +776,7 @@ def start_community_review(transcription_id: str, request: Request):
         recording = services.recordings.get(recording_id, include_result=False)
         if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
             raise RecordingConflict("Finish the recording before reviewing speaker labels")
-        tracks = services.recordings.transcribable_tracks(recording_id)
+        services.recordings.diarization_track(recording_id)
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except RecordingConflict as exc:
