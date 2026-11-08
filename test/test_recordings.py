@@ -229,6 +229,51 @@ class RecordingStoreTests(unittest.TestCase):
         tracks = self.store.transcribable_tracks(recording["id"])
         self.assertEqual([track["id"] for track, _ in tracks], ["mic", "system"])
 
+    def test_diarization_prefers_system_and_does_not_require_mic(self) -> None:
+        recording = self.store.create(
+            title="System audio survived microphone loss",
+            mime_type="audio/webm;codecs=opus",
+            model="test-model",
+            language="it",
+            capture_mode="both",
+        )
+        meeting_id = recording["id"]
+        self.store.append_track_chunk(meeting_id, "system", 0, b"system")
+        self.store.append_track_chunk(meeting_id, "mixed", 0, b"mixed")
+        with self.assertRaisesRegex(RecordingConflict, "Finish the recording"):
+            self.store.diarization_track(meeting_id)
+        self.store.finalize(meeting_id)
+        self.store.track_audio_path(meeting_id, "mic").unlink()
+
+        # The transcription contract is deliberately NOT weakened.
+        with self.assertRaisesRegex(RecordingConflict, "Track mic"):
+            self.store.transcribable_tracks(meeting_id)
+        track, path = self.store.diarization_track(meeting_id)
+        self.assertEqual(track["id"], "system")
+        self.assertEqual(path.read_bytes(), b"system")
+
+        # If system is unavailable, mixed is an explicit, verified fallback;
+        # never select microphone audio as though it were remote speakers.
+        path.unlink()
+        track, path = self.store.diarization_track(meeting_id)
+        self.assertEqual(track["id"], "mixed")
+        self.assertEqual(path.read_bytes(), b"mixed")
+
+        path.write_bytes(b"")
+        with self.assertRaisesRegex(RecordingConflict, "No finalized system or mixed audio"):
+            self.store.diarization_track(meeting_id)
+
+    def test_diarization_rejects_mic_only_without_remote_audio(self) -> None:
+        recording = self.store.create(
+            title="Mic only", mime_type="audio/webm",
+            model="test-model", language="it", capture_mode="mic_only",
+        )
+        meeting_id = recording["id"]
+        self.store.append_track_chunk(meeting_id, "mic", 0, b"voice")
+        self.store.finalize(meeting_id)
+        with self.assertRaisesRegex(RecordingConflict, "No finalized system or mixed audio"):
+            self.store.diarization_track(meeting_id)
+
     def test_native_capture_files_update_track_sizes_on_finalize(self) -> None:
         recording = self.store.create(
             title="Native Call",
