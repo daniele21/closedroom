@@ -10,6 +10,7 @@ from local_asr_server.speaker_diarization_benchmark import (
     _preview_segments, run_benchmark, validate_options,
     public_benchmark_job, benchmark_timeline_window,
 )
+from local_asr_server.recordings import RecordingStore
 
 
 def make_wav(path: Path, frames: int = 16_000) -> None:
@@ -87,6 +88,37 @@ class DiarizationBenchmarkTests(unittest.TestCase):
             self.assertNotIn(str(path), str(result))
             self.assertNotIn("Private meeting", str(result))
             self.assertFalse(result["reference_scored"])
+
+    def test_full_pipeline_uses_saved_system_audio_when_mic_is_missing(self):
+        # Exercise real RecordingStore selection and the full benchmark entry
+        # point (with model inference stubbed), not only the API admission.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = RecordingStore(root, use_settings_dir=False)
+            recording = store.create(
+                title="Meeting with missing mic.wav", mime_type="audio/wav",
+                model="test-model", language="it", capture_mode="both",
+            )
+            wav_path = root / "fixture.wav"
+            make_wav(wav_path)
+            store.append_track_chunk(recording["id"], "system", 0, wav_path.read_bytes())
+            store.finalize(recording["id"])
+            store.track_audio_path(recording["id"], "mic").unlink()
+            original_system = store.track_audio_path(recording["id"], "system").read_bytes()
+
+            result = run_benchmark(
+                store, recording["id"], engines=["community-1"], scope="full",
+                cancel_requested=lambda: False, on_progress=lambda *_args: None,
+                service=FakeDiarizer(), allow_single=True,
+            )
+            self.assertEqual(result["track_id"], "system")
+            self.assertEqual(result["scope"], "full")
+            self.assertEqual(result["outcome_status"], "completed")
+            self.assertEqual(result["runs"][0]["status"], "completed")
+            self.assertEqual(
+                store.track_audio_path(recording["id"], "system").read_bytes(),
+                original_system,
+            )
 
     def test_full_run_records_failures_without_exposing_sensitive_error(self):
         with tempfile.TemporaryDirectory() as tmp:
