@@ -77,6 +77,31 @@ class DiarizationBenchmarkApiTests(unittest.TestCase):
             payload = {"engines": ["community-1", "nemotron3-fast128"], **bad_range}
             self.assertEqual(self.client.post(url, json=payload).status_code, 422)
 
+    def test_comparison_request_allows_missing_mic_when_system_is_saved(self):
+        recording = self.store.create(
+            title="Dual-track with dropped mic", mime_type="audio/wav",
+            model="test-model", language="it", capture_mode="both",
+        )
+        recording_id = recording["id"]
+        self.store.append_track_chunk(recording_id, "system", 0, _wav())
+        self.store.finalize(recording_id)
+        self.store.track_audio_path(recording_id, "mic").unlink()
+        url = f"/v1/recordings/{recording_id}/diarization-benchmarks"
+        with patch("local_asr_server.routers.transcriptions.run_benchmark",
+                   return_value={"scope": "sample", "track_id": "system", "runs": []}) as run:
+            response = self.client.post(url, json={
+                "engines": ["community-1", "nemotron3-fast128"], "scope": "sample",
+            })
+            self.assertEqual(response.status_code, 202, response.text)
+            job_id = response.json()["id"]
+            for _ in range(100):
+                job = self.client.get(f"/v1/jobs/{job_id}").json()
+                if job.get("status") in {"completed", "failed", "cancelled"}:
+                    break
+                time.sleep(0.02)
+            self.assertEqual(job["status"], "completed", job)
+            run.assert_called_once()
+
     def test_job_api_persists_isolated_results_and_allows_lookup(self):
         recording_id = self.recording()
         url = f"/v1/recordings/{recording_id}/diarization-benchmarks"
