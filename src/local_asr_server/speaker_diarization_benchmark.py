@@ -162,13 +162,10 @@ def run_benchmark(
     recording = store.get(recording_id, include_result=False)
     if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
         raise RecordingConflict("Finish the recording before comparing speakers")
-    # Dual-track meetings diarize the remote-system track; the local mic is
-    # already treated as one known speaker by the canonical transcription flow.
-    tracks = store.transcribable_tracks(recording_id)
-    track, path = next(
-        ((track, path) for track, path in tracks if track.get("id") == "system"),
-        next(((track, path) for track, path in tracks if track.get("id") == "mixed"), tracks[0]),
-    )
+    # Use one verified local system (or mixed) audio source. A missing mic
+    # cannot block diarization, and mic-only audio cannot impersonate remote
+    # speakers. ASR retains its separate multi-track admission contract.
+    track, path = store.diarization_track(recording_id)
     if path.stat().st_size == 0:
         raise RecordingConflict("Selected meeting track contains no audio")
     track_id = str(track["id"])

@@ -546,8 +546,7 @@ def create_diarization_benchmark(
         recording = services.recordings.get(recording_id, include_result=False)
         if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
             raise RecordingConflict("Finish the recording before comparing speakers")
-        if not services.recordings.transcribable_tracks(recording_id):
-            raise RecordingConflict("Recording has no transcribable audio")
+        services.recordings.diarization_track(recording_id)
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except RecordingConflict as exc:
@@ -777,14 +776,11 @@ def start_community_review(transcription_id: str, request: Request):
         recording = services.recordings.get(recording_id, include_result=False)
         if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
             raise RecordingConflict("Finish the recording before reviewing speaker labels")
-        tracks = services.recordings.transcribable_tracks(recording_id)
+        services.recordings.diarization_track(recording_id)
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except RecordingConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if not any(track.get("id") in {"system", "mixed"} for track, _path in tracks):
-        raise HTTPException(status_code=409, detail="No system or mixed track can be diarized")
-
     # A staged result is scoped to its exact transcription and checks for
     # concurrent modifications at both preview and explicit apply time.
     pending = services.transcription_jobs.list(

@@ -134,6 +134,59 @@ class ReviewedDiarizationApiTests(unittest.TestCase):
         self.assertEqual(restored.json()["transcription"]["text"], before["text"])
         self.assertEqual(self.client.get(self.path).json()["undo"], None)
 
+    def test_preview_request_ignores_missing_finalized_microphone(self):
+        # A dual-track meeting may preserve usable system audio after a
+        # microphone disconnect. Community-1 should not demand mic.wav.
+        saved = self.services.recordings.create(
+            title="Dual-track audio without mic", mime_type="audio/wav",
+            model="test-model", language="en", capture_mode="both",
+        )
+        meeting_id = saved["id"]
+        self.services.recordings.append_track_chunk(meeting_id, "system", 0, wav_bytes())
+        self.services.recordings.finalize(meeting_id)
+        self.services.recordings.track_audio_path(meeting_id, "mic").unlink()
+        saved_transcription = self.services.transcriptions.save({
+            "text": "System voice.",
+            "segments": [{
+                "id": 0, "start": 0, "end": 0.8, "text": "System voice.",
+                "track_id": "system", "speaker_label": "Computer",
+            }],
+            "source_tracks": [{"id": "system", "label": "Computer"}],
+            "stats": {},
+        }, recording_id=meeting_id)
+        self.id = saved_transcription["id"]
+        self.path = f"/v1/transcriptions/{self.id}/diarization-reviews"
+
+        before_preview = self.services.transcriptions.get(self.id)
+        job_id = self._review_job()
+        response = self.client.get(f"{self.path}/{job_id}/preview")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["assigned_segments"], 1)
+        # The store may already render speaker/timestamps on save. Preview
+        # must preserve the exact persisted text, words and timestamps.
+        self.assertEqual(self.services.transcriptions.get(self.id), before_preview)
+
+    def test_preview_requires_finalized_system_or_mixed_not_microphone(self):
+        saved = self.services.recordings.create(
+            title="Mic only", mime_type="audio/wav",
+            model="test-model", language="en", capture_mode="mic_only",
+        )
+        meeting_id = saved["id"]
+        self.services.recordings.append_track_chunk(meeting_id, "mic", 0, wav_bytes())
+        self.services.recordings.finalize(meeting_id)
+        saved_transcription = self.services.transcriptions.save({
+            "text": "Mic phrase", "segments": [
+                {"start": 0, "end": 0.8, "text": "Mic phrase", "track_id": "mic"}
+            ],
+            "stats": {},
+        }, recording_id=meeting_id)
+        url = f"/v1/transcriptions/{saved_transcription['id']}/diarization-reviews"
+        with patch("local_asr_server.routers.transcriptions.run_benchmark") as runner:
+            response = self.client.post(url)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("No finalized system or mixed audio", response.json()["detail"])
+        runner.assert_not_called()
+
     def test_cross_transcription_review_reference_is_rejected(self):
         job_id = self._review_job()
         other = self.services.transcriptions.save({

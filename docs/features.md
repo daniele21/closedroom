@@ -206,9 +206,11 @@ personalizzato in tempo assoluto (ad esempio 15:00–25:00). Il backend valida
 ritagliati a livello di frame senza decodifica completa, mentre WebM e altri
 formati vengono convertiti localmente da ffmpeg nella sola directory temporanea
 del job, ripulita dopo successo, errore o cancellazione. La timeline del modello
-è traslata sul clock originale del meeting. Nelle registrazioni dual-track è
-confrontata `system` (il `mic` locale è già uno speaker noto), altrimenti
-`mixed` oppure `mic`.
+è traslata sul clock originale del meeting. Il RecordingStore sceglie
+solo audio finalizzato e non vuoto: preferisce `system`, poi `mixed` se
+disponibile. L'assenza del file `mic` non blocca né la preview Community-1
+né il confronto A/B; `mic` da solo non è un input valido per la diarizzazione.
+Il normale workflow ASR conserva i propri controlli indipendenti sulle tracce.
 
 `/v1/recordings/{id}/diarization-benchmarks` usa i job canonici con
 avanzamento, cancellazione e `HeavyWorkloadArbiter`. Ogni run nuovo conserva
