@@ -546,8 +546,7 @@ def create_diarization_benchmark(
         recording = services.recordings.get(recording_id, include_result=False)
         if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
             raise RecordingConflict("Finish the recording before comparing speakers")
-        if not services.recordings.transcribable_tracks(recording_id):
-            raise RecordingConflict("Recording has no transcribable audio")
+        services.recordings.diarization_track(recording_id)
     except RecordingNotFound as exc:
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except RecordingConflict as exc:
