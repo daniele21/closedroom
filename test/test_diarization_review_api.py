@@ -157,11 +157,14 @@ class ReviewedDiarizationApiTests(unittest.TestCase):
         self.id = saved_transcription["id"]
         self.path = f"/v1/transcriptions/{self.id}/diarization-reviews"
 
+        before_preview = self.services.transcriptions.get(self.id)
         job_id = self._review_job()
         response = self.client.get(f"{self.path}/{job_id}/preview")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["assigned_segments"], 1)
-        self.assertEqual(self.services.transcriptions.get(self.id)["text"], "System voice.")
+        # The store may already render speaker/timestamps on save. Preview
+        # must preserve the exact persisted text, words and timestamps.
+        self.assertEqual(self.services.transcriptions.get(self.id), before_preview)
 
     def test_preview_requires_finalized_system_or_mixed_not_microphone(self):
         saved = self.services.recordings.create(
