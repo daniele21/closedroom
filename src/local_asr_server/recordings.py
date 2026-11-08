@@ -1913,6 +1913,34 @@ class RecordingStore:
             result.append((track, audio_path))
         return result
 
+    def diarization_track(self, recording_id: str) -> tuple[dict[str, Any], Path]:
+        """Select a finalized local source for speaker diarization only.
+
+        Prefer the computer audio; an available mixed recording is a valid
+        fallback. An absent microphone must not block either source. This is
+        intentionally independent of transcribable_tracks(), whose stricter
+        multi-track contract belongs to the regular ASR workflow.
+        """
+        session_dir, metadata = self._load(recording_id)
+        if metadata["status"] in {"recording", "finalizing", "recoverable", "interrupted"}:
+            raise RecordingConflict("Finish the recording before diarizing speakers")
+        tracks = {track["id"]: track for track in self._ensure_tracks(metadata)["audio_tracks"]}
+        for track_id in ("system", "mixed"):
+            track = tracks.get(track_id)
+            if track is None or track.get("source") != track_id:
+                continue
+            path = self._track_audio_path(session_dir, track)
+            if path.is_symlink():
+                raise RecordingConflict("Diarization audio must not be a symlink")
+            try:
+                if path.is_file() and path.stat().st_size > 0:
+                    return track, path
+            except OSError as exc:
+                raise RecordingConflict("Diarization audio could not be inspected locally") from exc
+        raise RecordingConflict(
+            "No finalized system or mixed audio is available for speaker diarization"
+        )
+
     def track_content_sha256(self, recording_id: str, track_id: str) -> str:
         """Return a durable content hash for finalized audio, reusing it while stat identity matches."""
         with self._lock_for(recording_id):
