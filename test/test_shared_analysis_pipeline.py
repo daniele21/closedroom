@@ -233,6 +233,9 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
             self.transcriptions.transcription.setdefault("stats", {})["speaker_review"] = {
                 "segment_assignments": {"0": "system:S2"},
             }
+            # Store writes the effective segment group together with its
+            # canonical review intent; this fake does not call the resolver.
+            self.transcriptions.transcription["segments"][0]["speaker_group"] = "system:S2"
             fourth = service.analyze(body)
 
         self.assertEqual(provider.calls, 3)
