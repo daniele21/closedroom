@@ -8,8 +8,8 @@ Baseline: `repo-template-sw` **0.10.0**, **L2**, profiles Python/TypeScript/macO
 
 - Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
 - PRS-5..17: Meeting-first transcription/analysis, visual on-demand, bounded model residency, structured notes, archive search, capture priority and adaptive Today/Meeting/Projects. Dual-track audio still needs representative evidence.
-- PR #186 integrated (`9c7f86c`): source server port 1237, isolated Development data, non-destructive startup; physical check pending.
-- PR #189 (`03a6d6d`) integrated: minimal Voices timeline, shared player, restore; 894 tests + browser FULL_MEDIA PASS. WKWebView/real audio pending.
+- PR #186 (`9c7f86c`): dev port 1237, isolated data, non-destructive startup; physical check pending.
+- PR #189 (`03a6d6d`): minimal Voices timeline, shared player and restore; browser FULL_MEDIA passed, installed WKWebView/real audio pending.
 - PR #183 (`9df62d0`) integrated: optional GCS preference only; effective storage stays local. Upload/restore/eviction not enabled.
 - PR #181: local voice samples, rename/merge/exclude/undo integrated; packaged WKWebView/audio/accessibility proof pending.
 - PRs #194 (`21213bd`), #195 (`5857882`), #196 (`65f82f0`) integrated in `dev`: compact default transcript, coherent source-vs-person identity, timeline→transcript navigation and revision-safe **single-turn** correction/undo. Each passed integration Remote preflight and `local-ci/mac` on its checked head; real WKWebView/multitrack/VoiceOver evidence is still pending.
@@ -20,20 +20,15 @@ Baseline: `repo-template-sw` **0.10.0**, **L2**, profiles Python/TypeScript/macO
 
 ## Current integration state
 
-`HeavyWorkloadArbiter` is the sole heavy-work owner. Capture waits for a safe managed-work boundary, queues bounded work during recording and releases it afterward; `ResourcePolicy` is the fail-safe. `RecordingStore` owns persistence and external runtimes remain caller-owned.
-
-The frontend reserves before capture, shows cancellable preparation and starts the timer only with real capture. `App.tsx` + `workspace.css` own the adaptive shell.
+`HeavyWorkloadArbiter` owns bounded heavy work; recording reserves priority, waits at safe boundaries and releases queued work after Stop. `ResourcePolicy` fails safe; `RecordingStore` persists. The frontend shows cancellable preparation, starts the timer only after capture, and `App.tsx`/`workspace.css` own the shell.
 
 Native retention/checkpoint recovery needs target-Mac release proof; no power-loss guarantee.
 
-PRS-18 has two target-Mac evidence paths:
-
-- **Production**: `release_build` signs/notarizes the exact app + DMG; `release_evidence` covers WKWebView/TCC, MLX, thermal and contention on that artifact;
-- **Local**: `scripts/run_local_real_environment_suite.py` runs target-Mac checks on one exact finalized ad-hoc Apple-Silicon app. Evidence: `dist/evidence/local-real-environment/<revision>/`; not public distribution proof.
+PRS-18 target-Mac evidence paths: **production** signs/notarizes exact app/DMG and runs WKWebView/TCC, MLX, thermal and contention checks; **local** `scripts/run_local_real_environment_suite.py` verifies one finalized ad-hoc Apple-Silicon app, not public distribution.
 
 ## Stable-source evidence still pending
 
-Promotion `dev -> main` remains blocked until **RELEASE / FULL** automation and applicable target-environment observations agree on the exact candidate.
+Promotion `dev -> main` requires **RELEASE/FULL** and target-Mac evidence for the exact candidate.
 
 Still required where material:
 
@@ -43,7 +38,7 @@ Still required where material:
 - subjective VoiceOver/usability and representative production ASR/LLM quality or latency only when material;
 - speaker-review release journey on installed WKWebView (actual dual tracks, sample playback, transcript correction/undo, focus/keyboard) and representative long/legacy transcripts. Existing generated analyses are not yet proven to signal that their speaker attribution may be outdated after a manual correction.
 
-Stable source needs target-Mac evidence, not Apple distribution authority. A downloadable binary additionally needs Developer ID signing, notarization/stapling and Gatekeeper acceptance.
+Public binaries additionally require Developer ID signing, notarization/stapling and Gatekeeper acceptance.
 
 ## Active workstreams
 
