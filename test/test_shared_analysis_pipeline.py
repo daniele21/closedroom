@@ -283,6 +283,7 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
 
         run = {
             "id": "run-1",
+            "transcription_id": "trans-1",
             "job_id": "job-1",
             "analysis_type": "meeting_brief",
             "template_id": STRUCTURED_NOTES_TEMPLATE_ID,
