@@ -1728,6 +1728,36 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                     })}
                 </div>
 
+                {(selectedRun?.speaker_source_validity?.status === 'stale' ||
+                  selectedRun?.speaker_source_validity?.status === 'unverifiable') && (
+                  <div role="status" data-speaker-analysis-source-warning="true"
+                    className="mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 sm:mx-6">
+                    <div className="flex min-w-0 flex-1 items-start gap-2">
+                      <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                      <div className="min-w-0 text-sm">
+                        <p className="font-semibold text-text-primary">
+                          {lang === 'it' ? 'Verifica gli speaker nelle note' : 'Review speakers in these notes'}
+                        </p>
+                        <p className="mt-1 text-xs text-text-secondary">
+                          {selectedRun.speaker_source_validity.status === 'stale'
+                            ? (lang === 'it'
+                              ? 'L’attribuzione delle voci è cambiata dopo questa analisi. I nomi nelle note potrebbero non essere aggiornati.'
+                              : 'Speaker attribution changed after this analysis. Names in these notes may be outdated.')
+                            : (lang === 'it'
+                              ? 'Questa analisi precedente non conserva una prova verificabile delle attribuzioni speaker.'
+                              : 'This older analysis has no verifiable record of speaker attribution.')}
+                        </p>
+                      </div>
+                    </div>
+                    {canAnalyze && (
+                      <Button size="sm" variant="secondary" disabled={isBusy}
+                        onClick={() => void startPipeline('meeting_default')}>
+                        {lang === 'it' ? 'Rigenera solo analisi' : 'Regenerate analysis only'}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
                 <div className={meeting.transcription ? 'grid grid-cols-1 xl:grid-cols-2' : ''} data-meeting-notes-workspace="true">
                   <div className="min-w-0 p-4 sm:p-6 bg-bg-elevated min-h-[220px]" data-meeting-primary-notes="true">
                   {selectedRun ? (

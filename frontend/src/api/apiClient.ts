@@ -294,6 +294,10 @@ export interface AnalysisRun {
   prompt_version: string;
   input_hash: string;
   status: string;
+  speaker_source_validity?: {
+    status: 'current' | 'stale' | 'unverifiable';
+    reason?: 'speaker_attribution_changed' | 'legacy_without_speaker_provenance' | null;
+  };
   result?: any;
   result_markdown?: string | null;
   source_ids?: string[];
