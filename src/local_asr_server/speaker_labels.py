@@ -47,6 +47,8 @@ def apply_speaker_labels(
             value = str(cluster)
             if value and value not in clusters:
                 clusters.append(value)
+    # A turn override does not transfer a name to the raw source cluster.
+    turn_overrides = ((payload.get("stats") or {}).get("speaker_review") or {}).get("segment_assignments") or {}
     known_labels: dict[str, str] = {}
     segment_counts: dict[str, int] = {}
     for segment in sorted(segments, key=lambda item: (float(item.get("start") or 0), int(item.get("id") or 0))):
@@ -55,7 +57,7 @@ def apply_speaker_labels(
             clusters.append(str(cluster))
         if cluster:
             segment_counts[str(cluster)] = segment_counts.get(str(cluster), 0) + 1
-        if cluster and segment.get("speaker_label"):
+        if cluster and segment.get("speaker_label") and str(segment.get("id")) not in turn_overrides:
             label = str(segment["speaker_label"])
             if not str(cluster).startswith("Speaker "):
                 known_labels[str(cluster)] = label

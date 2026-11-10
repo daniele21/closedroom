@@ -143,6 +143,10 @@ class SpeakerLabelsTests(unittest.TestCase):
         again = apply_speaker_labels(result)
         self.assertEqual(again["segments"][0]["speaker_group"], "system:S2")
         self.assertEqual(again["segments"][0]["provider_speaker"], "system:S1")
+        mappings = {entry["speaker_cluster"]: entry["display_name"]
+                    for entry in again["stats"]["speaker_attribution"]["mappings"]}
+        self.assertNotEqual(mappings["system:S1"], mappings["system:S2"],
+                            "turn override must not rename the whole original cluster")
 
 
 if __name__ == "__main__":
