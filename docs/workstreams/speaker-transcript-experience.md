@@ -1,44 +1,38 @@
 # Meeting transcript × voices — coherent speaker experience
 
-> 2026-11-10 · ACTIVE · `dev@65a6b5b09996e78cba5c608f2da18adbb4ba85c5` · candidate branch `feat/speaker-conversation-ux-20261110`.
-> PRODUCT_FEATURE · DELIVERY ITERATION → INTEGRATION (`dev`) · VALIDATION selector-owned (shared attribution/privacy implies STRONG; material UI integration FULL_MEDIA) · EXECUTION REMOTE_AUTOMATED for Mac CI, REAL_ENVIRONMENT for packaged WKWebView/physical audio.
+> 2026-11-10 · ACTIVE (residual C/D) · integrated baseline `dev@65f82f09f2694d2e1b6f827b08313df22795e5e9`.
+> PRODUCT_FEATURE · DELIVERY INTEGRATION for the completed increments / future ITERATION for remaining scope · VALIDATION scoped UI + strong persistence contracts + required FULL_MEDIA E2E · EXECUTION REMOTE_AUTOMATED (deterministic Mac), REAL_ENVIRONMENT (installed app and physical audio).
 
-## Outcome / non-goals
+## Goal and boundary
 
-A user opens a meeting, reads who said what without scrolling through hundreds of padded cards, locates a voice, listens, confirms/merges a person, corrects a specific misattributed turn, and returns to the exact text/time. Ordinary use is local, accessible and requires zero model/provider decisions. No cloud fallback, biometric speaker recognition, audio source separation, mutation of original words/ASR timestamps, or new parallel persistence stores.
+A person can read a long recorded meeting as a conversation, know which identity is confirmed or merely an audio source, audition a voice without uploading it, correct one specific misattributed turn, and undo safely. Preserve original captured WAV and ASR provider cluster, words and time. Cloud is never an implicit fallback; existing `TranscriptionStore` and speaker-review API own persistence/revisions, not React.
 
-This extends the integrated PR #189 Voices experience and `design/ux-contract.json`; it does **not** replace its canonical player or diarization review/rollback.
+## Delivered to `dev`
 
-## Ownership and staged work
+| Lane | Verified outcome / owner | Status and evidence |
+| --- | --- | --- |
+| A1 reading | `TranscriptTextView` defaults to compact Conversation in Meeting, with Details and audio telemetry optional. Same underlying segment IDs, notes and screenshot anchors. | DONE · PR #194, `21213bd` |
+| A2 identity projection | `speakerPresentation.ts` distinguishes person cluster/group from source labels (legacy Computer); name/merge/exclusion remain owned by existing review state. | DONE · PR #194 |
+| A3 navigation | Voice timeline jumps reveal the transcript page and seek the shared local player. | DONE · PR #194 |
+| B correction contract | `speaker_review.py`, `speaker_labels.py`, API and `TranscriptionStore` persist `segment_assignments` by ID with existing fingerprint conflict and one-revision undo; raw words/timestamps/audio remain original. | DONE · PR #195, `5857882` |
+| B UI integration | `TurnSpeakerCorrection` supports an exact segment even within a grouped paragraph, explicit target, stale reload, keyboard-focus recovery and undo in Meeting. | DONE · PR #196, `65f82f0` |
+| C edge integrity | Imported/legacy mixed speaker IDs, overlaps, source-only rows, 401+/5000+ segment navigation and player reconciliation need representative tests beyond existing fixtures. | READY |
+| D analysis provenance | Establish canonical policy to flag/recompute previously generated actions/notes after speaker attribution changes, without silently modifying user edits or asserting unproven staleness handling. | READY |
+| D real UX | Installed WKWebView, physical mic+system media/TCC, VoiceOver, small window/200% text and representative long meetings. | BLOCKED on REAL_ENVIRONMENT release evidence |
 
-| Lane | Observable deliverable | Canonical owner | Dependencies | Status |
-| --- | --- | --- | --- | --- |
-| A1 · reading | Meeting defaults to compact conversation, original segment data and note/screenshot anchors remain; details opt-in | `TranscriptTextView.tsx`, `MeetingDetailPage.tsx`, E2E | none | ACTIVE — committed, gates pending |
-| A2 · projection | Raw cluster/group identity distinct from display name/source; legacy Computer not presented as person, warnings honest | `speakerPresentation.ts`, `SpeakerDiarizationEditor.tsx`; owner contracts/tests | none; parallel A1 files | ACTIVE — committed, gates pending |
-| A3 · navigation | Voice timeline jump reveals matching transcript page and synchronized playback | `MeetingDetailPage.tsx`, `TranscriptTextView.tsx` | A1 | ACTIVE — committed, gates pending |
-| B · precise correction | Correct **one** segment speaker independent of rename-all/merge; preview scope, version-checked commit and undo preserving original text/word times | `speaker_review.py`, route/store API, UI action | A2 and explicit conflict/revision contract | READY |
-| C · integrity | Real one-voice/track and merged cluster read model; historical imported transcripts migration/compatibility, overlapping turns/0 ASR/source only | speaker owner + API/tests | B design | READY |
-| D · integrated journey | User flows, copied names, analysis provenance/staleness, 1280/900/640 views, 200% text and VoiceOver | browser E2E, design contract, target Mac | A–C | READY |
+## Integration evidence and limits
 
-Parallel independent ownership: A1 presentation, A2 source projection/tests, and acceptance fixture/E2E may progress simultaneously, but shared `MeetingDetailPage.tsx` and `SpeakerDiarizationEditor.tsx` writes must be serialized. B is deliberately gated by canonical correction/undo design; never fake it as a frontend-only fix.
+- PR #194 `39afb46`, PR #195 `094f4a8` and PR #196 `ad78474` each had successful integration preflight and exact-HEAD `local-ci/mac`; each PR was squash-merged to `dev`. The saved Meeting FULL_MEDIA browser journey includes Conversation/Details, sample/merge/restore, scoped correction and undo. Projection unit tests cover immutable raw clusters, same-voice grouping/overlaps and source-only fallback; backend unit/API tests cover segment IDs, stale fingerprints and persistence.
+- E2E uses deterministic loopback/browser fixtures. This is **not** proof that installed WKWebView, physical audio switching or microphone/system playback work on the representative Mac. Nor is it performance/quality proof for 401+/5000+ segments or all historical transcripts.
+- Test-only failures were diagnosed and fixed with intact invariants (canonical merged ID in fixture; comparing immutable raw export rather than decorated read projection). No pass inferred from intermediate failed heads.
+- `dev` includes the feature. RELEASE/FULL for `dev→main`, physical media/TCC, packaged lifecycle, subjective VoiceOver and qualifying distribution artifacts still block promotion.
+- No new remote transfer, automatic model download, audio upload or second persistence/history owner was introduced.
 
-## Interaction contract / states
+## Remaining actions and acceptance
 
-- **Initial:** conversation view, no audio telemetry by default; click timestamp to play exact recording, diagnostic cards available under Details; all matches searchable, pagination bounded.
-- **Source-only:** “Audio non attribuito” (not a detected person). Legacy Computer is preserved in metadata for investigation. If a real cluster remains but was named Computer by fallback, “Voce da identificare” points to Voices.
-- **Selection/playback:** one existing local player. On voice-to-transcript navigation, show correct page/time. Abort sample fetch on meeting switch; never prefetch private audio.
-- **Rename/merge/restore:** save revision-aware on existing server owner; render updated names from raw IDs, then show success and undo.
-- **Future per-turn correction:** explicit scope (this turn vs whole voice), confirmation if ambiguous, atomic fingerprint and revision-safe undo. Conflicts show reload, not silent overwrite. Analysis previously generated is marked stale rather than silently altered.
-- **Unavailable:** missing source track keeps transcription readable; no fake audio or fallback; zero-ASR still permits diarized intervals.
-- **Viewport/accessibility:** WKWebView 1280/900/640 px, keyboard/visible focus, non-color distinctions, 200% font, 5k+ segments bounded.
+1. **C · edge/read-model integrity:** collect minimal anonymized/synthetic legacy fixture variants; test source-only Computer, renamed/merged cluster, 0 ASR segments, overlapping turns, stale identity and 401+/5000+ segment navigation. No best-effort speaker label inferred from a track name.
+2. **D · analysis provenance:** inspect the existing analysis provenance/cache owner and consumers, define exact invalidation/staleness contract for changed speaker attribution without losing user notes, verify via API and UI tests; no silent regeneration.
+3. **D · packaged UX:** record exact candidate, test speaker sample playback and per-turn correction/undo on installed WKWebView with real dual-track recording, keyboard/VoiceOver and compact/zoomed layout. Release authority and target-Mac evidence remain separate from GitHub Actions source tests.
+4. Before closure transfer any remaining findings to `docs/features.md`, `docs/current-state.md`, `design/ux-contract.json` and release evidence owners, then delete this temporary plan per `skills/finalize-workstream`.
 
-## Evidence checklist / gates
-
-- Browser `scripts/browser_saved_meeting_e2e.mjs`: conversation default, detail opt-in, audio on demand and full speaker review/undo flow. New `scripts/test_speaker_presentation.mjs`: actual TS projection tested for legacy sources, confirmations, grouped/overlap boundaries and immutability.
-- TypeScript `pnpm exec tsc --noEmit`, ESLint; Python speaker/diarization/review contract tests and preflight selector where affected.
-- Integration requires source SHA/base, complete diff, exact-head CI and FULL_MEDIA; target-Mac packaged WKWebView, local playback/VoiceOver and real TCC evidence remain RELEASE obligations, not implied by hosted browser fixtures.
-- A/B acceptance: 401+ segments readable, no cards in default mode, no phantom Computer participant, rename/merge reflect in reading, timeline seek goes to correct page, no original text/timing mutation.
-
-## Checkpoint
-
-First implementation on `feat/speaker-conversation-ux-20261110`. A1/A2/A3 source changes and targeted browser assertion are prepared; tests/CI and REAL_ENVIRONMENT are **not yet claimed PASS**. Next: PR preflight, error classification, then B as a separate shared-contract increment after precise edit/undo proof.
+Next discriminating action: inspect whether `MeetingDetailPage` / structured-note projection makes analysis source attribution stale after `speaker_review` mutations, with an existing or synthetic pre-correction analysis result; choose a narrow canonical fix only after observing behavior.

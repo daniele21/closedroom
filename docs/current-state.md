@@ -13,6 +13,7 @@ Baseline: `repo-template-sw` **0.10.0**, **L2**, profiles Python/TypeScript/macO
 - PR #189 (`03a6d6d`) integrated: minimal Voices timeline, shared player, restore; 894 tests + browser FULL_MEDIA PASS. WKWebView/real audio pending.
 - PR #183 (`9df62d0`) integrated: optional GCS preference only; effective storage stays local. Upload/restore/eviction not enabled.
 - PR #181: local voice samples, rename/merge/exclude/undo integrated; packaged WKWebView/audio/accessibility proof pending.
+- PRs #194 (`21213bd`), #195 (`5857882`), #196 (`65f82f0`) integrated in `dev`: compact default transcript, coherent source-vs-person identity, timeline→transcript navigation and revision-safe **single-turn** correction/undo. Each passed integration Remote preflight and `local-ci/mac` on its checked head; real WKWebView/multitrack/VoiceOver evidence is still pending.
 - PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
 - Release: root `VERSION=0.2.0` owns product version; app identity `ClosedRoom.app` / `com.closedroom.app` stays fixed. Final artifacts carry version/build/source SHA.
 - PR #137 consolidated UI/ASR; path/upload caches stay distinct. PRs #138–139 cut doc media and add read-only footprint audit; native dependency removal awaits Mac measurements.
@@ -41,7 +42,8 @@ Still required where material:
 - target-Mac WKWebView/accessibility + TCC-backed native `both` capture with non-empty mic/system tracks and clean lifecycle;
 - PRS-16 real AI-busy contention: local MLX active while `Preparing recording` is visible, no premature capture, then capture after the safe boundary with mic/system persistence;
 - representative CPU/RSS/thermal + local MLX completion and the PRS-9 dual-vs-mixed benchmark;
-- subjective VoiceOver/usability and representative production ASR/LLM quality or latency only when material.
+- subjective VoiceOver/usability and representative production ASR/LLM quality or latency only when material;
+- speaker-review release journey on installed WKWebView (actual dual tracks, sample playback, transcript correction/undo, focus/keyboard) and representative long/legacy transcripts. Existing generated analyses are not yet proven to signal that their speaker attribution may be outdated after a manual correction.
 
 Stable source needs target-Mac evidence, not Apple distribution authority. A downloadable binary additionally needs Developer ID signing, notarization/stapling and Gatekeeper acceptance.
 
@@ -53,6 +55,7 @@ Stable source needs target-Mac evidence, not Apple distribution authority. A dow
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
 - [`selective-efficiency.md`](workstreams/selective-efficiency.md): persisted audio fingerprint reuse and privacy-safe VAD comparison tooling; ONNX removal remains evidence-gated.
+- [`speaker-transcript-experience.md`](workstreams/speaker-transcript-experience.md): conversation, speaker projection and scoped correction integrated (#194–196); remaining large/legacy cases, analysis-staleness policy and packaged-app speaker UX evidence are explicitly open.
 
 - Meeting Moments (#100) integrated; Mac menu/focus/hotkey/TCC remains RELEASE evidence.
 
