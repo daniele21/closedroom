@@ -12,7 +12,7 @@ Baseline: `repo-template-sw` **0.10.0**, **L2**; profiles Python/TS/macOS/local-
 - PR #189 (`03a6d6d`): minimal Voices timeline, shared player and restore; browser FULL_MEDIA passed, installed WKWebView/real audio pending.
 - PR #183 (`9df62d0`) integrated: optional GCS preference only; effective storage stays local. Upload/restore/eviction not enabled.
 - PR #181: local voice samples, rename/merge/exclude/undo integrated; packaged WKWebView/audio/accessibility proof pending.
-- PRs #194–196/#198–199: compact conversation, source/person identity, scoped correction/undo, stale-note warning and synthetic 5,005-turn browser/Mac PASS. Historical imports, performance and installed WKWebView/audio/VoiceOver proof pending.
+- PRs #194–196/#198–200: conversation, source/person identity, scoped correction/undo, stale-note warning, synthetic 5,005-turn and legacy text-only/empty browser/Mac PASS. Real imports, performance and installed WKWebView/audio/VoiceOver pending.
 - PRS-18 tooling and target-Mac measured/AI-contention evidence suite are in place (#48/#53).
 - Release: root `VERSION=0.2.0` owns product version; app identity `ClosedRoom.app` / `com.closedroom.app` stays fixed. Final artifacts carry version/build/source SHA.
 - PRs #137–139 consolidated UI/ASR and bounded footprint audit; path/upload caches remain separate, native dependency removal awaits Mac measurements.
@@ -48,7 +48,7 @@ Public binaries additionally require Developer ID signing, notarization/stapling
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
 - [`selective-efficiency.md`](workstreams/selective-efficiency.md): persisted audio fingerprint reuse and privacy-safe VAD comparison tooling; ONNX removal remains evidence-gated.
-- [`speaker-transcript-experience.md`](workstreams/speaker-transcript-experience.md): #194–196/#198–199 integrated; historical import, text-only/empty browser and packaged speaker UX evidence pending.
+- [`speaker-transcript-experience.md`](workstreams/speaker-transcript-experience.md): #194–196/#198–200 integrated; representative historical imports and packaged speaker UX evidence pending.
 
 - Meeting Moments (#100) integrated; Mac menu/focus/hotkey/TCC remains RELEASE evidence.
 
