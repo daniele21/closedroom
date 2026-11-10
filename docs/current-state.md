@@ -2,7 +2,7 @@
 
 ## Engineering baseline
 
-Baseline: `repo-template-sw` **0.10.0**, **L2**, profiles Python/TypeScript/macOS/local-AI/product-UI. Integration → `dev`; `dev → main` requires RELEASE/FULL and target-Mac evidence. Distributable binaries need separate artifact qualification.
+Baseline: `repo-template-sw` **0.10.0**, **L2**; profiles Python/TS/macOS/local-AI/product-UI. Integration → `dev`; `dev → main` requires RELEASE/FULL and target-Mac evidence. Distributable binaries need separate artifact qualification.
 
 ## Integrated baseline
 
