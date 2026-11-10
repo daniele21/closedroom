@@ -35,8 +35,8 @@ assert.equal(speakerDisplay(voice, [{ ...mappings[0], status: 'accepted' }], ['C
   'Computer', 'an explicitly confirmed person must not be silently renamed');
 
 const group = [
-  { speaker_cluster: 'system:S1', speaker_group: 'person:1', display_name: 'Giuseppe', status: 'accepted' },
-  { speaker_cluster: 'system:S2', speaker_group: 'person:1', display_name: 'Giuseppe', status: 'merged' },
+  { speaker_cluster: 'system:S1', speaker_group: 'system:S1', display_name: 'Giuseppe', status: 'accepted' },
+  { speaker_cluster: 'system:S2', speaker_group: 'system:S1', display_name: 'Giuseppe', status: 'merged' },
 ];
 const first = { id: 1, start: 0, end: 4, text: 'First', provider_speaker: 'system:S1' };
 const next = { id: 2, start: 5, end: 8, text: 'Second', provider_speaker: 'system:S2' };
@@ -47,7 +47,7 @@ assert.equal(canJoinConversationTurns(first, { ...next, overlap: true }, group),
 assert.equal(canJoinConversationTurns(first, { ...next, start: 20 }, group), false);
 assert.equal(canJoinConversationTurns(first, { ...next, start: 3 }, group), false);
 assert.equal(canJoinConversationTurns(first, next, [
-  { ...group[0], speaker_group: 'person:A' }, { ...group[1], speaker_group: 'person:B' },
+  { ...group[0], speaker_group: 'system:S1' }, { ...group[1], speaker_group: 'system:S2' },
 ]), false, 'same displayed name does not imply same speaker identity');
 
 console.log('Speaker presentation and grouping contracts PASS');
