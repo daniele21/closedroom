@@ -63,6 +63,49 @@ class SpeakerReviewProjectionTests(unittest.TestCase):
         self.assertNotEqual(unmerged["segments"][1]["speaker_name"], "Paolo")
         self.assertEqual(base, base_copy)
 
+    def test_reassign_one_turn_without_mutating_source_or_other_turns(self):
+        base = transcription()
+        untouched = copy.deepcopy(base)
+        moved = project_speaker_action(
+            base, action="reassign_turn", cluster="system:S1", target="system:S2", segment_id=0,
+        )
+        self.assertEqual(moved["segments"][0]["speaker_group"], "system:S2")
+        self.assertEqual(moved["segments"][1]["speaker_group"], "system:S2")
+        self.assertEqual(moved["segments"][2]["speaker_group"], "system:S1")
+        self.assertEqual(moved["segments"][0]["provider_speaker"], "system:S1")
+        self.assertEqual(moved["text"], base["text"])
+        self.assertEqual(
+            [(row["text"], row["start"], row["end"], row.get("words")) for row in moved["segments"]],
+            [(row["text"], row["start"], row["end"], row.get("words")) for row in base["segments"]],
+        )
+        self.assertEqual(moved["stats"]["speaker_review"]["segment_assignments"], {"0": "system:S2"})
+        restored = project_speaker_action(
+            moved, action="reassign_turn", cluster="system:S1", target=None, segment_id=0,
+        )
+        self.assertEqual(restored["segments"][0]["speaker_group"], "system:S1")
+        self.assertEqual(restored["stats"]["speaker_review"]["segment_assignments"], {})
+        self.assertEqual(base, untouched)
+
+    def test_turn_assignment_rejects_invalid_scope_and_target(self):
+        base = transcription()
+        for segment_id in (None, -1, 99):
+            with self.assertRaises(ValueError):
+                project_speaker_action(base, action="reassign_turn", cluster="system:S1",
+                                       target="system:S2", segment_id=segment_id)
+        with self.assertRaisesRegex(ValueError, "changed speaker"):
+            project_speaker_action(base, action="reassign_turn", cluster="system:S2",
+                                   target="system:S1", segment_id=0)
+        with self.assertRaisesRegex(ValueError, "detected"):
+            project_speaker_action(base, action="reassign_turn", cluster="system:S1",
+                                   target="system:absent", segment_id=0)
+        with self.assertRaisesRegex(ValueError, "original speaker"):
+            project_speaker_action(base, action="reassign_turn", cluster="system:S1",
+                                   target=None, segment_id=0)
+        excluded = project_speaker_action(base, action="exclude", cluster="system:S3")
+        with self.assertRaisesRegex(ValueError, "excluded person"):
+            project_speaker_action(excluded, action="reassign_turn", cluster="system:S1",
+                                   target="system:S3", segment_id=0)
+
     def test_invalid_target_self_merge_cycle_and_duplicate_exclusion(self):
         base = transcription()
         with self.assertRaisesRegex(ValueError, "Unknown"):
@@ -240,6 +283,30 @@ class SpeakerReviewApiTests(unittest.TestCase):
                  if entry["speaker_cluster"] == "system:S3"),
             "Giulia",
         )
+
+    def test_single_turn_api_revision_and_undo(self):
+        info = self.client.get(self.url).json()
+        before = self.client.get(f"/v1/transcriptions/{self.id}").json()
+        response = self.client.post(self.url, json={
+            "action": "reassign_turn", "cluster": "system:S1", "target": "system:S2",
+            "segment_id": 0, "expected_fingerprint": info["fingerprint"],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()["transcription"]
+        self.assertEqual(result["segments"][0]["speaker_group"], "system:S2")
+        self.assertEqual(result["segments"][2]["speaker_group"], "system:S1")
+        self.assertEqual(result["segments"][0]["provider_speaker"], "system:S1")
+        self.assertEqual(result["segments"][0]["words"], before["segments"][0]["words"])
+        self.assertEqual(result["text"], before["text"])
+        conflict = self.client.post(self.url, json={
+            "action": "reassign_turn", "cluster": "system:S1",
+            "target": "system:S3", "segment_id": 0,
+            "expected_fingerprint": info["fingerprint"],
+        })
+        self.assertEqual(conflict.status_code, 409)
+        undone = self.client.post(self.url + "/undo", json={"revision_id": response.json()["revision_id"]})
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual(undone.json()["transcription"]["segments"][0]["speaker_group"], "system:S1")
 
     def test_revision_conflict_merge_and_undo(self):
         info = self.client.get(self.url)

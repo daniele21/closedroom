@@ -54,6 +54,7 @@ def _root(cluster: str, merges: dict[str, str]) -> str:
 def project_speaker_action(
     transcription: dict[str, Any], *, action: str, cluster: str,
     target: str | None = None, name: str | None = None,
+    segment_id: int | None = None,
 ) -> dict[str, Any]:
     """Pure optimistic-review candidate; the store atomically commits it."""
     possible = _clusters(transcription)
@@ -65,6 +66,7 @@ def project_speaker_action(
     names = dict(review.get("names") or {})
     merges = dict(review.get("merged_into") or {})
     excluded = set(review.get("excluded") or [])
+    turn_assignments = dict(review.get("segment_assignments") or {})
     originals = dict(review.get("original_mappings") or {})
     original_mappings = {
         str(m.get("speaker_cluster")): m
@@ -109,6 +111,39 @@ def project_speaker_action(
             excluded.remove(root)
         else:
             raise ValueError("Speaker has no correction to restore")
+    elif action == "reassign_turn":
+        # The raw provider cluster and immutable text/timings never change.
+        # A precise override belongs to exactly one persisted segment ID.
+        if segment_id is None or isinstance(segment_id, bool) or segment_id < 0:
+            raise ValueError("Choose one valid transcript segment")
+        selected = [
+            segment for segment in candidate.get("segments") or []
+            if segment.get("id") == segment_id
+        ]
+        if len(selected) != 1:
+            raise ValueError("Transcript segment is missing or ambiguous")
+        original_cluster = str(
+            selected[0].get("provider_speaker") or selected[0].get("speaker_label") or ""
+        )
+        if original_cluster != cluster:
+            raise ValueError("Transcript segment changed speaker since selection")
+        if not str(selected[0].get("text") or "").strip():
+            raise ValueError("Cannot reassign an empty transcript segment")
+        segment_key = str(segment_id)
+        if target is None:
+            if segment_key not in turn_assignments:
+                raise ValueError("This turn already uses its original speaker")
+            turn_assignments.pop(segment_key)
+        else:
+            if target not in possible:
+                raise ValueError("Choose a person detected in this transcription")
+            destination = _root(target, merges)
+            if destination in excluded:
+                raise ValueError("Cannot attribute a turn to an excluded person")
+            if destination == _root(original_cluster, merges):
+                turn_assignments.pop(segment_key, None)
+            else:
+                turn_assignments[segment_key] = destination
     else:
         raise ValueError("Unsupported speaker review action")
 
@@ -118,6 +153,7 @@ def project_speaker_action(
     review["original_mappings"] = originals
     review["merged_into"] = merges
     review["excluded"] = sorted(excluded)
+    review["segment_assignments"] = turn_assignments
     stats["speaker_review"] = review
     stats["review_preserve_canonical_text"] = True
     original_text = transcription.get("text", "")

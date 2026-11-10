@@ -76,10 +76,11 @@ class ReviewedDiarizationUndoRequest(BaseModel):
 
 
 class SpeakerReviewActionRequest(BaseModel):
-    action: Literal["rename", "merge", "exclude", "restore"]
+    action: Literal["rename", "merge", "exclude", "restore", "reassign_turn"]
     cluster: str = Field(min_length=1, max_length=160)
     target: str | None = Field(default=None, max_length=160)
     name: str | None = Field(default=None, max_length=120)
+    segment_id: int | None = Field(default=None, ge=0)
     expected_fingerprint: str = Field(min_length=64, max_length=64)
 
 
@@ -737,7 +738,7 @@ def commit_speaker_review(
     try:
         candidate = project_speaker_action(
             transcription, action=body.action, cluster=body.cluster,
-            target=body.target, name=body.name,
+            target=body.target, name=body.name, segment_id=body.segment_id,
         )
         return services.transcriptions.apply_reviewed_diarization(
             transcription_id,
