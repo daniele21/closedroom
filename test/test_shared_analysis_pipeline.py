@@ -211,6 +211,13 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
         self.assertNotIn(STRUCTURED_NOTES_TEMPLATE_ID, {item["id"] for item in list_templates()})
 
     def test_structured_cache_identity_includes_source_segments(self) -> None:
+        # Both source and target clusters must exist in the synthetic provider
+        # metadata, just as they do for a genuine speaker-review correction.
+        self.transcriptions.transcription["stats"] = {
+            "speaker_diarization": {
+                "clusters_by_track": {"system": ["Alex", "system:S2"]},
+            },
+        }
         provider = CountingStructuredProvider()
         service = AnalysisService(self.services)
         body = AnalysisRequest(
