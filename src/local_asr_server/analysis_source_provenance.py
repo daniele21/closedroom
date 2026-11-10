@@ -67,6 +67,14 @@ def project_speaker_source_validity(
     if not transcription or not transcription.get("id"):
         return list(runs)
     current_id = transcription["id"]
+    # The normal saved-Meeting open path must stay cheap when no completed
+    # source-linked analysis exists. Avoid copying and reprojecting thousands
+    # of ASR segments for a meeting that has no speaker-aware notes.
+    if not any(
+        run.get("status") == "completed" and run.get("transcription_id") == current_id
+        for run in runs
+    ):
+        return list(runs)
     digest = speaker_attribution_digest(transcription)
     reviewed = _reviewed_speaker_identity(transcription)
     projected = []
