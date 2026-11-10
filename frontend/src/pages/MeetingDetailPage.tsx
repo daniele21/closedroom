@@ -205,6 +205,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
     setEditingTitle(false);
     setProjectPickerOpen(false);
     setExistingProjects([]);
+    setTurnCorrectionUndo(null);
   }, [recordingId]);
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
   // The screenshot list owns current content; selection retains only its meeting-scoped identity.
@@ -230,6 +231,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
   const [activeTab, setActiveTab] = useState<MeetingTab>('transcript');
   const [currentTime, setCurrentTime] = useState(0);
   const [transcriptJumpTime, setTranscriptJumpTime] = useState<number | null>(null);
+  const [turnCorrectionUndo, setTurnCorrectionUndo] = useState<{
+    meetingId: string; transcriptionId: string; revisionId: string;
+  } | null>(null);
   const {
     audioIntelligence,
     audioIntelligenceState,
@@ -278,6 +282,56 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
       }
     }, 100);
   };
+  // One canonical server owner for scoped reattribution, fingerprints and undo.
+  const handleReassignTurn = async (segment: TranscriptionSegment, target: string | null) => {
+    const id = recordingId;
+    const transcriptionId = meeting?.transcription?.id || meeting?.transcription?.saved_id;
+    if (!id || !transcriptionId || demoMode) throw new Error('Meeting unavailable for correction');
+    const rawCluster = segment.provider_speaker || segment.speaker_label;
+    if (!rawCluster) throw new Error(lang === 'it' ? 'Nessuna voce originale verificabile' : 'No verifiable original voice');
+    const latest = await ApiClient.getTranscription(transcriptionId);
+    if (currentRecordingIdRef.current !== id) throw new Error('Meeting changed');
+    const matches = (latest.segments || []).filter((item) => item.id === segment.id);
+    if (matches.length !== 1 || matches[0].start !== segment.start ||
+      matches[0].end !== segment.end || matches[0].text !== segment.text ||
+      (matches[0].provider_speaker || matches[0].speaker_label) !== rawCluster) {
+      throw new Error(lang === 'it' ? 'La battuta è cambiata. Ricarica prima di correggere.'
+        : 'This turn changed. Reload before editing.');
+    }
+    const review = await ApiClient.getSpeakerReview(transcriptionId);
+    if (currentRecordingIdRef.current !== id) throw new Error('Meeting changed');
+    const response = await ApiClient.commitSpeakerReview(transcriptionId, {
+      action: 'reassign_turn', cluster: rawCluster, segment_id: segment.id,
+      target: target || undefined, expected_fingerprint: review.fingerprint,
+    });
+    if (currentRecordingIdRef.current !== id) return;
+    setMeeting((current) => current?.id === id
+      ? { ...current, transcription: response.transcription } : current);
+    setTurnCorrectionUndo({ meetingId: id, transcriptionId, revisionId: response.revision_id });
+    showToast(lang === 'it' ? 'Attribuzione salvata · solo questa battuta' : 'Attribution saved · this turn only', 'success');
+  };
+
+  const undoTurnCorrection = async () => {
+    const token = turnCorrectionUndo;
+    if (!token || currentRecordingIdRef.current !== token.meetingId) return;
+    const review = await ApiClient.getSpeakerReview(token.transcriptionId);
+    if (review.undo?.revision_id !== token.revisionId) {
+      setTurnCorrectionUndo(null);
+      showToast(lang === 'it' ? 'Un’altra modifica ha sostituito questo annullamento' : 'Another edit replaced this undo', 'error');
+      return;
+    }
+    try {
+      const result = await ApiClient.undoSpeakerReview(token.transcriptionId, token.revisionId);
+      if (currentRecordingIdRef.current !== token.meetingId) return;
+      setMeeting((current) => current?.id === token.meetingId
+        ? { ...current, transcription: result.transcription } : current);
+      setTurnCorrectionUndo(null);
+      showToast(lang === 'it' ? 'Attribuzione ripristinata' : 'Attribution restored', 'success');
+    } catch (reason) {
+      showToast(String(reason), 'error');
+    }
+  };
+
   const handleUpdateNote = async (note: RecordingNote, text: string) => {
     if (!recordingId || demoMode) return;
     await ApiClient.updateRecordingNote(recordingId, note.note_id, {
@@ -1505,6 +1559,12 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                         </span>
                       )}
                     </span>
+                    {turnCorrectionUndo?.meetingId === meeting.id &&
+                      turnCorrectionUndo.transcriptionId === (meeting.transcription?.id || meeting.transcription?.saved_id) && (
+                        <Button size="sm" variant="ghost" onClick={() => void undoTurnCorrection()}>
+                          {lang === 'it' ? 'Annulla ultima correzione' : 'Undo last speaker correction'}
+                        </Button>
+                      )}
                     <Button
                       size="sm"
                       variant="secondary"
@@ -1522,6 +1582,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                       sourceTrackLabels={(meeting.transcription.source_tracks || []).map((track) => track.label)}
                       initialDisplayMode="conversation"
                       onIdentifySpeakers={() => selectTab('speakers')}
+                      onReassignTurn={demoMode ? undefined : handleReassignTurn}
+                      turnOverrides={(meeting.transcription.stats?.speaker_review as { segment_assignments?: Record<string, string> } | undefined)?.segment_assignments || {}}
                       jumpToTime={transcriptJumpTime}
                       onTimestampClick={handleTimestampClick}
                       currentTime={currentTime}
@@ -1731,6 +1793,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                             sourceTrackLabels={(meeting.transcription.source_tracks || []).map((track) => track.label)}
                             initialDisplayMode="conversation"
                             onIdentifySpeakers={() => selectTab('speakers')}
+                            onReassignTurn={demoMode ? undefined : handleReassignTurn}
+                            turnOverrides={(meeting.transcription.stats?.speaker_review as { segment_assignments?: Record<string, string> } | undefined)?.segment_assignments || {}}
                             jumpToTime={transcriptJumpTime}
                             onTimestampClick={handleTimestampClick}
                             currentTime={currentTime}
