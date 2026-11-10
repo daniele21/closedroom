@@ -12,7 +12,7 @@ Baseline: `repo-template-sw` **0.10.0**, **L2**; profiles Python/TS/macOS/local-
 - PR #189 (`03a6d6d`): minimal Voices timeline, shared player and restore; browser FULL_MEDIA passed, installed WKWebView/real audio pending.
 - PR #183 (`9df62d0`) integrated: optional GCS preference only; effective storage stays local. Upload/restore/eviction not enabled.
 - PR #181: local voice samples, rename/merge/exclude/undo integrated; packaged WKWebView/audio/accessibility proof pending.
-- PRs #194–196 integrated: compact conversation, source-vs-person identity, timeline navigation and revision-safe single-turn correction/undo; integration preflight and exact-head Mac CI PASS. Speaker-aware note provenance now flags outdated/unverifiable attribution in read models (no edit loss/automatic regeneration). Installed WKWebView/multitrack/VoiceOver proof pending.
+- PRs #194–196, #198–199 integrated: compact conversation, source-vs-person identity, timeline navigation and revision-safe single-turn correction/undo; speaker-aware note provenance flags outdated/unverifiable attribution (no edit loss/automatic regeneration). #199 passed a synthetic 5,005-turn browser test with bounded pagination/search and no eager audio/inference on exact-head Mac CI. Historical imported media, representative long-meeting performance and installed WKWebView/multitrack/VoiceOver proof remain pending.
 - PRS-18 tooling and target-Mac measured/AI-contention evidence suite are in place (#48/#53).
 - Release: root `VERSION=0.2.0` owns product version; app identity `ClosedRoom.app` / `com.closedroom.app` stays fixed. Final artifacts carry version/build/source SHA.
 - PRs #137–139 consolidated UI/ASR and bounded footprint audit; path/upload caches remain separate, native dependency removal awaits Mac measurements.
@@ -48,7 +48,7 @@ Public binaries additionally require Developer ID signing, notarization/stapling
 - [`github-release-productization.md`](workstreams/github-release-productization.md): GRP-1..5 automation implemented; Apple authority/environment configuration and first public release remain blocked.
 - [`architectural-consolidation.md`](workstreams/architectural-consolidation.md): Wave 1 integrated; Wave 2 internal runtime/service boundaries under integration validation.
 - [`selective-efficiency.md`](workstreams/selective-efficiency.md): persisted audio fingerprint reuse and privacy-safe VAD comparison tooling; ONNX removal remains evidence-gated.
-- [`speaker-transcript-experience.md`](workstreams/speaker-transcript-experience.md): conversation, speaker projection and scoped correction integrated (#194–196); remaining large/legacy cases, analysis-staleness policy and packaged-app speaker UX evidence are explicitly open.
+- [`speaker-transcript-experience.md`](workstreams/speaker-transcript-experience.md): conversation, correction and analysis provenance integrated (#194–196, #198); synthetic 5,005-turn regression integrated (#199). Remaining real legacy imports, text-only/empty browser coverage and packaged-app speaker UX evidence are open.
 
 - Meeting Moments (#100) integrated; Mac menu/focus/hotkey/TCC remains RELEASE evidence.
 
