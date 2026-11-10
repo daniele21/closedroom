@@ -304,7 +304,14 @@ class SpeakerReviewApiTests(unittest.TestCase):
         self.assertEqual(result["segments"][2]["speaker_group"], "system:S1")
         self.assertEqual(result["segments"][0]["provider_speaker"], "system:S1")
         self.assertEqual(result["segments"][0]["words"], before["segments"][0]["words"])
-        self.assertEqual(result["text"], before["text"])
+        # GET may decorate the transcript for reading. The original exported
+        # source text, not that read projection, is the preservation invariant.
+        self.assertEqual(result["text"], "Original human-authored source text.")
+        from local_asr_server.app_services import get_services
+        store = get_services(self.app).transcriptions
+        raw_path = store.root / store._file_name_for(self.id)
+        self.assertEqual(json.loads(raw_path.read_text())["text"],
+                         "Original human-authored source text.")
         conflict = self.client.post(self.url, json={
             "action": "reassign_turn", "cluster": "system:S1",
             "target": "system:S3", "segment_id": 0,
