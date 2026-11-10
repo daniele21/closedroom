@@ -12,6 +12,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from local_asr_server.catalog import CatalogStore
+from local_asr_server.analysis_source_provenance import speaker_attribution_digest
 from local_asr_server.server import create_app
 from local_asr_server.speaker_review import project_speaker_action, speaker_audio_samples
 from local_asr_server.transcription_diarization_review import fingerprint
@@ -321,6 +322,49 @@ class SpeakerReviewApiTests(unittest.TestCase):
         undone = self.client.post(self.url + "/undo", json={"revision_id": response.json()["revision_id"]})
         self.assertEqual(undone.status_code, 200, undone.text)
         self.assertEqual(undone.json()["transcription"]["segments"][0]["speaker_group"], "system:S1")
+
+    def test_meeting_exposes_stale_analysis_after_speaker_correction_and_undo(self):
+        from local_asr_server.app_services import get_services
+        services = get_services(self.app)
+        current = services.transcriptions.get(self.id)
+        original_result = {
+            "markdown": "Original analysis rendered as-is.",
+            "source_snapshot": {
+                "transcription_id": self.id,
+                "speaker_attribution_sha256": speaker_attribution_digest(current),
+            },
+            "user_edits": [{"id": "preserve-this-edit"}],
+        }
+        services.catalog.create_analysis_run({
+            "id": "source-fingerprint-run", "scope_type": "transcription", "scope_id": self.id,
+            "recording_id": self.recording_id, "transcription_id": self.id,
+            "analysis_type": "meeting_brief", "provider": "mock", "input_hash": "a" * 64,
+            "status": "completed", "created_at": 1.0, "result": original_result,
+        })
+        url = f"/v1/meetings/{self.recording_id}"
+        before = self.client.get(url)
+        self.assertEqual(before.status_code, 200, before.text)
+        self.assertEqual(before.json()["latest_analysis"]["meeting_brief"]
+                         ["speaker_source_validity"]["status"], "current")
+        revision = self.client.get(self.url).json()["fingerprint"]
+        changed = self.client.post(self.url, json={
+            "action": "reassign_turn", "cluster": "system:S1", "target": "system:S2",
+            "segment_id": 0, "expected_fingerprint": revision,
+        })
+        self.assertEqual(changed.status_code, 200, changed.text)
+        after = self.client.get(url)
+        self.assertEqual(after.status_code, 200, after.text)
+        run = after.json()["latest_analysis"]["meeting_brief"]
+        self.assertEqual(run["speaker_source_validity"]["status"], "stale")
+        self.assertEqual(run["result"]["user_edits"], [{"id": "preserve-this-edit"}])
+        self.assertEqual(after.json()["analysis_runs"][0]["speaker_source_validity"]["status"], "stale")
+        self.assertEqual(services.catalog.get_analysis_run("source-fingerprint-run")["result"],
+                         original_result, "read projection must not mutate saved user edits")
+        undone = self.client.post(self.url + "/undo",
+                                  json={"revision_id": changed.json()["revision_id"]})
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual(self.client.get(url).json()["latest_analysis"]
+                         ["meeting_brief"]["speaker_source_validity"]["status"], "current")
 
     def test_revision_conflict_merge_and_undo(self):
         info = self.client.get(self.url)

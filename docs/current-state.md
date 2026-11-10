@@ -12,7 +12,7 @@ Baseline: `repo-template-sw` **0.10.0**, **L2**; profiles Python/TS/macOS/local-
 - PR #189 (`03a6d6d`): minimal Voices timeline, shared player and restore; browser FULL_MEDIA passed, installed WKWebView/real audio pending.
 - PR #183 (`9df62d0`) integrated: optional GCS preference only; effective storage stays local. Upload/restore/eviction not enabled.
 - PR #181: local voice samples, rename/merge/exclude/undo integrated; packaged WKWebView/audio/accessibility proof pending.
-- PRs #194 (`21213bd`), #195 (`5857882`), #196 (`65f82f0`) integrated in `dev`: compact default transcript, coherent source-vs-person identity, timeline→transcript navigation and revision-safe **single-turn** correction/undo. Each passed integration Remote preflight and `local-ci/mac` on its checked head; real WKWebView/multitrack/VoiceOver evidence is still pending.
+- PRs #194–196 integrated: compact conversation, source-vs-person identity, timeline navigation and revision-safe single-turn correction/undo; integration preflight and exact-head Mac CI PASS. Speaker-aware note provenance now flags outdated/unverifiable attribution in read models (no edit loss/automatic regeneration). Installed WKWebView/multitrack/VoiceOver proof pending.
 - PRS-18 tooling and target-Mac measured/AI-contention evidence suite are in place (#48/#53).
 - Release: root `VERSION=0.2.0` owns product version; app identity `ClosedRoom.app` / `com.closedroom.app` stays fixed. Final artifacts carry version/build/source SHA.
 - PRs #137–139 consolidated UI/ASR and bounded footprint audit; path/upload caches remain separate, native dependency removal awaits Mac measurements.
@@ -36,7 +36,7 @@ Still required where material:
 - PRS-16 real AI-busy contention: local MLX active while `Preparing recording` is visible, no premature capture, then capture after the safe boundary with mic/system persistence;
 - representative CPU/RSS/thermal + local MLX completion and the PRS-9 dual-vs-mixed benchmark;
 - subjective VoiceOver/usability and representative production ASR/LLM quality or latency only when material;
-- speaker-review release journey on installed WKWebView (actual dual tracks, sample playback, transcript correction/undo, focus/keyboard) and representative long/legacy transcripts. Existing generated analyses are not yet proven to signal that their speaker attribution may be outdated after a manual correction.
+- installed WKWebView voice journey (real dual tracks, sample playback, correction/undo, keyboard/VoiceOver) and long/legacy transcripts. Speaker-sensitive notes now derive a read-only current/stale/unverifiable status; no automatic rewrite of old notes.
 
 Public binaries additionally require Developer ID signing, notarization/stapling and Gatekeeper acceptance.
 
