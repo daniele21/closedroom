@@ -87,8 +87,9 @@ export function SpeakerDiarizationEditor({
     return fromMetadata.map((item) => {
       const cluster = item.speaker_cluster;
       const group = item.speaker_group || cluster;
-      const sourceOnly = !cluster.includes(':') && sourceLabels.has(cluster) &&
-        item.status !== 'accepted';
+      const sourceOnly = !cluster.includes(':') && (
+        sourceLabels.has(cluster) || ['computer', 'system', 'system track'].includes(cluster.toLowerCase())
+      ) && item.status !== 'accepted';
       return {
         cluster, group, name: item.display_name || cluster || 'Speaker',
         status: item.status, count: groupCounts.get(group) || 0, sourceOnly,
@@ -105,6 +106,10 @@ export function SpeakerDiarizationEditor({
   const active = rows.filter((r) => r.status !== 'merged' && r.status !== 'excluded' && !r.sourceOnly);
   const confirmed = active.filter((r) => r.status === 'accepted').length;
   const pending = active.length - confirmed;
+  const unattributedSources = rows.filter((row) => row.sourceOnly && (
+    row.count > 0 || (transcription.segments || []).some((segment) =>
+      segment.speaker_label === row.cluster || segment.provider_speaker === row.cluster)
+  ));
 
   selectedGroupRef.current = selected?.group || null;
   useEffect(() => () => activeListenRequest.current?.abort(), [meetingId]);
@@ -313,6 +318,12 @@ export function SpeakerDiarizationEditor({
         </div>
       )}
 
+      {unattributedSources.length > 0 && (
+        <p role="status" className="mb-3 rounded-lg border border-border-subtle bg-bg-surface p-3 text-xs text-text-secondary">
+          {tr('Alcuni interventi provengono da una sorgente audio, ma non sono attribuiti a una persona. Puoi provare Migliora riconoscimento nelle opzioni avanzate.',
+            'Some passages have an audio source but no identified person. You can try Improve recognition in advanced options.')}
+        </p>
+      )}
       {!rows.length ? (
         <p className="rounded-lg bg-bg-surface p-4 text-sm text-text-muted">
           {tr('Nessuna voce rilevata. Puoi migliorarne il riconoscimento nelle opzioni.', 'No voices found. Improve voice recognition in options.')}
