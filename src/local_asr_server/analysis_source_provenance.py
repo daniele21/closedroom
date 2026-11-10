@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 
@@ -67,7 +68,7 @@ def project_speaker_source_validity(
         result = run.get("result")
         snapshot = result.get("source_snapshot") if isinstance(result, dict) else None
         original = snapshot.get("speaker_attribution_sha256") if isinstance(snapshot, dict) and snapshot.get("transcription_id") == current_id else None
-        if isinstance(original, str) and len(original) == 64:
+        if isinstance(original, str) and re.fullmatch(r"[0-9a-f]{64}", original):
             status = "current" if original == digest else "stale"
             projected.append({
                 **run,
