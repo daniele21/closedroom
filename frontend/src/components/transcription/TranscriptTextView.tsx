@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { RecordingNote, RecordingScreenshot, TranscriptionSegment } from '../../api/apiClient';
 import { formatTime } from '../../utils/formatters';
 import { useTranslation } from '../../i18n/i18n';
@@ -17,6 +17,7 @@ interface TranscriptTextViewProps {
   initialDisplayMode?: 'conversation' | 'detailed';
   onIdentifySpeakers?: () => void;
   onReassignTurn?: (segment: TranscriptionSegment, target: string | null) => Promise<void>;
+  onRefreshTranscript?: () => Promise<void>;
   turnOverrides?: Record<string, string>;
   jumpToTime?: number | null;
   onTimestampClick?: (time: number) => void;
@@ -68,6 +69,7 @@ export default function TranscriptTextView({
   initialDisplayMode = 'detailed',
   onIdentifySpeakers,
   onReassignTurn,
+  onRefreshTranscript,
   turnOverrides = {},
   jumpToTime = null,
   onTimestampClick,
@@ -98,6 +100,11 @@ export default function TranscriptTextView({
   const [noteBusyId, setNoteBusyId] = useState<string | null>(null);
   const [noteActionError, setNoteActionError] = useState<string | null>(null);
   const [editingTurnAnchor, setEditingTurnAnchor] = useState<number | null>(null);
+  const correctionTriggers = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const closeTurnCorrection = (anchor: number) => {
+    correctionTriggers.current.get(anchor)?.focus();
+    setEditingTurnAnchor(null);
+  };
 
   const totalPages = Math.max(1, Math.ceil(segments.length / SEGMENTS_PER_PAGE));
 
@@ -614,8 +621,9 @@ export default function TranscriptTextView({
                       </button>
                     )}
                     {onReassignTurn && (
-                      <button type="button" data-turn-correction-open="true" onClick={() =>
-                        setEditingTurnAnchor((current) => current === first.id ? null : first.id)}
+                      <button type="button" data-turn-correction-open="true"
+                        ref={(node) => { if (node) correctionTriggers.current.set(first.id, node); else correctionTriggers.current.delete(first.id); }}
+                        onClick={() => setEditingTurnAnchor((current) => current === first.id ? null : first.id)}
                         aria-expanded={editingTurnAnchor === first.id}
                         className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-text-secondary hover:text-accent focus-visible:outline-2 focus-visible:outline-border-focus">
                         <PencilLine className="h-3 w-3" aria-hidden="true" />
@@ -633,7 +641,8 @@ export default function TranscriptTextView({
                   {editingTurnAnchor === first.id && onReassignTurn && (
                     <TurnSpeakerCorrection key={first.id} turns={item.segments} mappings={speakerMappings}
                       sourceTrackLabels={sourceTrackLabels} overrides={turnOverrides}
-                      onSave={onReassignTurn} onDismiss={() => setEditingTurnAnchor(null)} />
+                      onSave={onReassignTurn} onRefresh={onRefreshTranscript}
+                      onDismiss={() => closeTurnCorrection(first.id)} />
                   )}
                   {item.segments.flatMap((segment) => screenshotPlacement.anchored.get(segment.id) || [])
                     .map((shot) => renderScreenshotMarker(shot, true))}
@@ -672,8 +681,9 @@ export default function TranscriptTextView({
                     {speakerName}
                   </span>
                   {onReassignTurn && (
-                    <button type="button" data-turn-correction-open="true" onClick={() =>
-                      setEditingTurnAnchor((current) => current === seg.id ? null : seg.id)}
+                    <button type="button" data-turn-correction-open="true"
+                      ref={(node) => { if (node) correctionTriggers.current.set(seg.id, node); else correctionTriggers.current.delete(seg.id); }}
+                      onClick={() => setEditingTurnAnchor((current) => current === seg.id ? null : seg.id)}
                       aria-expanded={editingTurnAnchor === seg.id}
                       className="rounded px-2 py-1 text-xs font-medium normal-case tracking-normal text-text-secondary hover:text-accent focus-visible:outline-2 focus-visible:outline-border-focus">
                       {lang === 'it' ? 'Correggi speaker' : 'Correct speaker'}
@@ -719,7 +729,8 @@ export default function TranscriptTextView({
               {editingTurnAnchor === seg.id && onReassignTurn && (
                 <TurnSpeakerCorrection key={seg.id} turns={[seg]} mappings={speakerMappings}
                   sourceTrackLabels={sourceTrackLabels} overrides={turnOverrides}
-                  onSave={onReassignTurn} onDismiss={() => setEditingTurnAnchor(null)} />
+                  onSave={onReassignTurn} onRefresh={onRefreshTranscript}
+                  onDismiss={() => closeTurnCorrection(seg.id)} />
               )}
 
               {(screenshotPlacement.anchored.get(seg.id) || []).map((shot) => (

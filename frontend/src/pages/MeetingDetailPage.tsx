@@ -1583,6 +1583,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                       initialDisplayMode="conversation"
                       onIdentifySpeakers={() => selectTab('speakers')}
                       onReassignTurn={demoMode ? undefined : handleReassignTurn}
+                      onRefreshTranscript={load}
                       turnOverrides={(meeting.transcription.stats?.speaker_review as { segment_assignments?: Record<string, string> } | undefined)?.segment_assignments || {}}
                       jumpToTime={transcriptJumpTime}
                       onTimestampClick={handleTimestampClick}
@@ -1794,6 +1795,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                             initialDisplayMode="conversation"
                             onIdentifySpeakers={() => selectTab('speakers')}
                             onReassignTurn={demoMode ? undefined : handleReassignTurn}
+                            onRefreshTranscript={load}
                             turnOverrides={(meeting.transcription.stats?.speaker_review as { segment_assignments?: Record<string, string> } | undefined)?.segment_assignments || {}}
                             jumpToTime={transcriptJumpTime}
                             onTimestampClick={handleTimestampClick}

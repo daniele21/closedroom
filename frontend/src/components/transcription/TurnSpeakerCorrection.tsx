@@ -11,11 +11,12 @@ interface Props {
   overrides: Record<string, string>;
   onSave: (segment: TranscriptionSegment, target: string | null) => Promise<void>;
   onDismiss: () => void;
+  onRefresh?: () => Promise<void>;
 }
 
 /** Scoped user correction, never a whole-cluster rename and never an ASR edit. */
 export function TurnSpeakerCorrection({
-  turns, mappings, sourceTrackLabels, overrides, onSave, onDismiss,
+  turns, mappings, sourceTrackLabels, overrides, onSave, onDismiss, onRefresh,
 }: Props) {
   const { lang } = useTranslation();
   const it = lang === 'it';
@@ -63,7 +64,7 @@ export function TurnSpeakerCorrection({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex min-w-0 flex-col gap-1 text-xs text-text-secondary">
           {it ? 'Battuta' : 'Turn'}
-          <select value={segmentId} disabled={busy} data-turn-segment-select="true"
+          <select autoFocus value={segmentId} disabled={busy} data-turn-segment-select="true"
             onChange={(event) => { setSegmentId(Number(event.target.value)); setTarget(''); setError(''); }}
             className="w-full min-w-0 rounded-md border border-border-subtle bg-bg-elevated px-2 py-2 text-sm text-text-primary focus-visible:outline-2 focus-visible:outline-border-focus">
             {turns.map((turn) => (
@@ -90,9 +91,17 @@ export function TurnSpeakerCorrection({
           </select>
         </label>
       </div>
-      {error && <p role="alert" className="mt-2 text-xs text-danger">
-        {error} {it ? 'Puoi ricaricare il meeting e riprovare.' : 'Reload the meeting and retry.'}
-      </p>}
+      {error && <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-xs text-danger">
+        <span>{error}</span>
+        {onRefresh && (
+          <button type="button" disabled={busy} onClick={() => {
+            setError('');
+            void onRefresh().then(onDismiss).catch((reason) => setError(String(reason)));
+          }} className="rounded-md border border-border-subtle px-2 py-1 text-text-primary focus-visible:outline-2 focus-visible:outline-border-focus">
+            {it ? 'Ricarica meeting' : 'Reload meeting'}
+          </button>
+        )}
+      </div>}
       <div className="mt-3 flex flex-wrap justify-end gap-2">
         <button type="button" disabled={busy} onClick={onDismiss}
           className="rounded-md px-3 py-2 text-xs text-text-secondary hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-border-focus">
