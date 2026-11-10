@@ -1622,6 +1622,32 @@ try {
   }
   await checkpoint(browser, '19-metadata-edit');
 
+  // Previously generated notes remain intact; a changed speaker assignment
+  // is disclosed in the canonical Meeting analysis view without auto-regeneration.
+  meetingFixture.latest_analysis = { meeting_brief: {
+    id: 'e2e-before-speaker-correction', analysis_type: 'meeting_brief',
+    status: 'completed', result: { markdown: 'Old notes preserved for manual review.' },
+    speaker_source_validity: { status: 'stale', reason: 'speaker_attribution_changed' },
+  } };
+  meetingFixture.analysis_runs = [meetingFixture.latest_analysis.meeting_brief];
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitText(browser, ['Alternate pricing review'], 5000, true);
+  await setMeetingHash(MEETING_ID);
+  await waitText(browser, ['Quarterly launch review revised'], 5000, true);
+  await browser.clickCss('#meeting-tab-analysis');
+  await waitText(browser, ['Review speakers in these notes', 'Verifica gli speaker nelle note'], 5000, true);
+  const speakerProvenanceWarning = await browser.execute(`
+    const notice = document.querySelector('[data-speaker-analysis-source-warning="true"]');
+    const text = notice?.textContent || '';
+    return Boolean(notice && notice.getAttribute('role') === 'status' &&
+      (text.includes('Rigenera solo analisi') || text.includes('Regenerate analysis only')) &&
+      document.body.innerText.includes('Old notes preserved for manual review.'));
+  `);
+  if (!speakerProvenanceWarning) {
+    throw new Error('Stale speaker-attributed notes must show a review notice without rewriting content');
+  }
+  await checkpoint(browser, '20-stale-speaker-analysis');
+
   video = await renderVideo();
 } catch (caught) {
   error = `${caught?.name || 'Error'}: ${caught?.message || caught}`;
