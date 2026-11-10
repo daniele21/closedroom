@@ -1518,6 +1518,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                     <TranscriptTextView
                       segments={meeting.transcription.segments}
                       speakerMappings={speakerMappings}
+                      sourceTrackLabels={(meeting.transcription.source_tracks || []).map((track) => track.label)}
+                      initialDisplayMode="conversation"
+                      onIdentifySpeakers={() => selectTab('speakers')}
                       onTimestampClick={handleTimestampClick}
                       currentTime={currentTime}
                       screenshots={screenshots}
@@ -1723,6 +1726,9 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                           <TranscriptTextView
                             segments={meeting.transcription.segments}
                             speakerMappings={speakerMappings}
+                            sourceTrackLabels={(meeting.transcription.source_tracks || []).map((track) => track.label)}
+                            initialDisplayMode="conversation"
+                            onIdentifySpeakers={() => selectTab('speakers')}
                             onTimestampClick={handleTimestampClick}
                             currentTime={currentTime}
                             screenshots={screenshots}

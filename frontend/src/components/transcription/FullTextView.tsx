@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { Button } from '../ui/Button';
 import { Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { TranscriptionSegment } from '../../api/apiClient';
+import { speakerDisplay } from '../../utils/speakerPresentation';
 
 interface FullTextViewProps {
   segments: TranscriptionSegment[];
@@ -39,7 +40,7 @@ export default function FullTextView({ segments, speakerMappings }: FullTextView
     const map: Record<string, string> = {};
     let colorIndex = 0;
     segments.forEach((seg) => {
-      const spk = seg.speaker_label || 'unknown';
+      const spk = seg.speaker_group || seg.provider_speaker || seg.speaker_label || 'unknown';
       if (!map[spk]) {
         map[spk] = SPEAKER_TEXT_COLORS[colorIndex % SPEAKER_TEXT_COLORS.length];
         colorIndex++;
@@ -55,9 +56,9 @@ export default function FullTextView({ segments, speakerMappings }: FullTextView
     let currentPar: Paragraph | null = null;
 
     segments.forEach((seg) => {
-      const mapping = speakerMappings.find((m) => m.speaker_cluster === seg.speaker_label);
-      const speakerName = mapping?.display_name || seg.speaker_name || seg.speaker_label || 'Speaker';
-      const label = seg.speaker_label || 'unknown';
+      const speaker = speakerDisplay(seg, speakerMappings);
+      const speakerName = speaker.label;
+      const label = speaker.key || `unknown-${seg.id}`;
 
       if (currentPar && currentPar.speakerLabel === label) {
         currentPar.text += ' ' + seg.text;

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { RecordingNote, RecordingScreenshot, TranscriptionSegment } from '../../api/apiClient';
 import { formatTime } from '../../utils/formatters';
+import { canJoinConversationTurns, speakerDisplay, type SpeakerDisplayMapping } from '../../utils/speakerPresentation';
 import { Button } from '../ui/Button';
 import {
   Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
@@ -9,7 +10,10 @@ import {
 
 interface TranscriptTextViewProps {
   segments: TranscriptionSegment[];
-  speakerMappings: Array<{ speaker_cluster: string; display_name?: string | null }>;
+  speakerMappings: SpeakerDisplayMapping[];
+  sourceTrackLabels?: string[];
+  initialDisplayMode?: 'conversation' | 'detailed';
+  onIdentifySpeakers?: () => void;
   onTimestampClick?: (time: number) => void;
   currentTime?: number;
   screenshots?: RecordingScreenshot[];
@@ -55,6 +59,9 @@ function energyBadge(energy: string | null | undefined) {
 export default function TranscriptTextView({
   segments,
   speakerMappings,
+  sourceTrackLabels = [],
+  initialDisplayMode = 'detailed',
+  onIdentifySpeakers,
   onTimestampClick,
   currentTime = 0,
   screenshots = [],
@@ -66,7 +73,8 @@ export default function TranscriptTextView({
   const [currentPage, setCurrentPage] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
-  const [showAudioDetails, setShowAudioDetails] = useState(true);
+  const [showAudioDetails, setShowAudioDetails] = useState(false);
+  const [displayMode, setDisplayMode] = useState<'conversation' | 'detailed'>(initialDisplayMode);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [noteBusyId, setNoteBusyId] = useState<string | null>(null);
@@ -209,6 +217,28 @@ export default function TranscriptTextView({
       || a.sequence - b.sequence
     ));
   }, [currentPage, notePlacement.standalone, pageSegments, screenshotPlacement.standalone, segments]);
+
+  type TimelineEntry = (typeof timelineItems)[number] | { kind: 'utterance'; segments: TranscriptionSegment[] };
+  const displayTimelineItems = useMemo<TimelineEntry[]>(() => {
+    if (displayMode !== 'conversation') return timelineItems;
+    const result: TimelineEntry[] = [];
+    for (const item of timelineItems) {
+      if (item.kind !== 'segment') {
+        result.push(item);
+        continue;
+      }
+      const previous = result[result.length - 1];
+      const tail = previous?.kind === 'utterance' ? previous.segments[previous.segments.length - 1] : null;
+      if (previous?.kind === 'utterance' && tail &&
+          !notePlacement.anchored.has(tail.id) && !screenshotPlacement.anchored.has(tail.id) &&
+          canJoinConversationTurns(tail, item.segment, speakerMappings, sourceTrackLabels)) {
+        previous.segments.push(item.segment);
+      } else {
+        result.push({ kind: 'utterance', segments: [item.segment] });
+      }
+    }
+    return result;
+  }, [displayMode, timelineItems, notePlacement.anchored, screenshotPlacement.anchored, speakerMappings, sourceTrackLabels]);
 
   const renderScreenshotMarker = (shot: RecordingScreenshot, compact = false) => (
     <button
@@ -483,10 +513,22 @@ export default function TranscriptTextView({
           />
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-text-muted shrink-0">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted shrink-0">
+          <div role="group" aria-label="Vista trascrizione" className="flex rounded-lg border border-border-subtle p-0.5">
+            <button type="button" aria-pressed={displayMode === 'conversation'}
+              onClick={() => setDisplayMode('conversation')}
+              className={`rounded-md px-2.5 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-border-focus ${displayMode === 'conversation' ? 'bg-bg-elevated text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'}`}>
+              Conversazione
+            </button>
+            <button type="button" aria-pressed={displayMode === 'detailed'}
+              onClick={() => setDisplayMode('detailed')}
+              className={`rounded-md px-2.5 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-border-focus ${displayMode === 'detailed' ? 'bg-bg-elevated text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'}`}>
+              Dettagli
+            </button>
+          </div>
           <span>{segments.length} segmenti</span>
 
-          {hasAudioData && (
+          {displayMode === 'detailed' && hasAudioData && (
             <button
               onClick={() => setShowAudioDetails((v) => !v)}
               className={`flex items-center gap-1 px-2 py-1 rounded-md border border-border-subtle text-[10px] font-medium transition-colors cursor-pointer ${
@@ -519,19 +561,58 @@ export default function TranscriptTextView({
         </div>
       </div>
 
-      {/* Segment cards */}
-      <div className="flex flex-col gap-3">
-        {timelineItems.map((item) => {
+      {/* Readable conversation by default; original segment cards remain an explicit detailed view. */}
+      <div className={displayMode === 'conversation' ? 'flex flex-col gap-0.5' : 'flex flex-col gap-3'}>
+        {displayTimelineItems.map((item) => {
           if (item.kind === 'note') {
             return renderNoteMarker(item.note);
           }
           if (item.kind === 'screenshot') {
             return renderScreenshotMarker(item.screenshot);
           }
+          if (item.kind === 'utterance') {
+            const first = item.segments[0];
+            const speaker = speakerDisplay(first, speakerMappings, sourceTrackLabels);
+            const active = item.segments.some((segment) => currentTime >= segment.start && currentTime <= segment.end);
+            const firstColor = speakerColorMap[first.speaker_group || first.provider_speaker || first.speaker_label || 'unknown']
+              || speakerColorMap[first.speaker_label || 'unknown'] || 'border-l-4 border-border-subtle';
+            return (
+              <div key={`utterance-${first.id}`} data-transcript-turn="conversation"
+                data-speaker-key={speaker.key || 'unknown'}
+                className={`flex min-w-0 items-start gap-3 rounded-md py-2 pl-2 pr-3 transition-colors hover:bg-bg-hover/40 ${active ? 'bg-accent/10 ring-1 ring-accent/30' : ''}`}>
+                <button type="button" onClick={() => onTimestampClick?.(first.start)}
+                  aria-label={`Ascolta da ${formatTime(first.start)}`}
+                  className="w-[74px] shrink-0 pt-0.5 text-left text-xs tabular-nums text-text-muted hover:text-accent focus-visible:outline-2 focus-visible:outline-border-focus">
+                  {formatTime(first.start)}
+                </button>
+                <div className={`min-w-0 flex-1 border-l-4 pl-3 ${firstColor}`}>
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-text-primary">{speaker.label}</span>
+                    {speaker.needsIdentification && onIdentifySpeakers && (
+                      <button type="button" onClick={onIdentifySpeakers}
+                        className="text-xs text-accent hover:underline focus-visible:outline-2 focus-visible:outline-border-focus">
+                        Identifica voce
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-sm leading-6 text-text-primary select-text">
+                    {item.segments.map((segment, index) => (
+                      <span key={segment.id} data-transcript-segment-id={segment.id}>
+                        {index > 0 ? ' ' : ''}{renderHighlightedText(segment.text, segment.id)}
+                      </span>
+                    ))}
+                  </p>
+                  {item.segments.flatMap((segment) => screenshotPlacement.anchored.get(segment.id) || [])
+                    .map((shot) => renderScreenshotMarker(shot, true))}
+                  {item.segments.flatMap((segment) => notePlacement.anchored.get(segment.id) || [])
+                    .map((note) => renderNoteMarker(note, true))}
+                </div>
+              </div>
+            );
+          }
 
           const seg = item.segment;
-          const mapping = speakerMappings.find((m) => m.speaker_cluster === seg.speaker_label);
-          const speakerName = mapping?.display_name || seg.speaker_name || seg.speaker_label || 'Speaker';
+          const speakerName = speakerDisplay(seg, speakerMappings, sourceTrackLabels).label;
           const colorClass = speakerColorMap[seg.speaker_label || 'unknown'] || 'border-l-4 border-border-subtle';
           const isPlaying = currentTime >= seg.start && currentTime <= seg.end;
           const eBadge = energyBadge(seg.energy);
