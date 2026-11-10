@@ -5,6 +5,8 @@ import fsp from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
+// Run pure speaker identity invariants before browser integration.
+import './test_speaker_presentation.mjs';
 
 const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 const MEETING_ID = 'e2e-meeting';
@@ -1186,6 +1188,33 @@ try {
   }
   await setMeetingHash(MEETING_ID);
   await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
+  await browser.clickCss('#meeting-tab-transcript');
+  const readableTranscript = await browser.execute(`
+    const root = document.getElementById('meeting-panel-transcript');
+    const mode = root?.querySelector('[data-transcript-mode-control="true"]');
+    return Boolean(mode &&
+      ['Conversazione', 'Conversation'].some((word) =>
+        mode.querySelector('button[aria-pressed="true"]')?.textContent?.includes(word)) &&
+      root.querySelectorAll('[data-transcript-turn="conversation"]').length >= 1);
+  `);
+  if (!readableTranscript) throw new Error('Meeting must default to readable conversation with audio diagnostics hidden');
+  const switchedToDetails = await browser.execute(`
+    const buttons = document.querySelectorAll('#meeting-panel-transcript [data-transcript-mode-control="true"] button');
+    const details = [...buttons].find((button) =>
+      ['Dettagli', 'Details'].some((word) => button.textContent.includes(word)));
+    if (!details) return false;
+    details.click();
+    return true;
+  `);
+  if (!switchedToDetails) throw new Error('Detailed transcript mode is not selectable');
+  const detailMode = await browser.execute(`
+    const root = document.getElementById('meeting-panel-transcript');
+    const selected = root?.querySelector('[data-transcript-mode-control="true"] button[aria-pressed="true"]');
+    return Boolean(['Dettagli', 'Details'].some((word) => selected?.textContent?.includes(word)) &&
+      !root.querySelector('[data-transcript-turn="conversation"]'));
+  `);
+  if (!detailMode) throw new Error('Detailed transcript view did not replace grouped conversation');
+  await checkpoint(browser, '11-transcript-conversation-and-detail');
   await browser.clickCss('#meeting-tab-speakers');
   await waitText(browser, ['Voices', 'Voci']);
   await waitCount('speaker_sample_list', 1);
