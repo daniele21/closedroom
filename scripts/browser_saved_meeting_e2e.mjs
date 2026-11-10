@@ -1756,6 +1756,60 @@ try {
   }
   await checkpoint(browser, '21-long-legacy-conversation-5005');
 
+  // Historical imports may retain the complete raw transcript but no ASR
+  // segmentation. Reading must preserve the text, without creating imaginary
+  // speaker turns, timestamp buttons, or an implicit analysis/audio request.
+  const audioRequestsBeforeEmptyRead = counts.speaker_audio_request;
+  const benchmarkRequestsBeforeEmptyRead = counts.benchmark_start;
+  const legacyPlainText = 'Historical imported transcript: original words are still available without ASR segments.';
+  meetingFixture.transcription.segments = [];
+  meetingFixture.transcription.text = legacyPlainText;
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitText(browser, ['Alternate pricing review'], 5000, true);
+  await setMeetingHash(MEETING_ID);
+  await waitText(browser, ['Quarterly launch review revised'], 5000, true);
+  await browser.clickCss('#meeting-tab-transcript');
+  await waitText(browser, [legacyPlainText], 5000, true);
+  const plainTextOnly = await browser.execute(`
+    const panel = document.querySelector('#meeting-panel-transcript');
+    return Boolean(panel &&
+      panel.textContent.includes(${JSON.stringify(legacyPlainText)}) &&
+      !panel.querySelector('[data-transcript-turn]') &&
+      !panel.querySelector('[data-transcript-segment-id]') &&
+      !panel.querySelector('[data-turn-correction-open]'));
+  `);
+  if (!plainTextOnly) throw new Error('legacy raw text without ASR segments was hidden or given invented speaker turns');
+  await checkpoint(browser, '22-legacy-import-plain-text-without-segments');
+
+  // A genuinely empty transcription is different from an imported text-only
+  // transcript: show a truthful empty state, not the last long meeting page.
+  meetingFixture.transcription.text = '';
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitText(browser, ['Alternate pricing review'], 5000, true);
+  await setMeetingHash(MEETING_ID);
+  await waitText(browser, ['Quarterly launch review revised'], 5000, true);
+  await browser.clickCss('#meeting-tab-transcript');
+  await waitText(browser, [
+    'Qui troverai il testo della chiamata',
+    'Your call transcript will appear here',
+  ], 5000, true);
+  const zeroSegmentsEmpty = await browser.execute(`
+    const panel = document.querySelector('#meeting-panel-transcript');
+    const text = panel?.textContent || '';
+    return Boolean(panel &&
+      (text.includes('Qui troverai il testo della chiamata') ||
+       text.includes('Your call transcript will appear here')) &&
+      !text.includes('needle-5004') &&
+      !panel.querySelector('[data-transcript-turn]') &&
+      !panel.querySelector('[data-transcript-segment-id]'));
+  `);
+  if (!zeroSegmentsEmpty) throw new Error('empty legacy meeting showed stale transcript or invented speaker labels');
+  if (counts.speaker_audio_request !== audioRequestsBeforeEmptyRead ||
+      counts.benchmark_start !== benchmarkRequestsBeforeEmptyRead) {
+    throw new Error('reading text-only/empty legacy transcript triggered audio or inference');
+  }
+  await checkpoint(browser, '23-empty-transcript-no-invented-turns');
+
   video = await renderVideo();
 } catch (caught) {
   error = `${caught?.name || 'Error'}: ${caught?.message || caught}`;
