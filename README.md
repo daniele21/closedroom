@@ -110,7 +110,7 @@ A normal ClosedRoom workflow does not require choosing models, audio devices or 
 1. **Start and record a meeting.** Add a title or project if useful, grant the required macOS capture permissions, and let ClosedRoom write audio progressively so the meeting remains recoverable.
 2. **Stop and transcribe.** ClosedRoom finalizes the recording first, then runs the default local ASR path as a persisted, observable job.
 3. **Turn the transcript into meeting intelligence.** Structured analysis produces the summary, actions, decisions, risks and other reusable outputs shown in the main workspace.
-4. **Review and edit.** Generated items stay human-reviewable; corrections are persisted instead of being silently replaced on refresh or regeneration.
+4. **Review and edit.** Read the saved Meeting in the compact **Conversation** transcript (switch to **Details** for source-level information), open **Voices** to audition and name speakers, and use **Correct speaker** on an individual transcript turn when attribution is wrong. These corrections preserve the recorded audio and original words/timestamps and support one-step undo. Generated notes remain separately reviewable.
 5. **Reuse the result.** Today and Project workspaces carry decisions, commitments, risks and context across meetings instead of treating each transcript as an isolated file.
 
 Optional visual intelligence can be enabled for a specifically selected macOS window. It may contribute evidence for naming existing speaker clusters, but **audio diarization remains the source of who spoke when and uncertain identity mappings abstain rather than pretending certainty**.
