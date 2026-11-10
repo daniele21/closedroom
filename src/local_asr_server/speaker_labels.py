@@ -47,6 +47,8 @@ def apply_speaker_labels(
             value = str(cluster)
             if value and value not in clusters:
                 clusters.append(value)
+    # A turn override does not transfer a name to the raw source cluster.
+    turn_overrides = ((payload.get("stats") or {}).get("speaker_review") or {}).get("segment_assignments") or {}
     known_labels: dict[str, str] = {}
     segment_counts: dict[str, int] = {}
     for segment in sorted(segments, key=lambda item: (float(item.get("start") or 0), int(item.get("id") or 0))):
@@ -55,7 +57,7 @@ def apply_speaker_labels(
             clusters.append(str(cluster))
         if cluster:
             segment_counts[str(cluster)] = segment_counts.get(str(cluster), 0) + 1
-        if cluster and segment.get("speaker_label"):
+        if cluster and segment.get("speaker_label") and str(segment.get("id")) not in turn_overrides:
             label = str(segment["speaker_label"])
             if not str(cluster).startswith("Speaker "):
                 known_labels[str(cluster)] = label
@@ -90,6 +92,7 @@ def apply_speaker_labels(
     review = (payload.get("stats") or {}).get("speaker_review") or {}
     names = review.get("names") or {}
     merged_into = review.get("merged_into") or {}
+    segment_assignments = review.get("segment_assignments") or {}
     excluded = set(review.get("excluded") or [])
 
     def root_of(raw: str) -> str:
@@ -128,10 +131,15 @@ def apply_speaker_labels(
     for segment in segments:
         cluster = segment.get("provider_speaker") or segment.get("speaker_label")
         if cluster and str(cluster) in labels:
-            label = labels[str(cluster)]
+            # Overrides change only the user-facing attribution of this one
+            # immutable ASR segment. They never replace provider_speaker.
+            override = segment_assignments.get(str(segment.get("id")))
+            chosen = root_of(str(override)) if override else root_of(str(cluster))
+            resolved = by_cluster.get(chosen)
+            label = str(resolved["display_name"]) if resolved else labels[str(cluster)]
             segment["speaker_name"] = label
             segment["speaker_label"] = label
-            segment["speaker_group"] = root_of(str(cluster))
+            segment["speaker_group"] = chosen if resolved else root_of(str(cluster))
         label = segment.get("speaker_name") or segment.get("speaker_label") or segment.get("source") or "Audio"
         text = (segment.get("text") or "").strip()
         if text:
