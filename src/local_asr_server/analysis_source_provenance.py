@@ -5,10 +5,13 @@ persistence store. Digests contain no raw transcript or audio in API metadata.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
 from typing import Any
+
+from local_asr_server.speaker_labels import apply_speaker_labels
 
 
 def speaker_attribution_digest(transcription: dict[str, Any]) -> str:
@@ -17,8 +20,14 @@ def speaker_attribution_digest(transcription: dict[str, Any]) -> str:
     Keep the original provider ID separate from the effective user attribution.
     The transcript text itself is owned by the existing source/cache fingerprint.
     """
+    # Catalog.find_for_recording returns the persisted projection as-is,
+    # while TranscriptionStore.get applies the canonical speaker-label resolver.
+    # Both read paths must hash *the same effective speaker assignment*, not
+    # accidentally label every existing analysis stale on first Meeting load.
+    # Resolve on a clone: this must never rewrite the source transcript.
+    normalized = apply_speaker_labels(copy.deepcopy(transcription))
     segments = []
-    for index, segment in enumerate(transcription.get("segments") or []):
+    for index, segment in enumerate(normalized.get("segments") or []):
         if not isinstance(segment, dict):
             continue
         segments.append({
