@@ -122,5 +122,32 @@ class SpeakerLabelsTests(unittest.TestCase):
         self.assertEqual(result3["segments"][0]["speaker_label"], "Walter")
 
 
+    def test_single_turn_override_is_idempotent_and_preserves_raw_attribution(self):
+        payload = {
+            "segments": [
+                {"id": 0, "start": 0, "end": 1, "text": "Ciao", "provider_speaker": "system:S1"},
+                {"id": 1, "start": 1, "end": 2, "text": "Salve", "provider_speaker": "system:S1"},
+            ],
+            "stats": {
+                "speaker_diarization": {"clusters_by_track": {"system": ["system:S1", "system:S2"]}},
+                "speaker_review": {"segment_assignments": {"0": "system:S2"}},
+                "review_preserve_canonical_text": True,
+            },
+            "text": "Immutable human transcript.",
+        }
+        result = apply_speaker_labels(payload)
+        self.assertEqual(result["segments"][0]["speaker_group"], "system:S2")
+        self.assertEqual(result["segments"][1]["speaker_group"], "system:S1")
+        self.assertEqual(result["segments"][0]["provider_speaker"], "system:S1")
+        self.assertEqual(result["text"], "Immutable human transcript.")
+        again = apply_speaker_labels(result)
+        self.assertEqual(again["segments"][0]["speaker_group"], "system:S2")
+        self.assertEqual(again["segments"][0]["provider_speaker"], "system:S1")
+        mappings = {entry["speaker_cluster"]: entry["display_name"]
+                    for entry in again["stats"]["speaker_attribution"]["mappings"]}
+        self.assertNotEqual(mappings["system:S1"], mappings["system:S2"],
+                            "turn override must not rename the whole original cluster")
+
+
 if __name__ == "__main__":
     unittest.main()
