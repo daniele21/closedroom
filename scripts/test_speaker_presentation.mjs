@@ -41,6 +41,8 @@ const group = [
 const first = { id: 1, start: 0, end: 4, text: 'First', provider_speaker: 'system:S1' };
 const next = { id: 2, start: 5, end: 8, text: 'Second', provider_speaker: 'system:S2' };
 assert.equal(canJoinConversationTurns(first, next, group), true, 'explicit merged voice should group');
+assert.equal(speakerDisplay(next, group).needsIdentification, false,
+  'confirmed canonical person means merged clusters are not pending');
 assert.equal(canJoinConversationTurns(first, { ...next, overlap: true }, group), false);
 assert.equal(canJoinConversationTurns(first, { ...next, start: 20 }, group), false);
 assert.equal(canJoinConversationTurns(first, { ...next, start: 3 }, group), false);

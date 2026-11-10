@@ -26,12 +26,13 @@ export function speakerDisplay(
   const raw = segment.provider_speaker || segment.speaker_group || segment.speaker_label || '';
   const mapping = mappings.find((entry) => entry.speaker_cluster === (segment.provider_speaker || raw));
   const group = segment.speaker_group || mapping?.speaker_group || segment.provider_speaker || null;
-  const visible = (mapping?.display_name || segment.speaker_name || segment.speaker_label || '').trim();
-  const accepted = mapping?.status === 'accepted';
+  const canonical = mappings.find((entry) => entry.speaker_cluster === group);
+  const visible = (canonical?.display_name || mapping?.display_name || segment.speaker_name || segment.speaker_label || '').trim();
+  const accepted = mapping?.status === 'accepted' || canonical?.status === 'accepted';
   const sourceLabels = sourceTrackLabels.map((source) => source.toLocaleLowerCase());
   const isSourceName = (name: string) =>
     sourceLabels.includes(name.toLocaleLowerCase())
-    || (name.toLocaleLowerCase() === 'computer' && segment.source === 'system');
+    || name.toLocaleLowerCase() === 'computer';
   const sourceOnly = !accepted && !!visible && isSourceName(visible);
   // Legacy transcripts sometimes persisted "Computer" itself as a speaker ID.
   // That is not a detected person and must not become a newly inferred cluster.

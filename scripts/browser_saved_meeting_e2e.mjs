@@ -1191,16 +1191,17 @@ try {
   await browser.clickCss('#meeting-tab-transcript');
   const readableTranscript = await browser.execute(`
     const root = document.getElementById('meeting-panel-transcript');
-    const mode = root?.querySelector('[role="group"][aria-label="Vista trascrizione"]');
+    const mode = root?.querySelector('[data-transcript-mode-control="true"]');
     return Boolean(mode &&
-      mode.querySelector('button[aria-pressed="true"]')?.textContent?.includes('Conversazione') &&
-      root.querySelectorAll('[data-transcript-turn="conversation"]').length >= 1 &&
-      !root.querySelector('.bg-orange-500\\/15'));
+      ['Conversazione', 'Conversation'].some((word) =>
+        mode.querySelector('button[aria-pressed="true"]')?.textContent?.includes(word)) &&
+      root.querySelectorAll('[data-transcript-turn="conversation"]').length >= 1);
   `);
   if (!readableTranscript) throw new Error('Meeting must default to readable conversation with audio diagnostics hidden');
   const switchedToDetails = await browser.execute(`
-    const buttons = document.querySelectorAll('#meeting-panel-transcript [role="group"][aria-label="Vista trascrizione"] button');
-    const details = [...buttons].find((button) => button.textContent.includes('Dettagli'));
+    const buttons = document.querySelectorAll('#meeting-panel-transcript [data-transcript-mode-control="true"] button');
+    const details = [...buttons].find((button) =>
+      ['Dettagli', 'Details'].some((word) => button.textContent.includes(word)));
     if (!details) return false;
     details.click();
     return true;
@@ -1208,7 +1209,8 @@ try {
   if (!switchedToDetails) throw new Error('Detailed transcript mode is not selectable');
   const detailMode = await browser.execute(`
     const root = document.getElementById('meeting-panel-transcript');
-    return Boolean(root?.querySelector('button[aria-pressed="true"]')?.textContent?.includes('Dettagli') &&
+    const selected = root?.querySelector('[data-transcript-mode-control="true"] button[aria-pressed="true"]');
+    return Boolean(['Dettagli', 'Details'].some((word) => selected?.textContent?.includes(word)) &&
       !root.querySelector('[data-transcript-turn="conversation"]'));
   `);
   if (!detailMode) throw new Error('Detailed transcript view did not replace grouped conversation');

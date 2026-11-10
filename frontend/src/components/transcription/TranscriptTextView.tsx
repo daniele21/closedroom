@@ -527,7 +527,7 @@ export default function TranscriptTextView({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted shrink-0">
-          <div role="group" aria-label={lang === 'it' ? 'Vista trascrizione' : 'Transcript view'} className="flex rounded-lg border border-border-subtle p-0.5">
+          <div role="group" data-transcript-mode-control="true" aria-label={lang === 'it' ? 'Vista trascrizione' : 'Transcript view'} className="flex rounded-lg border border-border-subtle p-0.5">
             <button type="button" aria-pressed={displayMode === 'conversation'}
               onClick={() => setDisplayMode('conversation')}
               className={`rounded-md px-2.5 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-border-focus ${displayMode === 'conversation' ? 'bg-bg-elevated text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'}`}>
