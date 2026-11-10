@@ -5,6 +5,8 @@ import fsp from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
+// Run pure speaker identity invariants before browser integration.
+import './test_speaker_presentation.mjs';
 
 const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 const MEETING_ID = 'e2e-meeting';
