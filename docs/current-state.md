@@ -7,18 +7,16 @@ Baseline: `repo-template-sw` **0.10.0**, **L2**, profiles Python/TypeScript/macO
 ## Integrated baseline
 
 - Exact-head/tree-equivalent preflight, immutable finalized artifacts and packaged-app lifecycle smoke are established.
-- PRS-5..9 integrated Meeting-first defaults, visual on-demand, bounded model residency, SSE progress and privacy-safe audio benchmark tooling; dual-track audio remains canonical pending representative evidence.
-- PRS-11..17 integrated saved Meetings/Prepare notes, structured verifiable notes, bounded archive search, safe capture priority and adaptive Today/Meeting/Projects workspace.
+- PRS-5..17: Meeting-first transcription/analysis, visual on-demand, bounded model residency, structured notes, archive search, capture priority and adaptive Today/Meeting/Projects. Dual-track audio still needs representative evidence.
 - PR #186 integrated (`9c7f86c`): source server port 1237, isolated Development data, non-destructive startup; physical check pending.
 - PR #189 (`03a6d6d`) integrated: minimal Voices timeline, shared player, restore; 894 tests + browser FULL_MEDIA PASS. WKWebView/real audio pending.
 - PR #183 (`9df62d0`) integrated: optional GCS preference only; effective storage stays local. Upload/restore/eviction not enabled.
 - PR #181: local voice samples, rename/merge/exclude/undo integrated; packaged WKWebView/audio/accessibility proof pending.
 - PRs #194 (`21213bd`), #195 (`5857882`), #196 (`65f82f0`) integrated in `dev`: compact default transcript, coherent source-vs-person identity, timeline→transcript navigation and revision-safe **single-turn** correction/undo. Each passed integration Remote preflight and `local-ci/mac` on its checked head; real WKWebView/multitrack/VoiceOver evidence is still pending.
-- PRS-18 tooling integrated through PR #48; PR #53 added aggregate REAL_ENVIRONMENT coverage for measured target-Mac and PRS-16 contention owners.
+- PRS-18 tooling and target-Mac measured/AI-contention evidence suite are in place (#48/#53).
 - Release: root `VERSION=0.2.0` owns product version; app identity `ClosedRoom.app` / `com.closedroom.app` stays fixed. Final artifacts carry version/build/source SHA.
-- PR #137 consolidated UI/ASR; path/upload caches stay distinct. PRs #138–139 cut doc media and add read-only footprint audit; native dependency removal awaits Mac measurements.
-- GRP-3 stages immutable artifacts with source identity and checksums.
-- GRP-4/5 now build and draft releases locally from the exact tag; Actions release workflows are retired. Apple notarization remains mandatory.
+- PRs #137–139 consolidated UI/ASR and bounded footprint audit; path/upload caches remain separate, native dependency removal awaits Mac measurements.
+- GRP-3..5 stage immutable source-identified artifacts and build/draft releases locally from exact tags; Actions release builds retired, Apple notarization mandatory.
 
 ## Current integration state
 
