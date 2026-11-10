@@ -1648,6 +1648,114 @@ try {
   }
   await checkpoint(browser, '20-stale-speaker-analysis');
 
+  // Long/legacy speaker evidence: 5,005 synthetic turns, bounded pagination
+  // and search beyond page 200, and a source-only "Computer" that is not a
+  // detected person. This must not start AI, fetch clips or mutate transcript.
+  const audioRequestsBeforeLongRead = counts.speaker_audio_request;
+  const benchmarkRequestsBeforeLongRead = counts.benchmark_start;
+  meetingFixture.latest_analysis = {};
+  meetingFixture.analysis_runs = [];
+  meetingFixture.recording.duration_seconds = 7800;
+  meetingFixture.recording.stopped_at = '2026-09-05T12:10:00Z';
+  meetingFixture.transcription.text = 'Synthetic 5,005-turn meeting; original audio not required for transcript reading.';
+  meetingFixture.transcription.segments = Array.from({ length: 5005 }, (_, index) => ({
+    id: index, start: index * 1.5, end: index * 1.5 + 1.2,
+    text: `needle-${index}: synthetic local transcript segment.`,
+    track_id: 'system', source: 'system',
+    ...(index === 0
+      ? { speaker_label: 'Computer' }
+      : { provider_speaker: 'system:S1', speaker_group: 'system:S1',
+          speaker_label: 'Speaker 1', speaker_name: 'Speaker 1' }),
+    overlap: index === 2,
+  }));
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitText(browser, ['Alternate pricing review'], 5000, true);
+  await setMeetingHash(MEETING_ID);
+  await waitText(browser, ['Quarterly launch review revised'], 5000, true);
+  await browser.clickCss('#meeting-tab-transcript');
+  let longFirstPage = false;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    longFirstPage = await browser.execute(`
+      const root = document.querySelector('#meeting-panel-transcript');
+      const content = root?.textContent || '';
+      return Boolean(root &&
+        root.querySelector('[data-transcript-segment-id="0"]') &&
+        root.querySelector('[data-transcript-segment-id="24"]') &&
+        !root.querySelector('[data-transcript-segment-id="25"]') &&
+        root.querySelectorAll('[data-transcript-turn="conversation"]').length >= 3 &&
+        (content.includes('Audio non attribuito') || content.includes('Unattributed audio')) &&
+        !root.querySelector('button[aria-pressed="true"]')?.textContent?.includes('Dettagli'));
+    `);
+    if (longFirstPage) break;
+    await sleep(100);
+  }
+  if (!longFirstPage) {
+    throw new Error('long Meeting must show bounded conversation and mark legacy Computer as an audio source');
+  }
+  const jumpToLast = await browser.execute(`
+    const root = document.querySelector('#meeting-panel-transcript');
+    const button = [...(root?.querySelectorAll('button') || [])]
+      .find((item) => item.textContent.trim() === '201');
+    if (!button) return false;
+    button.click();
+    return true;
+  `);
+  if (!jumpToLast) throw new Error('last page of 5,005-segment transcript not reachable');
+  let lastPage = false;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    lastPage = await browser.execute(`
+      const root = document.querySelector('#meeting-panel-transcript');
+      return Boolean(root &&
+        root.querySelector('[data-transcript-segment-id="5004"]') &&
+        !root.querySelector('[data-transcript-segment-id="4974"]') &&
+        root.querySelectorAll('[data-transcript-segment-id]').length === 5);
+    `);
+    if (lastPage) break;
+    await sleep(100);
+  }
+  if (!lastPage) throw new Error('last page does not restrict the DOM to its five ASR turns');
+  const searched = await browser.execute(`
+    const input = document.querySelector('#meeting-panel-transcript input[placeholder="Cerca nel testo..."]');
+    if (!input) return false;
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    set.call(input, 'needle-4990');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  if (!searched) throw new Error('search field missing in very long transcript');
+  let matchingSearch = false;
+  for (let attempt = 0; attempt < 35; attempt += 1) {
+    matchingSearch = await browser.execute(`
+      const root = document.querySelector('#meeting-panel-transcript');
+      const counter = [...(root?.querySelectorAll('span') || [])]
+        .find((item) => item.textContent.trim() === '1/1');
+      const next = counter?.parentElement?.querySelectorAll('button')[1];
+      if (!next) return false;
+      next.click();
+      return true;
+    `);
+    if (matchingSearch) break;
+    await sleep(100);
+  }
+  if (!matchingSearch) throw new Error('search result navigator not reachable across 201 pages');
+  let searchedPage = false;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    searchedPage = await browser.execute(`
+      const root = document.querySelector('#meeting-panel-transcript');
+      return Boolean(root?.querySelector('[data-transcript-segment-id="4990"]') &&
+        !root.querySelector('[data-transcript-segment-id="5004"]') &&
+        root.querySelectorAll('[data-transcript-segment-id]').length <= 25);
+    `);
+    if (searchedPage) break;
+    await sleep(100);
+  }
+  if (!searchedPage) throw new Error('search did not reveal matching segment on page 200');
+  if (counts.speaker_audio_request !== audioRequestsBeforeLongRead ||
+      counts.benchmark_start !== benchmarkRequestsBeforeLongRead) {
+    throw new Error('reading a long transcript triggered unrequested audio or inference');
+  }
+  await checkpoint(browser, '21-long-legacy-conversation-5005');
+
   video = await renderVideo();
 } catch (caught) {
   error = `${caught?.name || 'Error'}: ${caught?.message || caught}`;
