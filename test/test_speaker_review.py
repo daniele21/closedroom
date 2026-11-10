@@ -86,6 +86,13 @@ class SpeakerReviewProjectionTests(unittest.TestCase):
         self.assertEqual(restored["stats"]["speaker_review"]["segment_assignments"], {})
         self.assertEqual(base, untouched)
 
+    def test_turn_assignment_rejects_duplicate_segment_ids(self):
+        base = transcription()
+        base["segments"][2]["id"] = 0
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            project_speaker_action(base, action="reassign_turn", cluster="system:S1",
+                                   target="system:S2", segment_id=0)
+
     def test_turn_assignment_rejects_invalid_scope_and_target(self):
         base = transcription()
         for segment_id in (None, -1, 99):
