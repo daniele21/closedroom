@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { Button } from '../ui/Button';
 import { Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { TranscriptionSegment } from '../../api/apiClient';
+import { useTranslation } from '../../i18n/i18n';
 import { speakerDisplay } from '../../utils/speakerPresentation';
 
 interface FullTextViewProps {
@@ -31,6 +32,7 @@ const SPEAKER_TEXT_COLORS = [
 const PARAGRAPHS_PER_PAGE = 12;
 
 export default function FullTextView({ segments, speakerMappings }: FullTextViewProps) {
+  const { lang } = useTranslation();
   const [currentPage, setCurrentPage] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
@@ -56,7 +58,7 @@ export default function FullTextView({ segments, speakerMappings }: FullTextView
     let currentPar: Paragraph | null = null;
 
     segments.forEach((seg) => {
-      const speaker = speakerDisplay(seg, speakerMappings);
+      const speaker = speakerDisplay(seg, speakerMappings, [], lang === 'it' ? 'it' : 'en');
       const speakerName = speaker.label;
       const label = speaker.key || `unknown-${seg.id}`;
 
@@ -80,7 +82,7 @@ export default function FullTextView({ segments, speakerMappings }: FullTextView
       list.push(currentPar);
     }
     return list;
-  }, [segments, speakerMappings]);
+  }, [segments, speakerMappings, lang]);
 
   const totalPages = Math.max(1, Math.ceil(paragraphs.length / PARAGRAPHS_PER_PAGE));
 

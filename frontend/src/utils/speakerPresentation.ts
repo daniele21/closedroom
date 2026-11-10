@@ -21,6 +21,7 @@ export function speakerDisplay(
   segment: TranscriptionSegment,
   mappings: SpeakerDisplayMapping[],
   sourceTrackLabels: string[] = [],
+  language: 'it' | 'en' = 'it',
 ): SpeakerDisplay {
   const raw = segment.provider_speaker || segment.speaker_group || segment.speaker_label || '';
   const mapping = mappings.find((entry) => entry.speaker_cluster === (segment.provider_speaker || raw));
@@ -38,7 +39,11 @@ export function speakerDisplay(
   const sourceUnattributed = sourceOnly && !hasRealCluster;
   return {
     key: sourceUnattributed ? null : (group || raw || null),
-    label: sourceUnattributed ? 'Audio non attribuito' : sourceOnly || !visible ? 'Voce da identificare' : visible,
+    label: sourceUnattributed
+      ? (language === 'it' ? 'Audio non attribuito' : 'Unattributed audio')
+      : sourceOnly || !visible
+        ? (language === 'it' ? 'Voce da identificare' : 'Unidentified voice')
+        : visible,
     needsIdentification: !sourceUnattributed && (!accepted || !visible),
   };
 }

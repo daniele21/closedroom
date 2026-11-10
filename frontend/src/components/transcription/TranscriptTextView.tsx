@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { RecordingNote, RecordingScreenshot, TranscriptionSegment } from '../../api/apiClient';
 import { formatTime } from '../../utils/formatters';
+import { useTranslation } from '../../i18n/i18n';
 import { canJoinConversationTurns, speakerDisplay, type SpeakerDisplayMapping } from '../../utils/speakerPresentation';
 import { Button } from '../ui/Button';
 import {
@@ -72,6 +73,7 @@ export default function TranscriptTextView({
   onUpdateNote,
   onDeleteNote,
 }: TranscriptTextViewProps) {
+  const { lang } = useTranslation();
   const [currentPage, setCurrentPage] = useState(0);
   // A jump from the voice timeline must reveal the corresponding transcript
   // page, not merely seek the hidden audio player.
@@ -525,16 +527,16 @@ export default function TranscriptTextView({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted shrink-0">
-          <div role="group" aria-label="Vista trascrizione" className="flex rounded-lg border border-border-subtle p-0.5">
+          <div role="group" aria-label={lang === 'it' ? 'Vista trascrizione' : 'Transcript view'} className="flex rounded-lg border border-border-subtle p-0.5">
             <button type="button" aria-pressed={displayMode === 'conversation'}
               onClick={() => setDisplayMode('conversation')}
               className={`rounded-md px-2.5 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-border-focus ${displayMode === 'conversation' ? 'bg-bg-elevated text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'}`}>
-              Conversazione
+              {lang === 'it' ? 'Conversazione' : 'Conversation'}
             </button>
             <button type="button" aria-pressed={displayMode === 'detailed'}
               onClick={() => setDisplayMode('detailed')}
               className={`rounded-md px-2.5 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-border-focus ${displayMode === 'detailed' ? 'bg-bg-elevated text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'}`}>
-              Dettagli
+              {lang === 'it' ? 'Dettagli' : 'Details'}
             </button>
           </div>
           <span>{segments.length} segmenti</span>
@@ -583,7 +585,7 @@ export default function TranscriptTextView({
           }
           if (item.kind === 'utterance') {
             const first = item.segments[0];
-            const speaker = speakerDisplay(first, speakerMappings, sourceTrackLabels);
+            const speaker = speakerDisplay(first, speakerMappings, sourceTrackLabels, lang === 'it' ? 'it' : 'en');
             const active = item.segments.some((segment) => currentTime >= segment.start && currentTime <= segment.end);
             const firstColor = speakerColorMap[first.speaker_group || first.provider_speaker || first.speaker_label || 'unknown']
               || speakerColorMap[first.speaker_label || 'unknown'] || 'border-l-4 border-border-subtle';
@@ -592,7 +594,7 @@ export default function TranscriptTextView({
                 data-speaker-key={speaker.key || 'unknown'}
                 className={`flex min-w-0 items-start gap-3 rounded-md py-2 pl-2 pr-3 transition-colors hover:bg-bg-hover/40 ${active ? 'bg-accent/10 ring-1 ring-accent/30' : ''}`}>
                 <button type="button" onClick={() => onTimestampClick?.(first.start)}
-                  aria-label={`Ascolta da ${formatTime(first.start)}`}
+                  aria-label={`${lang === 'it' ? 'Ascolta da' : 'Play from'} ${formatTime(first.start)}`}
                   className="w-[74px] shrink-0 pt-0.5 text-left text-xs tabular-nums text-text-muted hover:text-accent focus-visible:outline-2 focus-visible:outline-border-focus">
                   {formatTime(first.start)}
                 </button>
@@ -602,7 +604,7 @@ export default function TranscriptTextView({
                     {speaker.needsIdentification && onIdentifySpeakers && (
                       <button type="button" onClick={onIdentifySpeakers}
                         className="text-xs text-accent hover:underline focus-visible:outline-2 focus-visible:outline-border-focus">
-                        Verifica voce
+                        {lang === 'it' ? 'Verifica voce' : 'Verify voice'}
                       </button>
                     )}
                   </div>
@@ -623,7 +625,7 @@ export default function TranscriptTextView({
           }
 
           const seg = item.segment;
-          const speakerName = speakerDisplay(seg, speakerMappings, sourceTrackLabels).label;
+          const speakerName = speakerDisplay(seg, speakerMappings, sourceTrackLabels, lang === 'it' ? 'it' : 'en').label;
           const colorClass = speakerColorMap[seg.speaker_label || 'unknown'] || 'border-l-4 border-border-subtle';
           const isPlaying = currentTime >= seg.start && currentTime <= seg.end;
           const eBadge = energyBadge(seg.energy);
