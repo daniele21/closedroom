@@ -230,7 +230,9 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
             third = service.analyze(body)
             # A changed group with the same displayed name cannot reuse
             # the previously cached speaker-attributed source.
-            self.transcriptions.transcription["segments"][0]["speaker_group"] = "system:S2"
+            self.transcriptions.transcription.setdefault("stats", {})["speaker_review"] = {
+                "segment_assignments": {"0": "system:S2"},
+            }
             fourth = service.analyze(body)
 
         self.assertEqual(provider.calls, 3)

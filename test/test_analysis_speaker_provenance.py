@@ -7,6 +7,7 @@ from local_asr_server.analysis_source_provenance import (
     project_speaker_source_validity,
     speaker_attribution_digest,
 )
+from local_asr_server.speaker_labels import apply_speaker_labels
 
 
 def source():
@@ -44,14 +45,24 @@ class SpeakerAnalysisProvenanceTests(unittest.TestCase):
         original = source()
         digest = speaker_attribution_digest(original)
         changed = copy.deepcopy(original)
-        changed["segments"][0]["speaker_group"] = "system:S2"
+        changed["stats"]["speaker_review"] = {"segment_assignments": {"0": "system:S2"}}
         self.assertNotEqual(speaker_attribution_digest(changed), digest)
         changed = copy.deepcopy(original)
-        changed["segments"][0]["speaker_name"] = "Giulia"
+        changed["stats"]["speaker_review"] = {"names": {"system:S1": "Giulia"}}
         self.assertNotEqual(speaker_attribution_digest(changed), digest)
         changed = copy.deepcopy(original)
         changed["segments"][0]["text"] = "A harmless text edit."
         self.assertEqual(speaker_attribution_digest(changed), digest)
+
+    def test_raw_catalog_and_decorated_get_share_speaker_identity(self):
+        original = source()
+        untouched = copy.deepcopy(original)
+        decorated = apply_speaker_labels(copy.deepcopy(original))
+        self.assertEqual(speaker_attribution_digest(original), speaker_attribution_digest(decorated))
+        self.assertEqual(original, untouched, "provenance must never mutate source")
+        original["stats"]["speaker_review"] = {"names": {"system:S1": "Giulia"}}
+        decorated = apply_speaker_labels(copy.deepcopy(original))
+        self.assertEqual(speaker_attribution_digest(original), speaker_attribution_digest(decorated))
 
     def test_current_stale_undo_does_not_mutate_persisted_result(self):
         original = source()
@@ -60,7 +71,7 @@ class SpeakerAnalysisProvenanceTests(unittest.TestCase):
         self.assertEqual(project_speaker_source_validity([stored], original)[0]
                          ["speaker_source_validity"]["status"], "current")
         corrected = copy.deepcopy(original)
-        corrected["segments"][0]["speaker_group"] = "system:S2"
+        corrected["stats"]["speaker_review"] = {"segment_assignments": {"0": "system:S2"}}
         stale = project_speaker_source_validity([stored], corrected)[0]
         self.assertEqual(stale["speaker_source_validity"],
                          {"status": "stale", "reason": "speaker_attribution_changed"})
