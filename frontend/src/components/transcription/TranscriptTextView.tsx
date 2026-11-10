@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { RecordingNote, RecordingScreenshot, TranscriptionSegment } from '../../api/apiClient';
 import { formatTime } from '../../utils/formatters';
 import { canJoinConversationTurns, speakerDisplay, type SpeakerDisplayMapping } from '../../utils/speakerPresentation';
@@ -14,6 +14,7 @@ interface TranscriptTextViewProps {
   sourceTrackLabels?: string[];
   initialDisplayMode?: 'conversation' | 'detailed';
   onIdentifySpeakers?: () => void;
+  jumpToTime?: number | null;
   onTimestampClick?: (time: number) => void;
   currentTime?: number;
   screenshots?: RecordingScreenshot[];
@@ -62,6 +63,7 @@ export default function TranscriptTextView({
   sourceTrackLabels = [],
   initialDisplayMode = 'detailed',
   onIdentifySpeakers,
+  jumpToTime = null,
   onTimestampClick,
   currentTime = 0,
   screenshots = [],
@@ -71,6 +73,15 @@ export default function TranscriptTextView({
   onDeleteNote,
 }: TranscriptTextViewProps) {
   const [currentPage, setCurrentPage] = useState(0);
+  // A jump from the voice timeline must reveal the corresponding transcript
+  // page, not merely seek the hidden audio player.
+  useEffect(() => {
+    if (jumpToTime == null || !Number.isFinite(jumpToTime) || !segments.length) return;
+    const containing = segments.findIndex((segment) => segment.start <= jumpToTime && segment.end >= jumpToTime);
+    const closest = containing >= 0 ? containing : segments.findIndex((segment) => segment.start >= jumpToTime);
+    const index = closest >= 0 ? closest : segments.length - 1;
+    setCurrentPage(Math.floor(index / SEGMENTS_PER_PAGE));
+  }, [jumpToTime, segments]);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [showAudioDetails, setShowAudioDetails] = useState(false);
@@ -591,7 +602,7 @@ export default function TranscriptTextView({
                     {speaker.needsIdentification && onIdentifySpeakers && (
                       <button type="button" onClick={onIdentifySpeakers}
                         className="text-xs text-accent hover:underline focus-visible:outline-2 focus-visible:outline-border-focus">
-                        Identifica voce
+                        Verifica voce
                       </button>
                     )}
                   </div>

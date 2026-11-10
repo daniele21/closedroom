@@ -229,6 +229,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   const [activeTab, setActiveTab] = useState<MeetingTab>('transcript');
   const [currentTime, setCurrentTime] = useState(0);
+  const [transcriptJumpTime, setTranscriptJumpTime] = useState<number | null>(null);
   const {
     audioIntelligence,
     audioIntelligenceState,
@@ -1521,6 +1522,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                       sourceTrackLabels={(meeting.transcription.source_tracks || []).map((track) => track.label)}
                       initialDisplayMode="conversation"
                       onIdentifySpeakers={() => selectTab('speakers')}
+                      jumpToTime={transcriptJumpTime}
                       onTimestampClick={handleTimestampClick}
                       currentTime={currentTime}
                       screenshots={screenshots}
@@ -1729,6 +1731,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                             sourceTrackLabels={(meeting.transcription.source_tracks || []).map((track) => track.label)}
                             initialDisplayMode="conversation"
                             onIdentifySpeakers={() => selectTab('speakers')}
+                            jumpToTime={transcriptJumpTime}
                             onTimestampClick={handleTimestampClick}
                             currentTime={currentTime}
                             screenshots={screenshots}
@@ -1767,6 +1770,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                       readOnly={demoMode}
                       onPlaybackStart={() => audioRef.current?.pause()}
                       onJumpToTranscript={(time) => {
+                        setTranscriptJumpTime(time);
                         selectTab('transcript');
                         handleTimestampClick(time);
                       }}

@@ -27,14 +27,19 @@ export function speakerDisplay(
   const group = segment.speaker_group || mapping?.speaker_group || segment.provider_speaker || null;
   const visible = (mapping?.display_name || segment.speaker_name || segment.speaker_label || '').trim();
   const accepted = mapping?.status === 'accepted';
-  const sourceOnly = !accepted && !!visible && (
-    sourceTrackLabels.some((source) => source.toLocaleLowerCase() === visible.toLocaleLowerCase())
-    || (visible.toLocaleLowerCase() === 'computer' && segment.source === 'system')
-  ) && (!segment.provider_speaker || segment.provider_speaker === visible);
+  const sourceLabels = sourceTrackLabels.map((source) => source.toLocaleLowerCase());
+  const isSourceName = (name: string) =>
+    sourceLabels.includes(name.toLocaleLowerCase())
+    || (name.toLocaleLowerCase() === 'computer' && segment.source === 'system');
+  const sourceOnly = !accepted && !!visible && isSourceName(visible);
+  // Legacy transcripts sometimes persisted "Computer" itself as a speaker ID.
+  // That is not a detected person and must not become a newly inferred cluster.
+  const hasRealCluster = !!segment.provider_speaker && !isSourceName(segment.provider_speaker);
+  const sourceUnattributed = sourceOnly && !hasRealCluster;
   return {
-    key: group || (sourceOnly ? null : (raw || null)),
-    label: sourceOnly || !visible ? 'Voce da identificare' : visible,
-    needsIdentification: sourceOnly || !visible || (!accepted && !segment.provider_speaker && visible === 'Speaker'),
+    key: sourceUnattributed ? null : (group || raw || null),
+    label: sourceUnattributed ? 'Audio non attribuito' : sourceOnly || !visible ? 'Voce da identificare' : visible,
+    needsIdentification: !sourceUnattributed && (!accepted || !visible),
   };
 }
 

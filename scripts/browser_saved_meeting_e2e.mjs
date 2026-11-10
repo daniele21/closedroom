@@ -1186,6 +1186,31 @@ try {
   }
   await setMeetingHash(MEETING_ID);
   await expectCurrentMeeting('Quarterly launch review', 'Alternate pricing review', alternateMeetingFixture.transcription.text);
+  await browser.clickCss('#meeting-tab-transcript');
+  const readableTranscript = await browser.execute(`
+    const root = document.getElementById('meeting-panel-transcript');
+    const mode = root?.querySelector('[role="group"][aria-label="Vista trascrizione"]');
+    return Boolean(mode &&
+      mode.querySelector('button[aria-pressed="true"]')?.textContent?.includes('Conversazione') &&
+      root.querySelectorAll('[data-transcript-turn="conversation"]').length >= 1 &&
+      !root.querySelector('.bg-orange-500\\/15'));
+  `);
+  if (!readableTranscript) throw new Error('Meeting must default to readable conversation with audio diagnostics hidden');
+  const switchedToDetails = await browser.execute(`
+    const buttons = document.querySelectorAll('#meeting-panel-transcript [role="group"][aria-label="Vista trascrizione"] button');
+    const details = [...buttons].find((button) => button.textContent.includes('Dettagli'));
+    if (!details) return false;
+    details.click();
+    return true;
+  `);
+  if (!switchedToDetails) throw new Error('Detailed transcript mode is not selectable');
+  const detailMode = await browser.execute(`
+    const root = document.getElementById('meeting-panel-transcript');
+    return Boolean(root?.querySelector('button[aria-pressed="true"]')?.textContent?.includes('Dettagli') &&
+      !root.querySelector('[data-transcript-turn="conversation"]'));
+  `);
+  if (!detailMode) throw new Error('Detailed transcript view did not replace grouped conversation');
+  await checkpoint(browser, '11-transcript-conversation-and-detail');
   await browser.clickCss('#meeting-tab-speakers');
   await waitText(browser, ['Voices', 'Voci']);
   await waitCount('speaker_sample_list', 1);
