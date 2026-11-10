@@ -129,7 +129,8 @@ const counts = {
   benchmark_list: 0, benchmark_start: 0, benchmark_poll: 0, benchmark_window: 0,
   review_list: 0, review_start: 0, review_poll: 0, review_preview: 0,
   review_apply: 0, review_undo: 0,
-  speaker_sample_list: 0, speaker_timeline: 0, speaker_merge: 0, speaker_restore: 0, speaker_undo: 0, speaker_audio_request: 0,
+  speaker_sample_list: 0, speaker_timeline: 0, speaker_merge: 0, speaker_restore: 0, speaker_undo: 0,
+  speaker_turn_reassign: 0, speaker_audio_request: 0,
 };
 let benchmarkJob = null;
 let benchmarkRequest = null;
@@ -299,6 +300,9 @@ function fixtureServer(port) {
       return json(res, 200, { items: [screenshotFixture], total: 1 });
     }
 
+    if (pathname === '/v1/transcriptions/e2e-transcription' && req.method === 'GET') {
+      return json(res, 200, meetingFixture.transcription);
+    }
     if (pathname === '/v1/transcriptions/e2e-transcription/speaker-review' && req.method === 'GET') {
       return json(res, 200, {
         fingerprint: speakerReviewFingerprint,
@@ -375,7 +379,21 @@ function fixtureServer(port) {
         return json(res, 409, { detail: 'stale review' });
       }
       speakerReviewBefore = structuredClone(meetingFixture.transcription);
-      if (body.action === 'merge' && body.cluster === 'system:S1' && body.target === 'system:S2') {
+      if (body.action === 'reassign_turn' && body.cluster === 'system:S1' &&
+        body.segment_id === 0 && body.target === 'system:S2') {
+        counts.speaker_turn_reassign += 1;
+        meetingFixture.transcription = {
+          ...meetingFixture.transcription,
+          segments: meetingFixture.transcription.segments.map((segment) =>
+            segment.id === 0 ? {
+              ...segment, speaker_group: 'system:S2', speaker_name: 'Speaker 2', speaker_label: 'Speaker 2',
+            } : segment),
+          stats: {
+            ...meetingFixture.transcription.stats,
+            speaker_review: { segment_assignments: { '0': 'system:S2' } },
+          },
+        };
+      } else if (body.action === 'merge' && body.cluster === 'system:S1' && body.target === 'system:S2') {
         counts.speaker_merge += 1;
         speakerReviewUnmerged = structuredClone(speakerReviewBefore);
         meetingFixture.transcription = {
@@ -1198,6 +1216,33 @@ try {
       root.querySelectorAll('[data-transcript-turn="conversation"]').length >= 1);
   `);
   if (!readableTranscript) throw new Error('Meeting must default to readable conversation with audio diagnostics hidden');
+  // A scoped correction must not rename every utterance or alter the raw provider.
+  await browser.clickCss('#meeting-panel-transcript [data-transcript-turn="conversation"] [data-turn-correction-open="true"]');
+  const correctionAvailable = await browser.execute(`
+    const panel = document.querySelector('#meeting-panel-transcript [data-turn-correction="true"]');
+    const target = panel?.querySelector('[data-turn-target-select="true"]');
+    const turn = panel?.querySelector('[data-turn-segment-select="true"]');
+    if (!target || !turn || Number(turn.value) !== 0) return false;
+    target.value = 'system:S2';
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  `);
+  if (!correctionAvailable) throw new Error('single-turn correction controls not reachable');
+  await sleep(100);
+  await browser.clickCss('#meeting-panel-transcript [data-turn-save="true"]');
+  await waitCount('speaker_turn_reassign', 1);
+  await waitText(browser, ['Undo last speaker correction', 'Annulla ultima correzione'], 5000, true);
+  if (meetingFixture.transcription.segments[0].provider_speaker !== 'system:S1' ||
+    meetingFixture.transcription.segments[0].speaker_group !== 'system:S2' ||
+    meetingFixture.transcription.text !== 'Decision: ship the release after validation. Owner: Alex.') {
+    throw new Error('scoped correction mutated raw cluster or immutable transcript text');
+  }
+  await checkpoint(browser, '11a-single-turn-corrected');
+  await browser.clickButton(['Undo last speaker correction', 'Annulla ultima correzione']);
+  await waitCount('speaker_undo', 1);
+  if (meetingFixture.transcription.segments[0].speaker_group === 'system:S2') {
+    throw new Error('single-turn undo did not restore original attribution');
+  }
   const switchedToDetails = await browser.execute(`
     const buttons = document.querySelectorAll('#meeting-panel-transcript [data-transcript-mode-control="true"] button');
     const details = [...buttons].find((button) =>
@@ -1350,7 +1395,7 @@ try {
   if (!mergedTimeline) throw new Error('merged speaker timeline did not regroup raw intervals');
   await checkpoint(browser, '11b-speaker-review-merged');
   await browser.clickButton(['Undo last correction', 'Annulla ultima modifica']);
-  await waitCount('speaker_undo', 1);
+  await waitCount('speaker_undo', 2);
   let undoTimeline = false;
   for (let attempt = 0; attempt < 60; attempt += 1) {
     undoTimeline = await browser.execute(`
