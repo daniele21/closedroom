@@ -48,7 +48,7 @@ If the UI reports `Il server locale non è disponibile`, inspect the local
 `ClosedRoom server not ready` error; do not mistake nearby
 `http://testserver/` fixture logs for a live meeting failure. Never delete
 the catalog, recordings or `instance.lock` to troubleshoot. The source-level
-regression is `python -m unittest test.test_bundled_server_startup -v`;
+regression is `python -m unittest discover -s test -p test_bundled_server_startup.py -v`;
 it uses isolated temporary data and does not claim packaged-runtime proof.
 
 For target-Mac acceptance, build a new immutable artifact from the exact
