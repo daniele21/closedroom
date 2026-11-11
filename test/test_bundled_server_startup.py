@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from local_asr_server.app_services import get_services
 from local_asr_server.server import create_app
-from test.support import deterministic_settings
+from support import deterministic_settings
 
 
 class BundledServerStartupTests(unittest.TestCase):
