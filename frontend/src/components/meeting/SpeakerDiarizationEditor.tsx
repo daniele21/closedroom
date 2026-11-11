@@ -505,7 +505,14 @@ export function SpeakerDiarizationEditor({
                       {mergeTarget && <p className="mb-3 text-xs text-text-secondary">
                         {selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0) > 0
                           ? `${selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0)} ` +
-                            tr('interventi collegati al testo (nessuno cancellato)', 'transcript-linked turns (none deleted)')
+                            tr(
+                              selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0) === 1
+                                ? 'intervento collegato al testo (nessuno cancellato)'
+                                : 'interventi collegati al testo (nessuno cancellato)',
+                              selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0) === 1
+                                ? 'transcript-linked turn (none deleted)'
+                                : 'transcript-linked turns (none deleted)',
+                            )
                           : tr('Nessun intervento collegato al testo. Gli intervalli audio rimangono invariati.',
                             'No transcript-linked turns. Audio intervals remain unchanged.')}
                       </p>}
