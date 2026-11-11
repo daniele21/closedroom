@@ -129,7 +129,7 @@ def create_app(
         reason="Interrupted by server restart",
     )
     recording_store = RecordingStore(
-        recordings_dir or Path(f"~/ClosedRoom/Recordings/{APP_NAME}"),
+        recordings_dir or Path(load_settings()["recordings_dir"]).expanduser().resolve(),
         use_settings_dir=recordings_dir is None,
         catalog=catalog_store,
     )
