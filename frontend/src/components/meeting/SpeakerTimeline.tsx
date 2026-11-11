@@ -10,6 +10,7 @@ export interface TimelineSpeakerRow {
   name: string;
   status: string;
   sourceOnly: boolean;
+  count: number; // transcript-linked text turns, not audio intervals
 }
 
 interface Props {
@@ -336,6 +337,19 @@ export function SpeakerTimeline({
                   )}
                 </div>
               </div>
+              {selectedGroup === row.group && timeline && !loading && !error && (
+                <p data-speaker-evidence={row.group} role="status" aria-live="polite"
+                  className="ml-0 px-1 py-1 text-xs text-text-secondary sm:ml-[112px]">
+                  {summary.reduce((total, entry) => total + entry.interval_count, 0) > 0
+                    ? `${summary.reduce((total, entry) => total + entry.interval_count, 0)} ` +
+                      (it ? 'intervalli nella timeline' : 'intervals on timeline')
+                    : (it ? 'Nessun intervallo vocale verificabile' : 'No verifiable voice intervals')}
+                  {' · '}
+                  {row.count > 0
+                    ? `${row.count} ` + (it ? 'interventi collegati al testo' : 'transcript-linked turns')
+                    : (it ? 'Testo non collegato a questa voce' : 'No transcript text linked to this voice')}
+                </p>
+              )}
               {selectedGroup === row.group && children && (
                 <div data-speaker-inline-editor={row.group} className="ml-0 rounded-lg border border-border-subtle bg-bg-elevated p-3 sm:ml-[112px] sm:p-4">
                   {children}
