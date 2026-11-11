@@ -104,6 +104,95 @@ class MenuBarRecoveryTests(unittest.TestCase):
             with patch("local_asr_server.paths.is_bundled", return_value=True):
                 self.assertFalse(is_development_profile())
 
+    def test_second_bundled_launch_hands_off_without_starting_a_server(self):
+        from local_asr_server import menubar
+        from local_asr_server.runtime.port_manager import PortInUseError
+        lock = Mock()
+        lock.__enter__ = Mock(side_effect=PortInUseError("Another ClosedRoom instance is already using this data profile"))
+        lock.__exit__ = Mock(return_value=False)
+        with patch("local_asr_server.bundled_module_dispatch.dispatch_bundled_module", return_value=False), \
+             patch.object(menubar, "_RUMPS_AVAILABLE", True), \
+             patch.object(menubar, "is_bundled", return_value=True), \
+             patch.object(menubar, "runtime_instance_lock", return_value=lock), \
+             patch("local_asr_server.macos_instance_handoff.handle_existing_instance", return_value="focused") as handoff, \
+             patch.object(menubar, "ClosedRoomApp") as app:
+            menubar.main()
+        handoff.assert_called_once_with()
+        app.assert_not_called()
+
+    def test_port_error_after_lock_is_not_misclassified_as_duplicate_launch(self):
+        from local_asr_server import menubar
+        from local_asr_server.runtime.port_manager import PortInUseError
+        with patch("local_asr_server.bundled_module_dispatch.dispatch_bundled_module", return_value=False), \
+             patch.object(menubar, "_RUMPS_AVAILABLE", True), \
+             patch.object(menubar, "is_bundled", return_value=True), \
+             patch.object(menubar, "runtime_instance_lock"), \
+             patch("local_asr_server.app_logging.configure_application_logging"), \
+             patch.object(menubar, "ClosedRoomApp", side_effect=PortInUseError("No available local port")), \
+             patch("local_asr_server.macos_instance_handoff.handle_existing_instance") as handoff:
+            with self.assertRaisesRegex(PortInUseError, "No available"):
+                menubar.main()
+        handoff.assert_not_called()
+
+    def test_port_collision_selects_next_available_port(self):
+        from local_asr_server import menubar
+        from local_asr_server.runtime.port_manager import PortInUseError
+        with patch.object(menubar, "is_development_profile", return_value=False), \
+             patch.object(menubar, "prepare_api_port",
+                          side_effect=[PortInUseError("occupied"), None]) as prepare, \
+             patch.object(menubar, "register_api_runtime") as register, \
+             self.assertLogs(level="WARNING"):
+            chosen = menubar._select_app_port()
+        self.assertEqual(chosen, 1238)
+        self.assertEqual([c.args[0] for c in prepare.call_args_list], [1236, 1238])
+        register.assert_called_once_with(1238)
+
+    def test_server_startup_exception_wakes_waiter(self):
+        from local_asr_server.menubar import _ServerThread
+        server = _ServerThread(SimpleNamespace(window_manager=Mock()), 1236)
+        with patch.object(server, "_serve", side_effect=SystemExit(3)), \
+             self.assertLogs(level="ERROR"):
+            server.run()
+        self.assertTrue(server.startup_finished.is_set())
+        self.assertFalse(server.ready.is_set())
+        self.assertIn("SystemExit", server.startup_error)
+
+    def test_failed_server_shows_error_and_never_claims_ready(self):
+        self.app._server_thread = SimpleNamespace(
+            startup_finished=Mock(wait=Mock(return_value=True)),
+            ready=Mock(is_set=Mock(return_value=False)),
+            startup_error="RuntimeError: database unavailable",
+        )
+        self.app.app_port = 1236
+        self.app.window_manager = Mock()
+        self.app._update_status_item = Mock()
+        self.app._set_status_icon = Mock()
+        self.app._set_recording_actions = Mock()
+        with patch("local_asr_server.window.run_on_main_thread",
+                   side_effect=lambda callback: callback()), self.assertLogs(level="ERROR"):
+            self.app._wait_for_server()
+        self.app.window_manager.show_startup_error.assert_called_once_with()
+        self.app.window_manager.load_url.assert_not_called()
+        self.app._set_recording_actions.assert_called_once_with(recording=False, available=False)
+
+    def test_healthy_server_navigation_remains_unchanged(self):
+        self.app._server_thread = SimpleNamespace(
+            startup_finished=Mock(wait=Mock(return_value=True)),
+            ready=Mock(is_set=Mock(return_value=True)),
+            startup_error=None, is_alive=Mock(return_value=True),
+        )
+        self.app.app_port = 1236
+        self.app.app_url = "http://127.0.0.1:1236"
+        self.app.window_manager = Mock()
+        self.app._update_status_item = Mock()
+        self.app._set_recording_actions = Mock()
+        with patch("local_asr_server.menubar._check_server_health", return_value=True), \
+             patch("local_asr_server.window.run_on_main_thread",
+                   side_effect=lambda callback: callback()):
+            self.app._wait_for_server()
+        self.app.window_manager.load_url.assert_called_once_with(self.app.app_url)
+        self.app.window_manager.show_startup_error.assert_not_called()
+
     def test_detached_button_is_reported_without_display_claim(self):
         button = Mock()
         button.window.return_value = None
