@@ -8,6 +8,7 @@ import {
   type SpeakerReviewInfo, type SpeakerReviewSamples, type Transcription,
 } from '../../api/apiClient';
 import { useSpeakerReviewPlayback, type SpeakerTurn } from '../../hooks/useSpeakerReviewPlayback';
+import { linkedTranscriptTurns } from '../../utils/speakerEvidence';
 import { SpeakerTimeline } from './SpeakerTimeline';
 import { useToast } from '../../context/ToastContext';
 import { useTranslation } from '../../i18n/i18n';
@@ -78,11 +79,7 @@ export function SpeakerDiarizationEditor({
     ).map((cluster) => ({
       speaker_cluster: cluster as string, display_name: cluster as string, status: 'unassigned',
     }));
-    const groupCounts = new Map<string, number>();
-    for (const segment of transcription.segments || []) {
-      const group = segment.speaker_group || segment.provider_speaker || segment.speaker_label || '';
-      groupCounts.set(group, (groupCounts.get(group) || 0) + 1);
-    }
+    const groupCounts = linkedTranscriptTurns(transcription.segments || [], fromMetadata);
     const sourceLabels = new Set((transcription.source_tracks || []).map((track) => track.label));
     return fromMetadata.map((item) => {
       const cluster = item.speaker_cluster;
@@ -506,7 +503,11 @@ export function SpeakerDiarizationEditor({
                         {selectable.map((r) => <option key={r.cluster} value={r.cluster}>{r.name}</option>)}
                       </select>
                       {mergeTarget && <p className="mb-3 text-xs text-text-secondary">
-                        {selected.count} + {rows.find((r) => r.cluster === mergeTarget)?.count || 0} {tr('interventi (nessuno cancellato)', 'turns (none deleted)')}
+                        {selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0) > 0
+                          ? `${selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0)} ` +
+                            tr('interventi collegati al testo (nessuno cancellato)', 'transcript-linked turns (none deleted)')
+                          : tr('Nessun intervento collegato al testo. Gli intervalli audio rimangono invariati.',
+                            'No transcript-linked turns. Audio intervals remain unchanged.')}
                       </p>}
                       {mergeTarget && samples?.speakers.find((s) => s.speaker_cluster === mergeTarget)?.samples[0] && (
                         <Button variant="ghost" size="sm" onClick={() => {
@@ -527,7 +528,8 @@ export function SpeakerDiarizationEditor({
                       <h5 className="text-sm font-semibold">{tr('Escludere questa voce?', 'Exclude this voice?')}</h5>
                       <p className="mt-1 text-xs text-text-secondary">
                         {selected.count === 0
-                          ? tr('Nessun intervento collegato: la voce sarà nascosta, ma recuperabile.', 'No linked turns: this voice will be hidden but recoverable.')
+                          ? tr('Nessun intervento collegato al testo: la voce sarà nascosta, ma recuperabile. L’audio resta invariato.',
+                            'No transcript-linked turns: this voice will be hidden but recoverable. Audio stays unchanged.')
                           : tr('Gli interventi resteranno nel testo come “Non identificato”. Nessun contenuto sarà eliminato.', 'Turns will remain as “Unidentified”. No content will be deleted.')}
                       </p>
                       <div className="mt-3 flex gap-2">
