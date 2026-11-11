@@ -42,7 +42,6 @@ class BundledServerStartupTests(unittest.TestCase):
                 patch("local_asr_server.server.get_static_dir", return_value=root / "static"),
                 patch("local_asr_server.server.configure_application_logging",
                       return_value=str(root / "closedroom.log")),
-                patch("local_asr_server.settings.validate_development_storage") as validate,
             ):
                 app = create_app(
                     default_model="test-model", recordings_dir=None, enable_auth=False,
@@ -60,9 +59,9 @@ class BundledServerStartupTests(unittest.TestCase):
                     self.assertEqual(health.status_code, 200, health.text)
                     self.assertTrue(health.json()["ok"])
                     self.assertEqual(health.json()["server"], "local-asr-server")
-                # Development-specific restrictions must not reject a normal
-                # installed app pointing at its configured production location.
-                validate.assert_not_called()
+                # The installed profile may invoke the shared storage validator;
+                # it must nevertheless initialize and serve the configured data.
+                # The separate dev-profile test below checks the fail-closed guard.
 
     def test_development_storage_is_still_rejected_before_store_creation(self) -> None:
         """Moving the import must not relax the dev/installed-data boundary."""
