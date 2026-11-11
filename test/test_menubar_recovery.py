@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import unittest
 import sys
 import os
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 if sys.platform == 'darwin':
     from local_asr_server.menubar import ClosedRoomApp
@@ -107,7 +107,7 @@ class MenuBarRecoveryTests(unittest.TestCase):
     def test_second_bundled_launch_hands_off_without_starting_a_server(self):
         from local_asr_server import menubar
         from local_asr_server.runtime.port_manager import PortInUseError
-        lock = Mock()
+        lock = MagicMock()
         lock.__enter__ = Mock(side_effect=PortInUseError("Another ClosedRoom instance is already using this data profile"))
         lock.__exit__ = Mock(return_value=False)
         with patch("local_asr_server.bundled_module_dispatch.dispatch_bundled_module", return_value=False), \
