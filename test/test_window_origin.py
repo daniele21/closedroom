@@ -20,6 +20,18 @@ class NativeWindowRoutingTests(unittest.TestCase):
         self.assertIn("chiudi ClosedRoom", html)
         self.assertNotIn("Avvio del server di trascrizione locale in corso", html)
 
+    def test_startup_failure_before_window_creation_is_not_lost(self):
+        from local_asr_server.window import ClosedRoomWindowManager
+
+        manager = ClosedRoomWindowManager("http://127.0.0.1:1236")
+        manager.show_startup_error()
+        self.assertTrue(manager._startup_failed)
+        manager.webview = Mock()
+        manager.show_loading()
+        html = manager.webview.loadHTMLString_baseURL_.call_args.args[0]
+        self.assertIn("Impossibile avviare ClosedRoom", html)
+        self.assertNotIn("Avvio del server di trascrizione locale in corso", html)
+
     def test_notification_navigation_never_changes_overlay_origin(self):
         from local_asr_server.window import ClosedRoomWindowManager
 
