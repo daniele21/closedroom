@@ -14,6 +14,13 @@ const transpiled = ts.transpileModule(source, {
 const { speakerDisplay, canJoinConversationTurns } = await import(
   'data:text/javascript;base64,' + Buffer.from(transpiled).toString('base64')
 );
+const evidenceSource = readFileSync(new URL('../frontend/src/utils/speakerEvidence.ts', import.meta.url), 'utf8');
+const evidenceJs = ts.transpileModule(evidenceSource, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const { linkedTranscriptTurns } = await import(
+  'data:text/javascript;base64,' + Buffer.from(evidenceJs).toString('base64')
+);
 
 const legacy = { id: 1, start: 4, end: 8, text: 'Hello', source: 'system', speaker_label: 'Computer' };
 const old = structuredClone(legacy);
@@ -50,4 +57,33 @@ assert.equal(canJoinConversationTurns(first, next, [
   { ...group[0], speaker_group: 'system:S1' }, { ...group[1], speaker_group: 'system:S2' },
 ]), false, 'same displayed name does not imply same speaker identity');
 
-console.log('Speaker presentation and grouping contracts PASS');
+// Diarized audio intervals can exist without linked text. Never infer text
+// turns from speaker metadata, sample clips or raw diarization counts.
+assert.equal(linkedTranscriptTurns([], [{ speaker_cluster: 'system:S2' }]).size, 0);
+const classified = linkedTranscriptTurns([
+  { text: 'First', provider_speaker: 'system:S1' },
+  { text: 'Second', provider_speaker: 'system:S2' },
+  { text: '', provider_speaker: 'system:S2' },
+  { text: 'Other', provider_speaker: 'system:S3' },
+], [
+  { speaker_cluster: 'system:S1', speaker_group: 'system:S1' },
+  { speaker_cluster: 'system:S2', speaker_group: 'system:S1' },
+  { speaker_cluster: 'system:S3', speaker_group: 'system:S3' },
+]);
+assert.equal(classified.get('system:S1'), 2, 'merged raw clusters contribute text to one group');
+assert.equal(classified.get('system:S3'), 1);
+const corrected = linkedTranscriptTurns([
+  { text: 'Correction', provider_speaker: 'system:S1', speaker_group: 'system:S3' },
+  { text: '  ', provider_speaker: 'system:S1' },
+], [
+  { speaker_cluster: 'system:S1', speaker_group: 'system:S1' },
+  { speaker_cluster: 'system:S3', speaker_group: 'system:S3' },
+]);
+assert.equal(corrected.get('system:S1') || 0, 0, 'empty ASR segments do not create speech turns');
+assert.equal(corrected.get('system:S3'), 1, 'exact turn reattribution wins over raw cluster');
+const sourceOnly = linkedTranscriptTurns([
+  { text: 'Audio source only', speaker_label: 'Computer' },
+], [{ speaker_cluster: 'Computer', speaker_group: 'Computer' }]);
+assert.equal(sourceOnly.get('Computer'), 1, 'source-labelled text stays separate from a person');
+
+console.log('Speaker presentation and text-evidence contracts PASS');
