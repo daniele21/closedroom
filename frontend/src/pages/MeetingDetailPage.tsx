@@ -1485,12 +1485,12 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
             >
               <FileText className="w-4 h-4" aria-hidden="true" />
               <span>{t('meeting.tabTranscript')}</span>
-              {meeting.transcription && (
+              {Boolean(meeting.transcription?.segments?.length) && (
                 <span className={cn(
                   'ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border',
                   activeTab === 'transcript' ? 'bg-white/20 border-white/20 text-white' : 'bg-bg-elevated border-border-subtle text-text-secondary',
-                )}>
-                  {meeting.transcription.segments?.length || 0}
+                )} title={lang === 'it' ? 'Segmenti temporizzati della trascrizione' : 'Timed transcript segments'}>
+                  {meeting.transcription!.segments!.length}
                 </span>
               )}
             </button>
