@@ -82,6 +82,7 @@ class MenuBarRecoveryTests(unittest.TestCase):
              patch.object(menubar, "_RUMPS_AVAILABLE", True), \
              patch.object(menubar, "is_bundled", return_value=False), \
              patch.object(menubar, "runtime_instance_lock"), \
+             patch("local_asr_server.app_logging.configure_application_logging"), \
              patch.object(menubar, "ClosedRoomApp") as app, \
              patch.object(menubar, "clear_api_runtime") as clear:
             menubar.main()
@@ -97,6 +98,7 @@ class MenuBarRecoveryTests(unittest.TestCase):
              patch.object(menubar, "_RUMPS_AVAILABLE", True), \
              patch.object(menubar, "is_bundled", return_value=True), \
              patch.object(menubar, "runtime_instance_lock"), \
+             patch("local_asr_server.app_logging.configure_application_logging"), \
              patch.object(menubar, "ClosedRoomApp"):
             menubar.main()
             # paths.is_development_profile ignores the environment in bundles.
