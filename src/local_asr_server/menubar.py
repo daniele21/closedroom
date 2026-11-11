@@ -118,8 +118,21 @@ class _ServerThread(threading.Thread):
         self._server: Optional[object] = None
         self._app: Optional[object] = None
         self.ready = threading.Event()
+        self.startup_finished = threading.Event()
+        self.startup_error: str | None = None
 
     def run(self) -> None:
+        try:
+            self._serve()
+        except BaseException as exc:
+            # Uvicorn may raise SystemExit on lifespan startup failure.
+            self.startup_error = f"{type(exc).__name__}: {exc}"
+            logger.exception("ClosedRoom local server failed during startup")
+        finally:
+            # Wake the UI immediately on failure, rather than waiting 60 seconds.
+            self.startup_finished.set()
+
+    def _serve(self) -> None:
         import uvicorn
         from local_asr_server.server import create_app
         from local_asr_server.settings import load_settings
@@ -130,6 +143,7 @@ class _ServerThread(threading.Thread):
         if _is_reusable_server(status):
             logger.info("A compatible server is already running on port %s. Reusing it.", self.port)
             self.ready.set()
+            self.startup_finished.set()
             return
 
         app = create_app(
@@ -158,6 +172,7 @@ class _ServerThread(threading.Thread):
         async def _startup_with_signal(sockets=None):
             await original_startup(sockets=sockets)
             self.ready.set()
+            self.startup_finished.set()
 
         self._server.startup = _startup_with_signal
         self._server.run()
@@ -889,16 +904,32 @@ class ClosedRoomApp(rumps.App):
 
     def _wait_for_server(self) -> None:
         """Wait for local services, then expose user-facing ready state."""
-        self._server_thread.ready.wait(timeout=60)
-        import time
-        for _ in range(20):
-            if _check_server_health(self.app_port):
-                break
-            time.sleep(0.5)
+        completed = self._server_thread.startup_finished.wait(timeout=60)
+        healthy = False
+        if completed and self._server_thread.ready.is_set():
+            import time
+            for _ in range(20):
+                if _check_server_health(self.app_port):
+                    healthy = True
+                    break
+                if not self._server_thread.is_alive():
+                    break
+                time.sleep(0.5)
 
         from local_asr_server.window import run_on_main_thread
 
         def update_ui():
+            if not healthy:
+                logger.error(
+                    "ClosedRoom server not ready: %s",
+                    self._server_thread.startup_error or
+                    ("startup timed out" if not completed else "health check failed"),
+                )
+                self._set_status_icon("error")
+                self._update_status_item("Server locale non disponibile")
+                self._set_recording_actions(recording=False, available=False)
+                self.window_manager.show_startup_error()
+                return
             self._update_status_item("Pronto")
             self._set_recording_actions(recording=False, available=True)
             self.window_manager.load_url(self.app_url)
@@ -1404,12 +1435,29 @@ def main() -> None:
     )
     # Own the profile for the entire native app lifecycle. Never replace a
     # running app, including one with an active capture or transcription job.
-    with runtime_instance_lock():
-        app = ClosedRoomApp()
-        try:
-            app.run()
-        finally:
-            clear_api_runtime(app.app_port)
+    lock_acquired = False
+    try:
+        with runtime_instance_lock():
+            lock_acquired = True
+            # Log early initialization exceptions as well as API errors.
+            from local_asr_server.app_logging import configure_application_logging
+            configure_application_logging()
+            app = ClosedRoomApp()
+            try:
+                app.run()
+            finally:
+                clear_api_runtime(app.app_port)
+    except PortInUseError:
+        if lock_acquired:
+            raise  # A port-selection error is NOT a duplicate-profile launch.
+        if not is_bundled():
+            raise
+        from local_asr_server.macos_instance_handoff import handle_existing_instance
+        result = handle_existing_instance()
+        if result == "unavailable":
+            logger.error("ClosedRoom already owns the data profile; native handoff unavailable")
+        # Never start a second server, terminate the peer or remove the lock.
+        return
 
 
 if __name__ == "__main__":
