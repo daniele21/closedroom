@@ -100,6 +100,8 @@ export function SpeakerDiarizationEditor({
     (filter === 'all' || r.status !== 'accepted'),
   );
   const selected = visible.find((r) => r.cluster === selectedCluster) || visible[0] || null;
+  const mergedTextTurnCount = (selected?.count || 0) +
+    (rows.find((r) => r.cluster === mergeTarget)?.count || 0);
   const active = rows.filter((r) => r.status !== 'merged' && r.status !== 'excluded' && !r.sourceOnly);
   const confirmed = active.filter((r) => r.status === 'accepted').length;
   const pending = active.length - confirmed;
@@ -503,16 +505,15 @@ export function SpeakerDiarizationEditor({
                         {selectable.map((r) => <option key={r.cluster} value={r.cluster}>{r.name}</option>)}
                       </select>
                       {mergeTarget && <p className="mb-3 text-xs text-text-secondary">
-                        {selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0) > 0
-                          ? `${selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0)} ` +
-                            tr(
-                              selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0) === 1
-                                ? 'intervento collegato al testo (nessuno cancellato)'
-                                : 'interventi collegati al testo (nessuno cancellato)',
-                              selected.count + (rows.find((r) => r.cluster === mergeTarget)?.count || 0) === 1
-                                ? 'transcript-linked turn (none deleted)'
-                                : 'transcript-linked turns (none deleted)',
-                            )
+                        {mergedTextTurnCount > 0
+                          ? `${mergedTextTurnCount} ` + tr(
+                            mergedTextTurnCount === 1
+                              ? 'intervento collegato al testo (nessuno cancellato)'
+                              : 'interventi collegati al testo (nessuno cancellato)',
+                            mergedTextTurnCount === 1
+                              ? 'transcript-linked turn (none deleted)'
+                              : 'transcript-linked turns (none deleted)',
+                          )
                           : tr('Nessun intervento collegato al testo. Gli intervalli audio rimangono invariati.',
                             'No transcript-linked turns. Audio intervals remain unchanged.')}
                       </p>}
