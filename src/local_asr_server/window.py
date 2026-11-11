@@ -169,6 +169,7 @@ class ClosedRoomWindowManager:
         self._observer: Optional[ClosedRoomActivationObserver] = None
         self._key_event_monitor: Optional[objc.objc_object] = None
         self._global_key_event_monitor: Optional[objc.objc_object] = None
+        self._startup_failed = False
 
     def show(self) -> None:
         """Show the native window, creating it if it doesn't exist yet."""
@@ -300,8 +301,53 @@ class ClosedRoomWindowManager:
             self._handle_global_key_event,
         )
 
+    def show_startup_error(self) -> None:
+        """Replace the spinner with a readable, local-only recovery message.
+
+        Never embed exception text or personal filesystem paths in the WebView.
+        """
+        self._startup_failed = True
+        if not self.webview:
+            return
+        failure_html = """
+        <!doctype html>
+        <html lang="it">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>ClosedRoom — avvio non riuscito</title>
+          <style>
+            body { margin: 0; min-height: 100vh; background: #121214;
+                   color: #f3f4f6; font: 15px -apple-system, BlinkMacSystemFont, sans-serif;
+                   display: flex; align-items: center; justify-content: center; }
+            main { max-width: 440px; padding: 32px; line-height: 1.55; }
+            h1 { font-size: 21px; margin: 0 0 12px; }
+            p { color: #c4c4cc; margin: 0 0 14px; }
+            strong { color: #f3f4f6; }
+          </style>
+        </head>
+        <body>
+          <main role="alert">
+            <h1>Impossibile avviare ClosedRoom</h1>
+            <p>Il server locale non è disponibile. Nessuna registrazione
+               verrà avviata automaticamente.</p>
+            <p><strong>Come riprovare:</strong> chiudi ClosedRoom normalmente
+               dalla barra dei menu, verifica che non ci siano altre istanze
+               aperte e riavvia l'app.</p>
+            <p>Se il problema persiste, controlla il registro locale in
+               Library/Logs/ClosedRoom/closedroom.log.</p>
+          </main>
+        </body>
+        </html>
+        """
+        self.webview.loadHTMLString_baseURL_(failure_html, None)
+        logger.error("WebView displaying local server startup failure")
+
     def show_loading(self) -> None:
-        """Display a premium loading screen inside the webview."""
+        """Display the startup state, including failures before window creation."""
+        if self._startup_failed:
+            self.show_startup_error()
+            return
         if not self.webview:
             return
 
