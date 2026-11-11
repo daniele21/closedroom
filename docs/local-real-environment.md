@@ -34,6 +34,39 @@ The Accessibility helper is compiled into a stable source-versioned path under `
 
 If macOS asks you to quit/reopen an app after granting a permission, do so and run the same command again. The suite prefers reusing the exact finalized local app for that commit so TCC identity remains stable across reruns.
 
+## Startup / duplicate-instance checkpoint
+
+The production bundle uses the canonical local profile lock
+(`~/Library/Application Support/ClosedRoom/instance.lock`) independently
+of its loopback API port. A port collision alone may select another free port;
+**a lock collision must never start a second writer**, kill a prior process,
+delete the lock file or migrate/overwrite data. A second launch of the same
+app should focus the existing window; a different build must explain how to
+close the older instance normally, without ending capture automatically.
+If the backend fails to start, the native WKWebView must replace the spinner
+with an explicit recovery message and keep recording controls disabled.
+
+On a representative Mac with no active recording or in-flight processing:
+
+1. Open the exact finalized build and verify it reaches the meeting workspace.
+2. Attempt a second launch of the same app path; verify the first window is
+   brought forward and there is still only one live server/profile writer.
+3. With the installed `/Applications/ClosedRoom.app` open, attempt to launch
+   a **different** finalized local candidate. Confirm an explanatory native
+   dialog; choosing Cancel leaves the existing app and its data untouched.
+4. Quit the existing app **normally** and verify the candidate can open.
+5. Confirm the failed-backend state replaces the loading spinner using the
+   deterministic native tests; do not corrupt real user settings or the SQLite
+   catalog to simulate an exception.
+
+For non-destructive diagnosis, use `lsof -nP
+"$HOME/Library/Application Support/ClosedRoom/instance.lock"` and
+`lsof -nP -iTCP:1236-1267 -sTCP:LISTEN`. The application log is stored
+locally under `~/Library/Logs/ClosedRoom/closedroom.log`. Scrub any meeting
+identifiers or personal paths before sharing logs. Mac source CI checks
+collision routing/readiness but **does not qualify physical packaged handoff**;
+the real installed-WKWebView checkpoint remains required for release.
+
 ## Run
 
 From the repository root:
