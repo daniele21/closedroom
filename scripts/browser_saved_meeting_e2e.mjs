@@ -1291,6 +1291,33 @@ try {
     await sleep(100);
   }
   if (!initialTimeline) throw new Error('speaker timeline did not show 30-minute overview and audio-only voice');
+  // Audio-only speakers must not be displayed as zero speaking turns.
+  // Counted intervals and transcript-linked text are distinct evidence.
+  const linkedEvidence = await browser.execute(`
+    const evidence = document.querySelector('[data-speaker-evidence="system:S1"]');
+    return Boolean(evidence && /1 (intervento collegato al testo|transcript-linked turn)/.test(evidence.textContent || '') &&
+      /1 (intervallo nella timeline|interval on timeline)/.test(evidence.textContent || ''));
+  `);
+  if (!linkedEvidence) throw new Error('transcript-linked speaker did not show separately sourced counts');
+  await browser.clickCss('[data-speaker-lane="system:S2"] button[title="Speaker 2"]');
+  await waitText(browser, ['Testo non collegato a questa voce', 'No transcript text linked to this voice'], 5000, true);
+  const audioOnlyEvidence = await browser.execute(`
+    const evidence = document.querySelector('[data-speaker-evidence="system:S2"]');
+    return Boolean(evidence && /1 (intervallo nella timeline|interval on timeline)/.test(evidence.textContent || '') &&
+      !/0 (interventi|turns)/.test(evidence.textContent || ''));
+  `);
+  if (!audioOnlyEvidence) throw new Error('audio-only speaker was mislabeled as having zero speaking turns');
+  await browser.clickCss('[data-speaker-lane="system:S3"] button[title="Giulia"]');
+  await waitText(browser, ['Testo non collegato a questa voce', 'No transcript text linked to this voice'], 5000, true);
+  const lateAudioOnlyEvidence = await browser.execute(`
+    const evidence = document.querySelector('[data-speaker-evidence="system:S3"]');
+    return Boolean(evidence && /1 (intervallo nella timeline|interval on timeline)/.test(evidence.textContent || ''));
+  `);
+  if (!lateAudioOnlyEvidence) throw new Error('late audio-only speaker was not represented accurately');
+  await browser.clickCss('[data-speaker-lane="system:S1"] button[title="Speaker 1"]');
+  if (counts.speaker_audio_request !== 0) {
+    throw new Error('speaker evidence summary caused eager private audio retrieval');
+  }
   const located = await browser.execute(`
     const lane = document.querySelector('[data-speaker-lane="system:S3"]');
     const bin = lane?.querySelector('button[title*="25:"]');
@@ -1393,6 +1420,12 @@ try {
     await sleep(100);
   }
   if (!mergedTimeline) throw new Error('merged speaker timeline did not regroup raw intervals');
+  const mergedEvidence = await browser.execute(`
+    const evidence = document.querySelector('[data-speaker-evidence="system:S2"]');
+    return Boolean(evidence && /2 (intervalli nella timeline|intervals on timeline)/.test(evidence.textContent || '') &&
+      /1 (intervento collegato al testo|transcript-linked turn)/.test(evidence.textContent || ''));
+  `);
+  if (!mergedEvidence) throw new Error('merging speaker identities did not regroup audio and text evidence independently');
   await checkpoint(browser, '11b-speaker-review-merged');
   await browser.clickButton(['Undo last correction', 'Annulla ultima modifica']);
   await waitCount('speaker_undo', 2);
