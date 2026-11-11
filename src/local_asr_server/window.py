@@ -169,6 +169,7 @@ class ClosedRoomWindowManager:
         self._observer: Optional[ClosedRoomActivationObserver] = None
         self._key_event_monitor: Optional[objc.objc_object] = None
         self._global_key_event_monitor: Optional[objc.objc_object] = None
+        self._startup_failed = False
 
     def show(self) -> None:
         """Show the native window, creating it if it doesn't exist yet."""
@@ -305,6 +306,7 @@ class ClosedRoomWindowManager:
 
         Never embed exception text or personal filesystem paths in the WebView.
         """
+        self._startup_failed = True
         if not self.webview:
             return
         failure_html = """
@@ -342,7 +344,10 @@ class ClosedRoomWindowManager:
         logger.error("WebView displaying local server startup failure")
 
     def show_loading(self) -> None:
-        """Display a premium loading screen inside the webview."""
+        """Display the startup state, including failures before window creation."""
+        if self._startup_failed:
+            self.show_startup_error()
+            return
         if not self.webview:
             return
 
