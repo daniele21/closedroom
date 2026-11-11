@@ -342,11 +342,15 @@ export function SpeakerTimeline({
                   className="ml-0 px-1 py-1 text-xs text-text-secondary sm:ml-[112px]">
                   {summary.reduce((total, entry) => total + entry.interval_count, 0) > 0
                     ? `${summary.reduce((total, entry) => total + entry.interval_count, 0)} ` +
-                      (it ? 'intervalli nella timeline' : 'intervals on timeline')
+                      (summary.reduce((total, entry) => total + entry.interval_count, 0) === 1
+                        ? (it ? 'intervallo nella timeline' : 'interval on timeline')
+                        : (it ? 'intervalli nella timeline' : 'intervals on timeline'))
                     : (it ? 'Nessun intervallo vocale verificabile' : 'No verifiable voice intervals')}
                   {' · '}
                   {row.count > 0
-                    ? `${row.count} ` + (it ? 'interventi collegati al testo' : 'transcript-linked turns')
+                    ? `${row.count} ` + (row.count === 1
+                      ? (it ? 'intervento collegato al testo' : 'transcript-linked turn')
+                      : (it ? 'interventi collegati al testo' : 'transcript-linked turns'))
                     : (it ? 'Testo non collegato a questa voce' : 'No transcript text linked to this voice')}
                 </p>
               )}
