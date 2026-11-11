@@ -28,6 +28,15 @@ A person can read a long recorded meeting as a conversation, know which identity
 - `dev` includes the feature. RELEASE/FULL for `dev→main`, physical media/TCC, packaged lifecycle, subjective VoiceOver and qualifying distribution artifacts still block promotion.
 - No new remote transfer, automatic model download, audio upload or second persistence/history owner was introduced.
 
+## 2026-11-11 · source iteration: evidence-based voice counts
+
+- **Symptom / user job:** a voice can have verified local diarization clips yet appear to have `0 interventi`; a historical text-only transcript can also show an unexplained zero badge. Users need to identify a voice and understand whether text has been assigned, without losing or changing evidence.
+- **Canonical owners:** `speaker_review.py` already provides distinct native-diarization/transcript intervals and a bounded whole-meeting overview. The React projection in `SpeakerDiarizationEditor`, `SpeakerTimeline` and the Meeting transcript badge owns presentation. No API, store, model or audio lifecycle is changed.
+- **Interaction decision:** one selected voice exposes two distinct facts: verified **timeline intervals** (per-cluster overview grouped by canonical speaker group) and **transcript-linked text turns** (nonempty segments grouped by effective attribution). If only intervals exist, say **“Testo non collegato a questa voce”**, not `0 interventi`; absent structured segments do not imply absent transcript content. Keep source-only Computer out of the people list.
+- **Regression:** pure TS contract checks for zero ASR, merged clusters, turn reassignment, empty text and Computer source; assembled saved-Meeting browser journey checks audio-only speakers, merged evidence, restored lanes and no eager private audio request.
+- **Evidence boundary:** GitHub branch/PR source changes are not evidence that a separately installed `ClosedRoom.app` matches `dev`. Before claiming fixed on the user's Mac, compare installed app version/build source SHA and run the exact candidate in WKWebView with an affected meeting. Real audio/TCC and subjective usability remain RELEASE evidence.
+- **Axes:** PRODUCT_LOCAL (correct a settled misleading presentation), DELIVERY ITERATION → INTEGRATION (PR targeting `dev`), VALIDATION risk-selected scoped source + material UI FULL_MEDIA, EXECUTION REMOTE_AUTOMATED for deterministic Mac/browser, REAL_ENVIRONMENT for installed-app verification.
+
 ## Remaining actions and acceptance
 
 1. **C · edge/read-model integrity:** synthetic source-only Computer/overlap/201-page search (#199) and text-only/empty transcription states (#200) pass. Collect representative real historical imports for mixed/merged/stale IDs, source-vs-person reconciliation and player behavior. No speaker inferred from a track name.
