@@ -1293,11 +1293,16 @@ try {
   if (!initialTimeline) throw new Error('speaker timeline did not show 30-minute overview and audio-only voice');
   // Audio-only speakers must not be displayed as zero speaking turns.
   // Counted intervals and transcript-linked text are distinct evidence.
-  const linkedEvidence = await browser.execute(`
-    const evidence = document.querySelector('[data-speaker-evidence="system:S1"]');
-    return Boolean(evidence && /1 (intervento collegato al testo|transcript-linked turn)/.test(evidence.textContent || '') &&
-      /1 (intervallo nella timeline|interval on timeline)/.test(evidence.textContent || ''));
-  `);
+  let linkedEvidence = false;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    linkedEvidence = await browser.execute(`
+      const evidence = document.querySelector('[data-speaker-evidence="system:S1"]');
+      return Boolean(evidence && /1 (intervento collegato al testo|transcript-linked turn)/.test(evidence.textContent || '') &&
+        /1 (intervallo nella timeline|interval on timeline)/.test(evidence.textContent || ''));
+    `);
+    if (linkedEvidence) break;
+    await sleep(100);
+  }
   if (!linkedEvidence) throw new Error('transcript-linked speaker did not show separately sourced counts');
   await browser.clickCss('[data-speaker-lane="system:S2"] button[title="Speaker 2"]');
   await waitText(browser, ['Testo non collegato a questa voce', 'No transcript text linked to this voice'], 5000, true);
@@ -1420,11 +1425,16 @@ try {
     await sleep(100);
   }
   if (!mergedTimeline) throw new Error('merged speaker timeline did not regroup raw intervals');
-  const mergedEvidence = await browser.execute(`
-    const evidence = document.querySelector('[data-speaker-evidence="system:S2"]');
-    return Boolean(evidence && /2 (intervalli nella timeline|intervals on timeline)/.test(evidence.textContent || '') &&
-      /1 (intervento collegato al testo|transcript-linked turn)/.test(evidence.textContent || ''));
-  `);
+  let mergedEvidence = false;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    mergedEvidence = await browser.execute(`
+      const evidence = document.querySelector('[data-speaker-evidence="system:S2"]');
+      return Boolean(evidence && /2 (intervalli nella timeline|intervals on timeline)/.test(evidence.textContent || '') &&
+        /1 (intervento collegato al testo|transcript-linked turn)/.test(evidence.textContent || ''));
+    `);
+    if (mergedEvidence) break;
+    await sleep(100);
+  }
   if (!mergedEvidence) throw new Error('merging speaker identities did not regroup audio and text evidence independently');
   await checkpoint(browser, '11b-speaker-review-merged');
   await browser.clickButton(['Undo last correction', 'Annulla ultima modifica']);
