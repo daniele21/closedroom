@@ -34,6 +34,29 @@ The Accessibility helper is compiled into a stable source-versioned path under `
 
 If macOS asks you to quit/reopen an app after granting a permission, do so and run the same command again. The suite prefers reusing the exact finalized local app for that commit so TCC identity remains stable across reruns.
 
+## Installed-app server readiness checkpoint
+
+The bundled app runs `create_app(recordings_dir=None)` with the regular
+(non-development) storage profile. Its initialization must load the configured
+recordings directory, open the canonical catalog and serve `GET /health`
+on the selected loopback port before WKWebView declares the app ready. Source
+development-mode tests do **not** replace this packaged-app check.
+
+If the UI reports `Il server locale non è disponibile`, inspect the local
+`~/Library/Logs/ClosedRoom/closedroom.log` for the most recent
+`ClosedRoom local server failed during startup` traceback or
+`ClosedRoom server not ready` error; do not mistake nearby
+`http://testserver/` fixture logs for a live meeting failure. Never delete
+the catalog, recordings or `instance.lock` to troubleshoot. The source-level
+regression is `python -m unittest discover -s test -p test_bundled_server_startup.py -v`;
+it uses isolated temporary data and does not claim packaged-runtime proof.
+
+For target-Mac acceptance, build a new immutable artifact from the exact
+candidate, close any prior app normally, run the built executable, and confirm
+that its loopback `/health` endpoint responds and the native window opens.
+A full release still needs the independently required physical TCC/audio
+evidence and distribution qualification.
+
 ## Startup / duplicate-instance checkpoint
 
 The production bundle uses the canonical local profile lock

@@ -77,8 +77,11 @@ def create_app(
     # A direct uvicorn factory invocation must be unable to bypass the
     # development-profile data boundary established by the CLI.
     from local_asr_server.paths import is_development_profile
+    # load_settings is required by both the bundled app and development server.
+    # Importing it only in the branch below makes it an unbound local in
+    # production, preventing create_app() from reaching the HTTP startup.
+    from local_asr_server.settings import load_settings, validate_development_storage
     if is_development_profile():
-        from local_asr_server.settings import load_settings, validate_development_storage
         validate_development_storage(
             load_settings(), recordings_dir=recordings_dir,
             catalog_db=os.environ.get("CLOSEDROOM_CATALOG_DB"),
