@@ -37,6 +37,25 @@ A person can read a long recorded meeting as a conversation, know which identity
 - **Acceptance/proof:** two-speaker tagged audio updates linked text and names, preserves raw words/timestamps/text and creates one durable undo; manual corrections, ambiguities, weak overlaps, ASR-only evidence, empty text, stale source and concurrent editor revisions never silently rewrite attribution; reopening after undo stays undone. Full-media browser Meeting journey and strong Mac CI are required for PR to `dev`. Physical-recording quality, installed WKWebView and VoiceOver stay REAL_ENVIRONMENT release gates.
 - **Axes:** PRODUCT_FEATURE / DELIVERY INTEGRATION to `dev` / VALIDATION STRONG + affected UI FULL_MEDIA / EXECUTION REMOTE_AUTOMATED (deterministic source), REAL_ENVIRONMENT (installed Mac).
 
+## 2026-11-12 · Meeting UX audit: Transcript × Voci
+
+**Job:** read the recorded meeting as a labeled conversation, identify a voice only when necessary, correct individual misattributions without losing raw text or timing. Evidence: screenshot shows 3,989 words, a misleading `0` segment badge and flat `Computer` labels despite populated voice lanes.
+
+**Root cause (P0):** `routers/helpers._detail_transcription` intentionally strips heavy `segments` and `source_tracks` to keep Meeting fast, but `MeetingDetailPage` treated their *absence* as zero and rendered the flat `text` field. The Voices API independently reads full canonical ASR. Thus this is a read-model/UI mismatch, **not evidence of lost ASR data**.
+
+**UX friction and decisions:**
+- **P0:** hydrate the full canonical `GET /v1/transcriptions/{id}` after local automatic voice reconciliation settles; keep initial Meeting payload compact. Render Conversation with effective speaker mappings; preserve raw text, timestamps and word boundaries.
+- **P1:** remove redundant Transcript-toolbar “Modifica speaker e diarizzazione”, which routed away from Meeting. **Voci** is the only primary place to listen, name, merge, exclude or restore voices; expert Community-1 review remains under **Voci → Migliora riconoscimento**. Exact-turn correction stays contextual within Transcript.
+- **P1:** absent fields are *not loaded*, not `0`. Show loading, then structured turns; fetch failure retains original words and offers **Riprova**. Truly empty timed ASR keeps its legacy text and explicit recovery action; no synthetic timestamps.
+- **P1:** version-aware requests ignore stale results after meeting switches, and a delayed full GET cannot replace a newer automatic/manual speaker revision. Reload/revisit restores full transcript as needed.
+- **P2 (future):** user screenshot “Tu” is saved but “Da identificare”: distinguish label saved from identity *confirmed*; do not infer acceptance. Confirm and verify with real import, long transcript, 200% zoom and WKWebView/VoiceOver.
+
+**IA:** `Meeting → Trascrizione` (read/search/seek/correct a single turn); `→ Analisi AI` (notes/actions + reference transcript); `→ Voci` (listen/identify/merge/undo). “Apri completa” in Analysis is a contextual jump to reading, not another editor. No extra screen or store.
+
+**States and evidence:** initial compact/loading/full/true text-only/fetch error+retry/auto-linked/undo/meeting-switch all preserve one canonical revision owner. API contract asserts compact Meeting vs full ASR; browser FULL_MEDIA tests compact → full conversation, updated names, return after undo and no duplicate button or false-zero badge. Exact-head Mac automated source/browser evidence required before `dev`. Real mic/system source, packaging, VoiceOver and subjective UX remain REAL_ENVIRONMENT gates. No model inference or cloud transfer on open.
+
+**Axes:** PRODUCT_FEATURE · INTEGRATION · VALIDATION SCOPED with required FULL_MEDIA (risk selector authoritative) · REMOTE_AUTOMATED; REAL_ENVIRONMENT pending.
+
 ## Remaining actions and acceptance
 
 1. **C · edge/read-model integrity:** synthetic source-only Computer/overlap/201-page search (#199) and text-only/empty transcription states (#200) pass. Collect representative real historical imports for mixed/merged/stale IDs, source-vs-person reconciliation and player behavior. No speaker inferred from a track name.

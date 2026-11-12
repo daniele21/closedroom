@@ -158,7 +158,7 @@ const counts = {
   review_apply: 0, review_undo: 0,
   speaker_sample_list: 0, speaker_timeline: 0, speaker_merge: 0, speaker_restore: 0, speaker_undo: 0,
   speaker_turn_reassign: 0, speaker_audio_request: 0,
-  speaker_auto_link: 0, speaker_auto_undo: 0,
+  speaker_auto_link: 0, speaker_auto_undo: 0, transcript_full_detail: 0,
 };
 let benchmarkJob = null;
 let benchmarkRequest = null;
@@ -253,7 +253,11 @@ function fixtureServer(port) {
       });
     }
     if (pathname === `/v1/meetings/${AUTO_LINK_MEETING_ID}`) {
-      return json(res, 200, autoLinkMeetingFixture);
+      // The real Meeting read model deliberately excludes heavy timed segments.
+      const compact = structuredClone(autoLinkMeetingFixture);
+      delete compact.transcription.segments;
+      delete compact.transcription.source_tracks;
+      return json(res, 200, compact);
     }
     if ([MEETING_ID, ALTERNATE_MEETING_ID].some((id) => pathname === `/v1/meetings/${id}`)) {
       const requestedId = pathname.slice('/v1/meetings/'.length);
@@ -331,6 +335,10 @@ function fixtureServer(port) {
       return json(res, 200, { items: [screenshotFixture], total: 1 });
     }
 
+    if (pathname === '/v1/transcriptions/e2e-auto-link-transcription' && req.method === 'GET') {
+      counts.transcript_full_detail += 1;
+      return json(res, 200, autoLinkMeetingFixture.transcription);
+    }
     if (pathname === '/v1/transcriptions/e2e-auto-link-transcription/speaker-review/auto-link' && req.method === 'POST') {
       counts.speaker_auto_link += 1;
       if (autoLinkBefore) return json(res, 200, { status: 'undo_pending', linked_segments: 0 });
@@ -1919,6 +1927,43 @@ try {
     throw new Error('automatic voice linking launched unrequested media or inference');
   }
   await checkpoint(browser, '25-auto-link-undo-restored');
+
+  // Reopen the Meeting from a *compact* read model. The full transcript is
+  // retrieved separately, otherwise the old false '0' and source-only flat
+  // text return even though durable voice mappings are still available.
+  const detailCallsBeforeReopen = counts.transcript_full_detail;
+  await setMeetingHash(ALTERNATE_MEETING_ID);
+  await waitText(browser, ['Alternate pricing review'], 5000, true);
+  await setMeetingHash(AUTO_LINK_MEETING_ID);
+  await waitText(browser, ['Automatic speaker linking'], 5000, true);
+  await waitCount('transcript_full_detail', detailCallsBeforeReopen + 1);
+  let hydrated = false;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    hydrated = await browser.execute(`
+      const panel = document.querySelector('#meeting-panel-transcript');
+      const turn = panel?.querySelector('[data-transcript-turn="conversation"]');
+      return Boolean(turn &&
+        (turn.textContent || '').includes('Automatically linked voice words.') &&
+        /Audio non attribuito|Unattributed audio/.test(turn.textContent || '') &&
+        !panel.querySelector('[data-transcript-detail-loading]'));
+    `);
+    if (hydrated) break;
+    await sleep(100);
+  }
+  if (!hydrated) throw new Error('compact Meeting did not hydrate original timed conversation on reopen');
+  const misleadingZero = await browser.execute(`
+    const tab = document.querySelector('#meeting-tab-transcript');
+    return [...(tab?.querySelectorAll('span') || [])].some((node) =>
+      node.textContent.trim() === '0');
+  `);
+  if (misleadingZero) throw new Error('compact Meeting still displayed an invented zero-turn badge');
+  const redundantButton = await browser.execute(`
+    const panel = document.querySelector('#meeting-panel-transcript');
+    return [...(panel?.querySelectorAll('button') || [])].some((button) =>
+      /Modifica speaker e diarizzazione|Modify speakers and diarization/.test(button.textContent || ''));
+  `);
+  if (redundantButton) throw new Error('Transcript still duplicates primary Voices navigation');
+  await checkpoint(browser, '26-compact-meeting-full-transcript-hydrated');
 
   video = await renderVideo();
 } catch (caught) {
