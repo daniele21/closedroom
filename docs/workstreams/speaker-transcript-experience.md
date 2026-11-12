@@ -48,7 +48,7 @@ A person can read a long recorded meeting as a conversation, know which identity
 - **P1:** remove redundant Transcript-toolbar “Modifica speaker e diarizzazione”, which routed away from Meeting. **Voci** is the only primary place to listen, name, merge, exclude or restore voices; expert Community-1 review remains under **Voci → Migliora riconoscimento**. Exact-turn correction stays contextual within Transcript.
 - **P1:** absent fields are *not loaded*, not `0`. Show loading, then structured turns; fetch failure retains original words and offers **Riprova**. Truly empty timed ASR keeps its legacy text and explicit recovery action; no synthetic timestamps.
 - **P1:** version-aware requests ignore stale results after meeting switches, and a delayed full GET cannot replace a newer automatic/manual speaker revision. Reload/revisit restores full transcript as needed.
-- **P2 (future):** user screenshot “Tu” is saved but “Da identificare”: distinguish label saved from identity *confirmed*; do not infer acceptance. Confirm and verify with real import, long transcript, 200% zoom and WKWebView/VoiceOver.
+- **P2 (this PR):** “Tu” can be saved but unconfirmed; add an explicit Confirm action without rename, with canonical versioned revision and undo. Real imports, 200% zoom and WKWebView/VoiceOver remain release evidence.
 
 **IA:** `Meeting → Trascrizione` (read/search/seek/correct a single turn); `→ Analisi AI` (notes/actions + reference transcript); `→ Voci` (listen/identify/merge/undo). “Apri completa” in Analysis is a contextual jump to reading, not another editor. No extra screen or store.
 
