@@ -2113,6 +2113,20 @@ try {
   await checkpoint(browser, '27-confirm-self-voice-updates-transcript');
 
   await browser.clickCss('#meeting-tab-speakers');
+  await waitText(browser, ['Undo last correction', 'Annulla ultima modifica'], 7000, true);
+  const undoSelector = '[data-speaker-review-workspace] button';
+  let undoActionable = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    undoActionable = await browser.execute(`
+      const buttons = [...document.querySelectorAll('[data-speaker-review-workspace] button')];
+      return buttons.some((button) =>
+        /Undo last correction|Annulla ultima modifica/.test(button.textContent || '') &&
+        !button.disabled);
+    `);
+    if (undoActionable) break;
+    await sleep(100);
+  }
+  if (!undoActionable) throw new Error('speaker confirmation undo not actionable after reload');
   await browser.clickButton(['Undo last correction', 'Annulla ultima modifica']);
   await waitCount('speaker_confirm_undo', 1);
   await browser.clickCss('#meeting-tab-transcript');
