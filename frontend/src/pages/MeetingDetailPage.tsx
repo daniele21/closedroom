@@ -234,6 +234,12 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
   const [turnCorrectionUndo, setTurnCorrectionUndo] = useState<{
     meetingId: string; transcriptionId: string; revisionId: string;
   } | null>(null);
+  const [speakerAutoLink, setSpeakerAutoLink] = useState<{
+    meetingId: string; transcriptionId: string;
+    status: 'linked' | 'undo_pending' | 'no_timed_text' | 'no_verified_diarization' | 'no_safe_matches' | 'error' | 'undone';
+    linkedSegments: number; revisionId?: string;
+  } | null>(null);
+  const autoLinkAttempted = useRef(new Set<string>());
   const {
     audioIntelligence,
     audioIntelligenceState,
@@ -595,6 +601,58 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
       loadInFlightRef.current = null;
     };
   }, [recordingId, demoMode, lang]);
+
+  // Saved meeting reconciliation is local, idempotent and version-checked on
+  // the server. Only verified native intervals may label timestamped ASR text.
+  // Never launch model work or fabricate timestamps merely by opening Meeting.
+  useEffect(() => {
+    const selectedMeeting = meeting;
+    const trans = selectedMeeting?.transcription;
+    const transcriptionId = trans?.id || trans?.saved_id;
+    if (!selectedMeeting || !transcriptionId || demoMode ||
+      ['recording', 'finalizing', 'recoverable', 'interrupted'].includes(selectedMeeting.recording.status)) return;
+    const key = selectedMeeting.id + ':' + transcriptionId;
+    if (autoLinkAttempted.current.has(key)) return;
+    autoLinkAttempted.current.add(key);
+    let live = true;
+    void ApiClient.autoLinkVerifiedSpeakers(transcriptionId).then((result) => {
+      if (!live || currentRecordingIdRef.current !== selectedMeeting.id) return;
+      setSpeakerAutoLink({
+        meetingId: selectedMeeting.id, transcriptionId,
+        status: result.status, linkedSegments: result.linked_segments,
+        revisionId: result.revision_id,
+      });
+      if (result.status === 'linked' && result.transcription) {
+        setMeeting((current) => current?.id === selectedMeeting.id &&
+          (current.transcription?.id || current.transcription?.saved_id) === transcriptionId
+          ? { ...current, transcription: result.transcription! } : current);
+      }
+    }).catch(() => {
+      if (live && currentRecordingIdRef.current === selectedMeeting.id) {
+        setSpeakerAutoLink({
+          meetingId: selectedMeeting.id, transcriptionId,
+          status: 'error', linkedSegments: 0,
+        });
+      }
+    });
+    return () => { live = false; };
+  }, [meeting?.id, meeting?.transcription?.id, meeting?.transcription?.saved_id,
+    meeting?.recording?.status, demoMode]);
+
+  const undoAutomaticSpeakerLink = async () => {
+    const token = speakerAutoLink;
+    if (!token?.revisionId || token.meetingId !== recordingId) return;
+    try {
+      const response = await ApiClient.undoSpeakerReview(token.transcriptionId, token.revisionId);
+      if (currentRecordingIdRef.current !== token.meetingId) return;
+      setMeeting((current) => current?.id === token.meetingId
+        ? { ...current, transcription: response.transcription } : current);
+      setSpeakerAutoLink({ ...token, status: 'undone', revisionId: undefined });
+      showToast(lang === 'it' ? 'Attribuzione automatica annullata' : 'Automatic attribution undone', 'success');
+    } catch (reason) {
+      showToast(String(reason), 'error');
+    }
+  };
 
   useEffect(() => {
     if (!detailsOpen || !recordingId || demoMode || diagnosticReport || diagnosticsLoading || diagnosticsError) return;
@@ -1574,6 +1632,41 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                     </Button>
                   </div>
                 )}
+                {speakerAutoLink?.meetingId === meeting.id &&
+                  speakerAutoLink.transcriptionId === (meeting.transcription?.id || meeting.transcription?.saved_id) &&
+                  speakerAutoLink.status === 'linked' && (
+                    <div role="status" data-transcript-speaker-link="linked"
+                      className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-4 py-3 text-xs text-text-secondary">
+                      <span>{lang === 'it'
+                        ? `${speakerAutoLink.linkedSegments} interventi collegati automaticamente alle voci rilevate. Testo e tempi invariati.`
+                        : `${speakerAutoLink.linkedSegments} turns automatically linked to detected voices. Text and timing unchanged.`}</span>
+                      {speakerAutoLink.revisionId && (
+                        <Button size="sm" variant="ghost" onClick={() => void undoAutomaticSpeakerLink()}>
+                          {lang === 'it' ? 'Annulla attribuzione' : 'Undo attribution'}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                {speakerAutoLink?.meetingId === meeting.id &&
+                  speakerAutoLink.transcriptionId === (meeting.transcription?.id || meeting.transcription?.saved_id) &&
+                  (speakerAutoLink.status === 'no_timed_text' ||
+                    (speakerAutoLink.status === 'no_verified_diarization' &&
+                      (meeting.transcription?.segments || []).some((segment) => segment.text?.trim() &&
+                        (!segment.provider_speaker || ['computer', 'system', 'mixed'].includes(segment.provider_speaker.toLowerCase()))))) && (
+                    <div role="status" data-transcript-speaker-link={speakerAutoLink.status}
+                      className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 text-xs text-text-secondary">
+                      <span>{speakerAutoLink.status === 'no_timed_text'
+                        ? (lang === 'it'
+                          ? 'Il testo non contiene interventi temporizzati utilizzabili: per attribuirlo alle voci serve una trascrizione con timestamp.'
+                          : 'This text has no usable timed turns: speaker attribution requires a timestamped transcript.')
+                        : (lang === 'it'
+                          ? 'La timeline non contiene una diarizzazione audio verificata da applicare al testo.'
+                          : 'The timeline has no verified audio diarization to apply to the transcript.')}</span>
+                      <Button size="sm" variant="secondary" onClick={openAdvancedTranscription}>
+                        {lang === 'it' ? 'Apri strumenti trascrizione' : 'Open transcription tools'}
+                      </Button>
+                    </div>
+                  )}
                 {meeting.transcription?.segments?.length ? (
                   <div className="p-4 sm:p-5 bg-bg-elevated">
                     <TranscriptTextView
