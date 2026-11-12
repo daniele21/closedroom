@@ -106,7 +106,7 @@ export function SpeakerDiarizationEditor({
 
   // Full-meeting evidence counts are not ASR turn counts. Preserve the raw
   // cluster identity and aggregate by the canonical merged speaker group.
-  const audioCounts = useMemo(() => {
+  const timelineCounts = useMemo(() => {
     if (evidence?.source !== transcription || !evidence.overview) return null;
     const groups = new Map(rows.map((row) => [row.cluster, row.group]));
     const counts = new Map<string, number>();
@@ -134,7 +134,7 @@ export function SpeakerDiarizationEditor({
 
   selectedGroupRef.current = selected?.group || null;
   useEffect(() => () => activeListenRequest.current?.abort(), [meetingId]);
-  const selectedAudioCount = selected && audioCounts ? audioCounts.get(selected.group) || 0 : null;
+  const selectedIntervalCount = selected && timelineCounts ? timelineCounts.get(selected.group) || 0 : null;
   const sampleList = useMemo(() => (
     samples?.speakers.find((item) => item.speaker_cluster === selected?.cluster)?.samples || []
   ), [samples, selected?.cluster]);
@@ -401,19 +401,23 @@ export function SpeakerDiarizationEditor({
                       tr('Da identificare', 'Not yet identified')}
                   </p>
                   <p className="mt-1 text-xs text-text-secondary" data-speaker-evidence-counts="true" aria-live="polite">
-                    <span data-speaker-audio-count={selectedAudioCount ?? 'unknown'}>
-                      {selectedAudioCount === null
-                        ? tr('Intervalli vocali non ancora verificati', 'Voice intervals not yet verified')
-                        : selectedAudioCount > 0
-                          ? `${selectedAudioCount} ${tr('intervalli vocali rilevati', 'detected voice intervals')}`
+                    <span data-speaker-timeline-count={selectedIntervalCount ?? 'unknown'}>
+                      {selectedIntervalCount === null
+                        ? tr('Intervalli non ancora verificati', 'Intervals not yet verified')
+                        : selectedIntervalCount > 0
+                          ? `${selectedIntervalCount} ${selectedIntervalCount === 1
+                            ? tr('intervallo attribuito nella timeline', 'attributed interval in the timeline')
+                            : tr('intervalli attribuiti nella timeline', 'attributed intervals in the timeline')}`
                           : sampleList.length > 0
                             ? tr('Voce rilevata · intervalli non disponibili', 'Voice detected · intervals unavailable')
-                            : tr('Nessun intervallo vocale verificato', 'No verified voice intervals')}
+                            : tr('Nessun intervallo attribuito', 'No attributed intervals')}
                     </span>
                     {' · '}
                     <span data-speaker-text-count={selected.count}>
                       {selected.count > 0
-                        ? `${selected.count} ${tr('interventi collegati al testo', 'text-linked turns')}`
+                        ? `${selected.count} ${selected.count === 1
+                          ? tr('intervento collegato al testo', 'text-linked turn')
+                          : tr('interventi collegati al testo', 'text-linked turns')}`
                         : tr('Nessun intervento collegato al testo', 'No text-linked turns')}
                     </span>
                   </p>
