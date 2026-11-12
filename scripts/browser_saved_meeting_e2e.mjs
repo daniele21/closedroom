@@ -11,6 +11,7 @@ import './test_speaker_presentation.mjs';
 const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 const MEETING_ID = 'e2e-meeting';
 const ALTERNATE_MEETING_ID = 'e2e-meeting-other';
+const AUTO_LINK_MEETING_ID = 'e2e-meeting-auto-link';
 const VIDEO_FPS = 4;
 const DIAGNOSTICS_DELAY_MS = 1400;
 const root = path.resolve(process.cwd());
@@ -85,6 +86,32 @@ const alternateMeetingFixture = {
   },
 };
 
+const autoLinkMeetingFixture = {
+  ...meetingFixture,
+  id: AUTO_LINK_MEETING_ID,
+  recording: {
+    ...meetingFixture.recording, id: AUTO_LINK_MEETING_ID,
+    title: 'Automatic speaker linking',
+  },
+  transcription: {
+    ...meetingFixture.transcription,
+    id: 'e2e-auto-link-transcription',
+    recording_id: AUTO_LINK_MEETING_ID,
+    text: 'Automatically linked voice words.',
+    source_tracks: [{ id: 'system', label: 'Computer' }],
+    segments: [{
+      id: 0, start: 1, end: 3,
+      text: 'Automatically linked voice words.', track_id: 'system',
+      provider_speaker: 'Computer', speaker_label: 'Computer',
+    }],
+    stats: { speaker_attribution: { mappings: [
+      { speaker_cluster: 'Computer', display_name: 'Computer', status: 'unassigned' },
+      { speaker_cluster: 'system:S1', speaker_group: 'system:S1', display_name: 'Ismet', status: 'accepted' },
+    ] } },
+  },
+};
+let autoLinkBefore = null;
+
 const screenshotFixture = {
   screenshot_id: 'synthetic-shared-key',
   recording_id: MEETING_ID,
@@ -131,6 +158,7 @@ const counts = {
   review_apply: 0, review_undo: 0,
   speaker_sample_list: 0, speaker_timeline: 0, speaker_merge: 0, speaker_restore: 0, speaker_undo: 0,
   speaker_turn_reassign: 0, speaker_audio_request: 0,
+  speaker_auto_link: 0, speaker_auto_undo: 0,
 };
 let benchmarkJob = null;
 let benchmarkRequest = null;
@@ -224,6 +252,9 @@ function fixtureServer(port) {
         recordings: true,
       });
     }
+    if (pathname === `/v1/meetings/${AUTO_LINK_MEETING_ID}`) {
+      return json(res, 200, autoLinkMeetingFixture);
+    }
     if ([MEETING_ID, ALTERNATE_MEETING_ID].some((id) => pathname === `/v1/meetings/${id}`)) {
       const requestedId = pathname.slice('/v1/meetings/'.length);
       if (requestedId === MEETING_ID) counts.meeting += 1;
@@ -300,6 +331,29 @@ function fixtureServer(port) {
       return json(res, 200, { items: [screenshotFixture], total: 1 });
     }
 
+    if (pathname === '/v1/transcriptions/e2e-auto-link-transcription/speaker-review/auto-link' && req.method === 'POST') {
+      counts.speaker_auto_link += 1;
+      if (autoLinkBefore) return json(res, 200, { status: 'undo_pending', linked_segments: 0 });
+      autoLinkBefore = structuredClone(autoLinkMeetingFixture.transcription);
+      autoLinkMeetingFixture.transcription = {
+        ...autoLinkBefore,
+        segments: autoLinkBefore.segments.map((segment) => ({
+          ...segment, provider_speaker: 'system:S1', speaker_group: 'system:S1',
+          speaker_label: 'Ismet', speaker_name: 'Ismet',
+        })),
+      };
+      return json(res, 200, {
+        status: 'linked', linked_segments: 1,
+        transcription: autoLinkMeetingFixture.transcription,
+        revision_id: 'synthetic-auto-link-revision',
+      });
+    }
+    if (pathname === '/v1/transcriptions/e2e-auto-link-transcription/speaker-review/undo' && req.method === 'POST') {
+      if (!autoLinkBefore) return json(res, 409, { detail: 'No automatic link revision' });
+      counts.speaker_auto_undo += 1;
+      autoLinkMeetingFixture.transcription = autoLinkBefore;
+      return json(res, 200, { transcription: autoLinkMeetingFixture.transcription });
+    }
     if (pathname === '/v1/transcriptions/e2e-transcription' && req.method === 'GET') {
       return json(res, 200, meetingFixture.transcription);
     }
@@ -1835,6 +1889,36 @@ try {
     throw new Error('reading text-only/empty legacy transcript triggered audio or inference');
   }
   await checkpoint(browser, '23-empty-transcript-no-invented-turns');
+
+  // Automatic linking updates the actual conversation surface (not just the
+  // Voices tab), and its revision can be reverted without re-running ASR.
+  await setMeetingHash(AUTO_LINK_MEETING_ID);
+  await waitText(browser, ['Automatic speaker linking'], 5000, true);
+  await waitCount('speaker_auto_link', 1);
+  await waitText(browser, [
+    '1 interventi collegati automaticamente', '1 turns automatically linked',
+  ], 5000, true);
+  const linkedText = await browser.execute(`
+    const transcript = document.querySelector('#meeting-panel-transcript');
+    const turn = transcript?.querySelector('[data-transcript-turn="conversation"]');
+    return Boolean(turn && (turn.textContent || '').includes('Ismet') &&
+      (turn.textContent || '').includes('Automatically linked voice words.') &&
+      !(turn.textContent || '').includes('Audio non attribuito'));
+  `);
+  if (!linkedText) throw new Error('automatic speaker link did not reach readable transcript');
+  await checkpoint(browser, '24-auto-linked-voice-transcript');
+  await browser.clickButton(['Undo attribution', 'Annulla attribuzione']);
+  await waitCount('speaker_auto_undo', 1);
+  const restoredText = await browser.execute(`
+    const turn = document.querySelector('#meeting-panel-transcript [data-transcript-turn="conversation"]');
+    return Boolean(turn && /Audio non attribuito|Unattributed audio/.test(turn.textContent || ''));
+  `);
+  if (!restoredText) throw new Error('automatic speaker undo did not restore unattributed source');
+  if (counts.speaker_audio_request !== audioRequestsBeforeEmptyRead ||
+    counts.benchmark_start !== benchmarkRequestsBeforeEmptyRead) {
+    throw new Error('automatic voice linking launched unrequested media or inference');
+  }
+  await checkpoint(browser, '25-auto-link-undo-restored');
 
   video = await renderVideo();
 } catch (caught) {
