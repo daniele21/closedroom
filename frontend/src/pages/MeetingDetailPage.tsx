@@ -239,7 +239,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
     status: 'linked' | 'undo_pending' | 'no_timed_text' | 'no_verified_diarization' | 'no_safe_matches' | 'suppressed' | 'error' | 'undone';
     linkedSegments: number; revisionId?: string;
   } | null>(null);
-  const autoLinkAttempted = useRef(new Set<string>());
   const [transcriptDetailLoad, setTranscriptDetailLoad] = useState<{
     key: string; status: 'loading' | 'error'; message?: string;
   } | null>(null);
@@ -615,9 +614,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
     const transcriptionId = trans?.id || trans?.saved_id;
     if (!selectedMeeting || !transcriptionId || demoMode ||
       ['recording', 'finalizing', 'recoverable', 'interrupted'].includes(selectedMeeting.recording.status)) return;
-    const key = selectedMeeting.id + ':' + transcriptionId;
-    if (autoLinkAttempted.current.has(key)) return;
-    autoLinkAttempted.current.add(key);
+    // One idempotent reconciliation per meeting visit. A return from another
+    // meeting must re-read the canonical source and honor any newer edits.
     let live = true;
     void ApiClient.autoLinkVerifiedSpeakers(transcriptionId).then((result) => {
       if (!live || currentRecordingIdRef.current !== selectedMeeting.id) return;
