@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, ChevronDown, GitMerge, Headphones,
+  AlertCircle, CheckCircle2, ChevronDown, GitMerge, Headphones,
   MoreHorizontal, Pause, Play, RotateCcw, SkipBack, SkipForward,
 } from 'lucide-react';
 import {
