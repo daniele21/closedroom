@@ -1396,6 +1396,17 @@ export const ApiClient = {
     await request(`/v1/recordings/${recordingId}/screenshots/${screenshotId}`, { method: 'DELETE' });
   },
 
+  async autoLinkVerifiedSpeakers(id: string): Promise<{
+    status: 'linked' | 'undo_pending' | 'no_timed_text' | 'no_verified_diarization' | 'no_safe_matches' | 'suppressed';
+    linked_segments: number;
+    transcription?: Transcription;
+    revision_id?: string;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review/auto-link`, {
+      method: 'POST',
+    })).json();
+  },
+
   async getSpeakerReview(id: string): Promise<SpeakerReviewInfo> {
     return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review`)).json();
   },

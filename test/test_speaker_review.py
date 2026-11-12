@@ -14,7 +14,9 @@ from fastapi.testclient import TestClient
 from local_asr_server.catalog import CatalogStore
 from local_asr_server.analysis_source_provenance import speaker_attribution_digest
 from local_asr_server.server import create_app
-from local_asr_server.speaker_review import project_speaker_action, speaker_audio_samples
+from local_asr_server.speaker_review import (
+    project_speaker_action, project_verified_speaker_links, speaker_audio_samples,
+)
 from local_asr_server.transcription_diarization_review import fingerprint
 from local_asr_server.transcriptions import TranscriptionStore
 from support import deterministic_settings
@@ -130,6 +132,100 @@ class SpeakerReviewProjectionTests(unittest.TestCase):
             project_speaker_action(excluded, action="exclude", cluster="system:S3")
 
 
+class VerifiedAutomaticLinkTests(unittest.TestCase):
+    @staticmethod
+    def source():
+        return {
+            "recording_id": "meeting-1",
+            "text": "Exact original transcript.",
+            "segments": [
+                {"id": 1, "start": 0.0, "end": 2.0, "text": "Hello",
+                 "track_id": "system", "provider_speaker": "Computer",
+                 "speaker_label": "Computer",
+                 "words": [{"word": "Hello", "start": 0.0, "end": 0.3}]},
+                {"id": 2, "start": 3.0, "end": 5.0, "text": "World",
+                 "track_id": "system", "provider_speaker": "Computer",
+                 "speaker_label": "Computer"},
+            ],
+            "source_tracks": [{"id": "system", "label": "Computer"}],
+            "stats": {
+                "speaker_diarization": {
+                    "status": "completed", "engine": "fluidaudio-community-1",
+                    "clusters_by_track": {"system": ["system:S1", "system:S2"]},
+                },
+                "speaker_attribution": {"mappings": [
+                    {"speaker_cluster": "system:S1", "display_name": "Tu", "status": "accepted"},
+                    {"speaker_cluster": "system:S2", "display_name": "Ismet", "status": "accepted"},
+                    {"speaker_cluster": "Computer", "display_name": "Computer", "status": "unassigned"},
+                ]},
+            },
+        }
+
+    @staticmethod
+    def timeline():
+        return {"truncated": False, "intervals": [
+            {"origin": "diarization", "cluster": "system:S1", "track_id": "system",
+             "start": 0, "end": 2},
+            {"origin": "diarization", "cluster": "system:S2", "track_id": "system",
+             "start": 3, "end": 5},
+        ]}
+
+    def test_only_verified_native_intervals_link_text_and_keep_all_source_bytes(self):
+        source = self.source()
+        untouched = copy.deepcopy(source)
+        candidate, status, n = project_verified_speaker_links(source, self.timeline())
+        self.assertEqual((status, n), ("linked", 2))
+        self.assertEqual([x["provider_speaker"] for x in candidate["segments"]],
+                         ["system:S1", "system:S2"])
+        self.assertEqual([x["speaker_name"] for x in candidate["segments"]], ["Tu", "Ismet"])
+        self.assertEqual(candidate["text"], untouched["text"])
+        for old, new in zip(source["segments"], candidate["segments"]):
+            for field in ("id", "start", "end", "text", "words", "track_id"):
+                self.assertEqual(new.get(field), old.get(field))
+        self.assertEqual(source, untouched)
+        self.assertEqual(candidate["stats"]["speaker_review"]["auto_link_revision"], 1)
+
+    def test_transcript_derived_intervals_are_not_new_diarization_evidence(self):
+        timeline = self.timeline()
+        for item in timeline["intervals"]:
+            item["origin"] = "transcript"
+        candidate, status, count = project_verified_speaker_links(self.source(), timeline)
+        self.assertIsNone(candidate)
+        self.assertEqual((status, count), ("no_verified_diarization", 0))
+
+    def test_missing_timed_text_cannot_be_silently_mapped(self):
+        source = self.source()
+        for segment in source["segments"]:
+            segment["text"] = ""
+        candidate, status, count = project_verified_speaker_links(source, self.timeline())
+        self.assertIsNone(candidate)
+        self.assertEqual((status, count), ("no_timed_text", 0))
+
+    def test_ambiguous_or_partial_speech_never_auto_assigns(self):
+        timeline = self.timeline()
+        timeline["intervals"][1].update(start=0, end=2)
+        source = self.source()
+        source["segments"] = source["segments"][:1]
+        candidate, status, count = project_verified_speaker_links(source, timeline)
+        self.assertIsNone(candidate)
+        self.assertEqual((status, count), ("no_safe_matches", 0))
+        timeline["truncated"] = True
+        self.assertEqual(project_verified_speaker_links(source, timeline)[1],
+                         "no_verified_diarization")
+
+    def test_user_confirmed_or_corrected_segments_are_not_replaced(self):
+        source = self.source()
+        source["segments"][0]["provider_speaker"] = "system:S1"
+        source["segments"][0]["speaker_label"] = "Tu"
+        source["stats"]["speaker_review"] = {"segment_assignments": {"2": "system:S1"}}
+        candidate, status, count = project_verified_speaker_links(source, self.timeline())
+        self.assertIsNone(candidate)
+        self.assertEqual((status, count), ("no_safe_matches", 0))
+        source["stats"]["speaker_review"] = {"auto_link_suppressed": True}
+        self.assertEqual(project_verified_speaker_links(source, self.timeline())[1],
+                         "suppressed")
+
+
 class SampleReferenceTests(unittest.TestCase):
     class Store:
         def get(self, rid, include_result=False):
@@ -240,6 +336,44 @@ class SpeakerReviewApiTests(unittest.TestCase):
         self.client.close()
         self.setting_patch.stop()
         self.tmp.cleanup()
+
+    def test_auto_link_from_verified_local_timeline_persists_and_undo_opts_out(self):
+        from local_asr_server.app_services import get_services
+        services = get_services(self.app)
+        payload = VerifiedAutomaticLinkTests.source()
+        payload["recording_id"] = self.recording_id
+        payload["segments"][0]["id"] = 0
+        payload["segments"][1]["id"] = 1
+        saved = services.transcriptions.save(payload, recording_id=self.recording_id)
+        transcription_id = saved["id"]
+        url = f"/v1/transcriptions/{transcription_id}/speaker-review"
+        services.recordings.save_speaker_diarization(self.recording_id, {
+            "status": "completed", "engine": "fluidaudio-community-1",
+            "tracks": {"system": {"segments": [
+                {"speaker": "S1", "start": 0, "end": 2},
+                {"speaker": "S2", "start": 3, "end": 5},
+            ]}},
+        })
+        raw_export = services.transcriptions.root / services.transcriptions._file_name_for(transcription_id)
+        original_text = json.loads(raw_export.read_text())["text"]
+        first = self.client.post(url + "/auto-link")
+        self.assertEqual(first.status_code, 200, first.text)
+        result = first.json()
+        self.assertEqual((result["status"], result["linked_segments"]), ("linked", 2))
+        self.assertEqual([s["provider_speaker"] for s in result["transcription"]["segments"]],
+                         ["system:S1", "system:S2"])
+        self.assertEqual(json.loads(raw_export.read_text())["text"], original_text)
+        self.assertEqual(self.client.post(url + "/auto-link").json()["status"],
+                         "undo_pending")
+        reverted = self.client.post(url + "/undo", json={"revision_id": result["revision_id"]})
+        self.assertEqual(reverted.status_code, 200, reverted.text)
+        self.assertEqual(reverted.json()["transcription"]["segments"][0]["provider_speaker"],
+                         "Computer")
+        self.assertEqual(json.loads(raw_export.read_text())["text"], original_text)
+        self.assertTrue(services.transcriptions.get(transcription_id)["stats"]["speaker_review"]
+                        ["auto_link_suppressed"])
+        self.assertEqual(self.client.post(url + "/auto-link").json()["status"],
+                         "suppressed")
 
     def test_read_only_speaker_timeline_without_asr_segments(self):
         from local_asr_server.app_services import get_services

@@ -191,6 +191,121 @@ def _pick_samples(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return chosen
 
 
+
+def project_verified_speaker_links(
+    transcription: dict[str, Any], timeline: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str, int]:
+    """Apply *verified* local speech intervals to timed, unattributed ASR text.
+
+    An interval inferred only from an existing ASR label is never evidence
+    for repairing that label. Preserve every word/time, accepted identity,
+    manual correction and source track. Ambiguous overlap stays unattributed.
+    """
+    segments = transcription.get("segments") or []
+    if not any(str(s.get("text") or "").strip() for s in segments):
+        return None, "no_timed_text", 0
+    native = [item for item in timeline.get("intervals") or []
+              if item.get("origin") == "diarization"]
+    if timeline.get("truncated") or not native:
+        return None, "no_verified_diarization", 0
+
+    diarization = (
+        transcription.get("speaker_diarization")
+        or (transcription.get("stats") or {}).get("speaker_diarization") or {}
+    )
+    if diarization.get("status") != "completed":
+        return None, "no_verified_diarization", 0
+
+    names = {
+        str(row.get("speaker_cluster")): row
+        for row in ((transcription.get("stats") or {}).get(
+            "speaker_attribution") or {}).get("mappings", [])
+    }
+    source_labels = {
+        str(track.get("label") or "").casefold()
+        for track in transcription.get("source_tracks") or []
+    }
+    source_labels.update({"computer", "system", "system track", "mic", "mixed"})
+    known_clusters = set(_clusters(transcription))
+    manual_assignments = ((transcription.get("stats") or {}).get("speaker_review")
+                          or {}).get("segment_assignments") or {}
+    if ((transcription.get("stats") or {}).get("speaker_review") or {}).get(
+        "auto_link_suppressed"
+    ):
+        return None, "suppressed", 0
+
+    def source_only(raw: str) -> bool:
+        return not raw or raw.casefold() in source_labels
+
+    candidate = copy.deepcopy(transcription)
+    linked = 0
+    for segment in candidate.get("segments") or []:
+        if not str(segment.get("text") or "").strip():
+            continue
+        raw = str(segment.get("provider_speaker") or "")
+        # Never replace a detected person, a confirmed source name, an existing
+        # precise turn correction, or an explicitly selected merged group.
+        if raw and not source_only(raw):
+            continue
+        if raw and names.get(raw, {}).get("status") == "accepted":
+            continue
+        if str(segment.get("id")) in manual_assignments:
+            continue
+        if (segment.get("speaker_group") and
+                not source_only(str(segment["speaker_group"]))):
+            continue
+        track_id = str(segment.get("track_id") or segment.get("source") or "")
+        span = _finite_interval(segment.get("start"), segment.get("end"))
+        if not track_id or span is None:
+            continue
+        start, end = span
+        duration = end - start
+        scores: dict[str, float] = {}
+        for item in native:
+            if item.get("track_id") != track_id:
+                continue
+            cluster = str(item.get("cluster") or "")
+            if cluster not in known_clusters or cluster.casefold() in source_labels:
+                continue
+            interval = _finite_interval(item.get("start"), item.get("end"))
+            if interval is None:
+                continue
+            overlap = max(0.0, min(end, interval[1]) - max(start, interval[0]))
+            if overlap:
+                scores[cluster] = min(duration, scores.get(cluster, 0.0) + overlap)
+        ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+        if not ranked:
+            continue
+        best = ranked[0][1] / duration
+        runner_up = ranked[1][1] / duration if len(ranked) > 1 else 0.0
+        # Automatic attribution requires strong coverage and a clear winner.
+        if best < 0.65 or best - runner_up < 0.20:
+            continue
+        segment["provider_speaker"] = ranked[0][0]
+        segment.pop("speaker_name", None)
+        segment.pop("speaker_group", None)
+        segment.pop("speaker_label", None)
+        linked += 1
+
+    if not linked:
+        return None, "no_safe_matches", 0
+
+    stats = candidate.setdefault("stats", {})
+    stats["review_preserve_canonical_text"] = True
+    review = stats.setdefault("speaker_review", {})
+    if review.get("auto_link_suppressed"):
+        return None, "suppressed", 0
+    review["auto_link_revision"] = 1
+    candidate["text"] = transcription.get("text", "")
+    apply_speaker_labels(candidate)
+    candidate["text"] = transcription.get("text", "")
+    for before, after in zip(segments, candidate.get("segments") or []):
+        if any(before.get(field) != after.get(field)
+               for field in ("id", "text", "start", "end", "words", "track_id", "source")):
+            raise AssertionError("Automatic speaker linking changed ASR content")
+    return candidate, "linked", linked
+
+
 def speaker_audio_samples(transcription: dict[str, Any], recordings: Any) -> dict[str, Any]:
     """Read-only, bounded clip references from the exact saved recording.
 

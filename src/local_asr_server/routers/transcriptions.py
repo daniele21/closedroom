@@ -30,7 +30,8 @@ from local_asr_server.transcription_diarization_review import (
     REVIEW_JOB_TYPE, fingerprint, project_review,
 )
 from local_asr_server.speaker_review import (
-    project_speaker_action, speaker_audio_samples, speaker_timeline_window,
+    project_speaker_action, project_verified_speaker_links,
+    speaker_audio_samples, speaker_timeline_window,
 )
 from local_asr_server.env import get_env_var
 from local_asr_server.services.transcription_service import TranscriptionService
@@ -722,6 +723,50 @@ def get_speaker_review_timeline(
         raise HTTPException(status_code=404, detail="Recording not found") from exc
     except (RecordingConflict, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/transcriptions/{transcription_id}/speaker-review/auto-link")
+def auto_link_verified_speakers(transcription_id: str, request: Request):
+    """Idempotent local reconciliation; no inference or remote processing.
+
+    The timeline endpoint's provenance rules remain the sole authority for
+    native intervals. Only a verified match can create an undoable revision.
+    """
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
+    if services.transcriptions.reviewed_diarization_undo(transcription_id):
+        return {"status": "undo_pending", "linked_segments": 0}
+    if not any(str(item.get("text") or "").strip()
+               for item in transcription.get("segments") or []):
+        return {"status": "no_timed_text", "linked_segments": 0}
+    diarization = (transcription.get("speaker_diarization")
+                   or (transcription.get("stats") or {}).get("speaker_diarization") or {})
+    if diarization.get("status") != "completed" or not diarization.get("clusters_by_track"):
+        return {"status": "no_verified_diarization", "linked_segments": 0}
+    job_id = str(diarization.get("applied_review_job_id") or "")
+    review_job = services.transcription_jobs.get(job_id) if (
+        diarization.get("source") == "reviewed_meeting" and job_id
+    ) else None
+    try:
+        timeline = speaker_timeline_window(
+            transcription, services.recordings,
+            start_seconds=0, end_seconds=28800,
+            review_job=review_job,
+        )
+        candidate, status, linked = project_verified_speaker_links(transcription, timeline)
+        if candidate is None:
+            return {"status": status, "linked_segments": 0}
+        committed = services.transcriptions.apply_reviewed_diarization(
+            transcription_id, candidate=candidate,
+            expected_fingerprint=fingerprint(transcription),
+            preserve_raw_text=True,
+        )
+        return {"status": "linked", "linked_segments": linked, **committed}
+    except (RecordingConflict, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
 
 
 @router.post("/v1/transcriptions/{transcription_id}/speaker-review")

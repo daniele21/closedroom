@@ -28,6 +28,15 @@ A person can read a long recorded meeting as a conversation, know which identity
 - `dev` includes the feature. RELEASE/FULL for `dev→main`, physical media/TCC, packaged lifecycle, subjective VoiceOver and qualifying distribution artifacts still block promotion.
 - No new remote transfer, automatic model download, audio upload or second persistence/history owner was introduced.
 
+## 2026-11-12 · automatic verified local speaker-to-transcript linking
+
+- **User/problem:** the Voice tab shows recognized people and audio intervals, but Transcript still displays unattributed prose. A person expects readable diarized text without a second manual confirmation once trustworthy local evidence exists.
+- **Outcome/non-goals:** apply already verified native speaker windows to matching timestamped ASR segments automatically on saved Meeting open, preserve human naming and source text, provide visible Undo. Do not run ASR/diarization on open, infer text timestamps, use a transcript-derived timeline as independent evidence, overwrite previously confirmed or corrected speakers, or transmit meeting content.
+- **VALUE / USABILITY / FEASIBILITY / VIABILITY:** fewer manual steps, accessible inline result/error/undo and recovery action; require exact local engine/cluster/recording provenance with strong dominance per track; no extra inference, cloud charge or permanent history owner. Low-confidence overlaps remain unattributed. Text-only historical exports are explicitly not linkable until re-transcribed with timestamps.
+- **Canonical owners:** `speaker_timeline_window` verifies recording-native vs ASR fallback; `project_verified_speaker_links` produces a pure candidate; `TranscriptionStore.apply_reviewed_diarization` alone commits fingerprint-checked revisions and undo; `MeetingDetailPage` requests once per live meeting and refreshes the same Transcript model. Undo records `stats.speaker_review.auto_link_suppressed` to avoid replay on reopen.
+- **Acceptance/proof:** two-speaker tagged audio updates linked text and names, preserves raw words/timestamps/text and creates one durable undo; manual corrections, ambiguities, weak overlaps, ASR-only evidence, empty text, stale source and concurrent editor revisions never silently rewrite attribution; reopening after undo stays undone. Full-media browser Meeting journey and strong Mac CI are required for PR to `dev`. Physical-recording quality, installed WKWebView and VoiceOver stay REAL_ENVIRONMENT release gates.
+- **Axes:** PRODUCT_FEATURE / DELIVERY INTEGRATION to `dev` / VALIDATION STRONG + affected UI FULL_MEDIA / EXECUTION REMOTE_AUTOMATED (deterministic source), REAL_ENVIRONMENT (installed Mac).
+
 ## Remaining actions and acceptance
 
 1. **C · edge/read-model integrity:** synthetic source-only Computer/overlap/201-page search (#199) and text-only/empty transcription states (#200) pass. Collect representative real historical imports for mixed/merged/stale IDs, source-vs-person reconciliation and player behavior. No speaker inferred from a track name.

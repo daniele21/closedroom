@@ -364,9 +364,21 @@ class TranscriptionStore:
             state = json.loads(path.read_text(encoding="utf-8"))
             if state.get("revision_id") != revision_id:
                 raise ValueError("This rollback token is no longer current")
-            if fingerprint(self.get(transcription_id)) != state.get("after_fingerprint"):
+            current = self.get(transcription_id)
+            if fingerprint(current) != state.get("after_fingerprint"):
                 raise ValueError("Transcription changed after applying; rollback is no longer safe")
-            restored = self.replace_diarization(transcription_id, state["before"])
+            restored_payload = state["before"]
+            if ((current.get("stats") or {}).get("speaker_review") or {}).get(
+                "auto_link_revision"
+            ) == 1:
+                # Undoing automatic linking must survive reopening the meeting.
+                # Explicit future speaker-review actions remain available.
+                previous_review = restored_payload.setdefault("stats", {}).setdefault(
+                    "speaker_review", {}
+                )
+                previous_review["auto_link_suppressed"] = True
+                previous_review.pop("auto_link_revision", None)
+            restored = self.replace_diarization(transcription_id, restored_payload)
             path.unlink()
             return restored
 
