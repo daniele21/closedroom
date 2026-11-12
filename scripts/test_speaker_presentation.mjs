@@ -50,4 +50,17 @@ assert.equal(canJoinConversationTurns(first, next, [
   { ...group[0], speaker_group: 'system:S1' }, { ...group[1], speaker_group: 'system:S2' },
 ]), false, 'same displayed name does not imply same speaker identity');
 
+// A source-track label can be "Tu", but it is not a human confirmation.
+const selfVoice = { id: 42, start: 52, end: 54, text: 'Ciao',
+  track_id: 'mic', provider_speaker: 'mic:S1', speaker_label: 'Tu' };
+const pendingSelf = [{ speaker_cluster: 'mic:S1', speaker_group: 'mic:S1',
+  display_name: 'Tu', status: 'unassigned' }];
+assert.equal(speakerDisplay(selfVoice, pendingSelf, ['Tu']).label, 'Voce da identificare');
+assert.equal(speakerDisplay(selfVoice, pendingSelf, ['Tu']).needsIdentification, true);
+const confirmedSelf = [{ ...pendingSelf[0], status: 'accepted' }];
+assert.deepEqual(speakerDisplay(selfVoice, confirmedSelf, ['Tu']), {
+  key: 'mic:S1', label: 'Tu', needsIdentification: false,
+});
+assert.equal(speakerDisplay(selfVoice, confirmedSelf, ['Tu'], 'en').label, 'Tu');
+
 console.log('Speaker presentation and grouping contracts PASS');
