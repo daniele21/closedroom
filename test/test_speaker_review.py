@@ -84,7 +84,8 @@ class SpeakerReviewProjectionTests(unittest.TestCase):
         self.assertEqual(confirmed["stats"]["speaker_review"]["names"], {})
         self.assertEqual([x["speaker_name"] for x in confirmed["segments"] if
                           x["provider_speaker"] == "system:S1"], ["Tu", "Tu"])
-        self.assertEqual(confirmed["text"], original["text"])
+        self.assertEqual(confirmed["text"], preserved["text"],
+                         "explicit confirmation must not rewrite the existing read text")
         self.assertEqual(
             [(s["id"], s["text"], s["start"], s["end"], s.get("words"), s["provider_speaker"])
              for s in confirmed["segments"]],
@@ -496,6 +497,8 @@ class SpeakerReviewApiTests(unittest.TestCase):
         payload["source_tracks"] = [{"id": "system", "label": "Computer"}]
         saved = services.transcriptions.save(payload, recording_id=self.recording_id)
         url = f"/v1/transcriptions/{saved['id']}/speaker-review"
+        raw_path = services.transcriptions.root / services.transcriptions._file_name_for(saved["id"])
+        canonical_text = json.loads(raw_path.read_text(encoding="utf-8"))["text"]
         original = self.client.get(f"/v1/transcriptions/{saved['id']}").json()
         before = next(m for m in original["stats"]["speaker_attribution"]["mappings"]
                       if m["speaker_cluster"] == "system:S1")
@@ -511,7 +514,9 @@ class SpeakerReviewApiTests(unittest.TestCase):
                        if m["speaker_cluster"] == "system:S1")
         self.assertEqual((mapping["display_name"], mapping["status"]), ("Tu", "accepted"))
         self.assertEqual(changed["segments"][0]["speaker_name"], "Tu")
-        self.assertEqual(changed["text"], original["text"])
+        self.assertEqual(changed["text"], canonical_text)
+        self.assertEqual(json.loads(raw_path.read_text(encoding="utf-8"))["text"],
+                         canonical_text, "persisted source text must remain identical")
         self.assertEqual(
             [(s["id"], s["start"], s["end"], s.get("words"), s["provider_speaker"])
              for s in changed["segments"]],
@@ -536,7 +541,9 @@ class SpeakerReviewApiTests(unittest.TestCase):
             m["speaker_cluster"] == "system:S1")
         self.assertEqual((restored_mapping["display_name"], restored_mapping["status"]),
                          ("Tu", "unassigned"))
-        self.assertEqual(reverted["text"], original["text"])
+        self.assertEqual(reverted["text"], canonical_text)
+        self.assertEqual(json.loads(raw_path.read_text(encoding="utf-8"))["text"],
+                         canonical_text)
 
     def test_single_turn_api_revision_and_undo(self):
         info = self.client.get(self.url).json()
