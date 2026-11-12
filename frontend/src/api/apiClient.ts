@@ -1397,7 +1397,7 @@ export const ApiClient = {
   },
 
   async autoLinkVerifiedSpeakers(id: string): Promise<{
-    status: 'linked' | 'undo_pending' | 'no_timed_text' | 'no_verified_diarization' | 'no_safe_matches';
+    status: 'linked' | 'undo_pending' | 'no_timed_text' | 'no_verified_diarization' | 'no_safe_matches' | 'suppressed';
     linked_segments: number;
     transcription?: Transcription;
     revision_id?: string;
