@@ -236,7 +236,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
   } | null>(null);
   const [speakerAutoLink, setSpeakerAutoLink] = useState<{
     meetingId: string; transcriptionId: string;
-    status: 'linked' | 'undo_pending' | 'no_timed_text' | 'no_verified_diarization' | 'no_safe_matches' | 'error' | 'undone';
+    status: 'linked' | 'undo_pending' | 'no_timed_text' | 'no_verified_diarization' | 'no_safe_matches' | 'suppressed' | 'error' | 'undone';
     linkedSegments: number; revisionId?: string;
   } | null>(null);
   const autoLinkAttempted = useRef(new Set<string>());
@@ -1649,7 +1649,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                   )}
                 {speakerAutoLink?.meetingId === meeting.id &&
                   speakerAutoLink.transcriptionId === (meeting.transcription?.id || meeting.transcription?.saved_id) &&
-                  (speakerAutoLink.status === 'no_timed_text' ||
+                  ((speakerAutoLink.status === 'no_timed_text' && Boolean(meeting.transcription?.text?.trim())) ||
                     (speakerAutoLink.status === 'no_verified_diarization' &&
                       (meeting.transcription?.segments || []).some((segment) => segment.text?.trim() &&
                         (!segment.provider_speaker || ['computer', 'system', 'mixed'].includes(segment.provider_speaker.toLowerCase()))))) && (
