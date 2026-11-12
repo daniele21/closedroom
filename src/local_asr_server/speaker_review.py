@@ -111,8 +111,6 @@ def project_speaker_action(
         if (
             not display_name
             or re.fullmatch(r"Speaker\s+\d+", display_name, re.IGNORECASE)
-            or display_name.casefold() in source_names
-            and display_name.casefold() != "tu"
             or display_name.casefold() in {
                 "computer", "system", "system track", "non identificato",
                 "voce da identificare", "unidentified voice", "unknown",
