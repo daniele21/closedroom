@@ -1300,7 +1300,7 @@ try {
       verified = await browser.execute(`
         const detail = document.querySelector('[data-speaker-evidence-counts="true"]');
         return Boolean(detail &&
-          detail.querySelector('[data-speaker-audio-count="${audioCount}"]') &&
+          detail.querySelector('[data-speaker-timeline-count="${audioCount}"]') &&
           detail.querySelector('[data-speaker-text-count="${textCount}"]') &&
           !/\\b0 (interventi|turns)\\b/i.test(detail.textContent || ''));
       `);
