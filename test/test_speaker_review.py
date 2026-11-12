@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from local_asr_server.catalog import CatalogStore
 from local_asr_server.analysis_source_provenance import speaker_attribution_digest
 from local_asr_server.server import create_app
+from local_asr_server.speaker_labels import apply_speaker_labels
 from local_asr_server.speaker_review import (
     project_speaker_action, project_verified_speaker_links, speaker_audio_samples,
 )
@@ -65,6 +66,68 @@ class SpeakerReviewProjectionTests(unittest.TestCase):
         self.assertEqual(unmerged["segments"][1]["speaker_group"], "system:S2")
         self.assertNotEqual(unmerged["segments"][1]["speaker_name"], "Paolo")
         self.assertEqual(base, base_copy)
+
+    def test_confirm_name_without_rename_preserves_identity_and_raw_content(self):
+        original = transcription()
+        base = apply_speaker_labels(copy.deepcopy(original))
+        for mapping in base["stats"]["speaker_attribution"]["mappings"]:
+            if mapping["speaker_cluster"] == "system:S1":
+                mapping["display_name"] = "Tu"
+                mapping["status"] = "unassigned"
+        preserved = copy.deepcopy(base)
+        confirmed = project_speaker_action(base, action="confirm", cluster="system:S1")
+        by_cluster = {m["speaker_cluster"]: m for m in confirmed["stats"]["speaker_attribution"]["mappings"]}
+        self.assertEqual(by_cluster["system:S1"]["display_name"], "Tu")
+        self.assertEqual(by_cluster["system:S1"]["status"], "accepted")
+        self.assertEqual(by_cluster["system:S2"]["status"], "unassigned")
+        self.assertEqual(confirmed["stats"]["speaker_review"]["confirmed"], ["system:S1"])
+        self.assertEqual(confirmed["stats"]["speaker_review"]["names"], {})
+        self.assertEqual([x["speaker_name"] for x in confirmed["segments"] if
+                          x["provider_speaker"] == "system:S1"], ["Tu", "Tu"])
+        self.assertEqual(confirmed["text"], preserved["text"],
+                         "explicit confirmation must not rewrite the existing read text")
+        self.assertEqual(
+            [(s["id"], s["text"], s["start"], s["end"], s.get("words"), s["provider_speaker"])
+             for s in confirmed["segments"]],
+            [(s["id"], s["text"], s["start"], s["end"], s.get("words"), s["provider_speaker"])
+             for s in preserved["segments"]],
+        )
+        reloaded = apply_speaker_labels(copy.deepcopy(confirmed))
+        mapping = next(m for m in reloaded["stats"]["speaker_attribution"]["mappings"]
+                       if m["speaker_cluster"] == "system:S1")
+        self.assertEqual((mapping["display_name"], mapping["status"]), ("Tu", "accepted"))
+        self.assertEqual(base, preserved)
+
+    def test_confirm_rejects_placeholder_already_confirmed_or_unavailable_identity(self):
+        base = apply_speaker_labels(copy.deepcopy(transcription()))
+        with self.assertRaisesRegex(ValueError, "name"):
+            project_speaker_action(base, action="confirm", cluster="system:S1")
+        for mapping in base["stats"]["speaker_attribution"]["mappings"]:
+            if mapping["speaker_cluster"] == "system:S1":
+                mapping["display_name"] = "Tu"
+        confirmed = project_speaker_action(base, action="confirm", cluster="system:S1")
+        with self.assertRaisesRegex(ValueError, "already confirmed"):
+            project_speaker_action(confirmed, action="confirm", cluster="system:S1")
+        merged = project_speaker_action(base, action="merge", cluster="system:S1",
+                                        target="system:S2")
+        with self.assertRaisesRegex(ValueError, "unmerged"):
+            project_speaker_action(merged, action="confirm", cluster="system:S1")
+        excluded = project_speaker_action(base, action="exclude", cluster="system:S1")
+        with self.assertRaisesRegex(ValueError, "excluded"):
+            project_speaker_action(excluded, action="confirm", cluster="system:S1")
+
+    def test_confirm_can_apply_to_named_voice_without_transcript_turns(self):
+        base = apply_speaker_labels(copy.deepcopy(transcription()))
+        base["segments"] = []
+        for mapping in base["stats"]["speaker_attribution"]["mappings"]:
+            if mapping["speaker_cluster"] == "system:S3":
+                mapping["display_name"] = "Tu"
+        result = project_speaker_action(base, action="confirm", cluster="system:S3")
+        mapping = next(m for m in result["stats"]["speaker_attribution"]["mappings"]
+                       if m["speaker_cluster"] == "system:S3")
+        self.assertEqual((mapping["display_name"], mapping["status"]), ("Tu", "accepted"))
+        self.assertEqual(result["segments"], [])
+        self.assertEqual(result["text"], base["text"])
 
     def test_reassign_one_turn_without_mutating_source_or_other_turns(self):
         base = transcription()
@@ -425,6 +488,62 @@ class SpeakerReviewApiTests(unittest.TestCase):
                  if entry["speaker_cluster"] == "system:S3"),
             "Giulia",
         )
+
+    def test_confirm_existing_tu_name_api_with_exact_revision_and_undo(self):
+        from local_asr_server.app_services import get_services
+        services = get_services(self.app)
+        payload = transcription()
+        payload["segments"][0]["speaker_label"] = "Tu"
+        payload["source_tracks"] = [{"id": "system", "label": "Computer"}]
+        saved = services.transcriptions.save(payload, recording_id=self.recording_id)
+        url = f"/v1/transcriptions/{saved['id']}/speaker-review"
+        raw_path = services.transcriptions.root / services.transcriptions._file_name_for(saved["id"])
+        canonical_text = json.loads(raw_path.read_text(encoding="utf-8"))["text"]
+        original = self.client.get(f"/v1/transcriptions/{saved['id']}").json()
+        before = next(m for m in original["stats"]["speaker_attribution"]["mappings"]
+                      if m["speaker_cluster"] == "system:S1")
+        self.assertEqual((before["display_name"], before["status"]), ("Tu", "unassigned"))
+        revision = self.client.get(url).json()["fingerprint"]
+        response = self.client.post(url, json={
+            "action": "confirm", "cluster": "system:S1",
+            "expected_fingerprint": revision,
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        changed = response.json()["transcription"]
+        mapping = next(m for m in changed["stats"]["speaker_attribution"]["mappings"]
+                       if m["speaker_cluster"] == "system:S1")
+        self.assertEqual((mapping["display_name"], mapping["status"]), ("Tu", "accepted"))
+        self.assertEqual(changed["segments"][0]["speaker_name"], "Tu")
+        self.assertEqual(changed["text"], canonical_text)
+        self.assertEqual(json.loads(raw_path.read_text(encoding="utf-8"))["text"],
+                         canonical_text, "persisted source text must remain identical")
+        self.assertEqual(
+            [(s["id"], s["start"], s["end"], s.get("words"), s["provider_speaker"])
+             for s in changed["segments"]],
+            [(s["id"], s["start"], s["end"], s.get("words"), s["provider_speaker"])
+             for s in original["segments"]],
+        )
+        self.assertEqual(self.client.post(url, json={
+            "action": "confirm", "cluster": "system:S1",
+            "expected_fingerprint": revision,
+        }).status_code, 409)
+        reloaded = self.client.get(f"/v1/transcriptions/{saved['id']}").json()
+        self.assertEqual(next(m["status"] for m in
+            reloaded["stats"]["speaker_attribution"]["mappings"] if
+            m["speaker_cluster"] == "system:S1"), "accepted")
+        undone = self.client.post(url + "/undo", json={
+            "revision_id": response.json()["revision_id"],
+        })
+        self.assertEqual(undone.status_code, 200, undone.text)
+        reverted = undone.json()["transcription"]
+        restored_mapping = next(m for m in
+            reverted["stats"]["speaker_attribution"]["mappings"] if
+            m["speaker_cluster"] == "system:S1")
+        self.assertEqual((restored_mapping["display_name"], restored_mapping["status"]),
+                         ("Tu", "unassigned"))
+        self.assertEqual(reverted["text"], canonical_text)
+        self.assertEqual(json.loads(raw_path.read_text(encoding="utf-8"))["text"],
+                         canonical_text)
 
     def test_single_turn_api_revision_and_undo(self):
         info = self.client.get(self.url).json()

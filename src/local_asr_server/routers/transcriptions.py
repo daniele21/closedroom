@@ -77,7 +77,7 @@ class ReviewedDiarizationUndoRequest(BaseModel):
 
 
 class SpeakerReviewActionRequest(BaseModel):
-    action: Literal["rename", "merge", "exclude", "restore", "reassign_turn"]
+    action: Literal["rename", "confirm", "merge", "exclude", "restore", "reassign_turn"]
     cluster: str = Field(min_length=1, max_length=160)
     target: str | None = Field(default=None, max_length=160)
     name: str | None = Field(default=None, max_length=120)

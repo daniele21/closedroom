@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 from datetime import datetime
 from typing import Any
 
@@ -66,6 +67,7 @@ def project_speaker_action(
     names = dict(review.get("names") or {})
     merges = dict(review.get("merged_into") or {})
     excluded = set(review.get("excluded") or [])
+    confirmed = set(review.get("confirmed") or [])
     turn_assignments = dict(review.get("segment_assignments") or {})
     originals = dict(review.get("original_mappings") or {})
     original_mappings = {
@@ -91,6 +93,31 @@ def project_speaker_action(
         if not new_name or len(new_name) > 120:
             raise ValueError("Speaker name must contain 1–120 characters")
         names[root] = new_name
+    elif action == "confirm":
+        if cluster != root or root in excluded:
+            raise ValueError("Choose a non-excluded, unmerged speaker to confirm")
+        mapping = original_mappings.get(root) or {}
+        if mapping.get("status") == "accepted" or root in confirmed:
+            raise ValueError("This voice is already confirmed")
+        display_name = str((names.get(root) or mapping.get("display_name") or "")).strip()
+        source_names = {
+            str(track.get("label") or "").strip().casefold()
+            for track in transcription.get("source_tracks") or []
+        }
+        if root.casefold() in source_names or root.casefold() in {
+            "computer", "system", "mic", "mixed", "system track",
+        }:
+            raise ValueError("An audio source cannot be confirmed as a person")
+        if (
+            not display_name
+            or re.fullmatch(r"Speaker\s+\d+", display_name, re.IGNORECASE)
+            or display_name.casefold() in {
+                "computer", "system", "system track", "non identificato",
+                "voce da identificare", "unidentified voice", "unknown",
+            }
+        ):
+            raise ValueError("Give this voice a person's name before confirming")
+        confirmed.add(root)
     elif action == "merge":
         if cluster != root or root in excluded:
             raise ValueError("Choose a non-excluded source speaker")
@@ -150,6 +177,7 @@ def project_speaker_action(
     # Only store validated, serializable review intent, never a second copy of
     # transcript segments, diarization audio or user voice characteristics.
     review["names"] = names
+    review["confirmed"] = sorted(confirmed)
     review["original_mappings"] = originals
     review["merged_into"] = merges
     review["excluded"] = sorted(excluded)

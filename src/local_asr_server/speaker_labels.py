@@ -91,6 +91,9 @@ def apply_speaker_labels(
     # clusters and ASR timings are never overwritten, even on merge/exclude.
     review = (payload.get("stats") or {}).get("speaker_review") or {}
     names = review.get("names") or {}
+    # Identity confirmation does not alter the detected cluster or display
+    # name. Persist it as explicit user intent, separate from a rename.
+    confirmed = set(review.get("confirmed") or [])
     merged_into = review.get("merged_into") or {}
     segment_assignments = review.get("segment_assignments") or {}
     excluded = set(review.get("excluded") or [])
@@ -111,6 +114,8 @@ def apply_speaker_labels(
             item["display_name"] = str(names[raw])[:120]
             item["status"] = "accepted"
             item["source"] = "manual"
+        elif raw in confirmed:
+            item["status"] = "accepted"
     for raw, item in by_cluster.items():
         canonical = root_of(raw)
         resolved = by_cluster.get(canonical, item)

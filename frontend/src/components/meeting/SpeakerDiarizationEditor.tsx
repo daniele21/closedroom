@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, ChevronDown, GitMerge, Headphones,
+  AlertCircle, CheckCircle2, ChevronDown, GitMerge, Headphones,
   MoreHorizontal, Pause, Play, RotateCcw, SkipBack, SkipForward,
 } from 'lucide-react';
 import {
@@ -124,6 +124,12 @@ export function SpeakerDiarizationEditor({
     (filter === 'all' || r.status !== 'accepted'),
   );
   const selected = visible.find((r) => r.cluster === selectedCluster) || visible[0] || null;
+  const isPlaceholderName = !selected?.name.trim() ||
+    /^Speaker\s+\d+$/i.test(selected.name.trim()) ||
+    /^(computer|system|system track|mic|mixed|unknown|non identificato|voce da identificare|unidentified voice)$/i
+      .test(selected.name.trim());
+  const canConfirmSelected = Boolean(selected && selected.status === 'unassigned' &&
+    !selected.sourceOnly && !isPlaceholderName);
   const active = rows.filter((r) => r.status !== 'merged' && r.status !== 'excluded' && !r.sourceOnly);
   const confirmed = active.filter((r) => r.status === 'accepted').length;
   const pending = active.length - confirmed;
@@ -203,7 +209,8 @@ export function SpeakerDiarizationEditor({
       setAction('none');
       setReview(null); // new fingerprint is read from the canonical persisted owner
       onUpdated(response.transcription);
-      if (kind !== 'rename') showToast(tr('Modifica speaker salvata', 'Speaker correction saved'), 'success');
+      if (kind === 'confirm') showToast(tr('Identità confermata', 'Identity confirmed'), 'success');
+      else if (kind !== 'rename') showToast(tr('Modifica speaker salvata', 'Speaker correction saved'), 'success');
     } catch (error: any) {
       setMutationError(error?.message || tr('Modifica non salvata', 'Change not saved'));
     } finally {
@@ -490,10 +497,36 @@ export function SpeakerDiarizationEditor({
                   />
                   <span role="status" aria-live="polite" className="text-xs text-text-muted">
                     {saving ? tr('Salvataggio…', 'Saving…') : review && editedName === selected.name
-                      ? tr('Salvato', 'Saved') : ''}
+                      ? tr('Nome salvato', 'Name saved') : ''}
                   </span>
                 </div>
               </div>
+
+              {selected.status === 'unassigned' && !selected.sourceOnly && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-subtle bg-bg-surface p-3"
+                  data-speaker-identity-status="unconfirmed">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-text-primary">
+                      {tr('Identità non ancora confermata', 'Identity not yet confirmed')}
+                    </p>
+                    <p className="mt-1 text-xs text-text-secondary">
+                      {isPlaceholderName
+                        ? tr('Assegna prima un nome alla persona.', 'Name this person before confirming.')
+                        : editedName.trim() !== selected.name
+                          ? tr('Salva prima il nome modificato.', 'Save the changed name first.')
+                          : tr('Hai riconosciuto questa voce? Puoi confermarla senza cambiare il nome.',
+                            'Recognize this voice? Confirm it without changing the name.')}
+                    </p>
+                  </div>
+                  <Button type="button" size="sm" variant="primary"
+                    data-speaker-confirm={selected.cluster}
+                    disabled={!canEdit || saving || !canConfirmSelected || editedName.trim() !== selected.name}
+                    onClick={() => void commit('confirm', selected.cluster)}>
+                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                    {tr('Conferma questa voce', 'Confirm this voice')}
+                  </Button>
+                </div>
+              )}
 
               <div className="mt-4 border-t border-border-subtle pt-4">
                 <Button variant="secondary" onClick={() => void playSelectedTurns()}

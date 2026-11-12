@@ -431,7 +431,7 @@ export interface SpeakerReviewSamples {
 }
 
 export type SpeakerReviewAction = {
-  action: 'rename' | 'merge' | 'exclude' | 'restore' | 'reassign_turn';
+  action: 'rename' | 'confirm' | 'merge' | 'exclude' | 'restore' | 'reassign_turn';
   cluster: string;
   target?: string;
   name?: string;
