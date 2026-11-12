@@ -12,6 +12,7 @@ const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 const MEETING_ID = 'e2e-meeting';
 const ALTERNATE_MEETING_ID = 'e2e-meeting-other';
 const AUTO_LINK_MEETING_ID = 'e2e-meeting-auto-link';
+const CONFIRM_MEETING_ID = 'e2e-meeting-confirm';
 const VIDEO_FPS = 4;
 const DIAGNOSTICS_DELAY_MS = 1400;
 const root = path.resolve(process.cwd());
@@ -112,6 +113,34 @@ const autoLinkMeetingFixture = {
 };
 let autoLinkBefore = null;
 
+const confirmMeetingFixture = {
+  ...meetingFixture,
+  id: CONFIRM_MEETING_ID,
+  recording: {
+    ...meetingFixture.recording, id: CONFIRM_MEETING_ID,
+    title: 'Saved Tu speaker confirmation',
+    audio_tracks: [{ id: 'mic', label: 'Tu', source: 'mic', audio_file: 'synthetic.wav' }],
+  },
+  transcription: {
+    ...meetingFixture.transcription,
+    id: 'e2e-confirm-transcription', recording_id: CONFIRM_MEETING_ID,
+    text: '[00:52] Tu: Ciao, buongiorno.',
+    source_tracks: [{ id: 'mic', label: 'Tu' }],
+    segments: [{
+      id: 0, start: 52, end: 55, text: 'Ciao, buongiorno.',
+      provider_speaker: 'mic:S1', speaker_group: 'mic:S1',
+      speaker_label: 'Tu', speaker_name: 'Tu', track_id: 'mic',
+    }],
+    stats: { speaker_attribution: { mappings: [{
+      speaker_cluster: 'mic:S1', speaker_group: 'mic:S1',
+      display_name: 'Tu', status: 'unassigned', source: 'diarization',
+    }] } },
+  },
+};
+let confirmBefore = null;
+let confirmFingerprint = 'd'.repeat(64);
+let confirmUndoToken = null;
+
 const screenshotFixture = {
   screenshot_id: 'synthetic-shared-key',
   recording_id: MEETING_ID,
@@ -159,6 +188,7 @@ const counts = {
   speaker_sample_list: 0, speaker_timeline: 0, speaker_merge: 0, speaker_restore: 0, speaker_undo: 0,
   speaker_turn_reassign: 0, speaker_audio_request: 0,
   speaker_auto_link: 0, speaker_auto_undo: 0, transcript_full_detail: 0,
+  speaker_confirm: 0, speaker_confirm_undo: 0,
 };
 let benchmarkJob = null;
 let benchmarkRequest = null;
@@ -252,6 +282,12 @@ function fixtureServer(port) {
         recordings: true,
       });
     }
+    if (pathname === `/v1/meetings/${CONFIRM_MEETING_ID}`) {
+      const compact = structuredClone(confirmMeetingFixture);
+      delete compact.transcription.segments;
+      delete compact.transcription.source_tracks;
+      return json(res, 200, compact);
+    }
     if (pathname === `/v1/meetings/${AUTO_LINK_MEETING_ID}`) {
       // The real Meeting read model deliberately excludes heavy timed segments.
       const compact = structuredClone(autoLinkMeetingFixture);
@@ -335,6 +371,67 @@ function fixtureServer(port) {
       return json(res, 200, { items: [screenshotFixture], total: 1 });
     }
 
+    if (pathname === '/v1/transcriptions/e2e-confirm-transcription' && req.method === 'GET') {
+      return json(res, 200, confirmMeetingFixture.transcription);
+    }
+    if (pathname === '/v1/transcriptions/e2e-confirm-transcription/speaker-review/auto-link' && req.method === 'POST') {
+      return json(res, 200, { status: 'no_verified_diarization', linked_segments: 0 });
+    }
+    if (pathname === '/v1/transcriptions/e2e-confirm-transcription/speaker-review' && req.method === 'GET') {
+      return json(res, 200, { fingerprint: confirmFingerprint,
+        undo: confirmUndoToken ? { revision_id: confirmUndoToken } : null });
+    }
+    if (pathname === '/v1/transcriptions/e2e-confirm-transcription/speaker-review/samples') {
+      return json(res, 200, { recording_id: CONFIRM_MEETING_ID,
+        transcription_id: 'e2e-confirm-transcription',
+        speakers: [{ speaker_cluster: 'mic:S1', samples: [] }] });
+    }
+    if (pathname === '/v1/transcriptions/e2e-confirm-transcription/speaker-review/timeline') {
+      const interval = { cluster: 'mic:S1', track_id: 'mic', start: 52, end: 55,
+        origin: 'diarization', overlap: false, playable: false };
+      return json(res, 200, { recording_id: CONFIRM_MEETING_ID,
+        transcription_id: 'e2e-confirm-transcription', start: 0, end: 300,
+        duration_seconds: 600, duration_source: 'recording',
+        total_interval_count: 1, overview_bucket_count: 120,
+        intervals: [interval], overview: [{
+          cluster: 'mic:S1', interval_count: 1, first_start: 52,
+          playable_count: 0, bins: [10],
+        }],
+        coverage: 'diarization', window_coverage: 'diarization',
+        truncated: false, has_audio: false,
+      });
+    }
+    if (pathname === '/v1/transcriptions/e2e-confirm-transcription/speaker-review' && req.method === 'POST') {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (body.action !== 'confirm' || body.cluster !== 'mic:S1' ||
+        body.expected_fingerprint !== confirmFingerprint) {
+        return json(res, 409, { detail: 'Unexpected or stale confirmation' });
+      }
+      confirmBefore = structuredClone(confirmMeetingFixture.transcription);
+      counts.speaker_confirm += 1;
+      confirmUndoToken = 'synthetic-confirm-undo';
+      confirmFingerprint = 'e'.repeat(64);
+      const changed = structuredClone(confirmBefore);
+      changed.stats.speaker_attribution.mappings[0].status = 'accepted';
+      changed.stats.speaker_review = { confirmed: ['mic:S1'] };
+      confirmMeetingFixture.transcription = changed;
+      return json(res, 200, {
+        transcription: confirmMeetingFixture.transcription,
+        revision_id: confirmUndoToken,
+      });
+    }
+    if (pathname === '/v1/transcriptions/e2e-confirm-transcription/speaker-review/undo' && req.method === 'POST') {
+      if (!confirmBefore || !confirmUndoToken) {
+        return json(res, 409, { detail: 'No confirmation revision' });
+      }
+      counts.speaker_confirm_undo += 1;
+      confirmMeetingFixture.transcription = structuredClone(confirmBefore);
+      confirmFingerprint = 'f'.repeat(64);
+      confirmUndoToken = null;
+      return json(res, 200, { transcription: confirmMeetingFixture.transcription });
+    }
     if (pathname === '/v1/transcriptions/e2e-auto-link-transcription' && req.method === 'GET') {
       counts.transcript_full_detail += 1;
       return json(res, 200, autoLinkMeetingFixture.transcription);
@@ -1964,6 +2061,69 @@ try {
   `);
   if (redundantButton) throw new Error('Transcript still duplicates primary Voices navigation');
   await checkpoint(browser, '26-compact-meeting-full-transcript-hydrated');
+
+  // "Tu" is a saved name, not a confirmed identity. The user must be able
+  // to confirm it directly without changing text/timing, and undo locally.
+  await setMeetingHash(CONFIRM_MEETING_ID);
+  await waitText(browser, ['Saved Tu speaker confirmation'], 5000, true);
+  await browser.clickCss('#meeting-tab-speakers');
+  await waitText(browser, ['Conferma questa voce', 'Confirm this voice'], 7000, true);
+  const pendingSelf = await browser.execute(`
+    const root = document.querySelector('[data-speaker-review-workspace]');
+    return Boolean(root?.querySelector('[data-speaker-confirm="mic:S1"]:not([disabled])') &&
+      root.querySelector('input#speaker-review-name')?.value === 'Tu' &&
+      root.querySelector('[data-speaker-identity-status="unconfirmed"]'));
+  `);
+  if (!pendingSelf) throw new Error('saved Tu name cannot be confirmed without renaming');
+  await browser.clickCss('[data-speaker-confirm="mic:S1"]');
+  await waitCount('speaker_confirm', 1);
+  let confirmedSelf = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    confirmedSelf = await browser.execute(`
+      const root = document.querySelector('[data-speaker-review-workspace]');
+      return Boolean(root?.textContent?.includes('Identità confermata') ||
+        root?.textContent?.includes('Confirmed identity'));
+    `);
+    if (confirmedSelf) break;
+    await sleep(100);
+  }
+  if (!confirmedSelf) throw new Error('speaker confirmation did not update the Voices state');
+  await browser.clickCss('#meeting-tab-transcript');
+  let transcriptIdentity = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    transcriptIdentity = await browser.execute(`
+      const turn = document.querySelector('#meeting-panel-transcript [data-transcript-turn="conversation"]');
+      return Boolean(turn && (turn.textContent || '').includes('Tu') &&
+        (turn.textContent || '').includes('Ciao, buongiorno.') &&
+        !(turn.textContent || '').includes('Verifica voce') &&
+        !(turn.textContent || '').includes('Verify voice'));
+    `);
+    if (transcriptIdentity) break;
+    await sleep(100);
+  }
+  if (!transcriptIdentity) throw new Error('confirmed Tu identity not shown in Conversation');
+  if (confirmMeetingFixture.transcription.text !== '[00:52] Tu: Ciao, buongiorno.' ||
+      confirmMeetingFixture.transcription.segments[0].provider_speaker !== 'mic:S1') {
+    throw new Error('speaker confirmation changed immutable source text or cluster');
+  }
+  await checkpoint(browser, '27-confirm-self-voice-updates-transcript');
+
+  await browser.clickCss('#meeting-tab-speakers');
+  await browser.clickButton(['Undo last correction', 'Annulla ultima modifica']);
+  await waitCount('speaker_confirm_undo', 1);
+  await browser.clickCss('#meeting-tab-transcript');
+  let restoredPendingSelf = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    restoredPendingSelf = await browser.execute(`
+      const turn = document.querySelector('#meeting-panel-transcript [data-transcript-turn="conversation"]');
+      return Boolean(turn && (turn.textContent || '').includes('Voce da identificare') &&
+        (turn.textContent || '').includes('Verifica voce'));
+    `);
+    if (restoredPendingSelf) break;
+    await sleep(100);
+  }
+  if (!restoredPendingSelf) throw new Error('identity undo did not restore pending speaker');
+  await checkpoint(browser, '28-undo-self-identity-preserves-name');
 
   video = await renderVideo();
 } catch (caught) {
