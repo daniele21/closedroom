@@ -240,6 +240,10 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
     linkedSegments: number; revisionId?: string;
   } | null>(null);
   const autoLinkAttempted = useRef(new Set<string>());
+  const [transcriptDetailLoad, setTranscriptDetailLoad] = useState<{
+    key: string; status: 'loading' | 'error'; message?: string;
+  } | null>(null);
+  const [transcriptDetailRetry, setTranscriptDetailRetry] = useState(0);
   const {
     audioIntelligence,
     audioIntelligenceState,
@@ -638,6 +642,43 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
     return () => { live = false; };
   }, [meeting?.id, meeting?.transcription?.id, meeting?.transcription?.saved_id,
     meeting?.recording?.status, demoMode]);
+
+  // The Meeting read model deliberately omits heavy ASR segments. Fetch the
+  // existing canonical full transcription on demand, after local automatic
+  // reconciliation settles; never mistake an absent field for zero turns.
+  // Preserve newer speaker edits if a concurrent fetch finishes later.
+  useEffect(() => {
+    const selectedMeeting = meeting;
+    const trans = selectedMeeting?.transcription;
+    const transcriptionId = trans?.id || trans?.saved_id;
+    if (!selectedMeeting || !transcriptionId || demoMode || Array.isArray(trans?.segments)) return;
+    const identity = selectedMeeting.id + ':' + transcriptionId;
+    const settled = speakerAutoLink?.meetingId === selectedMeeting.id &&
+      speakerAutoLink.transcriptionId === transcriptionId;
+    const recordingActive = ['recording', 'finalizing', 'recoverable', 'interrupted']
+      .includes(selectedMeeting.recording.status);
+    if (!settled && !recordingActive) return;
+
+    let live = true;
+    setTranscriptDetailLoad({ key: identity, status: 'loading' });
+    void ApiClient.getTranscription(transcriptionId).then((full) => {
+      if (!live || currentRecordingIdRef.current !== selectedMeeting.id) return;
+      setMeeting((current) => {
+        if (current?.id !== selectedMeeting.id ||
+          (current.transcription?.id || current.transcription?.saved_id) !== transcriptionId ||
+          Array.isArray(current.transcription?.segments)) return current;
+        return { ...current, transcription: { ...current.transcription, ...full } };
+      });
+      setTranscriptDetailLoad(null);
+    }).catch((reason) => {
+      if (!live || currentRecordingIdRef.current !== selectedMeeting.id) return;
+      setTranscriptDetailLoad({ key: identity, status: 'error', message: String(reason) });
+    });
+    return () => { live = false; };
+  }, [meeting?.id, meeting?.transcription?.id, meeting?.transcription?.saved_id,
+    meeting?.transcription?.segments, meeting?.recording?.status, demoMode,
+    speakerAutoLink?.meetingId, speakerAutoLink?.transcriptionId, speakerAutoLink?.status,
+    transcriptDetailRetry]);
 
   const undoAutomaticSpeakerLink = async () => {
     const token = speakerAutoLink;
@@ -1543,12 +1584,12 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
             >
               <FileText className="w-4 h-4" aria-hidden="true" />
               <span>{t('meeting.tabTranscript')}</span>
-              {meeting.transcription && (
+              {Boolean(meeting.transcription?.segments?.length) && (
                 <span className={cn(
                   'ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border',
                   activeTab === 'transcript' ? 'bg-white/20 border-white/20 text-white' : 'bg-bg-elevated border-border-subtle text-text-secondary',
-                )}>
-                  {meeting.transcription.segments?.length || 0}
+                )} title={lang === 'it' ? 'Interventi temporizzati' : 'Timed transcript turns'}>
+                  {meeting.transcription!.segments!.length}
                 </span>
               )}
             </button>
@@ -1623,13 +1664,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                           {lang === 'it' ? 'Annulla ultima correzione' : 'Undo last speaker correction'}
                         </Button>
                       )}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => navigateTo('transcription', meeting.transcription?.id || null)}
-                    >
-                      {t('meeting.openTranscriptTools')}
-                    </Button>
+
                   </div>
                 )}
                 {speakerAutoLink?.meetingId === meeting.id &&
@@ -1667,7 +1702,30 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                       </Button>
                     </div>
                   )}
-                {meeting.transcription?.segments?.length ? (
+                {meeting.transcription && !Array.isArray(meeting.transcription.segments) &&
+                  transcriptDetailLoad?.key === meeting.id + ':' +
+                    (meeting.transcription.id || meeting.transcription.saved_id) &&
+                  transcriptDetailLoad.status === 'error' && (
+                    <div role="alert" data-transcript-detail-error="true"
+                      className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 text-xs text-text-secondary">
+                      <span>{lang === 'it'
+                        ? 'Impossibile caricare gli interventi della trascrizione. Il testo originale rimane disponibile.'
+                        : 'Could not load transcript turns. The original text remains available.'}</span>
+                      <Button size="sm" variant="secondary" onClick={() => setTranscriptDetailRetry((n) => n + 1)}>
+                        {lang === 'it' ? 'Riprova' : 'Retry'}
+                      </Button>
+                    </div>
+                  )}
+                {meeting.transcription && !Array.isArray(meeting.transcription.segments) &&
+                  !(transcriptDetailLoad?.key === meeting.id + ':' +
+                    (meeting.transcription.id || meeting.transcription.saved_id) &&
+                    transcriptDetailLoad.status === 'error') ? (
+                  <div data-transcript-detail-loading="true" role="status" aria-live="polite"
+                    className="flex items-center gap-2 bg-bg-elevated p-5 text-sm text-text-secondary">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    {lang === 'it' ? 'Caricamento interventi e voci…' : 'Loading turns and speakers…'}
+                  </div>
+                ) : meeting.transcription?.segments?.length ? (
                   <div className="p-4 sm:p-5 bg-bg-elevated">
                     <TranscriptTextView
                       segments={meeting.transcription.segments}
