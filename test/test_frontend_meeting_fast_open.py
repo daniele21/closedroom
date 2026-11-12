@@ -45,6 +45,23 @@ class FrontendMeetingFastOpenContractTests(unittest.TestCase):
         self.assertIn("if (request.queued) void load();", self.source)
         self.assertIn("loadInFlightRef.current = null", self.source)
 
+    def test_compact_meeting_hydrates_full_transcript_without_second_primary_voice_route(self) -> None:
+        self.assertIn("ApiClient.getTranscription(transcriptionId)", self.source)
+        self.assertIn("Array.isArray(trans?.segments)", self.source)
+        self.assertIn("speakerAutoLink?.meetingId === selectedMeeting.id", self.source)
+        self.assertIn("currentRecordingIdRef.current !== selectedMeeting.id", self.source)
+        self.assertIn("Array.isArray(current.transcription?.segments)", self.source)
+        self.assertIn("data-transcript-detail-loading", self.source)
+        self.assertIn("data-transcript-detail-error", self.source)
+        self.assertIn("setTranscriptDetailRetry((n) => n + 1)", self.source)
+        self.assertNotIn("t('meeting.openTranscriptTools')", self.source)
+        self.assertIn("onIdentifySpeakers={() => selectTab('speakers')}", self.source)
+
+    def test_absent_timed_segments_do_not_claim_zero_utterances(self) -> None:
+        # Rich transcript is a separate read model. Absence is not a zero.
+        self.assertIn("Boolean(meeting.transcription?.segments?.length)", self.source)
+        self.assertNotIn("meeting.transcription.segments?.length || 0", self.source)
+
     def test_accessory_failures_have_local_retry_state(self) -> None:
         self.assertIn("diagnosticsError", self.source)
         self.assertIn("visualFramesError", self.source)
