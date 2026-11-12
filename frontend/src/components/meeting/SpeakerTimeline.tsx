@@ -27,6 +27,7 @@ interface Props {
   sampleAvailable?: (cluster: string) => boolean;
   onPlayInterval: (clip: SpeakerClip) => void;
   onJumpToTranscript?: (time: number) => void;
+  onEvidenceSummary?: (source: Transcription, overview: SpeakerTimelineWindow['overview']) => void;
   lang: string;
 }
 
@@ -58,7 +59,7 @@ function clipFor(item: SpeakerTimelineWindow['intervals'][number]): SpeakerClip 
 export function SpeakerTimeline({
   transcription, recordingId, durationSeconds, rows, showHidden, pendingOnly = false,
   selectedGroup, cursorSeconds, children, onSelect, onPlaySample, sampleAvailable,
-  onPlayInterval, onJumpToTranscript, lang,
+  onPlayInterval, onJumpToTranscript, onEvidenceSummary, lang,
 }: Props) {
   const it = lang === 'it';
   const transcriptionId = transcription.id || transcription.saved_id || '';
@@ -68,6 +69,12 @@ export function SpeakerTimeline({
   const [timeline, setTimeline] = useState<SpeakerTimelineWindow | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Share the one canonical full-meeting evidence overview with the editor.
+  // Null means unavailable/loading, never a verified zero.
+  useEffect(() => {
+    onEvidenceSummary?.(transcription, timeline?.overview);
+  }, [onEvidenceSummary, timeline, transcription]);
 
   // Canonical Meeting metadata is preferred. Never manufacture a one-second
   // recording, and do not start eager media requests to learn its duration.
