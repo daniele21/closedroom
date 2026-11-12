@@ -218,8 +218,8 @@ def project_verified_speaker_links(
 
     names = {
         str(row.get("speaker_cluster")): row
-        for row in (transcription.get("stats") or {}).get(
-            "speaker_attribution", {}).get("mappings", [])
+        for row in ((transcription.get("stats") or {}).get(
+            "speaker_attribution") or {}).get("mappings", [])
     }
     source_labels = {
         str(track.get("label") or "").casefold()
@@ -229,6 +229,10 @@ def project_verified_speaker_links(
     known_clusters = set(_clusters(transcription))
     manual_assignments = ((transcription.get("stats") or {}).get("speaker_review")
                           or {}).get("segment_assignments") or {}
+    if ((transcription.get("stats") or {}).get("speaker_review") or {}).get(
+        "auto_link_suppressed"
+    ):
+        return None, "suppressed", 0
 
     def source_only(raw: str) -> bool:
         return not raw or raw.casefold() in source_labels
@@ -286,7 +290,12 @@ def project_verified_speaker_links(
     if not linked:
         return None, "no_safe_matches", 0
 
-    candidate.setdefault("stats", {})["review_preserve_canonical_text"] = True
+    stats = candidate.setdefault("stats", {})
+    stats["review_preserve_canonical_text"] = True
+    review = stats.setdefault("speaker_review", {})
+    if review.get("auto_link_suppressed"):
+        return None, "suppressed", 0
+    review["auto_link_revision"] = 1
     candidate["text"] = transcription.get("text", "")
     apply_speaker_labels(candidate)
     candidate["text"] = transcription.get("text", "")
