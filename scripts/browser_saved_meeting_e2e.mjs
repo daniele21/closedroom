@@ -1291,6 +1291,28 @@ try {
     await sleep(100);
   }
   if (!initialTimeline) throw new Error('speaker timeline did not show 30-minute overview and audio-only voice');
+  // Evidence is full-meeting diarization, not only the ASR segments. A
+  // diarized voice with zero linked text must never be presented as zero speech.
+  async function assertSpeakerEvidence(group, name, audioCount, textCount) {
+    await browser.clickCss('[data-speaker-lane="' + group + '"] button[title="' + name + '"]');
+    let verified = false;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      verified = await browser.execute(`
+        const detail = document.querySelector('[data-speaker-evidence-counts="true"]');
+        return Boolean(detail &&
+          detail.querySelector('[data-speaker-timeline-count="${audioCount}"]') &&
+          detail.querySelector('[data-speaker-text-count="${textCount}"]') &&
+          !/\\b0 (interventi|turns)\\b/i.test(detail.textContent || ''));
+      `);
+      if (verified) break;
+      await sleep(100);
+    }
+    if (!verified) throw new Error('Voice evidence misreported for ' + name +
+      ': audio=' + audioCount + ', text=' + textCount);
+  }
+  await assertSpeakerEvidence('system:S2', 'Speaker 2', 1, 0);
+  await assertSpeakerEvidence('system:S3', 'Giulia', 1, 0);
+  await assertSpeakerEvidence('system:S1', 'Speaker 1', 1, 1);
   const located = await browser.execute(`
     const lane = document.querySelector('[data-speaker-lane="system:S3"]');
     const bin = lane?.querySelector('button[title*="25:"]');
@@ -1393,6 +1415,8 @@ try {
     await sleep(100);
   }
   if (!mergedTimeline) throw new Error('merged speaker timeline did not regroup raw intervals');
+  // The canonical group now covers both native clusters but only one text turn.
+  await assertSpeakerEvidence('system:S2', 'Speaker 2', 2, 1);
   await checkpoint(browser, '11b-speaker-review-merged');
   await browser.clickButton(['Undo last correction', 'Annulla ultima modifica']);
   await waitCount('speaker_undo', 2);
@@ -1416,6 +1440,8 @@ try {
     `);
     throw new Error('undo failed to restore separate speaker lanes: ' + JSON.stringify(lanes));
   }
+  await assertSpeakerEvidence('system:S1', 'Speaker 1', 1, 1);
+  await assertSpeakerEvidence('system:S2', 'Speaker 2', 1, 0);
   await checkpoint(browser, '11c-speaker-review-undo');
 
   // Undo and later restore are distinct recovery paths. A merged voice must

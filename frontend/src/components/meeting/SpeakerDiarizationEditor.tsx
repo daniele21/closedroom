@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, ChevronDown, GitMerge, Headphones,
   MoreHorizontal, Pause, Play, RotateCcw, SkipBack, SkipForward,
 } from 'lucide-react';
 import {
   ApiClient, type SpeakerClip, type SpeakerReviewAction,
-  type SpeakerReviewInfo, type SpeakerReviewSamples, type Transcription,
+  type SpeakerReviewInfo, type SpeakerReviewSamples, type SpeakerTimelineWindow, type Transcription,
 } from '../../api/apiClient';
 import { useSpeakerReviewPlayback, type SpeakerTurn } from '../../hooks/useSpeakerReviewPlayback';
 import { SpeakerTimeline } from './SpeakerTimeline';
@@ -49,6 +49,13 @@ export function SpeakerDiarizationEditor({
   const meetingId = recordingId || transcription.recording_id || '';
   const [review, setReview] = useState<SpeakerReviewInfo | null>(null);
   const [samples, setSamples] = useState<SpeakerReviewSamples | null>(null);
+  const [evidence, setEvidence] = useState<{
+    source: Transcription; overview: SpeakerTimelineWindow['overview'];
+  } | null>(null);
+  // The timeline owns the read-only evidence request; never fetch it twice.
+  const onEvidenceSummary = useCallback((source: Transcription, overview: SpeakerTimelineWindow['overview']) => {
+    setEvidence({ source, overview });
+  }, []);
   const [loadError, setLoadError] = useState('');
   const [selectedCluster, setSelectedCluster] = useState('');
   const [editedName, setEditedName] = useState('');
@@ -97,6 +104,20 @@ export function SpeakerDiarizationEditor({
     });
   }, [mappings, transcription.segments, transcription.source_tracks]);
 
+  // Full-meeting evidence counts are not ASR turn counts. Preserve the raw
+  // cluster identity and aggregate by the canonical merged speaker group.
+  const timelineCounts = useMemo(() => {
+    if (evidence?.source !== transcription || !evidence.overview) return null;
+    const groups = new Map(rows.map((row) => [row.cluster, row.group]));
+    const counts = new Map<string, number>();
+    for (const item of evidence.overview) {
+      const group = groups.get(item.cluster);
+      if (!group || !Number.isFinite(item.interval_count) || item.interval_count < 0) continue;
+      counts.set(group, (counts.get(group) || 0) + item.interval_count);
+    }
+    return counts;
+  }, [evidence, rows, transcription]);
+
   const visible = rows.filter((r) =>
     !r.sourceOnly &&
     (showHidden || (r.status !== 'merged' && r.status !== 'excluded')) &&
@@ -113,6 +134,7 @@ export function SpeakerDiarizationEditor({
 
   selectedGroupRef.current = selected?.group || null;
   useEffect(() => () => activeListenRequest.current?.abort(), [meetingId]);
+  const selectedIntervalCount = selected && timelineCounts ? timelineCounts.get(selected.group) || 0 : null;
   const sampleList = useMemo(() => (
     samples?.speakers.find((item) => item.speaker_cluster === selected?.cluster)?.samples || []
   ), [samples, selected?.cluster]);
@@ -352,6 +374,7 @@ export function SpeakerDiarizationEditor({
             selectedGroup={selected?.group || null}
             cursorSeconds={timelineCursor}
             lang={lang}
+            onEvidenceSummary={onEvidenceSummary}
             onSelect={(cluster) => { activeListenRequest.current?.abort(); playback.stop(); setTimelineCursor(null); setSelectedCluster(cluster); }}
             sampleAvailable={(cluster) => Boolean(samples?.speakers.find((s) => s.speaker_cluster === cluster)?.samples.length)}
             onPlaySample={(cluster) => {
@@ -376,6 +399,27 @@ export function SpeakerDiarizationEditor({
                       selected.status === 'excluded' ? tr('Esclusa (ripristinabile)', 'Excluded (restorable)') :
                       selected.status === 'merged' ? tr('Unita a un’altra voce', 'Merged into another voice') :
                       tr('Da identificare', 'Not yet identified')}
+                  </p>
+                  <p className="mt-1 text-xs text-text-secondary" data-speaker-evidence-counts="true" aria-live="polite">
+                    <span data-speaker-timeline-count={selectedIntervalCount ?? 'unknown'}>
+                      {selectedIntervalCount === null
+                        ? tr('Intervalli non ancora verificati', 'Intervals not yet verified')
+                        : selectedIntervalCount > 0
+                          ? `${selectedIntervalCount} ${selectedIntervalCount === 1
+                            ? tr('intervallo attribuito nella timeline', 'attributed interval in the timeline')
+                            : tr('intervalli attribuiti nella timeline', 'attributed intervals in the timeline')}`
+                          : sampleList.length > 0
+                            ? tr('Voce rilevata · intervalli non disponibili', 'Voice detected · intervals unavailable')
+                            : tr('Nessun intervallo attribuito', 'No attributed intervals')}
+                    </span>
+                    {' · '}
+                    <span data-speaker-text-count={selected.count}>
+                      {selected.count > 0
+                        ? `${selected.count} ${selected.count === 1
+                          ? tr('intervento collegato al testo', 'text-linked turn')
+                          : tr('interventi collegati al testo', 'text-linked turns')}`
+                        : tr('Nessun intervento collegato al testo', 'No text-linked turns')}
+                    </span>
                   </p>
                 </div>
                 {canEdit && selected.status !== 'excluded' && selected.status !== 'merged' && (
@@ -505,9 +549,6 @@ export function SpeakerDiarizationEditor({
                         <option value="">{tr('Scegli una voce', 'Select a voice')}</option>
                         {selectable.map((r) => <option key={r.cluster} value={r.cluster}>{r.name}</option>)}
                       </select>
-                      {mergeTarget && <p className="mb-3 text-xs text-text-secondary">
-                        {selected.count} + {rows.find((r) => r.cluster === mergeTarget)?.count || 0} {tr('interventi (nessuno cancellato)', 'turns (none deleted)')}
-                      </p>}
                       {mergeTarget && samples?.speakers.find((s) => s.speaker_cluster === mergeTarget)?.samples[0] && (
                         <Button variant="ghost" size="sm" onClick={() => {
                           const clip = samples?.speakers.find((s) => s.speaker_cluster === mergeTarget)?.samples[0];
@@ -527,8 +568,8 @@ export function SpeakerDiarizationEditor({
                       <h5 className="text-sm font-semibold">{tr('Escludere questa voce?', 'Exclude this voice?')}</h5>
                       <p className="mt-1 text-xs text-text-secondary">
                         {selected.count === 0
-                          ? tr('Nessun intervento collegato: la voce sarà nascosta, ma recuperabile.', 'No linked turns: this voice will be hidden but recoverable.')
-                          : tr('Gli interventi resteranno nel testo come “Non identificato”. Nessun contenuto sarà eliminato.', 'Turns will remain as “Unidentified”. No content will be deleted.')}
+                          ? tr('Questa voce sarà nascosta, ma recuperabile. Audio e testo originali restano invariati.', 'This voice will be hidden but recoverable. Original audio and text remain unchanged.')
+                          : tr('Gli interventi resteranno nel testo come “Non identificato”. Audio e testo originali rimarranno invariati.', 'Turns will remain as “Unidentified”. Original audio and text remain unchanged.')}
                       </p>
                       <div className="mt-3 flex gap-2">
                         <Button variant="warning" size="sm" disabled={!canEdit}
