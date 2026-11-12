@@ -1543,7 +1543,9 @@ try {
   if (!restoredAll) throw new Error('cannot restore full-meeting speaker timeline');
   await waitCount('speaker_timeline', 5);
   await checkpoint(browser, '11a-speaker-review-ready');
-  await browser.clickCss('[data-speaker-review-workspace] button[aria-label="Manage this voice"], [data-speaker-review-workspace] button[aria-label="Gestisci questa voce"]');
+  await clickWhenPointerReady(browser,
+    '[data-speaker-review-workspace] button[aria-label="Manage this voice"], [data-speaker-review-workspace] button[aria-label="Gestisci questa voce"]',
+    6500);
   await browser.clickButton(['Merge voice', 'Unisci voce']);
   const targetChanged = await browser.execute(`
     const select = document.querySelector('[data-speaker-review-workspace] select');
@@ -1606,7 +1608,9 @@ try {
   // Undo and later restore are distinct recovery paths. A merged voice must
   // remain actionable from the minimal UI without showing a duplicate lane.
   await browser.clickCss('[data-speaker-lane="system:S1"] button[title="Speaker 1"]');
-  await browser.clickCss('[data-speaker-review-workspace] button[aria-label="Manage this voice"], [data-speaker-review-workspace] button[aria-label="Gestisci questa voce"]');
+  await clickWhenPointerReady(browser,
+    '[data-speaker-review-workspace] button[aria-label="Manage this voice"], [data-speaker-review-workspace] button[aria-label="Gestisci questa voce"]',
+    6500);
   await browser.clickButton(['Merge voice', 'Unisci voce']);
   const secondTarget = await browser.execute(`
     const select = document.querySelector('[data-speaker-review-workspace] select');
