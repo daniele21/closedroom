@@ -67,6 +67,7 @@ export function RecordingOverlayActions({
             aria-expanded={noteComposerOpen}
             title={noteComposerOpen ? 'Close note editor' : 'Add note about this moment'}
             data-note-action="true"
+            data-persisted={lastSavedNoteId !== null}
           >
             {isAnchoringNote || isSavingNote ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -107,6 +108,7 @@ export function RecordingOverlayActions({
             title={selectedDisplayId === null ? 'Choose a screen first' : screenshotShortcut}
             aria-label={screenshotLabel}
             data-screenshot-action="true"
+            data-persisted={lastSavedScreenshotId !== null}
           >
             {isCapturingScreenshot ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
