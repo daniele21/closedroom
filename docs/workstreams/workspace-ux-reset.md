@@ -1,97 +1,76 @@
-# ClosedRoom — meeting-first UX reset
+# ClosedRoom — UX/UI meeting-first redesign
 
-Status: active
-Owner: product UX, frontend workspace, local workspace read model
-Read when: changing core recording / saved Meeting / Projects journeys or their loading and navigation behavior
-Base: `dev` at `bb38105620e3547b0d28b541d6d4b0cec968945f` (2026-11-13); refresh before implementation/integration.
+Status: ACTIVE — design approved; implementation not yet integrated. Owner: product/front-end. Target: dev.
+Resume identity: dev bb38105620e3547b0d28b541d6d4b0cec968945f (2026-11-13); refresh head/base/PRs before work.
 
-## Visual design handoff
+## Product outcome and boundaries
 
-Editable UX/UI concept: [ClosedRoom UX/UI Refresh v1](https://www.figma.com/design/VbELzf6PuSKxFbpZzUCBuu). Eight screens: all Meetings; Projects meeting-first; saved Meeting notes+transcript; Voices identity review; outcome-driven analysis; New Meeting readiness; active capture with notes/screenshots; compact Projects (900 px). Figma is a design handoff, not implemented behavior or validated WKWebView. Implementation remains owned by `frontend/src/` and this repo's `design/ux-contract.json` and brand tokens; sample contents are illustrative.
+A privacy-conscious macOS user can start a reliable call, write notes and take intentional screenshots while recording, transcribe/identify speakers, run an outcome-driven analysis, then find the same Meeting by project or search in a clear, continuous interface. Reduce steps, repeated actions, initial loading and unnecessary cognitive effort. **Meeting is the one canonical user object.**
 
-## User and desired outcome
+No cloud inference or silent fallback; no new recording, transcript, screenshot, model, player, speaker or persistence owners; no replacement of source audio/text/timestamps or finalized artifacts; no new UI framework, parallel design tokens, cosmetic AI processing or unlicensed competitor code. Preserve local privacy, loopback auth, explicit optional storage, recoverable edits and screenshot provenance.
 
-A privacy-conscious macOS professional records a call, writes timestamped notes and takes intentional screenshots without leaving the call, transcribes and attributes speech afterward, requests a repeatable analysis outcome, then finds the recording by project in seconds. The same Meeting is the canonical object throughout.
+Axes: intended product PRODUCT_FEATURE; this plan-only edit PRODUCT_NONE. Delivery ITERATION now, INTEGRATION on each PR to dev, RELEASE only for stable promotion. Validation LEAN for this doc, risk-selected SCOPED/STRONG for implementation, FULL for release. Execution AGENT_LOCAL where equivalent tools exist, REMOTE_AUTOMATED for deterministic unavailable Mac/browser gates, REAL_ENVIRONMENT for installed macOS/TCC/physical audio, VoiceOver and subjective UX. Treat axes independently.
 
-Outcome: an obvious meeting-first navigation, no redundant destinations/actions, no simulated processing, immediate navigation with progressive local content, reliable capture/undo, and one consistent visual/interaction language. **User-visible processing only when work is actually happening.**
+## Designs and current truth
 
-Non-goals: cloud inference or silent remote fallback; new recording, transcription, speaker or job persistence owners; deleting advanced features; rewriting finalized artifacts or existing analysis; replacing the existing brand; importing competitors' code without license review.
+- Eight editable screens: https://www.figma.com/design/VbELzf6PuSKxFbpZzUCBuu — Riunioni; Progetti; Meeting Notes; Voci; Analisi; Nuovo meeting; Registrazione attiva; Progetti compatti.
+- Dedicated **compact floating overlay** and **saved Meeting screenshot gallery** are specified in design/overlay-screenshot-ux-v1.md on open PR #210; conversation HTML prototype is illustrative. These changes are NOT yet Figma-editable screens because the Figma Starter limit blocked that addition; synchronize when available, without blocking code delivery.
+- dev already contains reliable local source owners for note and screenshot persistence, overlay display selection, note/screenshot undo, Meeting image thumbnails/context, transcription and speakers. Redesign the journey, not storage.
+- PR #210 (daniele/workspace-ux-reset → dev) implements first Projects hierarchy/loading changes but is **open, unmerged**. Its branch workstream must converge with this plan rather than establish a second roadmap.
+- docs/workstreams/meeting-ux-consolidation.md records earlier integrated UX and legacy-route obligations: preserve them; do not redo integrated UX-0..6. Code + design/ux-contract.json + design/brand-kit.json remain canonical, not Figma.
 
-## Evidence: current UX problems and owner
+## Information architecture and approved flows
 
-Screenshots supplied 2026-11-13 show a full-screen Projects loading card with a fixed 62%, four metric tiles, a large unavailable digest, an empty actions block and empty decisions/risks before the first Meeting. Left project navigation consumes its own tall scroll column, and there are multiple time filters.
+Primary rail: **Riunioni**, **Progetti**, persistent **Nuovo meeting**. Utilities: Attività, Impostazioni. Opening a Meeting is contextual, not a third root destination. Back restores parent list, search, project selection, filter, scroll and focus.
 
-Code audit (`dev`):
-- `frontend/src/pages/ProjectsPage.tsx:154-178`: `listProjects()` on every mount, full-page loading guard; no instant cached view. `:342-355` passes a hard-coded `progress={62}`; `:535-550` passes `progress={72}` to an unrelated project digest animation.
-- `ProjectsPage.tsx:323-340`: the "Generate project situation" action uses a fixed 850ms timeout and pre-existing local digest items, not a real new analysis. The copy/progress must not imply an inference task.
-- `ProjectsPage.tsx:461-714`: four KPIs and multiple empty insight panels precede the Meeting timeline, which is clipped to the first three items unless manually expanded.
-- `src/local_asr_server/routers/helpers.py:139-184`: `GET /v1/projects` loops over up to 999 recordings and reads transcription, runs by recording, runs by transcription and preparation jobs per recording; plausible N+1 latency source. Measure, do not assert latency impact without profiling.
-- `frontend/src/App.tsx:267-312,546-550`: route switch mounts/unmounts page components and uses lazy page chunks. `frontend/src/components/workspace/MeetingSearchDialog.tsx:82-131` introduces 180ms debounce even for an initial unfiltered archive load.
-- Existing `docs/workstreams/meeting-ux-consolidation.md` and `design/ux-contract.json` already specify a canonical Meeting and shared local library; this reset must **finish and simplify** that ownership, not invent a competing architecture.
+- **Riunioni:** searchable local archive, recent rows at top, one Open action; status, date, project and duration visible. Empty/archived/filter states concise.
+- **Progetti:** project selection → meeting list directly under heading, same global Meeting identities; one time filter, search within project; insight digest/actions/risks below meetings only when present.
+- **Capture:** New Meeting → optional title/project → truthful source/permission readiness → Start → compact overlay (REC, timer, mic/system health, display, Note/Screenshot/Stop) → finalization → saved Meeting. Hide overlay never stops recording.
+- **Saved Meeting:** one player and four user views: **Note e fonti** (authored notes, generated notes when present, captured screenshots and source timestamps); **Trascrizione** (compact readable conversation); **Voci** (sample, name/merge/exclude, attribution and timeline); **Analisi** (outcome selection, status, results).
+- **Screenshot first-class:** every manual image is visible in Note e fonti *without* ASR/AI, with a real thumbnail, selected preview, capture timestamp/display provenance, nearby note/transcript when available and seek in the same player. Similar shots may group only with discoverable “Mostra tutti”; missing thumbnail remains a row with Retry.
+- **Analysis:** select “Sintesi e prossimi passi”, “Decisioni e rischi”, or “Domanda personalizzata”, then explicitly start a local analysis. Never confuse visual-only evidence with spoken decisions. Re-attributed voices do not silently rewrite old analyses.
 
-## Competitive patterns
+## Independent work graph
 
-Granola: notes/list/folders first (https://docs.granola.ai/help-center/getting-started/granola-101); Fireflies: synced notes/transcript/audio (https://guide.fireflies.ai/articles/6653885315-learn-about-the-fireflies-notepad); Fathom: call scratchpad (https://www.fathom.ai/whats-new). Inspect Meetily, Meet2Notes and MeetMind GitHub sources for patterns only; verify licenses and never add external runtime dependencies.
+| ID / state | Shippable result and single write owner | Dependency |
+| --- | --- | --- |
+| UX0 ACTIVE | Finish PR #210: ProjectsPage.tsx meeting-first layout, truthful loading, no duplicated CTA, reuse bounded snapshot; preserve source and browser evidence | Existing PR → dev gates |
+| UX1 READY | App.tsx + MeetingsPage.tsx + MeetingSearchDialog.tsx: one rail/search/navigation model; fast route change, proper Back and context recovery | UX0 IA agreement |
+| UX2 READY | routers/workspace.py + routers/helpers.py: profile /v1/projects (1/25/200 records), remove proven N+1; bounded canonical metadata projection/cache invalidation | UX0 API semantics |
+| UX3 READY | MeetingDetailPage.tsx + small extracted presentation components as needed: Note e fonti plus visible screenshot strip/gallery/preview/seek. Reuse current screenshot hooks and player | Existing saved Meeting contract |
+| UX4 READY | RecordingOverlayPage.tsx and overlay-specific CSS: compact/expanded control, persistent timer/source health, note composer, selected display, screenshot, Stop/Undo | Existing recorder/screenshot owners |
+| UX5 READY | NewRecordingPage.tsx: one Start, readiness/permissions and honest waiting, safe transition to overlay/saved Meeting | UX4 visible state contract |
+| UX6 BLOCKED | TranscriptTextView + SpeakerDiarizationEditor: no “Computer” person; mic identity, readable correction/undo. MeetingDetailPage tab wiring serialized after UX3 | UX3 shared parent |
+| UX7 BLOCKED | Analysis child dialogs/editors: reusable predefined outcomes and truthful processing. MeetingDetailPage integration serialized after UX3/UX6 | UX3 + UX6 tabs |
+| UX8 BLOCKED | Semantic UI components + workspace.css/index.css: consistent controls/type/spacing, 1280/900/640 layouts, light/dark tokens, accessibility, restrained motion | UX1 + UX3 hierarchy |
+| UX9 BLOCKED | End-to-end UX convergence: critical journeys, performance, accessibility, source docs, exact-head validation and PR-to-dev integration | affected slices |
 
-## Product decision / IA
+**Parallel execution:** UX2 backend, UX3 saved Meeting, UX4 overlay and UX1 shell may proceed on *disjoint files*. UX5 can start with NewRecordingPage after UX4 action contract is settled. UX6/UX7 may prepare child-only pieces in parallel, but only UX3 owns MeetingDetailPage until handoff. UX8 must not write shared CSS while UX1 does. Merge small coherent PRs early; no multi-agent edits on the same file.
 
-Primary root: `Meetings` (Today/All/Archived, fast local search); `Projects` (grouping/filtering of the **same** saved Meetings). Persistent `New Meeting` action. `Activities` and `Settings` stay secondary.
+## Required interaction states and recovery
 
-Primary journey:
-`Open app -> locate Meeting or Project -> open saved Meeting -> read notes/transcript -> seek source audio/screenshot -> review actions/decisions -> return to same context`.
+- Navigation: preserve previous Meeting rows on return while background local refresh runs; stale/error/retry visible; ignore responses for prior selections. No full-screen fake “62%”/“72%”; real percentage only from measured backend units. Measure first-open latency separately from warm navigation.
+- Overlay: displayed REC only after capture-ready; mic/system warnings remain distinct and a device switch never silently discards surviving audio. Notes capture canonical timestamp; Save→persisted confirmation→Undo, draft retained on failure. Screenshot uses explicit selected display; Capturing→backend commit→count/time/Undo, no false success. Stop reports actual finalization; overlay exclusion and display choice remain canonical.
+- Saved screenshots: zero images → single compact empty state; unreadable/missing asset → visible placeholder and Retry; transcript unavailable → screenshots still accessible; selected image → local preview and source seek; Escape closes and returns focus.
+- Voci: person ≠ source track, manually corrected names don't alter ASR words/times; source/revision-checked preview/apply/undo; source-sensitive analysis marked stale when speaker attribution changes.
+- Analysis: queued/waiting/running/failed/ready distinguishable, cancel/retry where supported; no automatic inference on navigation, capture or editing.
+- Responsive/accessible: keyboard + VoiceOver semantics, focus return, 200% text, reduced motion, no clipped three-column layout, no tooltip-only or color-only actions.
 
-Capture journey:
-`New Meeting -> choose optional project -> readiness -> Start -> note/screenshot during recording -> Stop -> saved Meeting -> Transcribe -> review speaker labels -> run selected analysis outcome`.
-Capture status must be truthful for waiting/permission/device switch/stop/finalization; note/screenshot persisted before success. No forced ASR/diarization without a user choice or an explicit settled default.
+## Acceptance and validation evidence
 
-Projects default: `Project title + scoped search/filter -> meeting list` in the first viewport. Meeting rows show date/title/duration/processing/readiness and one primary Open action; rename/move/archive contextual. Insight digest/actions/decisions/risks are a secondary `Project insights` section, hidden when all empty or represented by a single compact explanatory state. One project time range controls the entire page; no independent action-only range.
+| Journey | Concrete evidence required |
+| --- | --- |
+| Project 0/1/many meetings | Meetings above analytics in first viewport; no fake progress; global/project search and filter/Back survive; profile 1/25/200 latency/read count without invented SLO |
+| Library and source | Search matching canonical Meeting ID, open and seek audio, return to same context; no duplicate Transcribe or speaker button |
+| Capture and overlay | Real ready/record/stop states; note/screenshot Save failure preserves draft; Undo only persisted marker; display change persists across SSE; Stop drains admitted writes |
+| Meeting Note e fonti | With three screenshot fixtures and no ASR, see all images; select second, preview + audio seek to its real time; unavailable image offers Retry |
+| Transcript/Voci/Analisi | Current labels visible in transcript, verification and rollback; predefined outcome runs with provenance; old analysis not silently rewritten |
+| UI fidelity/accessibility | Browser screenshots + FULL_MEDIA at 1280/900/640, keyboard/focus/zoom/contrast; installed WKWebView, multi-display/TCC/audio and VoiceOver as separate REAL_ENVIRONMENT release proof |
 
-Saved Meeting: title, project and local activity status always visible. Normal work is `Notes | Transcript | Voices | Analysis` under one identity with consistent tabs/CTAs; screenshot and manual note evidence is visible in the appropriate note/timestamp context. Expert reprocessing/benchmark/providers/diagnostics stay under one Advanced disclosure and never duplicate primary navigation.
+Use repository selector `python3 scripts/select_validation_profile.py --base <base> --head <head> --stage integration`. Targeted frontend `pnpm run lint`, `pnpm exec tsc --noEmit`, relevant API tests, `scripts/browser_meeting_ui_e2e.mjs`, `scripts/browser_workspace_coherence_e2e.mjs` and repository E2E suites (call-overlay-screenshot-evidence, meeting-moments-notes, archive, speakers). Actual code PRs require **exact head/base, full diff, required selected gates, affected FULL_MEDIA**. Deterministic Mac tests run via repository REMOTE_AUTOMATED workflows if needed, not delegated manually. RELEASE requires FULL and applicable blocking target-Mac physical/TCC/WKWebView evidence; fixture PASS is never physical PASS.
 
-## States and performance contract
+## Resume and durable closeout
 
-1. Navigation does not block on unrelated project aggregation or analysis. Render current/snapshot meeting list immediately; background refresh updates only the affected area, with visible, truthful stale/error/retry state.
-2. Separate index (project names, counts, recent Meeting metadata) from expensive per-Meeting derived insights where profiling proves a need; prefer one canonical server read projection over N+1 requests and client duplicates.
-3. Cache may hold an in-memory view snapshot only, bounded and revalidated; no new persistence, never cache local transcripts in third-party services, and invalidate after recording/project mutations.
-4. Real progress is determinate only if backend supplies measured work units; otherwise use an indeterminate status without percentages or invented stages. Never delay a synchronous projection solely to show an animation.
-5. Project or Meeting changes cancel/ignore stale async responses; mutation failures preserve inputs; restore origin/selection/filter and scroll/focus when returning.
-6. First content should remain useful even when ASR, diarization, model, screenshot enrichment or analytics is pending/failed.
+**Next:** reconcile #210 with this plan, inspect its exact-head FULL_MEDIA and integrate UX0 only if required gates pass. In parallel start UX2 profiling and UX4 overlay. The redesign is **planned, not shipped**; latency, usability and real hardware outcomes remain unmeasured.
 
-## One layout, responsive semantics
-
-Wide: app rail | optional project list | **meeting list** and, on selection, same canonical Meeting detail. Compact: project picker -> meeting list -> selected Meeting; no squeezed three-column grid. Avoid secondary full-page loader, duplicate action bars, oversize empty-state cards, high-chroma gradients everywhere, tiny all-caps metadata and redundant borders. Use existing `design/brand-kit.json`, semantic controls and tokens; one primary CTA per surface.
-
-## Four independently valuable tracks
-
-| ID | State | Outcome | Write owner | Dependency |
-| --- | --- | --- | --- | --- |
-| UX-R0 | ACTIVE | Project meeting-first hierarchy, truthful loading and no fake digest delay; browser regression coverage | `ProjectsPage.tsx` and targeted workspace journey | base `dev` |
-| UX-R1 | READY | Profile server Projects N+1, implement compact/index + detail projection if warranted, query/coalescing and invalidation evidence | `routers/workspace.py`, `routers/helpers.py`, catalog/read tests | data-contract agreement with R0 |
-| UX-R2 | READY | Navigation/visual grammar, one search/list/filter pattern, fast route transitions with selection/focus restoration, bounded query state | `App.tsx`, `MeetingsPage.tsx`, `MeetingSearchDialog.tsx`, `workspace.css` | R0 semantics; serialize shared shell writes |
-| UX-R3 | READY | Single reliable capture flow: readiness, notes, screenshots, Stop and recovery; target-Mac audio/TCC evidence separate | `NewRecordingPage.tsx`, `RecordingOverlayPage.tsx`, capture UI tests | canonical capture lifecycle; independent R0 |
-| UX-R4 | READY | Coherent saved Meeting defaults; one transcript/voice/analysis flow and an explicit outcome/template selection; no duplicate CTAs | `MeetingDetailPage.tsx`, speaker/notes components, meeting E2E | shared contract audit; independent R0/R3 writing |
-| UX-R5 | BLOCKED | Integrated usability, accessibility and latency checks, durable UX contract/feature docs, safe `dev` integration | `design/ux-contract.json`, affected docs and e2e manifest | R0–R4 |
-
-Parallelism: R1/R3/R4 can proceed with disjoint owners; R0 writes Projects; R2 owns App/shared shell only after agreement about project route and filter contracts. No parallel writes to the same file. Release validation is a separate axis.
-
-## Acceptance and evidence
-
-- P0: entering Projects and returning from a Meeting does **not** show the fake 62% multi-step loader; no fixed percentages for synchronous work; the project Meeting list appears before analytics, with all recent meetings discoverable without scrolling through empty tiles.
-- P0: zero-analysis projects display meetings and a single truthful compact empty insight state; analysis ready/pending/error are distinct. A newly created or moved Meeting appears after refresh, without assuming cached content is fresh.
-- P0: project filtering and selection persist across Meeting -> Back; archive search/direct links/legacy routes remain functional.
-- P1: count and instrument local `/v1/projects` database calls and timings at bounded fixture sizes (e.g., 1/25/200), then establish a measured regression threshold from baseline. No fabricated fixed performance promise.
-- P1: find a project Meeting, open it, seek an audio/notes timestamp, and return using keyboard and mouse at wide/compact widths; project and global search semantics are consistent.
-- P1: one primary Transcribe/Identify voices/Analyze action per eligible saved Meeting state; all outcomes retain provenance, undo and version safety.
-- P1: note and screenshot during an active recording survive Stop/reopen; failed captures never show success; switching devices must retain available recording source and report real gaps honestly.
-- Validation: `python3 scripts/select_validation_profile.py --base <dev> --head <feature> --stage integration` selects mandatory gates; frontend lint+tsc; backend contract/source tests when changed; `scripts/browser_workspace_coherence_e2e.mjs`, saved Meeting, archive, note/screenshot and recording journeys in FULL_MEDIA when materially affected; exact-head/base preflight and relevant Mac automation. WKWebView/TCC, real physical audio switching, MLX/Metal and VoiceOver user judgement remain RELEASE / REAL_ENVIRONMENT, never inferred from fixtures.
-
-## Risks and measurement
-
-VALUE/USABILITY: scripted find/open/return task at 0/1/many meetings; measure success/time, discoverability and redundant actions.
-FEASIBILITY/VIABILITY: profile expensive per-recording reads before adding new cache owners or auto-triggered AI.
-PRIVACY/RELIABILITY: retain loopback auth, local original source/markers, explicit storage, cancellation, retry and rollback.
-No performance or product-success PASS without representative evidence.
-
-## Checkpoint and next action
-
-Initial checkpoint: `dev` `bb38105620e3547b0d28b541d6d4b0cec968945f`, `main` `7f1136eb6bf7034c56942ae2590b42da881e105a`. Code and screenshots confirm hierarchy and fake progress; measured server timing is unknown. Next: land UX-R0 focused, add DOM+FULL_MEDIA assertion for first-viewport Meeting ordering, then profile server path before optimizing storage/query. Refresh identity before each integration. Transfer final product decisions into `design/ux-contract.json` and update `docs/current-state.md` only when integrated. Delete this workstream after durable convergence.
+At convergence update design/ux-contract.json, affected docs/features.md or bounded feature owner, docs/current-state.md and executable tests; update design/brand-kit.json only if approved tokens change. Remove temporary workstream after durable truth and deferred release obligations are transferred.
