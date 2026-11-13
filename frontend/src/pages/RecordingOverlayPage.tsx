@@ -17,7 +17,7 @@ import { useTranslation } from '../i18n/i18n';
 import type { AudioSourceHealth } from '../hooks/useRecorder';
 
 export default function RecordingOverlayPage() {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const [timer, setTimer] = useState('00:00');
   const [signalLevelMic, setSignalLevelMic] = useState('-∞ dB');
   const [signalLevelSystem, setSignalLevelSystem] = useState('-∞ dB');
