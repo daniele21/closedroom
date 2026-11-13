@@ -9,6 +9,7 @@ import {
 } from '../../api/apiClient';
 import { useSpeakerReviewPlayback, type SpeakerTurn } from '../../hooks/useSpeakerReviewPlayback';
 import { SpeakerTimeline } from './SpeakerTimeline';
+import { linkedTranscriptTurns } from '../../utils/speakerEvidence';
 import { useToast } from '../../context/ToastContext';
 import { useTranslation } from '../../i18n/i18n';
 import { Button } from '../ui/Button';
@@ -85,11 +86,7 @@ export function SpeakerDiarizationEditor({
     ).map((cluster) => ({
       speaker_cluster: cluster as string, display_name: cluster as string, status: 'unassigned',
     }));
-    const groupCounts = new Map<string, number>();
-    for (const segment of transcription.segments || []) {
-      const group = segment.speaker_group || segment.provider_speaker || segment.speaker_label || '';
-      groupCounts.set(group, (groupCounts.get(group) || 0) + 1);
-    }
+    const groupCounts = linkedTranscriptTurns(transcription.segments || [], fromMetadata);
     const sourceLabels = new Set((transcription.source_tracks || []).map((track) => track.label));
     return fromMetadata.map((item) => {
       const cluster = item.speaker_cluster;
@@ -124,6 +121,8 @@ export function SpeakerDiarizationEditor({
     (filter === 'all' || r.status !== 'accepted'),
   );
   const selected = visible.find((r) => r.cluster === selectedCluster) || visible[0] || null;
+  const mergedTextTurnCount = (selected?.count || 0) +
+    (rows.find((row) => row.cluster === mergeTarget)?.count || 0);
   const isPlaceholderName = !selected?.name.trim() ||
     /^Speaker\s+\d+$/i.test(selected.name.trim()) ||
     /^(computer|system|system track|mic|mixed|unknown|non identificato|voce da identificare|unidentified voice)$/i
