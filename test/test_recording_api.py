@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
 import wave
@@ -13,16 +14,14 @@ from support import deterministic_settings
 
 
 def _wav_bytes() -> bytes:
-    path = Path(tempfile.gettempdir()) / "closedroom-test-tone.wav"
-    with wave.open(str(path), "wb") as wav:
+    """Produce deterministic fixture bytes without shared files across Mac runners."""
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(16_000)
         wav.writeframes((b"\x00\x20" * 16_000))
-    try:
-        return path.read_bytes()
-    finally:
-        path.unlink(missing_ok=True)
+    return output.getvalue()
 
 
 class RecordingApiTests(unittest.TestCase):
