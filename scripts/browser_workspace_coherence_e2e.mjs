@@ -558,6 +558,22 @@ try {
   }
   await checkpoint(browser, '03-projects-container');
 
+  // Search in the Project selector is view context, not another server filter.
+  // A Meeting round trip must preserve it, just like project selection and period.
+  const projectSearchSet = await browser.execute(`
+    const field = document.querySelector('[data-tour="project-sidebar"] input');
+    if (!field) return false;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, 'ClosedRoom');
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  if (!projectSearchSet) throw new Error('Project sidebar search was unavailable');
+  await waitUntil(browser, 'Project search retained in session',
+    `return document.querySelector('[data-tour="project-sidebar"] input')?.value === 'ClosedRoom'
+      && JSON.parse(sessionStorage.getItem('closedroom.projects.view') || '{}').query === 'ClosedRoom';`,
+    5000, true);
+
+
   const openedProjectMeeting = await browser.execute(`
     const timeline = document.querySelector('[data-tour="project-timeline"]');
     const open = Array.from(timeline?.querySelectorAll('button') || []).find((button) =>
@@ -604,6 +620,18 @@ try {
     true,
   );
   await checkpoint(browser, '03b-project-return-preserved');
+  observations.returnedProjectSearch = await browser.execute(`
+    const field = document.querySelector('[data-tour="project-sidebar"] input');
+    return {
+      field: field?.value,
+      stored: JSON.parse(sessionStorage.getItem('closedroom.projects.view') || '{}').query,
+    };
+  `);
+  if (observations.returnedProjectSearch.field !== 'ClosedRoom'
+    || observations.returnedProjectSearch.stored !== 'ClosedRoom') {
+    throw new Error('Project search was lost after meeting return: ' + JSON.stringify(observations.returnedProjectSearch));
+  }
+
 
   // Job state remains shell-owned, but its entry point is a utility, not a third peer page.
   const activityUtility = await browser.execute(`
