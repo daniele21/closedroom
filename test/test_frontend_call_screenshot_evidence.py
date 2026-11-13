@@ -77,6 +77,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn('data-display-selector="true"', self.overlay)
         self.assertIn('data-display-picker="true"', self.overlay)
         self.assertIn('data-screenshot-action="true"', self.controls)
+        self.assertIn('data-persisted={lastSavedScreenshotId !== null}', self.controls)
         self.assertIn("<RecordingOverlayActions", self.overlay)
         self.assertIn("onCaptureScreenshot={() => void handleCaptureScreenshot()}", self.overlay)
         self.assertNotIn("<select", self.overlay)
