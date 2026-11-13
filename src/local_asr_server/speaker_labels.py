@@ -99,12 +99,14 @@ def apply_speaker_labels(
             or ("Tu" if owned_microphone else None)
             or known_labels.get(cluster) or f"Speaker {index}"
         )
-        source = "manual" if cluster in manual else (
-            previous.get("source")
-            or ("microphone_track" if owned_microphone else (
-                "visual" if accepted_name else "diarization"
-            ))
-        )
+        if cluster in manual:
+            source = "manual"
+        elif accepted_name:
+            source = previous.get("source") or "visual"
+        elif owned_microphone:
+            source = "microphone_track"
+        else:
+            source = previous.get("source") or "diarization"
         status = (
             "accepted" if cluster in manual or accepted_name or owned_microphone
             else "unassigned"
