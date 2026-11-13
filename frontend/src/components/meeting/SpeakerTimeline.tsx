@@ -10,6 +10,7 @@ export interface TimelineSpeakerRow {
   name: string;
   status: string;
   sourceOnly: boolean;
+  count: number; // transcript-linked text turns; never diarization intervals
 }
 
 interface Props {
@@ -139,11 +140,14 @@ export function SpeakerTimeline({
       && (showHidden || row.status !== 'excluded')
       && (!pendingOnly || row.status !== 'accepted'));
     const source = new Map(rows.map((row) => [row.cluster, row]));
-    return visible.map((row, index) => ({
-      row, color: COLORS[index % COLORS.length],
-      summary: timeline?.overview?.filter((entry) => source.get(entry.cluster)?.group === row.group) || [],
-      intervals: (timeline?.intervals || []).filter((item) => source.get(item.cluster)?.group === row.group),
-    }));
+    return visible.map((row, index) => {
+      const summary = timeline?.overview?.filter((entry) => source.get(entry.cluster)?.group === row.group) || [];
+      return {
+        row, color: COLORS[index % COLORS.length], summary,
+        intervalCount: summary.reduce((total, entry) => total + entry.interval_count, 0),
+        intervals: (timeline?.intervals || []).filter((item) => source.get(item.cluster)?.group === row.group),
+      };
+    });
   }, [rows, showHidden, pendingOnly, timeline]);
 
   const allIntervals = timeline?.intervals || [];
@@ -309,7 +313,7 @@ export function SpeakerTimeline({
               )}
             </div>
           </div>
-          {lanes.map(({ row, color, summary, intervals }) => (
+          {lanes.map(({ row, color, summary, intervals, intervalCount }) => (
             <Fragment key={row.group}>
               <div className="grid min-h-10 grid-cols-[104px_minmax(0,1fr)] items-center gap-2"
                 data-speaker-lane={row.group}>
@@ -343,6 +347,22 @@ export function SpeakerTimeline({
                   )}
                 </div>
               </div>
+              {selectedGroup === row.group && timeline && !loading && !error && (
+                <p data-speaker-evidence={row.group} role="status" aria-live="polite"
+                  className="ml-0 px-1 py-1 text-xs text-text-secondary sm:ml-[112px]">
+                  {intervalCount > 0
+                    ? `${intervalCount} ${intervalCount === 1
+                      ? (it ? 'intervallo nella timeline' : 'interval on timeline')
+                      : (it ? 'intervalli nella timeline' : 'intervals on timeline')}`
+                    : (it ? 'Nessun intervallo vocale verificabile' : 'No verifiable voice intervals')}
+                  {' · '}
+                  {row.count > 0
+                    ? `${row.count} ${row.count === 1
+                      ? (it ? 'intervento collegato al testo' : 'transcript-linked turn')
+                      : (it ? 'interventi collegati al testo' : 'transcript-linked turns')}`
+                    : (it ? 'Testo non collegato a questa voce' : 'No transcript text linked to this voice')}
+                </p>
+              )}
               {selectedGroup === row.group && children && (
                 <div data-speaker-inline-editor={row.group} className="ml-0 rounded-lg border border-border-subtle bg-bg-elevated p-3 sm:ml-[112px] sm:p-4">
                   {children}

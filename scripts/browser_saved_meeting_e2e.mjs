@@ -1499,10 +1499,15 @@ try {
     for (let attempt = 0; attempt < 60; attempt += 1) {
       verified = await browser.execute(`
         const detail = document.querySelector('[data-speaker-evidence-counts="true"]');
-        return Boolean(detail &&
+        const timeline = document.querySelector('[data-speaker-evidence="${group}"]');
+        const timelineText = timeline?.textContent || '';
+        return Boolean(detail && timeline &&
           detail.querySelector('[data-speaker-timeline-count="${audioCount}"]') &&
           detail.querySelector('[data-speaker-text-count="${textCount}"]') &&
-          !/\\b0 (interventi|turns)\\b/i.test(detail.textContent || ''));
+          timelineText.includes(String(${audioCount}) + ' ') &&
+          (${textCount} === 0 ? /Testo non collegato|No transcript text linked/.test(timelineText)
+            : timelineText.includes(String(${textCount}) + ' ')) &&
+          !/\b0 (interventi|turns)\b/i.test(detail.textContent || timelineText));
       `);
       if (verified) break;
       await sleep(100);

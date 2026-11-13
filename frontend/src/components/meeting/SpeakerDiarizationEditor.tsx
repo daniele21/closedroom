@@ -9,6 +9,7 @@ import {
 } from '../../api/apiClient';
 import { useSpeakerReviewPlayback, type SpeakerTurn } from '../../hooks/useSpeakerReviewPlayback';
 import { SpeakerTimeline } from './SpeakerTimeline';
+import { linkedTranscriptTurns } from '../../utils/speakerEvidence';
 import { useToast } from '../../context/ToastContext';
 import { useTranslation } from '../../i18n/i18n';
 import { Button } from '../ui/Button';
@@ -85,11 +86,7 @@ export function SpeakerDiarizationEditor({
     ).map((cluster) => ({
       speaker_cluster: cluster as string, display_name: cluster as string, status: 'unassigned',
     }));
-    const groupCounts = new Map<string, number>();
-    for (const segment of transcription.segments || []) {
-      const group = segment.speaker_group || segment.provider_speaker || segment.speaker_label || '';
-      groupCounts.set(group, (groupCounts.get(group) || 0) + 1);
-    }
+    const groupCounts = linkedTranscriptTurns(transcription.segments || [], fromMetadata);
     const sourceLabels = new Set((transcription.source_tracks || []).map((track) => track.label));
     return fromMetadata.map((item) => {
       const cluster = item.speaker_cluster;
@@ -124,6 +121,8 @@ export function SpeakerDiarizationEditor({
     (filter === 'all' || r.status !== 'accepted'),
   );
   const selected = visible.find((r) => r.cluster === selectedCluster) || visible[0] || null;
+  const mergedTextTurnCount = (selected?.count || 0) +
+    (rows.find((row) => row.cluster === mergeTarget)?.count || 0);
   const isPlaceholderName = !selected?.name.trim() ||
     /^Speaker\s+\d+$/i.test(selected.name.trim()) ||
     /^(computer|system|system track|mic|mixed|unknown|non identificato|voce da identificare|unidentified voice)$/i
@@ -582,6 +581,17 @@ export function SpeakerDiarizationEditor({
                         <option value="">{tr('Scegli una voce', 'Select a voice')}</option>
                         {selectable.map((r) => <option key={r.cluster} value={r.cluster}>{r.name}</option>)}
                       </select>
+                      {mergeTarget && (
+                        <p className="mb-3 text-xs text-text-secondary" data-speaker-merge-count="true">
+                          {mergedTextTurnCount > 0
+                            ? `${mergedTextTurnCount} ${mergedTextTurnCount === 1
+                              ? tr('intervento collegato al testo', 'transcript-linked turn')
+                              : tr('interventi collegati al testo', 'transcript-linked turns')}`
+                            : tr('Testo non ancora collegato a queste voci', 'No transcript text linked to these voices')}
+                          {' · '}
+                          {tr('Gli intervalli audio restano disponibili.', 'Audio intervals remain available.')}
+                        </p>
+                      )}
                       {mergeTarget && samples?.speakers.find((s) => s.speaker_cluster === mergeTarget)?.samples[0] && (
                         <Button variant="ghost" size="sm" onClick={() => {
                           const clip = samples?.speakers.find((s) => s.speaker_cluster === mergeTarget)?.samples[0];
@@ -601,7 +611,7 @@ export function SpeakerDiarizationEditor({
                       <h5 className="text-sm font-semibold">{tr('Escludere questa voce?', 'Exclude this voice?')}</h5>
                       <p className="mt-1 text-xs text-text-secondary">
                         {selected.count === 0
-                          ? tr('Questa voce sarà nascosta, ma recuperabile. Audio e testo originali restano invariati.', 'This voice will be hidden but recoverable. Original audio and text remain unchanged.')
+                          ? tr('Nessun intervento collegato al testo. La voce può avere intervalli audio; sarà nascosta ma recuperabile, senza cambiare audio e testo.', 'No transcript-linked turns. This voice may have audio intervals; it will be hidden but recoverable without changing audio or text.')
                           : tr('Gli interventi resteranno nel testo come “Non identificato”. Audio e testo originali rimarranno invariati.', 'Turns will remain as “Unidentified”. Original audio and text remain unchanged.')}
                       </p>
                       <div className="mt-3 flex gap-2">

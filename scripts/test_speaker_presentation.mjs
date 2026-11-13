@@ -15,6 +15,14 @@ const { speakerDisplay, canJoinConversationTurns } = await import(
   'data:text/javascript;base64,' + Buffer.from(transpiled).toString('base64')
 );
 
+const evidenceSource = readFileSync(new URL('../frontend/src/utils/speakerEvidence.ts', import.meta.url), 'utf8');
+const evidenceJs = ts.transpileModule(evidenceSource, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const { linkedTranscriptTurns } = await import(
+  'data:text/javascript;base64,' + Buffer.from(evidenceJs).toString('base64')
+);
+
 const legacy = { id: 1, start: 4, end: 8, text: 'Hello', source: 'system', speaker_label: 'Computer' };
 const old = structuredClone(legacy);
 assert.deepEqual(speakerDisplay(legacy, [], ['Computer']), {
@@ -63,4 +71,30 @@ assert.deepEqual(speakerDisplay(selfVoice, confirmedSelf, ['Tu']), {
 });
 assert.equal(speakerDisplay(selfVoice, confirmedSelf, ['Tu'], 'en').label, 'Tu');
 
-console.log('Speaker presentation and grouping contracts PASS');
+// Verified audio-only speakers can exist even when no text is linked.
+assert.equal(linkedTranscriptTurns([], [{ speaker_cluster: 'system:S2' }]).size, 0);
+const counted = linkedTranscriptTurns([
+  { text: 'First', provider_speaker: 'system:S1' },
+  { text: 'Second', provider_speaker: 'system:S2' },
+  { text: ' ', provider_speaker: 'system:S2' },
+  { text: 'Other', provider_speaker: 'system:S3' },
+], [
+  { speaker_cluster: 'system:S1', speaker_group: 'system:S1' },
+  { speaker_cluster: 'system:S2', speaker_group: 'system:S1' },
+  { speaker_cluster: 'system:S3', speaker_group: 'system:S3' },
+]);
+assert.equal(counted.get('system:S1'), 2, 'merged identities group actual text turns');
+assert.equal(counted.get('system:S3'), 1);
+const corrected = linkedTranscriptTurns([
+  { text: 'Reassigned', provider_speaker: 'system:S1', speaker_group: 'system:S3' },
+  { text: '', provider_speaker: 'system:S1' },
+], [
+  { speaker_cluster: 'system:S1', speaker_group: 'system:S1' },
+  { speaker_cluster: 'system:S3', speaker_group: 'system:S3' },
+]);
+assert.equal(corrected.get('system:S1') || 0, 0);
+assert.equal(corrected.get('system:S3'), 1, 'scoped per-turn attribution wins');
+assert.equal(linkedTranscriptTurns([{ text: 'Unattributed', speaker_label: 'Computer' }], [])
+  .get('Computer'), 1, 'source-only text is not automatically a human voice');
+
+console.log('Speaker presentation and evidence contracts PASS');
