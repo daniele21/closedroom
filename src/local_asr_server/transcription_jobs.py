@@ -174,6 +174,7 @@ class TranscriptionJobManager:
     ) -> dict[str, list[dict[str, Any]]]:
         """One canonical projection for persisted or currently managed jobs."""
         ids = list(dict.fromkeys(scope_id for scope_id in scope_ids if scope_id))
+        selected_ids = set(ids)
         bounded = max(1, min(limit, 500))
         if self._store is not None:
             return {
@@ -190,7 +191,7 @@ class TranscriptionJobManager:
             if job.job_type != job_type or job.scope_type != scope_type:
                 continue
             scope_id = job.scope_id or job.recording_id
-            if scope_id not in ids:
+            if scope_id not in selected_ids:
                 continue
             group = grouped.setdefault(scope_id, [])
             if len(group) < bounded:
