@@ -40,7 +40,11 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertIn("const startPreparation = async () =>", page)
         self.assertIn("await prepareMeetingNotes(meeting.id, requestedIncludeScreenshots)", page)
         self.assertIn("latestPreparation?.result?.include_screenshots", page)
-        self.assertIn("onClick={startPreparation}", page)
+        choices = (ROOT / "frontend/src/components/meeting/MeetingAnalysisChoices.tsx").read_text(encoding="utf-8")
+        self.assertIn("onPrepare={() => void startPreparation()}", page)
+        self.assertIn('data-meeting-outcome="summary"', choices)
+        self.assertIn("onClick={onPrepare}", choices)
+        self.assertIn("disabled={disabled}", choices)
         self.assertIn("'Trascrivi e riassumi' : 'Transcribe and summarize'", page)
         self.assertIn("'Crea sintesi e azioni' : 'Create summary and actions'", page)
 
