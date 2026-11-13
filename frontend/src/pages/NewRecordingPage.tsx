@@ -39,6 +39,8 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
   const [recordingsDir, setRecordingsDir] = useState('');
   const [storageConfigured, setStorageConfigured] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [settingsLoadError, setSettingsLoadError] = useState(false);
+  const [settingsRetry, setSettingsRetry] = useState(0);
   const autoStartClaimedRef = useRef<string | null>(null);
   const [projectsList, setProjectsList] = useState<string[]>([]);
   const [permissionLoading, setPermissionLoading] = useState(false);
@@ -71,7 +73,7 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
   const computerReady = sourceMode === 'mic_only'
     || (nativeCaptureReady && recorder.capturePermissions?.screen_capture === 'granted');
   const storageReady = storageConfigured && recordingsDir.trim().length > 0;
-  const readyToRecord = micReady && computerReady && storageReady;
+  const readyToRecord = settingsLoaded && micReady && computerReady && storageReady;
   const selectedVisualWindow = captureWindows.find((window) => String(window.id) === visualWindowId);
   const recordingFlowLocked = recorder.isRecording || recorder.isPreparingRecording;
 
@@ -89,22 +91,35 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
     }
   }, []);
 
+  // Storage readiness is required to start recording; the optional project
+  // suggestions must never delay it. Keep these requests independent.
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const settings = await ApiClient.getSettings();
-        const configuredDir = settings.recordings_dir || '';
-        setRecordingsDir(configuredDir);
-        setStorageConfigured(Boolean(configuredDir.trim()));
-        const projects = await ApiClient.listProjects();
+    let cancelled = false;
+    setSettingsLoaded(false);
+    setSettingsLoadError(false);
+    void ApiClient.getSettings().then((settings) => {
+      if (cancelled) return;
+      const configuredDir = settings.recordings_dir || '';
+      setRecordingsDir(configuredDir);
+      setStorageConfigured(Boolean(configuredDir.trim()));
+    }).catch(() => {
+      if (!cancelled) setSettingsLoadError(true);
+    }).finally(() => {
+      if (!cancelled) setSettingsLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [settingsRetry]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void ApiClient.listProjects().then((projects) => {
+      if (!cancelled) {
         setProjectsList((projects.items || []).filter((project) => !project.is_unassigned).map((project) => project.name));
-      } catch {
-        // Readiness below exposes configuration gaps without blocking the rest of the app shell.
-      } finally {
-        setSettingsLoaded(true);
       }
-    };
-    void loadSettings();
+    }).catch(() => {
+      // Suggestions are optional. The user can type any project name directly.
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const handleAuthorizeCapture = async () => {
@@ -209,13 +224,24 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
             : (lang === 'it' ? 'L’audio del computer è pronto.' : 'Computer audio is ready.'),
       };
     }
+    if (!settingsLoaded) {
+      return {
+        tone: 'working',
+        title: lang === 'it' ? 'Verifica archivio locale' : 'Checking local storage',
+        detail: lang === 'it'
+          ? 'Controllo la cartella dei meeting sul dispositivo.'
+          : 'Checking the meetings folder on this device.',
+      };
+    }
     if (!storageReady) {
       return {
         tone: 'blocked',
-        title: lang === 'it' ? 'Scegli dove salvare i meeting' : 'Choose where meetings are saved',
+        title: settingsLoadError
+          ? (lang === 'it' ? 'Impossibile leggere le impostazioni' : 'Cannot read settings')
+          : (lang === 'it' ? 'Scegli dove salvare i meeting' : 'Choose where meetings are saved'),
         detail: lang === 'it'
-          ? 'Serve una cartella locale prima della prima registrazione.'
-          : 'A local folder is required before the first recording.',
+          ? 'Seleziona una cartella locale o riprova a leggere le impostazioni.'
+          : 'Choose a local folder or retry loading settings.',
       };
     }
     if (nativeCaptureReady && (!micReady || !computerReady)) {
@@ -359,7 +385,13 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
                 {lang === 'it' ? 'Consenti accesso' : 'Allow access'}
               </Button>
             )}
-            {!recordingFlowLocked && !storageReady && (
+            {!recordingFlowLocked && settingsLoadError && !storageReady && (
+              <Button type="button" size="sm" variant="secondary" onClick={() => setSettingsRetry((value) => value + 1)} className="shrink-0">
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                {lang === 'it' ? 'Riprova' : 'Retry'}
+              </Button>
+            )}
+            {!recordingFlowLocked && !storageReady && !settingsLoadError && (
               <Button type="button" size="sm" variant="secondary" onClick={handleBrowseDir} isLoading={storageSaving} className="shrink-0">
                 <FolderOpen className="h-4 w-4" />
                 {t('settings.btnBrowse')}
