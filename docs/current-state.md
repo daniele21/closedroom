@@ -42,7 +42,7 @@ Public binaries additionally require Developer ID signing, notarization/stapling
 
 ## Active workstreams
 
-- [UX/UI meeting-first](workstreams/workspace-ux-reset.md): #210 Progetti, #212 Note/screenshot, #213 query e #211 overlay integrati in dev. #214 ricerca integrata; voci, analisi e navigazione completa ancora aperte.
+- [UX/UI meeting-first](workstreams/workspace-ux-reset.md): #210–#217 integrati su dev (Progetti, fonti/screenshot, overlay, archivio, avvio, contesto e batch query). #218 analisi outcome in validazione; rifinitura Voci/overlay, latenza misurata e target-Mac pending.
 
 - [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 integrato in `dev` via PR #176 (`772a5f68`): ripresa microfono e audio sistema solo nativo; FULL automated PASS, switch fisico/TCC ancora da provare.
 - [`meeting-detection.md`](workstreams/meeting-detection.md): default-on/retry integrated (#184); real Teams/Zoom notifications/TCC pending.
