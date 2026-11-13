@@ -511,6 +511,15 @@ try {
   }
   await checkpoint(browser, '02a-legacy-recording-alias');
 
+  // The workspace fixture is demo read-only. Seed a persisted view to verify
+  // rehydration on both mount and Meeting return, not demo-mode writes.
+  await browser.execute(`
+    sessionStorage.setItem('closedroom.projects.view', JSON.stringify({
+      name: 'ClosedRoom Beta Launch', range: { mode: 'all' },
+      query: 'ClosedRoom', showAll: true,
+    }));
+  `);
+
   await browser.click('[data-tour="nav-projects"]');
   await waitUntil(
     browser,
@@ -558,20 +567,12 @@ try {
   }
   await checkpoint(browser, '03-projects-container');
 
-  // Search in the Project selector is view context, not another server filter.
-  // A Meeting round trip must preserve it, just like project selection and period.
-  const projectSearchSet = await browser.execute(`
-    const field = document.querySelector('[data-tour="project-sidebar"] input');
-    if (!field) return false;
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, 'ClosedRoom');
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    return true;
+  observations.initialProjectSearch = await browser.execute(`
+    return document.querySelector('[data-tour="project-sidebar"] input')?.value;
   `);
-  if (!projectSearchSet) throw new Error('Project sidebar search was unavailable');
-  await waitUntil(browser, 'Project search retained in session',
-    `return document.querySelector('[data-tour="project-sidebar"] input')?.value === 'ClosedRoom'
-      && JSON.parse(sessionStorage.getItem('closedroom.projects.view') || '{}').query === 'ClosedRoom';`,
-    5000, true);
+  if (observations.initialProjectSearch !== 'ClosedRoom') {
+    throw new Error('Seeded Project search was not restored when Projects opened');
+  }
 
 
   const openedProjectMeeting = await browser.execute(`
