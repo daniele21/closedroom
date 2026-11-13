@@ -168,9 +168,8 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     } catch (err: unknown) {
       if (generation !== requestGeneration.current) return;
       const message = err instanceof Error ? err.message : String(err);
-      if (projectViewSnapshot !== null) {
-        setRefreshError(message);
-      } else {
+      setRefreshError(message);
+      if (projectViewSnapshot === null) {
         showToast(message || t('projects.loading') || 'Errore', 'error');
       }
     } finally {
@@ -319,6 +318,17 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     return (
       <div role="status" aria-live="polite" aria-busy="true" className="surface-supporting rounded-xl px-4 py-5 text-sm text-text-secondary">
         {lang === 'it' ? 'Caricamento elenco progetti dal dispositivo…' : 'Loading projects from this device…'}
+      </div>
+    );
+  }
+
+  if (!selectedProject && refreshError && !demoMode) {
+    return (
+      <div role="alert" className="surface-supporting flex flex-wrap items-center gap-3 rounded-xl p-4 text-sm text-text-secondary">
+        <span>{lang === 'it' ? 'Impossibile leggere i progetti locali.' : 'Could not load local projects.'}</span>
+        <Button size="sm" variant="secondary" onClick={() => void loadProjects()}>
+          {lang === 'it' ? 'Riprova' : 'Retry'}
+        </Button>
       </div>
     );
   }
