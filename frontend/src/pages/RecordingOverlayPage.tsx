@@ -580,6 +580,10 @@ export default function RecordingOverlayPage() {
   const closeNoteComposer = useCallback(() => {
     setNoteComposerVisible(false);
     if (!noteDraft.trim()) setNoteAnchor(null);
+    // The textarea unmounts; return keyboard/VoiceOver focus to its trigger.
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>('[data-note-action="true"]')?.focus();
+    });
   }, [noteDraft]);
 
   const resetSavedNoteComposer = useCallback(() => {
