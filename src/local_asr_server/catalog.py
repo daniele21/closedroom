@@ -651,6 +651,43 @@ class CatalogStore:
             row = conn.execute("SELECT * FROM transcriptions WHERE id = ?", (transcription_id,)).fetchone()
         return self.row_to_transcription(row) if row else None
 
+    def find_transcriptions_for_recordings(
+        self, recording_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve the latest transcript for many local recordings with bounded SQLite reads.
+
+        Same effective selection as find_transcription_for_recording; a merged
+        transcription resolves to its canonical target. No new index/cache owner.
+        """
+        ids = list(dict.fromkeys(recording_id for recording_id in recording_ids if recording_id))
+        items: dict[str, dict[str, Any]] = {}
+        if not ids:
+            return items
+
+        # Keep below SQLite's historic 999-variable limit and avoid one DB
+        # connection/SELECT per meeting during /v1/projects aggregation.
+        for start in range(0, len(ids), 400):
+            batch = ids[start:start + 400]
+            placeholders = ", ".join("?" for _ in batch)
+            with self.connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT * FROM (
+                        SELECT *, ROW_NUMBER() OVER (
+                            PARTITION BY recording_id ORDER BY timestamp DESC
+                        ) AS row_rank
+                        FROM transcriptions WHERE recording_id IN ({placeholders})
+                    ) WHERE row_rank = 1
+                    """,
+                    batch,
+                ).fetchall()
+            for row in rows:
+                item = self.row_to_transcription(row)
+                if item.get("merged_into"):
+                    item = self.get_transcription(item["merged_into"]) or item
+                items[row["recording_id"]] = item
+        return items
+
     def find_transcription_for_recording(self, recording_id: str, audio_filename: str = "") -> dict[str, Any] | None:
         with self.connection() as conn:
             row = None

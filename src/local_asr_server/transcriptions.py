@@ -204,6 +204,10 @@ class TranscriptionStore:
             raise FileNotFoundError("Transcription not found")
         return apply_speaker_labels(item)
 
+    def find_for_recordings(self, recording_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Batch latest transcriptions through the same canonical catalog owner."""
+        return self.catalog.find_transcriptions_for_recordings(recording_ids)
+
     def find_for_recording(self, recording_id: str, audio_filename: str = "") -> dict[str, Any] | None:
         return self.catalog.find_transcription_for_recording(recording_id, audio_filename)
 
