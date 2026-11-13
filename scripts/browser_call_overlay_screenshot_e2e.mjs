@@ -707,6 +707,21 @@ try {
   await waitText(browser, ['Screenshot evidence review'], 30000, true);
   if (counts.stop !== 1 || counts.open_meeting !== 1) throw new Error('stop/open counts unexpected: ' + JSON.stringify(counts));
   await waitSelector(browser, '[data-key-moments="true"]', 10000, true);
+  await waitSelector(browser, '[data-meeting-user-note-id="note-001"]', 10000, true);
+  const sources = await browser.execute(`
+    const root = document.querySelector('[data-meeting-notes-sources="true"]');
+    const gallery = document.querySelector('[data-meeting-screenshot-gallery="true"]');
+    const note = document.querySelector('[data-meeting-user-note-id="note-001"]');
+    const tabs = document.querySelector('[role="tablist"]');
+    return {
+      exists: Boolean(root && gallery && note),
+      sameSection: Boolean(root?.contains(gallery) && root?.contains(note)),
+      beforeTabs: Boolean(root && tabs && (root.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING)),
+    };
+  `);
+  if (!sources.exists || !sources.sameSection || !sources.beforeTabs) {
+    throw new Error('Saved Meeting must show manual notes and screenshot sources before transcript/AI tabs: ' + JSON.stringify(sources));
+  }
   await waitText(browser, ['Alex reviews the launch roadmap and validation plan.'], 5000, true);
   await waitText(browser, ['The roadmap shows the launch milestone, and the user marked a follow-up with Marco.'], 10000, true);
   await waitText(browser, ['Screenshot · 00:12'], 10000);

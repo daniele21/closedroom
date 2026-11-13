@@ -3,13 +3,11 @@ import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState,
 import {
   Archive,
   ArrowLeft,
-  Bookmark,
   ChevronDown,
   CheckCircle2,
   FileText,
   History,
   Info,
-  Images,
   ListChecks,
   Loader2,
   MessageCircleQuestion,
@@ -46,6 +44,7 @@ import { VisualDebugPanel } from '../components/meeting/VisualDebugPanel';
 import { MeetingRecordingDetails } from '../components/meeting/MeetingRecordingDetails';
 import AudioIntelligencePanel from './recording/AudioIntelligencePanel';
 import { StructuredNotesEditor } from '../components/meeting/StructuredNotesEditor';
+import { MeetingSourcesGallery } from '../components/meeting/MeetingSourcesGallery';
 import { useMeetingJobEvents } from '../hooks/useMeetingJobEvents';
 import { useVisualIntelligence } from '../hooks/useVisualIntelligence';
 import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
@@ -1189,6 +1188,26 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
         )}
       </section>
 
+      {!demoMode && (
+        <MeetingSourcesGallery
+          lang={lang}
+          notes={notes}
+          screenshotsState={screenshotsState}
+          savedScreenshotCount={savedScreenshotCount}
+          showAllScreenshots={showAllScreenshots}
+          canExpandScreenshots={canExpandScreenshots}
+          hiddenScreenshotCount={hiddenScreenshotCount}
+          visibleKeyMoments={visibleKeyMoments}
+          keyMomentContexts={keyMomentContexts}
+          getVisualContext={(shot) => keyMomentVisualContext(shot, visualData)}
+          screenshotTimestampLabel={screenshotTimestampLabel}
+          onOpenScreenshot={openKeyMoment}
+          onSeek={handleTimestampClick}
+          onReloadScreenshots={() => void loadScreenshots()}
+          onToggleShowAll={() => setShowAllScreenshots((value) => !value)}
+        />
+      )}
+
       {outcomeStatus === 'completed_with_warnings' && (
         <section className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-xs text-text-secondary">
           <div className="flex items-start justify-between gap-3">
@@ -1330,181 +1349,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                 {lang === 'it' ? 'Riprova' : 'Retry'}
               </Button>
             </div>
-          </section>
-        )}
-
-        {!demoMode && screenshotsState === 'loading' && (
-          <section
-            className="rounded-xl border border-border-subtle bg-bg-surface/40 px-4 py-4"
-            aria-label={lang === 'it' ? 'Screenshot del meeting' : 'Meeting screenshots'}
-            aria-busy="true"
-          >
-            <div className="flex items-center gap-2 text-xs text-text-muted">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              <span>{lang === 'it' ? 'Caricamento screenshot…' : 'Loading screenshots…'}</span>
-            </div>
-          </section>
-        )}
-
-        {!demoMode && screenshotsState === 'error' && (
-          <section className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-start gap-2">
-                <Images className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-                <div>
-                  <p className="text-xs font-semibold text-text-primary">
-                    {lang === 'it' ? 'Screenshot non disponibili' : 'Screenshots unavailable'}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-text-muted">
-                    {lang === 'it'
-                      ? 'ClosedRoom non è riuscito a caricare le immagini salvate per questo meeting.'
-                      : 'ClosedRoom could not load the images saved for this meeting.'}
-                  </p>
-                </div>
-              </div>
-              <Button size="sm" variant="ghost" onClick={loadScreenshots}>
-                {lang === 'it' ? 'Riprova' : 'Retry'}
-              </Button>
-            </div>
-          </section>
-        )}
-
-        {!demoMode && screenshotsState === 'ready' && savedScreenshotCount > 0 && (
-          <section
-            data-meeting-screenshot-gallery="true"
-            data-key-moments="true"
-            className="rounded-xl border border-border-subtle bg-bg-elevated p-4"
-            aria-labelledby="meeting-screenshots-title"
-          >
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-2.5">
-                <Bookmark className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 id="meeting-screenshots-title" className="text-xs font-semibold text-text-primary">
-                      {lang === 'it' ? 'Momenti chiave' : 'Key moments'}
-                    </h3>
-                    <Badge variant="idle">{savedScreenshotCount}</Badge>
-                  </div>
-                  <p className="mt-0.5 max-w-2xl text-[11px] leading-relaxed text-text-muted">
-                    {lang === 'it'
-                      ? 'Momenti che hai segnato durante il meeting. ClosedRoom li collega al transcript e all’audio senza registrare lo schermo in continuo.'
-                      : 'Moments you marked during the meeting. ClosedRoom connects them to the transcript and audio without continuous screen recording.'}
-                  </p>
-                </div>
-              </div>
-              {canExpandScreenshots && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setShowAllScreenshots((value) => !value)}
-                  aria-expanded={showAllScreenshots}
-                  className="shrink-0"
-                >
-                  {showAllScreenshots
-                    ? (lang === 'it' ? 'Raggruppa simili' : 'Group similar')
-                    : (lang === 'it' ? `Mostra tutti gli scatti (${savedScreenshotCount})` : `Show all captures (${savedScreenshotCount})`)}
-                  <ChevronDown
-                    className={cn('h-3.5 w-3.5 transition-transform', showAllScreenshots && 'rotate-180')}
-                    aria-hidden="true"
-                  />
-                </Button>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2.5">
-              {visibleKeyMoments.map(({ shot, group }) => {
-                const context = keyMomentContexts.get(shot.screenshot_id);
-                const visualContext = keyMomentVisualContext(shot, visualData);
-                return (
-                  <button
-                    key={group?.group_id || shot.screenshot_id}
-                    type="button"
-                    onClick={() => openKeyMoment(shot)}
-                    className="group grid min-h-[124px] w-full max-w-3xl grid-cols-[128px_minmax(0,1fr)] overflow-hidden rounded-xl border border-border-subtle bg-bg-surface text-left transition hover:border-border-focus hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:grid-cols-[190px_minmax(0,1fr)]"
-                    aria-label={
-                      lang === 'it'
-                        ? `Apri momento chiave a ${screenshotTimestampLabel(shot.timestamp)}`
-                        : `Open key moment at ${screenshotTimestampLabel(shot.timestamp)}`
-                    }
-                    title={shot.display_title || undefined}
-                    data-key-moment-id={shot.screenshot_id}
-                    data-key-moment-group={group?.group_id || undefined}
-                  >
-                    <div className="flex h-full min-h-[124px] items-center justify-center overflow-hidden bg-black/5 p-1.5">
-                      {shot.available && shot.thumbnail_available ? (
-                        <img
-                          src={shot.thumbnail_url}
-                          alt=""
-                          loading="lazy"
-                          className="max-h-[120px] w-full object-contain transition-transform duration-200 group-hover:scale-[1.01]"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-text-muted">
-                          {lang === 'it' ? 'Immagine non disponibile' : 'Image unavailable'}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex min-w-0 flex-col justify-between gap-2 p-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-[11px] font-semibold tabular-nums text-text-primary">
-                            {group
-                              ? `${screenshotTimestampLabel(group.start)}–${screenshotTimestampLabel(group.end)}`
-                              : screenshotTimestampLabel(shot.timestamp)}
-                          </span>
-                          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[9px] font-semibold text-accent">
-                            {lang === 'it' ? 'Segnato da te' : 'Marked by you'}
-                          </span>
-                          {group && (
-                            <span className="rounded-full border border-border-subtle px-2 py-0.5 text-[9px] font-semibold text-text-muted">
-                              {lang === 'it'
-                                ? `${group.screenshot_ids.length} scatti simili`
-                                : `${group.screenshot_ids.length} similar captures`}
-                            </span>
-                          )}
-                          {visualContext?.contentType && (
-                            <span className="rounded-full border border-border-subtle px-2 py-0.5 text-[9px] font-medium capitalize text-text-muted">
-                              {visualContext.contentType}
-                            </span>
-                          )}
-                        </div>
-                        {visualContext?.title && (
-                          <p className="mt-1.5 truncate text-xs font-semibold text-text-primary" title={visualContext.title}>
-                            {visualContext.title}
-                          </p>
-                        )}
-                        <p className="mt-2 max-h-14 overflow-hidden text-xs leading-relaxed text-text-secondary">
-                          {context?.excerpt || (
-                            lang === 'it'
-                              ? 'Nessun parlato vicino a questo momento. L’immagine e il riferimento temporale restano disponibili.'
-                              : 'No nearby speech for this moment. The image and timestamp remain available.'
-                          )}
-                        </p>
-                      </div>
-                      <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] text-text-muted">
-                        <span className="truncate">
-                          {context?.speakers?.length
-                            ? context.speakers.join(' · ')
-                            : (shot.display_title || (lang === 'it' ? 'Contesto visuale' : 'Visual context'))}
-                        </span>
-                        <span className="shrink-0 font-medium text-accent">
-                          {lang === 'it' ? 'Apri momento' : 'Open moment'}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {!showAllScreenshots && hiddenScreenshotCount > 0 && (
-              <p className="mt-2.5 text-right text-[10px] text-text-muted">
-                {lang === 'it'
-                  ? `+${hiddenScreenshotCount} scatti raccolti negli stack`
-                  : `+${hiddenScreenshotCount} captures grouped into stacks`}
-              </p>
-            )}
           </section>
         )}
 
