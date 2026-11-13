@@ -1,7 +1,7 @@
 # ClosedRoom — UX/UI meeting-first redesign
 
-Status: ACTIVE — UX0/UX3/UX5 integrated; UX1 archive and project-return slices integrated; UX2 transcript and analysis batching integrated; UX4 controls integrated; UX7 outcome choices PR #218 under validation. Full redesign remains open. Owner: product/front-end. Target: dev.
-Resume identity: dev 6d1d482e4957025f6d54b889bc4f4e7dc00e63ec (2026-11-13); refresh head/base/PRs before work.
+Status: ACTIVE — UX0/UX3/UX5 integrated; UX1 archive and project-return slices integrated; UX2 transcript and analysis batching integrated; UX4 controls integrated; UX7 outcome choices integrated. Full redesign remains open. Owner: product/front-end. Target: dev.
+Resume identity: dev 39b19a03aebc2111da16152112c99f6e1f84cfbd (2026-11-13); refresh head/base/PRs before work.
 
 ## Product outcome and boundaries
 
@@ -16,7 +16,7 @@ Axes: intended product PRODUCT_FEATURE; this plan-only edit PRODUCT_NONE. Delive
 - Eight editable screens: https://www.figma.com/design/VbELzf6PuSKxFbpZzUCBuu — Riunioni; Progetti; Meeting Notes; Voci; Analisi; Nuovo meeting; Registrazione attiva; Progetti compatti.
 - Dedicated **compact floating overlay** and **saved Meeting screenshot gallery** are specified in design/overlay-screenshot-ux-v1.md on open PR #210; conversation HTML prototype is illustrative. These changes are NOT yet Figma-editable screens because the Figma Starter limit blocked that addition; synchronize when available, without blocking code delivery.
 - dev already contains reliable local source owners for note and screenshot persistence, overlay display selection, note/screenshot undo, Meeting image thumbnails/context, transcription and speakers. Redesign the journey, not storage.
-- PRs #210–#217 (except #218) relevant to UX: #210 Progetti, #211 overlay, #212 Note e fonti, #213 transcript batch, #214 archive, #215 readiness, #216 project return, #217 analysis batch are integrated on dev after Mac checks. #218 outcome choices is pending integration validation. Use this plan as the only active roadmap.
+- PRs #210–#217 (except #218) relevant to UX: #210 Progetti, #211 overlay, #212 Note e fonti, #213 transcript batch, #214 archive, #215 readiness, #216 project return, #217 analysis batch are integrated on dev after Mac checks. #218 outcome choices is integrated after exact-head Mac validation. Use this plan as the only active roadmap.
 - docs/workstreams/meeting-ux-consolidation.md records earlier integrated UX and legacy-route obligations: preserve them; do not redo integrated UX-0..6. Code + design/ux-contract.json + design/brand-kit.json remain canonical, not Figma.
 
 ## Information architecture and approved flows
@@ -41,7 +41,7 @@ Primary rail: **Riunioni**, **Progetti**, persistent **Nuovo meeting**. Utilitie
 | UX4 ACTIVE | PR #211: modular stateless RecordingOverlayActions integrated, semantic persistence/Undo E2E passed; complete compact/expanded UX polish | dev integrated; interaction design pending |
 | UX5 DONE | #215: settings/readiness independent of optional project suggestions, real checking/error/retry states; existing native capture flow retained | dev integrated; target-Mac TCC pending |
 | UX6 BLOCKED | TranscriptTextView + SpeakerDiarizationEditor: no “Computer” person; mic identity, readable correction/undo. MeetingDetailPage tab wiring serialized after UX3 | UX3 shared parent |
-| UX7 ACTIVE | #218: small MeetingAnalysisChoices child for existing summary and deep-analysis pipelines, with selected-run/ready safeguards; custom-question UX remains to shape | #218 Mac integration validation pending |
+| UX7 ACTIVE | #218: stateless MeetingAnalysisChoices integrates existing summary and deep-analysis pipelines; custom-question and additional outcome UX remain to shape | #218 integrated; outcomes remainder |
 | UX8 BLOCKED | Semantic UI components + workspace.css/index.css: consistent controls/type/spacing, 1280/900/640 layouts, light/dark tokens, accessibility, restrained motion | UX1 + UX3 hierarchy |
 | UX9 BLOCKED | End-to-end UX convergence: critical journeys, performance, accessibility, source docs, exact-head validation and PR-to-dev integration | affected slices |
 
@@ -71,6 +71,6 @@ Use repository selector `python3 scripts/select_validation_profile.py --base <ba
 
 ## Resume and durable closeout
 
-**Next:** finish exact-head #218 validation; UX1 shell navigation/Back, UX2 real project latency benchmark, UX4 compact overlay, UX6 Voices/Transcript review (reconcile existing #204 first), then UX7 extended outcomes and UX8/9 integration. Source deliveries ≠ product success; latency, usability and physical Mac outcomes remain unmeasured.
+**Next:** UX1 shell navigation/Back, UX2 real project latency benchmark, UX4 compact overlay polish, UX6 Voices/Transcript review (reconcile existing #204 first), then UX7 additional outcomes and UX8/9 integration. Source deliveries ≠ product success; latency, usability and physical Mac outcomes remain unmeasured.
 
 At convergence update design/ux-contract.json, affected docs/features.md or bounded feature owner, docs/current-state.md and executable tests; update design/brand-kit.json only if approved tokens change. Remove temporary workstream after durable truth and deferred release obligations are transferred.
