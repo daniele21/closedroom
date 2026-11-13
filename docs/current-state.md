@@ -42,6 +42,8 @@ Public binaries additionally require Developer ID signing, notarization/stapling
 
 ## Active workstreams
 
+- [UX/UI meeting-first redesign](workstreams/workspace-ux-reset.md): piano implementativo approvato su dev per Riunioni/Progetti, Note e fonti con screenshot, overlay, trascrizione/voci e analisi. **Non integrato**; prima slice in PR #210 aperta.
+
 - [`audio-continuity-auto-recovery.md`](workstreams/audio-continuity-auto-recovery.md): P0 integrato in `dev` via PR #176 (`772a5f68`): ripresa microfono e audio sistema solo nativo; FULL automated PASS, switch fisico/TCC ancora da provare.
 - [`meeting-detection.md`](workstreams/meeting-detection.md): default-on/retry integrated (#184); real Teams/Zoom notifications/TCC pending.
 - [`meeting-value-efficiency.md`](workstreams/meeting-value-efficiency.md): PRS-11..17 integrated; PRS-18 measured product/runtime release evidence active.
