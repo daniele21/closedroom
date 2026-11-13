@@ -50,6 +50,21 @@ class NewMeetingSimplicityContractTests(unittest.TestCase):
         self.assertIn("No visual AI runs while recording", self.source)
         self.assertIn("No frames are captured without an explicit selection", self.source)
 
+    def test_optional_project_suggestions_do_not_gate_capture_readiness(self) -> None:
+        self.assertIn("const readyToRecord = settingsLoaded && micReady && computerReady && storageReady;", self.source)
+        self.assertIn("void ApiClient.getSettings().then(", self.source)
+        self.assertIn("void ApiClient.listProjects().then(", self.source)
+        self.assertNotIn("const projects = await ApiClient.listProjects();", self.source)
+        self.assertIn("setSettingsLoaded(true);", self.source)
+        self.assertIn("Suggestions are optional.", self.source)
+
+    def test_storage_readiness_has_real_pending_and_retry_states(self) -> None:
+        self.assertIn("if (!settingsLoaded) {", self.source)
+        self.assertIn("Checking local storage", self.source)
+        self.assertIn("setSettingsLoadError(true)", self.source)
+        self.assertIn("Cannot read settings", self.source)
+        self.assertIn("setSettingsRetry((value) => value + 1)", self.source)
+
     def test_normal_start_keeps_automatic_audio_and_only_passes_explicit_visual_source(self) -> None:
         self.assertIn("useState<'both' | 'mic_only' | 'pc_only'>('both')", self.source)
         self.assertIn("visualWindowId ? Number(visualWindowId) : undefined", self.source)
