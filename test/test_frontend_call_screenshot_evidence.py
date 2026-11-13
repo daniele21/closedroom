@@ -120,7 +120,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.gallery)
         self.assertIn("data-key-moment-id={shot.screenshot_id}", self.gallery)
         self.assertIn("data-key-moment-context=\"true\"", self.meeting)
-        self.assertIn("openKeyMoment(shot)", self.meeting)
+        self.assertIn("onClick={() => onOpenScreenshot(shot)}", self.gallery)
         self.assertIn("visualResultAvailable && selectedScreenshot !== null", self.meeting)
         self.assertNotIn("keyMomentVisualRequested", self.meeting)
         self.assertIn("setSelectedScreenshotKey(null)", self.meeting)
