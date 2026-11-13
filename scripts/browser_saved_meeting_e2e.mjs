@@ -2114,7 +2114,7 @@ try {
   // Outcome-first analysis uses existing Meeting pipelines and never launches
   // a job merely by opening the tab.
   await browser.clickCss('#meeting-tab-analysis');
-  await waitSelector(browser, '[data-meeting-analysis-choices="true"]', 5000, true);
+  await waitText(browser, ['Cosa vuoi ottenere?', 'What would you like to get?'], 5000, true);
   const outcomeChoices = await browser.execute(`
     const root = document.querySelector('[data-meeting-analysis-choices="true"]');
     const summary = root?.querySelector('[data-meeting-outcome="summary"]');
