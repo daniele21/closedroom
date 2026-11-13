@@ -32,7 +32,6 @@ import {
   RiskPanel,
   SectionHeader,
 } from '../components/workspace/MeetingWorkspace';
-import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
 import {
   TimeRangeState,
   extractActionItems,
@@ -49,7 +48,7 @@ import {
   sourceFromProjectItem,
   uniqueInsightItems,
 } from '../utils/meetingInsights';
-import { formatBytes, formatDuration, formatProjectDate, getDurationSeconds } from '../utils/formatters';
+import { formatDuration, formatProjectDate, getDurationSeconds } from '../utils/formatters';
 import { cn } from '../utils/cn';
 function limitText(value: string, max = 150): string {
   if (value.length <= max) return value;
@@ -422,7 +421,7 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
               </div>
               <Button size="sm" variant="secondary" onClick={handleNewMeetingForProject} disabled={demoMode}>
                 <Mic className="h-4 w-4" />
-                {t('projects.btnNewMeetingShort') || 'Registra'}
+                {lang === 'it' ? 'Nuovo meeting nel progetto' : 'New meeting in project'}
               </Button>
             </div>
           </section>
@@ -466,7 +465,6 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
               icon={FileAudio}
               title={t('projects.emptyTimelineTitle')}
               description={t('projects.emptyTimelineDesc')}
-              action={<Button onClick={handleNewMeetingForProject} disabled={demoMode}>{t('projects.btnNewMeetingShort')}</Button>}
             />
           ) : (
             <div className="overflow-hidden rounded-xl border border-border-subtle bg-bg-glass shadow-[var(--shadow-soft)]">
@@ -483,7 +481,6 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
                   onCancelRename={() => setEditingRecordingId(null)}
                   onAssignProject={() => handleAssignProject(item.recording)}
                   onOpen={() => navigateTo('meeting', item.recording.id)}
-                  onTranscribe={() => navigateTo('transcription', recordingTranscriptionRoute(item.recording.id))}
                   demoMode={demoMode}
                 />
               ))}
@@ -633,7 +630,6 @@ function ProjectTimelineItem({
   onCancelRename,
   onAssignProject,
   onOpen,
-  onTranscribe,
   demoMode,
 }: {
   item: ProjectItem;
@@ -646,7 +642,6 @@ function ProjectTimelineItem({
   onCancelRename: () => void;
   onAssignProject: () => void;
   onOpen: () => void;
-  onTranscribe: () => void;
   demoMode?: boolean;
 }) {
   const status = projectItemStatus(item);
@@ -695,7 +690,6 @@ function ProjectTimelineItem({
             if (key === 'recording.durationFormat') return `${options.mins}m ${options.secs}s`;
             return key;
           })}</span>
-          <span>{formatBytes(item.recording.bytes_written || 0)}</span>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -704,14 +698,9 @@ function ProjectTimelineItem({
         {projectItemHasAnalysis(item) && <Sparkles className="h-4 w-4 text-accent" />}
       </div>
       <div className="flex flex-wrap gap-2 lg:justify-end">
-        <Button size="sm" onClick={onOpen}>
+        <Button size="sm" onClick={onOpen} aria-label={`${lang === 'it' ? 'Apri meeting' : 'Open meeting'}: ${recordingTitle(item.recording)}`}>
           {lang === 'it' ? 'Apri' : 'Open'}
         </Button>
-        {!item.transcription && !demoMode && (
-          <Button size="sm" variant="secondary" onClick={onTranscribe}>
-            {lang === 'it' ? 'Trascrivi' : 'Transcribe'}
-          </Button>
-        )}
         {!demoMode && (
           <Button size="sm" variant="ghost" onClick={onAssignProject}>
             {lang === 'it' ? 'Progetto' : 'Project'}
