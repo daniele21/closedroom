@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "frontend" / "src" / "pages" / "RecordingOverlayPage.tsx"
+CONTROLS = ROOT / "frontend" / "src" / "components" / "recording" / "RecordingOverlayActions.tsx"
 TRANSCRIPT = ROOT / "frontend" / "src" / "components" / "transcription" / "TranscriptTextView.tsx"
 MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
 ACCESSORIES = ROOT / "frontend" / "src" / "hooks" / "useMeetingAccessories.ts"
@@ -19,6 +20,7 @@ class FrontendMeetingMomentNotesContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.overlay = OVERLAY.read_text(encoding="utf-8")
+        cls.controls = CONTROLS.read_text(encoding="utf-8")
         cls.transcript = TRANSCRIPT.read_text(encoding="utf-8")
         cls.meeting = MEETING.read_text(encoding="utf-8")
         cls.accessories = ACCESSORIES.read_text(encoding="utf-8")
@@ -35,8 +37,9 @@ class FrontendMeetingMomentNotesContractTests(unittest.TestCase):
             self.overlay.index("ApiClient.createRecordingNote(recordingId"),
         )
         self.assertIn('data-note-composer="true"', self.overlay)
-        self.assertIn('data-note-action="true"', self.overlay)
-        self.assertIn('data-note-undo="true"', self.overlay)
+        self.assertIn('data-note-action="true"', self.controls)
+        self.assertIn("onOpenNote={() => void handleOpenNote()}", self.overlay)
+        self.assertIn('data-note-undo="true"', self.controls)
         self.assertIn("event.key === 'Enter' && !event.shiftKey", self.overlay)
         self.assertIn("event.key === 'Escape'", self.overlay)
         self.assertIn("maxLength={4000}", self.overlay)
