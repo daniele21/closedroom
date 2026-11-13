@@ -58,10 +58,6 @@ export function RecordingOverlayNoteComposer({
           {it ? 'Invio: salva · Maiusc+Invio: nuova riga' : 'Enter: save · Shift+Enter: new line'}
         </span>
         <div className="flex gap-1.5">
-          <button type="button" onClick={onClose} disabled={saving}
-            className="min-h-8 rounded-md px-2 text-[11px] text-white/75 hover:bg-white/10 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-200">
-            {it ? 'Chiudi' : 'Close'}
-          </button>
           <button type="button" onClick={onSave} disabled={!draft.trim() || saving}
             className="min-h-8 rounded-md bg-amber-200/20 px-2.5 text-[11px] font-semibold text-amber-100 hover:bg-amber-200/30 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-amber-200"
             data-note-save="true">
