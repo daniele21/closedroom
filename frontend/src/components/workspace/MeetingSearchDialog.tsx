@@ -66,6 +66,7 @@ export function MeetingArchiveExplorer({
   const [retryKey, setRetryKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const generationRef = useRef(0);
+  const previousQueryRef = useRef(query);
 
   useEffect(() => {
     if (open && initialView) setShowArchived(initialView === 'archived');
@@ -86,6 +87,10 @@ export function MeetingArchiveExplorer({
     setLoading(true);
     setError(null);
     setLoadMoreError(null);
+    // Debounce only typing, never the first archive load or a view/filter switch.
+    // Generation and AbortController still discard superseded local queries.
+    const queryChanged = previousQueryRef.current !== query;
+    previousQueryRef.current = query;
     const timer = window.setTimeout(async () => {
       try {
         if (demoMeetings) {
@@ -122,7 +127,7 @@ export function MeetingArchiveExplorer({
       } finally {
         if (generation === generationRef.current) setLoading(false);
       }
-    }, 180);
+    }, queryChanged ? 180 : 0);
 
     return () => {
       window.clearTimeout(timer);

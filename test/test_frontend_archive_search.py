@@ -81,6 +81,14 @@ class FrontendArchiveSearchContractTests(unittest.TestCase):
         self.assertIn("Load more", self.dialog)
         self.assertIn('aria-live="polite"', self.dialog)
 
+    def test_empty_or_unchanged_query_opens_without_artificial_debounce(self) -> None:
+        # Initial local archive metadata should not wait for the typing-only debounce.
+        self.assertIn("const previousQueryRef = useRef(query);", self.dialog)
+        self.assertIn("const queryChanged = previousQueryRef.current !== query;", self.dialog)
+        self.assertIn("previousQueryRef.current = query;", self.dialog)
+        self.assertIn("}, queryChanged ? 180 : 0);", self.dialog)
+        self.assertIn("controller.abort()", self.dialog)
+
     def test_query_survives_navigation_without_loading_entire_archive(self) -> None:
         self.assertIn("sessionStorage.setItem(QUERY_STORAGE_KEY, query)", self.dialog)
         self.assertIn("sessionStorage.setItem(VIEW_STORAGE_KEY, showArchived ? 'archived' : 'active')", self.dialog)
