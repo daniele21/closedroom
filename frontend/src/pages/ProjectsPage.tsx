@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Edit3,
@@ -22,7 +22,6 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { ProjectPromptModal } from '../components/ui/ProjectPromptModal';
 import { TimeRangeFilter } from '../components/workspace/TimeRangeFilter';
-import { TaskProcessingLoader } from '../components/workspace/TaskProcessingLoader';
 import { InsightDetailDialog, type InsightTab } from '../components/workspace/InsightDetailDialog';
 import {
   ActionChecklist,
@@ -33,7 +32,6 @@ import {
   RiskPanel,
   SectionHeader,
 } from '../components/workspace/MeetingWorkspace';
-import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
 import {
   TimeRangeState,
   extractActionItems,
@@ -50,7 +48,7 @@ import {
   sourceFromProjectItem,
   uniqueInsightItems,
 } from '../utils/meetingInsights';
-import { formatBytes, formatDuration, formatProjectDate, getDurationSeconds } from '../utils/formatters';
+import { formatDuration, formatProjectDate, getDurationSeconds } from '../utils/formatters';
 import { cn } from '../utils/cn';
 function limitText(value: string, max = 150): string {
   if (value.length <= max) return value;
@@ -64,18 +62,13 @@ interface ProjectsPageProps {
 
 
 
-const ACTION_SCOPE_OPTIONS = [
-  { value: 'week', label: 'Settimana' },
-  { value: 'month', label: 'Mese' },
-  { value: 'all', label: 'Tutte' },
-] as const;
-
-type ActionScope = typeof ACTION_SCOPE_OPTIONS[number]['value'];
-
 const PROJECT_VIEW_STORAGE_KEY = 'closedroom.projects.view';
+// Ephemeral, in-memory view snapshot. The backend remains the canonical project owner.
+// Show it immediately on return and always reconcile against the local API.
+let projectViewSnapshot: Project[] | null = null;
 
-function restoreProjectView(): { name: string; range: TimeRangeState; actionScope: ActionScope } {
-  const fallback = { name: '', range: { mode: 'last7' } as TimeRangeState, actionScope: 'week' as ActionScope };
+function restoreProjectView(): { name: string; range: TimeRangeState } {
+  const fallback = { name: '', range: { mode: 'all' } as TimeRangeState };
   try {
     const raw = sessionStorage.getItem(PROJECT_VIEW_STORAGE_KEY);
     if (!raw) return fallback;
@@ -83,7 +76,7 @@ function restoreProjectView(): { name: string; range: TimeRangeState; actionScop
     if (!saved || typeof saved !== 'object') return fallback;
     const data = saved as Record<string, unknown>;
     const range = data.range && typeof data.range === 'object' ? data.range as Record<string, unknown> : null;
-    const mode = range && ['last7', 'last30', 'all', 'custom'].includes(String(range.mode)) ? String(range.mode) : 'last7';
+    const mode = range && ['last7', 'last30', 'all', 'custom'].includes(String(range.mode)) ? String(range.mode) : 'all';
     const validRange = {
       mode,
       ...(range?.startDate && typeof range.startDate === 'string' ? { startDate: range.startDate } : {}),
@@ -92,7 +85,6 @@ function restoreProjectView(): { name: string; range: TimeRangeState; actionScop
     return {
       name: typeof data.name === 'string' ? data.name : '',
       range: validRange,
-      actionScope: ['week', 'month', 'all'].includes(String(data.actionScope)) ? data.actionScope as ActionScope : 'week',
     };
   } catch {
     return fallback;
@@ -104,14 +96,16 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
   const { showToast } = useToast();
 
   const savedProjectView = useMemo(restoreProjectView, []);
-  const [loading, setLoading] = useState(true);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(() => !demoMode && projectViewSnapshot === null);
+  const [projects, setProjects] = useState<Project[]>(() =>
+    demoMode ? getDemoProjects(lang) : (projectViewSnapshot ?? [])
+  );
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
   const [selectedProjectName, setSelectedProjectName] = useState(savedProjectView.name);
   const [sidebarQuery, setSidebarQuery] = useState('');
   const [projectRange, setProjectRange] = useState<TimeRangeState>(savedProjectView.range);
-  const [actionScope, setActionScope] = useState<ActionScope>(savedProjectView.actionScope);
-  const [projectDigestGeneratedAt, setProjectDigestGeneratedAt] = useState<string | null>(null);
-  const [isProjectGenerating, setIsProjectGenerating] = useState(false);
   const [editingRecordingId, setEditingRecordingId] = useState<string | null>(null);
   const [editTitleValue, setEditTitleValue] = useState('');
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
@@ -145,36 +139,50 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     { mode: 'custom' as const, label: lang === 'it' ? 'Custom' : 'Custom' },
   ], [lang]);
 
-  const actionScopeOptions = useMemo(() => [
-    { value: 'week' as const, label: lang === 'it' ? 'Settimana' : 'Week' },
-    { value: 'month' as const, label: lang === 'it' ? 'Mese' : 'Month' },
-    { value: 'all' as const, label: lang === 'it' ? 'Tutte' : 'All' },
-  ], [lang]);
-
   const loadProjects = async () => {
-    try {
-      setLoading(true);
-      if (demoMode) {
-        setProjects(getDemoProjects(lang));
-        setSelectedProjectName('ClosedRoom Beta Launch');
-        return;
-      }
-      const data = await ApiClient.listProjects();
-      setProjects(data.items || []);
-    } catch (err: any) {
-      if (demoMode) {
-        setProjects(getDemoProjects(lang));
-        setSelectedProjectName('ClosedRoom Beta Launch');
-        return;
-      }
-      showToast(err.message || t('projects.loading') || 'Errore', 'error');
-    } finally {
+    const generation = ++requestGeneration.current;
+    setRefreshError(null);
+    if (demoMode) {
+      setProjects(getDemoProjects(lang));
+      setSelectedProjectName('ClosedRoom Beta Launch');
       setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    // Do not remount the heavy route loader for a previously explored project.
+    // All reads and refreshes still go to the local canonical /v1/projects API.
+    if (projectViewSnapshot !== null) {
+      setProjects(projectViewSnapshot);
+      setLoading(false);
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    try {
+      const response = await ApiClient.listProjects();
+      if (generation !== requestGeneration.current) return;
+      const items = response.items || [];
+      projectViewSnapshot = items;
+      setProjects(items);
+    } catch (err: unknown) {
+      if (generation !== requestGeneration.current) return;
+      const message = err instanceof Error ? err.message : String(err);
+      setRefreshError(message);
+      if (projectViewSnapshot === null) {
+        showToast(message || t('projects.loading') || 'Errore', 'error');
+      }
+    } finally {
+      if (generation === requestGeneration.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadProjects();
+    void loadProjects();
+    return () => { requestGeneration.current += 1; };
   }, [demoMode, lang]);
 
   useEffect(() => {
@@ -195,14 +203,8 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     sessionStorage.setItem(PROJECT_VIEW_STORAGE_KEY, JSON.stringify({
       name: selectedProjectName,
       range: projectRange,
-      actionScope,
     }));
-  }, [loading, demoMode, selectedProjectName, projectRange, actionScope]);
-
-  useEffect(() => {
-    setProjectDigestGeneratedAt(null);
-    setIsProjectGenerating(false);
-  }, [selectedProjectName, projectRange.mode, projectRange.startDate, projectRange.endDate]);
+  }, [loading, demoMode, selectedProjectName, projectRange]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.name === selectedProjectName) || projects[0],
@@ -239,18 +241,10 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     [sources]
   );
 
-  const actionScopeRange = useMemo(() => {
-    if (actionScope === 'week') return resolveTimeRange({ mode: 'last7' });
-    if (actionScope === 'month') return resolveTimeRange({ mode: 'last30' });
-    return resolveTimeRange({ mode: 'all' });
-  }, [actionScope]);
-  const actionItems = useMemo(
-    () => actionItemsAll.filter((item) => isWithinTimeRange(item.sourceDate, actionScopeRange)),
-    [actionItemsAll, actionScopeRange]
-  );
+  const actionItems = actionItemsAll;
 
   const visibleTimelineItems = useMemo(
-    () => showAllTimeline ? periodItems : periodItems.slice(0, 3),
+    () => showAllTimeline ? periodItems : periodItems.slice(0, 12),
     [periodItems, showAllTimeline]
   );
 
@@ -320,37 +314,21 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     navigateTo('recording');
   };
 
-  const handleGenerateProjectSituation = () => {
-    const insightCount = digestItems.length + actionItemsAll.length + decisions.length + risks.length;
-    setIsProjectGenerating(true);
-    window.setTimeout(() => {
-      const timestamp = new Date().toLocaleString(lang === 'it' ? 'it-IT' : 'en-US', {
-        dateStyle: 'short',
-        timeStyle: 'short',
-      });
-      setProjectDigestGeneratedAt(timestamp);
-      setIsProjectGenerating(false);
-      showToast(
-        insightCount > 0
-          ? t('projects.toastDigestSuccess')
-          : t('projects.toastDigestEmpty'),
-        insightCount > 0 ? 'success' : 'info'
-      );
-    }, 850);
-  };
-
   if (loading) {
     return (
-      <div className="py-16">
-        <TaskProcessingLoader
-          title={t('workspace.loaderProjectsTitle')}
-          description={t('workspace.loaderProjectsDesc')}
-          steps={[t('workspace.loaderProjectsStep1'), t('workspace.loaderProjectsStep2'), t('workspace.loaderProjectsStep3')]}
-          activeStep={1}
-          progress={62}
-          variant="project"
-          helperText={t('workspace.loaderLocalHelper')}
-        />
+      <div role="status" aria-live="polite" aria-busy="true" className="surface-supporting rounded-xl px-4 py-5 text-sm text-text-secondary">
+        {lang === 'it' ? 'Caricamento elenco progetti dal dispositivo…' : 'Loading projects from this device…'}
+      </div>
+    );
+  }
+
+  if (!selectedProject && refreshError && !demoMode) {
+    return (
+      <div role="alert" className="surface-supporting flex flex-wrap items-center gap-3 rounded-xl p-4 text-sm text-text-secondary">
+        <span>{lang === 'it' ? 'Impossibile leggere i progetti locali.' : 'Could not load local projects.'}</span>
+        <Button size="sm" variant="secondary" onClick={() => void loadProjects()}>
+          {lang === 'it' ? 'Riprova' : 'Retry'}
+        </Button>
       </div>
     );
   }
@@ -453,215 +431,24 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
               </div>
               <Button size="sm" variant="secondary" onClick={handleNewMeetingForProject} disabled={demoMode}>
                 <Mic className="h-4 w-4" />
-                {t('projects.btnNewMeetingShort') || 'Registra'}
+                {lang === 'it' ? 'Nuovo meeting nel progetto' : 'New meeting in project'}
               </Button>
             </div>
           </section>
 
-        {/* Compact project status KPIs */}
-        {periodItems.length > 0 && (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4" data-tour="project-status">
-            <button
-              type="button"
-              onClick={() => {
-                const timelineSec = document.querySelector('[data-tour="project-timeline"]');
-                timelineSec?.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="surface-primary hover:border-border-focus p-4 rounded-xl text-left transition-premium hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(0,0,0,0.1)]"
-            >
-              <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{lang === 'it' ? 'Meeting' : 'Meetings'}</div>
-              <div className="mt-1 text-2xl font-bold text-accent">{periodItems.length}</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => openInsightDialog('actions')}
-              className="surface-primary hover:border-border-focus p-4 rounded-xl text-left transition-premium hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(0,0,0,0.1)]"
-            >
-              <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{lang === 'it' ? 'Azioni aperte' : 'Open actions'}</div>
-              <div className="mt-1 text-2xl font-bold text-success">{actionItemsAll.length}</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => openInsightDialog('decisions')}
-              className="surface-primary hover:border-border-focus p-4 rounded-xl text-left transition-premium hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(0,0,0,0.1)]"
-            >
-              <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{lang === 'it' ? 'Decisioni' : 'Decisions'}</div>
-              <div className="mt-1 text-2xl font-bold text-info">{decisions.length}</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => openInsightDialog('risks')}
-              className="surface-primary hover:border-border-focus p-4 rounded-xl text-left transition-premium hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(0,0,0,0.1)]"
-            >
-              <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{lang === 'it' ? 'Rischi' : 'Risks'}</div>
-              <div className="mt-1 text-2xl font-bold text-warning">{risks.length}</div>
-            </button>
+        {refreshing && (
+          <p role="status" className="text-xs text-text-muted">
+            {lang === 'it' ? 'Aggiornamento progetti dal dispositivo…' : 'Refreshing projects from this device…'}
+          </p>
+        )}
+        {refreshError && (
+          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-border-subtle px-3 py-2 text-xs text-text-secondary">
+            <span>{lang === 'it' ? 'Dati precedenti: aggiornamento non riuscito.' : 'Showing previous data: refresh failed.'}</span>
+            <Button size="sm" variant="secondary" onClick={() => void loadProjects()}>
+              {lang === 'it' ? 'Riprova' : 'Retry'}
+            </Button>
           </div>
         )}
-
-        {/* Project Situation (Digest) - full width */}
-        <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
-          <SectionHeader
-            icon={Sparkles}
-            title={t('workspace.projectDigestTitle')}
-            description={t('workspace.digestSubtitle')}
-            tooltip={t('workspace.digestTooltip')}
-            action={
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => navigateTo('analysis')}
-                  className="text-xs"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {t('projects.btnCustomQuestion')}
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleGenerateProjectSituation}
-                  disabled={periodItems.length === 0 || isProjectGenerating}
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {projectDigestGeneratedAt ? t('workspace.digestCtaUpdate') : t('workspace.digestCtaGenerate')}
-                </Button>
-              </div>
-            }
-          />
-          
-          {isProjectGenerating ? (
-            <div className="py-4">
-              <TaskProcessingLoader
-                title={t('workspace.loaderProjectSituationTitle')}
-                description={t('workspace.loaderProjectSituationDesc')}
-                steps={[
-                  t('workspace.loaderProjectSituationStep1'),
-                  t('workspace.loaderProjectSituationStep2'),
-                  t('workspace.loaderProjectSituationStep3'),
-                  t('workspace.loaderProjectSituationStep4'),
-                ]}
-                activeStep={2}
-                progress={72}
-                variant="project"
-                compact
-                helperText={t('workspace.loaderLocalHelper')}
-              />
-            </div>
-          ) : (
-            <div className="mt-1">
-              {projectDigestGeneratedAt && digestItems.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {digestItems.slice(0, 4).map((item) => (
-                    <div key={item.id} className="rounded-xl border border-border-subtle bg-bg-glass p-3 shadow-[inset_0_1px_0_var(--surface-highlight)] transition-premium hover:border-accent/30 hover:bg-bg-hover/40">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-text-muted">
-                        <span>{item.title}</span>
-                        <span>{item.sourceTitle}</span>
-                      </div>
-                      <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">{limitText(item.text, 220)}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  icon={Sparkles}
-                  title={t('workspace.digestEmptyTitle')}
-                  description={t('workspace.digestEmptyDesc')}
-                  className="py-6"
-                  action={
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={handleGenerateProjectSituation}
-                      disabled={periodItems.length === 0 || isProjectGenerating}
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      {t('workspace.digestCtaGenerate')}
-                    </Button>
-                  }
-                />
-              )}
-              {projectDigestGeneratedAt && (
-                <p className="mt-2 text-[10px] text-text-muted text-right">
-                  {lang === 'it' ? 'Situazione aggiornata' : 'Situation updated'}: {projectDigestGeneratedAt}
-                </p>
-              )}
-            </div>
-          )}
-        </section>
-
-        {/* Actions - full width */}
-        <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4" data-tour="project-actions">
-          <SectionHeader
-            icon={ListChecks}
-            title={t('projects.actionsTitle')}
-            description={t('projects.actionsDesc')}
-            action={
-              <div className="flex items-center gap-2">
-                <div className="flex rounded-lg border border-border-subtle bg-bg-elevated p-1">
-                  {actionScopeOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setActionScope(option.value)}
-                      className={cn(
-                        'rounded-md px-2.5 py-1 text-xs font-semibold transition-colors',
-                        actionScope === option.value
-                          ? 'bg-accent text-white'
-                          : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                {actionItems.length > 5 && (
-                  <button type="button" onClick={() => openInsightDialog('actions')} className="view-all-link">
-                    {t('demo.viewAll')} ({actionItems.length})
-                  </button>
-                )}
-              </div>
-            }
-          />
-          <ActionChecklist items={actionItems.slice(0, 5)} />
-        </section>
-
-        {/* Decisions and Risks Side-by-Side */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
-            <SectionHeader
-              icon={Target}
-              title={t('projects.decisionsTitle')}
-              description={t('projects.decisionsDesc')}
-              action={
-                decisions.length > 4 ? (
-                  <button type="button" onClick={() => openInsightDialog('decisions')} className="view-all-link">
-                    {t('demo.viewAll')} ({decisions.length})
-                  </button>
-                ) : undefined
-              }
-            />
-            <DecisionLog items={decisions.slice(0, 4)} />
-          </div>
-
-          <div className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
-            <SectionHeader
-              icon={ShieldAlert}
-              title={t('projects.risksTitle')}
-              description={t('projects.risksDesc')}
-              action={
-                risks.length > 4 ? (
-                  <button type="button" onClick={() => openInsightDialog('risks')} className="view-all-link">
-                    {t('demo.viewAll')} ({risks.length})
-                  </button>
-                ) : undefined
-              }
-            />
-            <RiskPanel items={risks.slice(0, 4)} />
-          </div>
-        </div>
 
         {/* Timeline of meetings - full width */}
         <section className="surface-supporting flex flex-col gap-3 rounded-2xl p-4" data-tour="project-timeline">
@@ -670,7 +457,7 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
             title={t('projects.timelineTitle')}
             description={t('projects.timelineDesc')}
             action={
-              periodItems.length > 3 && (
+              periodItems.length > 12 && (
                 <button
                   type="button"
                   onClick={() => setShowAllTimeline(!showAllTimeline)}
@@ -688,7 +475,6 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
               icon={FileAudio}
               title={t('projects.emptyTimelineTitle')}
               description={t('projects.emptyTimelineDesc')}
-              action={<Button onClick={handleNewMeetingForProject} disabled={demoMode}>{t('projects.btnNewMeetingShort')}</Button>}
             />
           ) : (
             <div className="overflow-hidden rounded-xl border border-border-subtle bg-bg-glass shadow-[var(--shadow-soft)]">
@@ -705,13 +491,99 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
                   onCancelRename={() => setEditingRecordingId(null)}
                   onAssignProject={() => handleAssignProject(item.recording)}
                   onOpen={() => navigateTo('meeting', item.recording.id)}
-                  onTranscribe={() => navigateTo('transcription', recordingTranscriptionRoute(item.recording.id))}
                   demoMode={demoMode}
                 />
               ))}
             </div>
           )}
         </section>
+
+        <p className="text-xs text-text-muted" data-tour="project-status">
+          {periodItems.length} {lang === 'it' ? 'meeting' : 'meetings'} · {readyCount} {lang === 'it' ? 'analizzati' : 'analyzed'}
+        </p>
+
+        {periodItems.length > 0 && readyCount === 0 && (
+          <p className="text-xs text-text-muted">
+            {lang === 'it'
+              ? 'I meeting sono disponibili qui sopra. Azioni, decisioni e rischi appariranno dopo un’analisi del meeting.'
+              : 'Meetings are available above. Actions, decisions and risks will appear after meeting analysis.'}
+          </p>
+        )}
+
+        {/* Project insights are a projection of existing meeting analyses; no fake AI task. */}
+        {digestItems.length > 0 && (
+          <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
+            <SectionHeader
+              icon={Sparkles}
+              title={t('workspace.projectDigestTitle')}
+              description={t('workspace.digestSubtitle')}
+              tooltip={t('workspace.digestTooltip')}
+            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {digestItems.slice(0, 4).map((item) => (
+                <div key={item.id} className="rounded-xl border border-border-subtle bg-bg-glass p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-text-muted">
+                    <span>{item.title}</span>
+                    <span>{item.sourceTitle}</span>
+                  </div>
+                  <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">{limitText(item.text, 220)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Actions - full width */}
+        {actionItems.length > 0 && <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4" data-tour="project-actions">
+          <SectionHeader
+            icon={ListChecks}
+            title={t('projects.actionsTitle')}
+            description={t('projects.actionsDesc')}
+            action={
+              actionItems.length > 5 ? (
+                <button type="button" onClick={() => openInsightDialog('actions')} className="view-all-link">
+                  {t('demo.viewAll')} ({actionItems.length})
+                </button>
+              ) : undefined
+            }
+          />
+          <ActionChecklist items={actionItems.slice(0, 5)} />
+        </section>}
+
+        {/* Decisions and Risks Side-by-Side */}
+        {(decisions.length > 0 || risks.length > 0) && <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {decisions.length > 0 && <div className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
+            <SectionHeader
+              icon={Target}
+              title={t('projects.decisionsTitle')}
+              description={t('projects.decisionsDesc')}
+              action={
+                decisions.length > 4 ? (
+                  <button type="button" onClick={() => openInsightDialog('decisions')} className="view-all-link">
+                    {t('demo.viewAll')} ({decisions.length})
+                  </button>
+                ) : undefined
+              }
+            />
+            <DecisionLog items={decisions.slice(0, 4)} />
+          </div>}
+
+          {risks.length > 0 && <div className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
+            <SectionHeader
+              icon={ShieldAlert}
+              title={t('projects.risksTitle')}
+              description={t('projects.risksDesc')}
+              action={
+                risks.length > 4 ? (
+                  <button type="button" onClick={() => openInsightDialog('risks')} className="view-all-link">
+                    {t('demo.viewAll')} ({risks.length})
+                  </button>
+                ) : undefined
+              }
+            />
+            <RiskPanel items={risks.slice(0, 4)} />
+          </div>}
+        </div>}
 
         {/* Advanced details at the bottom */}
         <div className="mt-2">
@@ -768,7 +640,6 @@ function ProjectTimelineItem({
   onCancelRename,
   onAssignProject,
   onOpen,
-  onTranscribe,
   demoMode,
 }: {
   item: ProjectItem;
@@ -781,7 +652,6 @@ function ProjectTimelineItem({
   onCancelRename: () => void;
   onAssignProject: () => void;
   onOpen: () => void;
-  onTranscribe: () => void;
   demoMode?: boolean;
 }) {
   const status = projectItemStatus(item);
@@ -830,7 +700,6 @@ function ProjectTimelineItem({
             if (key === 'recording.durationFormat') return `${options.mins}m ${options.secs}s`;
             return key;
           })}</span>
-          <span>{formatBytes(item.recording.bytes_written || 0)}</span>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -839,14 +708,9 @@ function ProjectTimelineItem({
         {projectItemHasAnalysis(item) && <Sparkles className="h-4 w-4 text-accent" />}
       </div>
       <div className="flex flex-wrap gap-2 lg:justify-end">
-        <Button size="sm" onClick={onOpen}>
+        <Button size="sm" onClick={onOpen} aria-label={`${lang === 'it' ? 'Apri meeting' : 'Open meeting'}: ${recordingTitle(item.recording)}`}>
           {lang === 'it' ? 'Apri' : 'Open'}
         </Button>
-        {!item.transcription && !demoMode && (
-          <Button size="sm" variant="secondary" onClick={onTranscribe}>
-            {lang === 'it' ? 'Trascrivi' : 'Transcribe'}
-          </Button>
-        )}
         {!demoMode && (
           <Button size="sm" variant="ghost" onClick={onAssignProject}>
             {lang === 'it' ? 'Progetto' : 'Project'}

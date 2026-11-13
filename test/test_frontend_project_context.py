@@ -16,10 +16,15 @@ class ProjectContextTests(unittest.TestCase):
             "useMemo(restoreProjectView, [])",
             "useState(savedProjectView.name)",
             "useState<TimeRangeState>(savedProjectView.range)",
-            "useState<ActionScope>(savedProjectView.actionScope)",
             "sessionStorage.setItem(PROJECT_VIEW_STORAGE_KEY, JSON.stringify({",
         ):
             self.assertIn(expected, page)
+        # A single project date range now drives Meetings and all derived insights.
+        # Old persisted actionScope is intentionally ignored on rehydrate.
+        self.assertIn("const actionItems = actionItemsAll;", page)
+        self.assertNotIn("useState<ActionScope>", page)
+        self.assertNotIn("actionScope:", page)
+        self.assertIn("projectRange,\n", page)
 
     def test_bad_storage_and_stale_selected_project_recover_safely(self) -> None:
         page = PROJECTS.read_text(encoding="utf-8")
