@@ -137,7 +137,15 @@ def _exclude_incomplete_preparation_runs(
 
 
 def _build_projects(app: FastAPI) -> dict:
-    recordings = get_services(app).recordings.list(limit=999)
+    services = get_services(app)
+    recordings = services.recordings.list(limit=999)
+    # One bounded catalog read replaces N standalone latest-transcript lookups.
+    # Keep compatibility with temporary mocked transcription owners in tests.
+    batch_reader = getattr(services.transcriptions, "find_for_recordings", None)
+    transcriptions_by_recording = (
+        batch_reader([recording["id"] for recording in recordings])
+        if callable(batch_reader) else None
+    )
     projects: dict[str, dict] = {}
     unassigned_name = "Senza progetto"
     for recording in recordings:
@@ -147,14 +155,18 @@ def _build_projects(app: FastAPI) -> dict:
             "is_unassigned": project_name == unassigned_name,
             "items": [],
         })
-        transcription = get_services(app).transcriptions.find_for_recording(recording["id"])
-        runs = get_services(app).catalog.list_analysis_runs(recording_id=recording["id"], limit=50)
+        transcription = (
+            transcriptions_by_recording.get(recording["id"])
+            if transcriptions_by_recording is not None
+            else services.transcriptions.find_for_recording(recording["id"])
+        )
+        runs = services.catalog.list_analysis_runs(recording_id=recording["id"], limit=50)
         if transcription:
-            transcription_runs = get_services(app).catalog.list_analysis_runs(transcription_id=transcription["id"], limit=50)
+            transcription_runs = services.catalog.list_analysis_runs(transcription_id=transcription["id"], limit=50)
             existing = {run["id"] for run in runs}
             runs.extend(run for run in transcription_runs if run["id"] not in existing)
         current_runs = _current_analysis_runs(runs, transcription)
-        preparation_jobs = get_services(app).transcription_jobs.list(
+        preparation_jobs = services.transcription_jobs.list(
             job_type="meeting_preparation",
             scope_type="recording",
             scope_id=recording["id"],
