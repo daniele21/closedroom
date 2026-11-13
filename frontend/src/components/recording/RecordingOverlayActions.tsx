@@ -5,6 +5,7 @@ import { Camera, Check, Loader2, PencilLine, Square } from 'lucide-react';
 interface RecordingOverlayActionsProps {
   lang: string;
   noteComposerOpen: boolean;
+  hasNoteDraft: boolean;
   noteCount: number;
   screenshotCount: number;
   isRecording: boolean;
@@ -30,6 +31,7 @@ interface RecordingOverlayActionsProps {
 export function RecordingOverlayActions({
   lang,
   noteComposerOpen,
+  hasNoteDraft,
   noteCount,
   screenshotCount,
   isRecording,
@@ -63,10 +65,16 @@ export function RecordingOverlayActions({
             onClick={onOpenNote}
             disabled={isStopping || isAnchoringNote || isSavingNote || isUndoingNote || !isRecording}
             className="flex h-full items-center gap-1.5 px-2.5 text-[10px] font-semibold text-white/90 transition hover:bg-white/[0.05] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-35"
-            aria-label={noteComposerOpen ? 'Close note' : 'Add note'}
+            aria-label={noteComposerOpen
+              ? (lang === 'it' ? 'Chiudi nota' : 'Close note')
+              : hasNoteDraft
+                ? (lang === 'it' ? 'Riprendi la bozza della nota' : 'Resume unsaved note')
+                : (lang === 'it' ? 'Aggiungi nota' : 'Add note')}
             aria-expanded={noteComposerOpen}
-            title={noteComposerOpen ? 'Close note editor' : 'Add note about this moment'}
+            aria-controls="overlay-note-composer"
+            title={hasNoteDraft ? (lang === 'it' ? 'Bozza non salvata' : 'Unsaved draft') : (lang === 'it' ? 'Aggiungi nota' : 'Add note')}
             data-note-action="true"
+            data-note-draft={hasNoteDraft}
             data-persisted={lastSavedNoteId !== null}
           >
             {isAnchoringNote || isSavingNote ? (
@@ -76,7 +84,7 @@ export function RecordingOverlayActions({
             ) : (
               <PencilLine className="h-3.5 w-3.5 text-amber-100/85" aria-hidden="true" />
             )}
-            <span>{lastSavedNoteId !== null ? (lang === 'it' ? 'Salvata' : 'Saved') : `${lang === 'it' ? 'Note' : 'Notes'} ${noteCount}`}</span>
+            <span>{lang === 'it' ? 'Note' : 'Notes'} {noteCount}{hasNoteDraft && <span aria-hidden="true" className="ml-1 text-amber-100">•</span>}</span>
           </button>
           {lastSavedNoteId && (
             <button
@@ -85,8 +93,9 @@ export function RecordingOverlayActions({
               disabled={isUndoingNote || isStopping}
               className="flex h-full items-center border-l border-amber-100/15 px-2 text-[9px] font-semibold text-amber-100/75 transition hover:bg-amber-100/10 disabled:opacity-35"
               data-note-undo="true"
+              aria-label={lang === 'it' ? 'Annulla ultima nota salvata' : 'Undo last saved note'}
             >
-              {isUndoingNote ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
+              {isUndoingNote ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : (lang === 'it' ? 'Annulla' : 'Undo')}
             </button>
           )}
         </div>
@@ -117,7 +126,7 @@ export function RecordingOverlayActions({
             ) : (
               <Camera className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            <span>{lastSavedScreenshotId !== null ? (lang === 'it' ? 'Salvato' : 'Saved') : `${lang === 'it' ? 'Scatti' : 'Shots'} ${screenshotCount}`}</span>
+            <span>{lang === 'it' ? 'Scatti' : 'Shots'} {screenshotCount}</span>
           </button>
 
           {lastSavedScreenshotId && (
@@ -126,11 +135,11 @@ export function RecordingOverlayActions({
               onClick={onUndoScreenshot}
               disabled={isUndoingScreenshot || isStopping}
               className="flex h-full items-center border-l border-emerald-200/20 px-2 text-[9px] font-semibold text-emerald-100/75 transition hover:bg-emerald-200/10 hover:text-emerald-50 disabled:cursor-not-allowed disabled:opacity-35"
-              aria-label="Undo last screenshot"
-              title="Undo last screenshot"
+              aria-label={lang === 'it' ? 'Annulla ultimo screenshot' : 'Undo last screenshot'}
+              title={lang === 'it' ? 'Annulla ultimo screenshot' : 'Undo last screenshot'}
               data-screenshot-undo="true"
             >
-              {isUndoingScreenshot ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
+              {isUndoingScreenshot ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : (lang === 'it' ? 'Annulla' : 'Undo')}
             </button>
           )}
         </div>

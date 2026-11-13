@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { ApiClient, CaptureDisplay } from '../api/apiClient';
 import { RecordingOverlayActions } from '../components/recording/RecordingOverlayActions';
+import { RecordingOverlayNoteComposer } from '../components/recording/RecordingOverlayNoteComposer';
 import { useTranslation } from '../i18n/i18n';
 import type { AudioSourceHealth } from '../hooks/useRecorder';
 
@@ -46,7 +47,8 @@ export default function RecordingOverlayPage() {
   const [noteCount, setNoteCount] = useState(0);
   const [noteDraft, setNoteDraft] = useState('');
   const [noteAnchor, setNoteAnchor] = useState<number | null>(null);
-  const noteComposerOpen = noteAnchor !== null;
+  const [noteComposerVisible, setNoteComposerVisible] = useState(false);
+  const noteComposerOpen = noteComposerVisible && noteAnchor !== null;
   const [isAnchoringNote, setIsAnchoringNote] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isUndoingNote, setIsUndoingNote] = useState(false);
@@ -98,6 +100,14 @@ export default function RecordingOverlayPage() {
   const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
   const screenshotFeedbackTimerRef = useRef<number | null>(null);
   const noteFeedbackTimerRef = useRef<number | null>(null);
+
+  // A draft belongs to one recording ID. Never carry unsaved text/timestamps
+  // into a different Meeting when the overlay reconnects or switches sessions.
+  useEffect(() => {
+    setNoteDraft('');
+    setNoteAnchor(null);
+    setNoteComposerVisible(false);
+  }, [recordingId]);
 
   useEffect(() => {
     selectedDisplayIdRef.current = selectedDisplayId;
@@ -205,6 +215,7 @@ export default function RecordingOverlayPage() {
           setNoteCount(0);
           setNoteDraft('');
           setNoteAnchor(null);
+          setNoteComposerVisible(false);
           setLastScreenshotAt(null);
           setLastSavedScreenshotId(null);
           if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -571,9 +582,22 @@ export default function RecordingOverlayPage() {
     }
   };
 
+  // Collapsing a draft must not silently discard the text or its *original*
+  // local capture timestamp. An empty composer is intentionally reset so a new
+  // note receives a fresh authoritative anchor.
   const closeNoteComposer = useCallback(() => {
+    setNoteComposerVisible(false);
+    if (!noteDraft.trim()) setNoteAnchor(null);
+    // The textarea unmounts; return keyboard/VoiceOver focus to its trigger.
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>('[data-note-action="true"]')?.focus();
+    });
+  }, [noteDraft]);
+
+  const resetSavedNoteComposer = useCallback(() => {
     setNoteDraft('');
     setNoteAnchor(null);
+    setNoteComposerVisible(false);
   }, []);
 
   const handleOpenNote = async () => {
@@ -582,11 +606,18 @@ export default function RecordingOverlayPage() {
       return;
     }
     if (!recordingId || !isRecording || isStopping || isAnchoringNote || isSavingNote) return;
+    if (noteAnchor !== null && noteDraft.trim()) {
+      setNoteComposerVisible(true);
+      setIsDisplayPickerOpen(false);
+      window.requestAnimationFrame(() => noteInputRef.current?.focus());
+      return;
+    }
     setIsAnchoringNote(true);
     setErrorMsg(null);
     try {
       const anchor = await ApiClient.recordingNoteAnchor(recordingId);
       setNoteAnchor(anchor.timestamp);
+      setNoteComposerVisible(true);
       setIsDisplayPickerOpen(false);
       window.requestAnimationFrame(() => noteInputRef.current?.focus());
     } catch (err: any) {
@@ -612,7 +643,7 @@ export default function RecordingOverlayPage() {
       });
       setNoteCount((current) => Math.max(current + 1, saved.sequence + 1));
       setLastSavedNoteId(saved.note_id);
-      closeNoteComposer();
+      resetSavedNoteComposer();
       if (noteFeedbackTimerRef.current) window.clearTimeout(noteFeedbackTimerRef.current);
       noteFeedbackTimerRef.current = window.setTimeout(() => {
         setLastSavedNoteId(null);
@@ -906,61 +937,17 @@ export default function RecordingOverlayPage() {
         </div>
       )}
 
-      {noteComposerOpen && (
-        <div
-          className="mt-2 rounded-xl border border-amber-200/20 bg-amber-100/[0.07] p-2"
-          data-note-composer="true"
-        >
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="font-mono text-[10px] font-semibold tabular-nums text-amber-100/85">
-              {noteAnchor === null
-                ? '—'
-                : `${Math.floor(noteAnchor / 60)}:${String(Math.floor(noteAnchor % 60)).padStart(2, '0')}`}
-            </span>
-            <button
-              type="button"
-              onClick={closeNoteComposer}
-              disabled={isSavingNote}
-              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-40"
-              aria-label="Close note editor"
-              data-note-close="true"
-            >
-              <X className="h-3 w-3" aria-hidden="true" />
-              Close
-            </button>
-          </div>
-          <textarea
-            ref={noteInputRef}
-            value={noteDraft}
-            maxLength={4000}
-            rows={2}
-            placeholder="Add a note about this moment…"
-            onChange={(event) => setNoteDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                closeNoteComposer();
-                return;
-              }
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                void handleSaveNote();
-              }
-            }}
-            className="w-full select-text resize-none rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-[11px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-amber-200/35"
-            aria-label="Note about this meeting moment"
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="text-[9px] text-white/40">Enter to save · Shift+Enter for a new line</span>
-            <div className="flex gap-1.5">
-              <button type="button" onClick={closeNoteComposer} disabled={isSavingNote} className="rounded-md px-2 py-1 text-[10px] text-white/60 hover:bg-white/10 disabled:opacity-40">Cancel</button>
-              <button type="button" onClick={() => void handleSaveNote()} disabled={!noteDraft.trim() || isSavingNote} className="rounded-md bg-amber-200/20 px-2.5 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-200/30 disabled:opacity-40" data-note-save="true">{isSavingNote ? 'Saving…' : 'Save note'}</button>
-            </div>
-          </div>
-          {noteDraft.length >= 3600 && (
-            <div className="mt-1 text-right text-[8px] text-white/35">{noteDraft.length}/4000</div>
-          )}
-        </div>
+      {noteComposerOpen && noteAnchor !== null && (
+        <RecordingOverlayNoteComposer
+          lang={lang}
+          anchor={noteAnchor}
+          draft={noteDraft}
+          saving={isSavingNote}
+          inputRef={noteInputRef}
+          onChange={setNoteDraft}
+          onClose={closeNoteComposer}
+          onSave={() => void handleSaveNote()}
+        />
       )}
 
       <div className="mt-2 flex items-center gap-1.5">
@@ -1077,6 +1064,7 @@ export default function RecordingOverlayPage() {
         <RecordingOverlayActions
           lang={lang}
           noteComposerOpen={noteComposerOpen}
+          hasNoteDraft={Boolean(noteDraft.trim())}
           noteCount={noteCount}
           screenshotCount={screenshotCount}
           isRecording={isRecording}
