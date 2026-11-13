@@ -576,6 +576,39 @@ class CatalogStore:
             ).fetchall()
         return [self._row_to_analysis_run(row) for row in rows]
 
+    def list_analysis_runs_grouped(
+        self, source_key: str, source_ids: list[str], *, limit: int = 50,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Batch per-source latest runs without changing list_analysis_runs semantics.
+
+        Each recording/transcription keeps its own limit and newest-first order;
+        no cross-record cap or new cache/persistence owner is introduced.
+        """
+        if source_key not in {"recording_id", "transcription_id"}:
+            raise ValueError("Unsupported analysis run source")
+        ids = list(dict.fromkeys(source_id for source_id in source_ids if source_id))
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        bounded_limit = max(1, min(limit, 500))
+        for start in range(0, len(ids), 400):
+            batch = ids[start:start + 400]
+            placeholders = ", ".join("?" for _ in batch)
+            with self.connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT * FROM (
+                        SELECT analysis_runs.*, ROW_NUMBER() OVER (
+                            PARTITION BY {source_key} ORDER BY created_at DESC
+                        ) AS source_rank
+                        FROM analysis_runs WHERE {source_key} IN ({placeholders})
+                    ) WHERE source_rank <= ?
+                    ORDER BY {source_key}, created_at DESC
+                    """,
+                    [*batch, bounded_limit],
+                ).fetchall()
+            for row in rows:
+                grouped.setdefault(row[source_key], []).append(self._row_to_analysis_run(row))
+        return grouped
+
     def _row_to_analysis_run(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
             "id": row["id"],
