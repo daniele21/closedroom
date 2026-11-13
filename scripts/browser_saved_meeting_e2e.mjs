@@ -2113,13 +2113,32 @@ try {
   await waitText(browser, ['Saved Tu speaker confirmation'], 5000, true);
   await browser.clickCss('#meeting-tab-speakers');
   await waitText(browser, ['Conferma questa voce', 'Confirm this voice'], 7000, true);
-  const pendingSelf = await browser.execute(`
-    const root = document.querySelector('[data-speaker-review-workspace]');
-    return Boolean(root?.querySelector('[data-speaker-confirm="mic:S1"]:not([disabled])') &&
-      root.querySelector('input#speaker-review-name')?.value === 'Tu' &&
-      root.querySelector('[data-speaker-identity-status="unconfirmed"]'));
-  `);
-  if (!pendingSelf) throw new Error('saved Tu name cannot be confirmed without renaming');
+  // Name input is hydrated in a React effect after the selected voice appears.
+  // The button's text can be visible before that effect commits; wait for the
+  // full actionable state, never just for the label or an enabled-looking row.
+  let pendingSelf = false;
+  let pendingSelfState = null;
+  for (let attempt = 0; attempt < 70; attempt += 1) {
+    pendingSelfState = await browser.execute(`
+      const root = document.querySelector('[data-speaker-review-workspace]');
+      const button = root?.querySelector('[data-speaker-confirm="mic:S1"]');
+      const name = root?.querySelector('input#speaker-review-name');
+      return {
+        workspace: Boolean(root),
+        confirmPresent: Boolean(button),
+        confirmEnabled: Boolean(button && !button.disabled),
+        name: name?.value ?? null,
+        unconfirmed: Boolean(root?.querySelector('[data-speaker-identity-status="unconfirmed"]')),
+      };
+    `);
+    pendingSelf = pendingSelfState.confirmEnabled &&
+      pendingSelfState.name === 'Tu' && pendingSelfState.unconfirmed;
+    if (pendingSelf) break;
+    await sleep(100);
+  }
+  if (!pendingSelf) {
+    throw new Error('saved Tu name cannot be confirmed without renaming: ' + JSON.stringify(pendingSelfState));
+  }
   await browser.clickCss('[data-speaker-confirm="mic:S1"]');
   await waitCount('speaker_confirm', 1);
   let confirmedSelf = false;

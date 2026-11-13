@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "frontend" / "src" / "pages" / "RecordingOverlayPage.tsx"
+CONTROLS = ROOT / "frontend" / "src" / "components" / "recording" / "RecordingOverlayActions.tsx"
 RECORDER = ROOT / "frontend" / "src" / "hooks" / "useRecorder.ts"
 MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
 GALLERY = ROOT / "frontend" / "src" / "components" / "meeting" / "MeetingSourcesGallery.tsx"
@@ -21,6 +22,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.overlay = OVERLAY.read_text(encoding="utf-8")
+        cls.controls = CONTROLS.read_text(encoding="utf-8")
         cls.recorder = RECORDER.read_text(encoding="utf-8")
         cls.meeting = MEETING.read_text(encoding="utf-8")
         cls.gallery = GALLERY.read_text(encoding="utf-8")
@@ -76,14 +78,17 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn('data-overlay-control-center="true"', self.overlay)
         self.assertIn('data-display-selector="true"', self.overlay)
         self.assertIn('data-display-picker="true"', self.overlay)
-        self.assertIn('data-screenshot-action="true"', self.overlay)
+        self.assertIn('data-screenshot-action="true"', self.controls)
+        self.assertIn('data-persisted={lastSavedScreenshotId !== null}', self.controls)
+        self.assertIn("<RecordingOverlayActions", self.overlay)
+        self.assertIn("onCaptureScreenshot={() => void handleCaptureScreenshot()}", self.overlay)
         self.assertNotIn("<select", self.overlay)
         self.assertIn("display.width} × {display.height", self.overlay)
-        self.assertIn("lastSavedScreenshotId !== null", self.overlay)
+        self.assertIn("lastSavedScreenshotId !== null", self.controls)
         self.assertIn("ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId)", self.overlay)
         self.assertIn("if (isUndoingScreenshot)", self.overlay)
-        self.assertIn("isCapturingScreenshot || isUndoingScreenshot", self.overlay)
-        self.assertIn('data-screenshot-undo="true"', self.overlay)
+        self.assertIn("isCapturingScreenshot || isUndoingScreenshot", self.controls)
+        self.assertIn('data-screenshot-undo="true"', self.controls)
 
     def test_transcript_keeps_asr_segments_immutable_and_anchors_screenshot_by_time(self) -> None:
         self.assertIn("segment.start <= shot.timestamp && shot.timestamp <= segment.end", self.transcript)
