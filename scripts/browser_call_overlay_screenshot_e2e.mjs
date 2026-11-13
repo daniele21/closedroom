@@ -670,6 +670,31 @@ try {
   await browser.clickCss('button[data-note-action="true"]');
   await waitSelector(browser, '[data-note-composer="true"] textarea', 5000, true);
   if (counts.note_anchor !== 2) throw new Error('reopening the composer did not request a new anchor: ' + counts.note_anchor);
+  // Collapsing an unsaved draft is not a new note and must not move its
+  // authoritative capture anchor. Reopening resumes the draft in place.
+  const draftSet = await browser.execute(`
+    const textarea = document.querySelector('[data-note-composer="true"] textarea');
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    if (!textarea || !setter) return false;
+    setter.call(textarea, 'Draft while speaking');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  if (!draftSet) throw new Error('Could not write a local overlay draft');
+  await waitText(browser, ['Draft while speaking'], 3000, true);
+  await browser.clickCss('button[data-note-close="true"]');
+  await waitSelector(browser, 'button[data-note-action="true"][data-note-draft="true"]', 3000, true);
+  await browser.clickCss('button[data-note-action="true"]');
+  await waitSelector(browser, '[data-note-composer="true"] textarea', 3000, true);
+  const resumedDraft = await browser.execute(`
+    const textarea = document.querySelector('[data-note-composer="true"] textarea');
+    return { value: textarea?.value, anchor: document.querySelector('[data-note-composer="true"] span[title]')?.textContent?.trim() };
+  `);
+  if (resumedDraft.value !== 'Draft while speaking' || counts.note_anchor !== 2 || counts.notes_post !== 0) {
+    throw new Error('Reopening unsaved draft lost text or reanchored: ' + JSON.stringify({ resumedDraft, counts }));
+  }
+  await checkpoint(browser, '03c-note-draft-resumed');
+
   const noteEntered = await browser.execute(`
     const textarea = document.querySelector('[data-note-composer="true"] textarea');
     if (!textarea) return false;
