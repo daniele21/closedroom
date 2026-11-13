@@ -1,7 +1,7 @@
 # ClosedRoom — UX/UI meeting-first redesign
 
-Status: ACTIVE — design approved; implementation not yet integrated. Owner: product/front-end. Target: dev.
-Resume identity: dev bb38105620e3547b0d28b541d6d4b0cec968945f (2026-11-13); refresh head/base/PRs before work.
+Status: ACTIVE — UX0/UX3 integrated, UX2 batch optimization integrated, UX4 controls integrated; UX1 archive opening PR #214 in validation. Full redesign remains open. Owner: product/front-end. Target: dev.
+Resume identity: dev 4e1ea700a3730c9354c8d0b5845fecb0aca29f1e (2026-11-13); refresh head/base/PRs before work.
 
 ## Product outcome and boundaries
 
@@ -16,7 +16,7 @@ Axes: intended product PRODUCT_FEATURE; this plan-only edit PRODUCT_NONE. Delive
 - Eight editable screens: https://www.figma.com/design/VbELzf6PuSKxFbpZzUCBuu — Riunioni; Progetti; Meeting Notes; Voci; Analisi; Nuovo meeting; Registrazione attiva; Progetti compatti.
 - Dedicated **compact floating overlay** and **saved Meeting screenshot gallery** are specified in design/overlay-screenshot-ux-v1.md on open PR #210; conversation HTML prototype is illustrative. These changes are NOT yet Figma-editable screens because the Figma Starter limit blocked that addition; synchronize when available, without blocking code delivery.
 - dev already contains reliable local source owners for note and screenshot persistence, overlay display selection, note/screenshot undo, Meeting image thumbnails/context, transcription and speakers. Redesign the journey, not storage.
-- PR #210 (daniele/workspace-ux-reset → dev) implements first Projects hierarchy/loading changes but is **open, unmerged**. Its branch workstream must converge with this plan rather than establish a second roadmap.
+- PR #210 Projects, #212 Meeting Note e fonti, #213 catalog batch and #211 overlay controls are integrated in dev. PR #214 archive-first-open is open pending Mac validation. Use this plan as the only active roadmap.
 - docs/workstreams/meeting-ux-consolidation.md records earlier integrated UX and legacy-route obligations: preserve them; do not redo integrated UX-0..6. Code + design/ux-contract.json + design/brand-kit.json remain canonical, not Figma.
 
 ## Information architecture and approved flows
@@ -34,11 +34,11 @@ Primary rail: **Riunioni**, **Progetti**, persistent **Nuovo meeting**. Utilitie
 
 | ID / state | Shippable result and single write owner | Dependency |
 | --- | --- | --- |
-| UX0 ACTIVE | Finish PR #210: ProjectsPage.tsx meeting-first layout, truthful loading, no duplicated CTA, reuse bounded snapshot; preserve source and browser evidence | Existing PR → dev gates |
-| UX1 READY | App.tsx + MeetingsPage.tsx + MeetingSearchDialog.tsx: one rail/search/navigation model; fast route change, proper Back and context recovery | UX0 IA agreement |
-| UX2 READY | routers/workspace.py + routers/helpers.py: profile /v1/projects (1/25/200 records), remove proven N+1; bounded canonical metadata projection/cache invalidation | UX0 API semantics |
-| UX3 READY | MeetingDetailPage.tsx + small extracted presentation components as needed: Note e fonti plus visible screenshot strip/gallery/preview/seek. Reuse current screenshot hooks and player | Existing saved Meeting contract |
-| UX4 READY | RecordingOverlayPage.tsx and overlay-specific CSS: compact/expanded control, persistent timer/source health, note composer, selected display, screenshot, Stop/Undo | Existing recorder/screenshot owners |
+| UX0 DONE | PR #210: Projects meeting-first ordering, truthful loading and bounded in-memory snapshot integrated with Mac FULL_MEDIA | dev integrated |
+| UX1 ACTIVE | PR #214 removes artificial initial archive debounce; finish App.tsx navigation consistency and Back/context recovery | UX0 integrated; PR #214 validation |
+| UX2 ACTIVE | PR #213 batches latest transcript lookups in CatalogStore; measure 1/25/200 and remove other proven per-item run/job reads | Batch integrated; further profiling |
+| UX3 DONE | PR #212: MeetingSourcesGallery presents notes/screenshots before AI tabs; same source API, thumbnail, seek and original preview | dev integrated + Mac FULL_MEDIA |
+| UX4 ACTIVE | PR #211: modular stateless RecordingOverlayActions integrated, semantic persistence/Undo E2E passed; complete compact/expanded UX polish | dev integrated; interaction design pending |
 | UX5 READY | NewRecordingPage.tsx: one Start, readiness/permissions and honest waiting, safe transition to overlay/saved Meeting | UX4 visible state contract |
 | UX6 BLOCKED | TranscriptTextView + SpeakerDiarizationEditor: no “Computer” person; mic identity, readable correction/undo. MeetingDetailPage tab wiring serialized after UX3 | UX3 shared parent |
 | UX7 BLOCKED | Analysis child dialogs/editors: reusable predefined outcomes and truthful processing. MeetingDetailPage integration serialized after UX3/UX6 | UX3 + UX6 tabs |
@@ -71,6 +71,6 @@ Use repository selector `python3 scripts/select_validation_profile.py --base <ba
 
 ## Resume and durable closeout
 
-**Next:** reconcile #210 with this plan, inspect its exact-head FULL_MEDIA and integrate UX0 only if required gates pass. In parallel start UX2 profiling and UX4 overlay. The redesign is **planned, not shipped**; latency, usability and real hardware outcomes remain unmeasured.
+**Next:** validate/merge PR #214 on exact head, then UX1 navigation context, UX2 project latency profiling, UX4 overlay polish and UX5 readiness independently. UX6/7/8 follow owner integration. Source deliveries ≠ product success; latency, usability and physical Mac outcomes remain unmeasured.
 
 At convergence update design/ux-contract.json, affected docs/features.md or bounded feature owner, docs/current-state.md and executable tests; update design/brand-kit.json only if approved tokens change. Remove temporary workstream after durable truth and deferred release obligations are transferred.
