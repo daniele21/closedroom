@@ -57,6 +57,8 @@ class FrontendMeetingMomentNotesContractTests(unittest.TestCase):
         self.assertIn("resetSavedNoteComposer();", self.overlay)
         self.assertIn("onClose={closeNoteComposer}", self.overlay)
         self.assertIn("hasNoteDraft={Boolean(noteDraft.trim())}", self.overlay)
+        self.assertIn("}, [recordingId]);", self.overlay)
+        self.assertIn("Never carry unsaved text/timestamps", self.overlay)
         self.assertIn("data-note-draft={hasNoteDraft}", self.controls)
         self.assertIn("onSave={() => void handleSaveNote()}", self.overlay)
 
