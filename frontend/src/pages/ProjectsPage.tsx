@@ -22,7 +22,6 @@ import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { ProjectPromptModal } from '../components/ui/ProjectPromptModal';
 import { TimeRangeFilter } from '../components/workspace/TimeRangeFilter';
-import { TaskProcessingLoader } from '../components/workspace/TaskProcessingLoader';
 import { InsightDetailDialog, type InsightTab } from '../components/workspace/InsightDetailDialog';
 import {
   ActionChecklist,
@@ -64,21 +63,13 @@ interface ProjectsPageProps {
 
 
 
-const ACTION_SCOPE_OPTIONS = [
-  { value: 'week', label: 'Settimana' },
-  { value: 'month', label: 'Mese' },
-  { value: 'all', label: 'Tutte' },
-] as const;
-
-type ActionScope = typeof ACTION_SCOPE_OPTIONS[number]['value'];
-
 const PROJECT_VIEW_STORAGE_KEY = 'closedroom.projects.view';
 // Ephemeral, in-memory view snapshot. The backend remains the canonical project owner.
 // Show it immediately on return and always reconcile against the local API.
 let projectViewSnapshot: Project[] | null = null;
 
-function restoreProjectView(): { name: string; range: TimeRangeState; actionScope: ActionScope } {
-  const fallback = { name: '', range: { mode: 'all' } as TimeRangeState, actionScope: 'all' as ActionScope };
+function restoreProjectView(): { name: string; range: TimeRangeState } {
+  const fallback = { name: '', range: { mode: 'all' } as TimeRangeState };
   try {
     const raw = sessionStorage.getItem(PROJECT_VIEW_STORAGE_KEY);
     if (!raw) return fallback;
@@ -86,7 +77,7 @@ function restoreProjectView(): { name: string; range: TimeRangeState; actionScop
     if (!saved || typeof saved !== 'object') return fallback;
     const data = saved as Record<string, unknown>;
     const range = data.range && typeof data.range === 'object' ? data.range as Record<string, unknown> : null;
-    const mode = range && ['last7', 'last30', 'all', 'custom'].includes(String(range.mode)) ? String(range.mode) : 'last7';
+    const mode = range && ['last7', 'last30', 'all', 'custom'].includes(String(range.mode)) ? String(range.mode) : 'all';
     const validRange = {
       mode,
       ...(range?.startDate && typeof range.startDate === 'string' ? { startDate: range.startDate } : {}),
@@ -95,7 +86,6 @@ function restoreProjectView(): { name: string; range: TimeRangeState; actionScop
     return {
       name: typeof data.name === 'string' ? data.name : '',
       range: validRange,
-      actionScope: ['week', 'month', 'all'].includes(String(data.actionScope)) ? data.actionScope as ActionScope : 'week',
     };
   } catch {
     return fallback;
@@ -117,9 +107,6 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
   const [selectedProjectName, setSelectedProjectName] = useState(savedProjectView.name);
   const [sidebarQuery, setSidebarQuery] = useState('');
   const [projectRange, setProjectRange] = useState<TimeRangeState>(savedProjectView.range);
-  const [actionScope, setActionScope] = useState<ActionScope>(savedProjectView.actionScope);
-  const [projectDigestGeneratedAt, setProjectDigestGeneratedAt] = useState<string | null>(null);
-  const [isProjectGenerating, setIsProjectGenerating] = useState(false);
   const [editingRecordingId, setEditingRecordingId] = useState<string | null>(null);
   const [editTitleValue, setEditTitleValue] = useState('');
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
@@ -151,12 +138,6 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     { mode: 'last30' as const, label: '30g' },
     { mode: 'all' as const, label: lang === 'it' ? 'Tutto' : 'All' },
     { mode: 'custom' as const, label: lang === 'it' ? 'Custom' : 'Custom' },
-  ], [lang]);
-
-  const actionScopeOptions = useMemo(() => [
-    { value: 'week' as const, label: lang === 'it' ? 'Settimana' : 'Week' },
-    { value: 'month' as const, label: lang === 'it' ? 'Mese' : 'Month' },
-    { value: 'all' as const, label: lang === 'it' ? 'Tutte' : 'All' },
   ], [lang]);
 
   const loadProjects = async () => {
@@ -224,14 +205,8 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     sessionStorage.setItem(PROJECT_VIEW_STORAGE_KEY, JSON.stringify({
       name: selectedProjectName,
       range: projectRange,
-      actionScope,
     }));
-  }, [loading, demoMode, selectedProjectName, projectRange, actionScope]);
-
-  useEffect(() => {
-    setProjectDigestGeneratedAt(null);
-    setIsProjectGenerating(false);
-  }, [selectedProjectName, projectRange.mode, projectRange.startDate, projectRange.endDate]);
+  }, [loading, demoMode, selectedProjectName, projectRange]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.name === selectedProjectName) || projects[0],
@@ -268,15 +243,7 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     [sources]
   );
 
-  const actionScopeRange = useMemo(() => {
-    if (actionScope === 'week') return resolveTimeRange({ mode: 'last7' });
-    if (actionScope === 'month') return resolveTimeRange({ mode: 'last30' });
-    return resolveTimeRange({ mode: 'all' });
-  }, [actionScope]);
-  const actionItems = useMemo(
-    () => actionItemsAll.filter((item) => isWithinTimeRange(item.sourceDate, actionScopeRange)),
-    [actionItemsAll, actionScopeRange]
-  );
+  const actionItems = actionItemsAll;
 
   const visibleTimelineItems = useMemo(
     () => showAllTimeline ? periodItems : periodItems.slice(0, 12),
@@ -347,19 +314,6 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
       sessionStorage.setItem(NEW_RECORDING_PROJECT_STORAGE_KEY, selectedProject.name);
     }
     navigateTo('recording');
-  };
-
-  const handleGenerateProjectSituation = () => {
-    const insightCount = digestItems.length + actionItemsAll.length + decisions.length + risks.length;
-    const timestamp = new Date().toLocaleString(lang === 'it' ? 'it-IT' : 'en-US', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    });
-    setProjectDigestGeneratedAt(timestamp);
-    showToast(
-      insightCount > 0 ? t('projects.toastDigestSuccess') : t('projects.toastDigestEmpty'),
-      insightCount > 0 ? 'success' : 'info',
-    );
   };
 
   if (loading) {
@@ -537,49 +491,9 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
           )}
         </section>
 
-        {/* Compact project status KPIs */}
-        {periodItems.length > 0 && (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4" data-tour="project-status">
-            <button
-              type="button"
-              onClick={() => {
-                const timelineSec = document.querySelector('[data-tour="project-timeline"]');
-                timelineSec?.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="surface-primary hover:border-border-focus p-4 rounded-xl text-left transition-premium hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(0,0,0,0.1)]"
-            >
-              <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{lang === 'it' ? 'Meeting' : 'Meetings'}</div>
-              <div className="mt-1 text-2xl font-bold text-accent">{periodItems.length}</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => openInsightDialog('actions')}
-              className="surface-primary hover:border-border-focus p-4 rounded-xl text-left transition-premium hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(0,0,0,0.1)]"
-            >
-              <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{lang === 'it' ? 'Azioni aperte' : 'Open actions'}</div>
-              <div className="mt-1 text-2xl font-bold text-success">{actionItemsAll.length}</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => openInsightDialog('decisions')}
-              className="surface-primary hover:border-border-focus p-4 rounded-xl text-left transition-premium hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(0,0,0,0.1)]"
-            >
-              <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{lang === 'it' ? 'Decisioni' : 'Decisions'}</div>
-              <div className="mt-1 text-2xl font-bold text-info">{decisions.length}</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => openInsightDialog('risks')}
-              className="surface-primary hover:border-border-focus p-4 rounded-xl text-left transition-premium hover:-translate-y-0.5 hover:shadow-[0_8px_20px_rgba(0,0,0,0.1)]"
-            >
-              <div className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{lang === 'it' ? 'Rischi' : 'Risks'}</div>
-              <div className="mt-1 text-2xl font-bold text-warning">{risks.length}</div>
-            </button>
-          </div>
-        )}
+        <p className="text-xs text-text-muted" data-tour="project-status">
+          {periodItems.length} {lang === 'it' ? 'meeting' : 'meetings'} · {readyCount} {lang === 'it' ? 'analizzati' : 'analyzed'}
+        </p>
 
         {periodItems.length > 0 && readyCount === 0 && (
           <p className="text-xs text-text-muted">
@@ -589,95 +503,28 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
           </p>
         )}
 
-        {/* Project Situation (Digest) - full width */}
-        {readyCount > 0 && <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
-          <SectionHeader
-            icon={Sparkles}
-            title={t('workspace.projectDigestTitle')}
-            description={t('workspace.digestSubtitle')}
-            tooltip={t('workspace.digestTooltip')}
-            action={
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => navigateTo('analysis')}
-                  className="text-xs"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {t('projects.btnCustomQuestion')}
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleGenerateProjectSituation}
-                  disabled={periodItems.length === 0 || isProjectGenerating}
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {projectDigestGeneratedAt ? t('workspace.digestCtaUpdate') : t('workspace.digestCtaGenerate')}
-                </Button>
-              </div>
-            }
-          />
-          
-          {isProjectGenerating ? (
-            <div className="py-4">
-              <TaskProcessingLoader
-                title={t('workspace.loaderProjectSituationTitle')}
-                description={t('workspace.loaderProjectSituationDesc')}
-                steps={[
-                  t('workspace.loaderProjectSituationStep1'),
-                  t('workspace.loaderProjectSituationStep2'),
-                  t('workspace.loaderProjectSituationStep3'),
-                  t('workspace.loaderProjectSituationStep4'),
-                ]}
-                activeStep={2}
-                progress={72}
-                variant="project"
-                compact
-                helperText={t('workspace.loaderLocalHelper')}
-              />
-            </div>
-          ) : (
-            <div className="mt-1">
-              {projectDigestGeneratedAt && digestItems.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {digestItems.slice(0, 4).map((item) => (
-                    <div key={item.id} className="rounded-xl border border-border-subtle bg-bg-glass p-3 shadow-[inset_0_1px_0_var(--surface-highlight)] transition-premium hover:border-accent/30 hover:bg-bg-hover/40">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-text-muted">
-                        <span>{item.title}</span>
-                        <span>{item.sourceTitle}</span>
-                      </div>
-                      <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">{limitText(item.text, 220)}</p>
-                    </div>
-                  ))}
+        {/* Project insights are a projection of existing meeting analyses; no fake AI task. */}
+        {digestItems.length > 0 && (
+          <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
+            <SectionHeader
+              icon={Sparkles}
+              title={t('workspace.projectDigestTitle')}
+              description={t('workspace.digestSubtitle')}
+              tooltip={t('workspace.digestTooltip')}
+            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {digestItems.slice(0, 4).map((item) => (
+                <div key={item.id} className="rounded-xl border border-border-subtle bg-bg-glass p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-text-muted">
+                    <span>{item.title}</span>
+                    <span>{item.sourceTitle}</span>
+                  </div>
+                  <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">{limitText(item.text, 220)}</p>
                 </div>
-              ) : (
-                <EmptyState
-                  icon={Sparkles}
-                  title={t('workspace.digestEmptyTitle')}
-                  description={t('workspace.digestEmptyDesc')}
-                  className="py-6"
-                  action={
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={handleGenerateProjectSituation}
-                      disabled={periodItems.length === 0 || isProjectGenerating}
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      {t('workspace.digestCtaGenerate')}
-                    </Button>
-                  }
-                />
-              )}
-              {projectDigestGeneratedAt && (
-                <p className="mt-2 text-[10px] text-text-muted text-right">
-                  {lang === 'it' ? 'Situazione aggiornata' : 'Situation updated'}: {projectDigestGeneratedAt}
-                </p>
-              )}
+              ))}
             </div>
-          )}
-        </section>}
+          </section>
+        )}
 
         {/* Actions - full width */}
         {actionItems.length > 0 && <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4" data-tour="project-actions">
@@ -686,30 +533,11 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
             title={t('projects.actionsTitle')}
             description={t('projects.actionsDesc')}
             action={
-              <div className="flex items-center gap-2">
-                <div className="flex rounded-lg border border-border-subtle bg-bg-elevated p-1">
-                  {actionScopeOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setActionScope(option.value)}
-                      className={cn(
-                        'rounded-md px-2.5 py-1 text-xs font-semibold transition-colors',
-                        actionScope === option.value
-                          ? 'bg-accent text-white'
-                          : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                {actionItems.length > 5 && (
-                  <button type="button" onClick={() => openInsightDialog('actions')} className="view-all-link">
-                    {t('demo.viewAll')} ({actionItems.length})
-                  </button>
-                )}
-              </div>
+              actionItems.length > 5 ? (
+                <button type="button" onClick={() => openInsightDialog('actions')} className="view-all-link">
+                  {t('demo.viewAll')} ({actionItems.length})
+                </button>
+              ) : undefined
             }
           />
           <ActionChecklist items={actionItems.slice(0, 5)} />
@@ -717,7 +545,7 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
 
         {/* Decisions and Risks Side-by-Side */}
         {(decisions.length > 0 || risks.length > 0) && <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
+          {decisions.length > 0 && <div className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
             <SectionHeader
               icon={Target}
               title={t('projects.decisionsTitle')}
@@ -731,9 +559,9 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
               }
             />
             <DecisionLog items={decisions.slice(0, 4)} />
-          </div>
+          </div>}
 
-          <div className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
+          {risks.length > 0 && <div className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
             <SectionHeader
               icon={ShieldAlert}
               title={t('projects.risksTitle')}
@@ -747,7 +575,7 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
               }
             />
             <RiskPanel items={risks.slice(0, 4)} />
-          </div>
+          </div>}
         </div>}
 
         {/* Advanced details at the bottom */}
