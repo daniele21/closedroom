@@ -101,6 +101,14 @@ export default function RecordingOverlayPage() {
   const screenshotFeedbackTimerRef = useRef<number | null>(null);
   const noteFeedbackTimerRef = useRef<number | null>(null);
 
+  // A draft belongs to one recording ID. Never carry unsaved text/timestamps
+  // into a different Meeting when the overlay reconnects or switches sessions.
+  useEffect(() => {
+    setNoteDraft('');
+    setNoteAnchor(null);
+    setNoteComposerVisible(false);
+  }, [recordingId]);
+
   useEffect(() => {
     selectedDisplayIdRef.current = selectedDisplayId;
   }, [selectedDisplayId]);
