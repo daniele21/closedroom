@@ -511,6 +511,15 @@ try {
   }
   await checkpoint(browser, '02a-legacy-recording-alias');
 
+  // The workspace fixture is demo read-only. Seed a persisted view to verify
+  // rehydration on both mount and Meeting return, not demo-mode writes.
+  await browser.execute(`
+    sessionStorage.setItem('closedroom.projects.view', JSON.stringify({
+      name: 'ClosedRoom Beta Launch', range: { mode: 'all' },
+      query: 'ClosedRoom', showAll: true,
+    }));
+  `);
+
   await browser.click('[data-tour="nav-projects"]');
   await waitUntil(
     browser,
@@ -558,6 +567,14 @@ try {
   }
   await checkpoint(browser, '03-projects-container');
 
+  observations.initialProjectSearch = await browser.execute(`
+    return document.querySelector('[data-tour="project-sidebar"] input')?.value;
+  `);
+  if (observations.initialProjectSearch !== 'ClosedRoom') {
+    throw new Error('Seeded Project search was not restored when Projects opened');
+  }
+
+
   const openedProjectMeeting = await browser.execute(`
     const timeline = document.querySelector('[data-tour="project-timeline"]');
     const open = Array.from(timeline?.querySelectorAll('button') || []).find((button) =>
@@ -604,6 +621,18 @@ try {
     true,
   );
   await checkpoint(browser, '03b-project-return-preserved');
+  observations.returnedProjectSearch = await browser.execute(`
+    const field = document.querySelector('[data-tour="project-sidebar"] input');
+    return {
+      field: field?.value,
+      stored: JSON.parse(sessionStorage.getItem('closedroom.projects.view') || '{}').query,
+    };
+  `);
+  if (observations.returnedProjectSearch.field !== 'ClosedRoom'
+    || observations.returnedProjectSearch.stored !== 'ClosedRoom') {
+    throw new Error('Project search was lost after meeting return: ' + JSON.stringify(observations.returnedProjectSearch));
+  }
+
 
   // Job state remains shell-owned, but its entry point is a utility, not a third peer page.
   const activityUtility = await browser.execute(`

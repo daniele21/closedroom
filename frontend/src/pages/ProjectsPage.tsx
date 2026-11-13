@@ -67,8 +67,8 @@ const PROJECT_VIEW_STORAGE_KEY = 'closedroom.projects.view';
 // Show it immediately on return and always reconcile against the local API.
 let projectViewSnapshot: Project[] | null = null;
 
-function restoreProjectView(): { name: string; range: TimeRangeState } {
-  const fallback = { name: '', range: { mode: 'all' } as TimeRangeState };
+function restoreProjectView(): { name: string; range: TimeRangeState; query: string; showAll: boolean } {
+  const fallback = { name: '', range: { mode: 'all' } as TimeRangeState, query: '', showAll: false };
   try {
     const raw = sessionStorage.getItem(PROJECT_VIEW_STORAGE_KEY);
     if (!raw) return fallback;
@@ -85,6 +85,8 @@ function restoreProjectView(): { name: string; range: TimeRangeState } {
     return {
       name: typeof data.name === 'string' ? data.name : '',
       range: validRange,
+      query: typeof data.query === 'string' ? data.query.slice(0, 200) : '',
+      showAll: data.showAll === true,
     };
   } catch {
     return fallback;
@@ -104,14 +106,14 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
   const [selectedProjectName, setSelectedProjectName] = useState(savedProjectView.name);
-  const [sidebarQuery, setSidebarQuery] = useState('');
+  const [sidebarQuery, setSidebarQuery] = useState(savedProjectView.query);
   const [projectRange, setProjectRange] = useState<TimeRangeState>(savedProjectView.range);
   const [editingRecordingId, setEditingRecordingId] = useState<string | null>(null);
   const [editTitleValue, setEditTitleValue] = useState('');
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [activeRecordingForProject, setActiveRecordingForProject] = useState<Recording | null>(null);
   const [existingProjectsList, setExistingProjectsList] = useState<string[]>([]);
-  const [showAllTimeline, setShowAllTimeline] = useState(false);
+  const [showAllTimeline, setShowAllTimeline] = useState(savedProjectView.showAll);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('projects_sidebar_collapsed') === 'true');
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
@@ -203,8 +205,10 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
     sessionStorage.setItem(PROJECT_VIEW_STORAGE_KEY, JSON.stringify({
       name: selectedProjectName,
       range: projectRange,
+      query: sidebarQuery,
+      showAll: showAllTimeline,
     }));
-  }, [loading, demoMode, selectedProjectName, projectRange]);
+  }, [loading, demoMode, selectedProjectName, projectRange, sidebarQuery, showAllTimeline]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.name === selectedProjectName) || projects[0],
