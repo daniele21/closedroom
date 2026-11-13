@@ -146,6 +146,20 @@ def _build_projects(app: FastAPI) -> dict:
         batch_reader([recording["id"] for recording in recordings])
         if callable(batch_reader) else None
     )
+    # Project analysis is also a per-record N+1 read. Fetch the same latest
+    # 50 recording and transcription runs per source in bounded local batches.
+    grouped_runs = getattr(services.catalog, "list_analysis_runs_grouped", None)
+    if callable(grouped_runs):
+        recording_runs = grouped_runs("recording_id", [recording["id"] for recording in recordings], limit=50)
+        transcription_runs = grouped_runs(
+            "transcription_id",
+            [transcription["id"] for transcription in transcriptions_by_recording.values()]
+            if transcriptions_by_recording is not None else [],
+            limit=50,
+        )
+    else:
+        recording_runs = None
+        transcription_runs = None
     projects: dict[str, dict] = {}
     unassigned_name = "Senza progetto"
     for recording in recordings:
@@ -160,11 +174,17 @@ def _build_projects(app: FastAPI) -> dict:
             if transcriptions_by_recording is not None
             else services.transcriptions.find_for_recording(recording["id"])
         )
-        runs = services.catalog.list_analysis_runs(recording_id=recording["id"], limit=50)
+        runs = list(recording_runs.get(recording["id"], [])) if recording_runs is not None else (
+            services.catalog.list_analysis_runs(recording_id=recording["id"], limit=50)
+        )
         if transcription:
-            transcription_runs = services.catalog.list_analysis_runs(transcription_id=transcription["id"], limit=50)
+            matched_transcription_runs = (
+                transcription_runs.get(transcription["id"], [])
+                if transcription_runs is not None else
+                services.catalog.list_analysis_runs(transcription_id=transcription["id"], limit=50)
+            )
             existing = {run["id"] for run in runs}
-            runs.extend(run for run in transcription_runs if run["id"] not in existing)
+            runs.extend(run for run in matched_transcription_runs if run["id"] not in existing)
         current_runs = _current_analysis_runs(runs, transcription)
         preparation_jobs = services.transcription_jobs.list(
             job_type="meeting_preparation",
