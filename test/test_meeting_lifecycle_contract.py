@@ -10,14 +10,15 @@ class MeetingLifecycleFrontendContracts(unittest.TestCase):
     def test_native_overlay_can_accept_keyboard_for_note_input(self) -> None:
         native = (ROOT / "src/local_asr_server/window.py").read_text(encoding="utf-8")
         overlay = (ROOT / "frontend/src/pages/RecordingOverlayPage.tsx").read_text(encoding="utf-8")
+        composer = (ROOT / "frontend/src/components/recording/RecordingOverlayNoteComposer.tsx").read_text(encoding="utf-8")
         self.assertIn("class InteractiveOverlayPanel(NSPanel):", native)
         self.assertIn("def canBecomeKeyWindow(self) -> bool:", native)
         self.assertIn("self.overlay_window = InteractiveOverlayPanel.alloc()", native)
-        self.assertIn('data-note-close="true"', overlay)
-        self.assertIn('data-note-save="true"', overlay)
+        self.assertIn('data-note-close="true"', composer)
+        self.assertIn('data-note-save="true"', composer)
         self.assertIn("closeNoteComposer()", overlay)
         self.assertIn("noteInputRef.current?.focus()", overlay)
-        self.assertIn('className="w-full select-text resize-none', overlay)
+        self.assertIn('className="w-full select-text resize-none', composer)
 
     def test_meeting_progress_displays_running_and_measured_state(self) -> None:
         meeting = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
