@@ -5,6 +5,10 @@ Owner: product UX, frontend workspace, local workspace read model
 Read when: changing core recording / saved Meeting / Projects journeys or their loading and navigation behavior
 Base: `dev` at `bb38105620e3547b0d28b541d6d4b0cec968945f` (2026-11-13); refresh before implementation/integration.
 
+## Visual design handoff
+
+Editable UX/UI concept: [ClosedRoom UX/UI Refresh v1](https://www.figma.com/design/VbELzf6PuSKxFbpZzUCBuu). Eight screens: all Meetings; Projects meeting-first; saved Meeting notes+transcript; Voices identity review; outcome-driven analysis; New Meeting readiness; active capture with notes/screenshots; compact Projects (900 px). Figma is a design handoff, not implemented behavior or validated WKWebView. Implementation remains owned by `frontend/src/` and this repo's `design/ux-contract.json` and brand tokens; sample contents are illustrative.
+
 ## User and desired outcome
 
 A privacy-conscious macOS professional records a call, writes timestamped notes and takes intentional screenshots without leaving the call, transcribes and attributes speech afterward, requests a repeatable analysis outcome, then finds the recording by project in seconds. The same Meeting is the canonical object throughout.
