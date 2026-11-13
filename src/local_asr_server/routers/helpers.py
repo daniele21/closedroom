@@ -149,7 +149,7 @@ def _build_projects(app: FastAPI) -> dict:
     # Project analysis is also a per-record N+1 read. Fetch the same latest
     # 50 recording and transcription runs per source in bounded local batches.
     grouped_runs = getattr(services.catalog, "list_analysis_runs_grouped", None)
-    if callable(grouped_runs):
+    if callable(grouped_runs) and transcriptions_by_recording is not None:
         recording_runs = grouped_runs("recording_id", [recording["id"] for recording in recordings], limit=50)
         transcription_runs = grouped_runs(
             "transcription_id",
