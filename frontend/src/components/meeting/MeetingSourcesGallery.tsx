@@ -17,7 +17,7 @@ interface MeetingSourcesGalleryProps {
   canExpandScreenshots: boolean;
   hiddenScreenshotCount: number;
   visibleKeyMoments: Array<{shot: RecordingScreenshot; group: VisualManualScreenshotGroup | null}>;
-  keyMomentContexts: Map<string, SourceContext>;
+  keyMomentContexts: ReadonlyMap<string, SourceContext>;
   getVisualContext: (shot: RecordingScreenshot) => SourceVisual | null;
   screenshotTimestampLabel: (time: number) => string;
   onOpenScreenshot: (shot: RecordingScreenshot) => void;
