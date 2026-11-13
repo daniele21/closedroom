@@ -62,21 +62,55 @@ def apply_speaker_labels(
             if not str(cluster).startswith("Speaker "):
                 known_labels[str(cluster)] = label
 
+    # A *recording-owned* microphone track already uses one fixed speaker
+    # (mic:S1). This is capture-source attribution, not voice biometrics:
+    # only a genuine mic track and same-track raw cluster may default to "Tu".
+    # Legacy/imported "Tu" labels and unverified track/cluster combinations
+    # must still require identification.
+    microphone_track = any(
+        str(track.get("id") or "") == "mic"
+        and str(track.get("source") or "mic") == "mic"
+        for track in payload.get("source_tracks") or []
+    )
+    microphone_segments = [
+        segment for segment in segments
+        if str(segment.get("provider_speaker") or "") == "mic:S1"
+    ]
+    microphone_diarization = (
+        (diarization.get("clusters_by_track") or {}).get("mic") or []
+    )
+    microphone_owner = (
+        microphone_track
+        and (bool(microphone_segments) or "mic:S1" in microphone_diarization)
+        and all(str(segment.get("track_id") or "") == "mic"
+                for segment in microphone_segments)
+    )
+
     review_baseline = ((payload.get("stats") or {}).get("speaker_review") or {}).get("original_mappings") or {}
     mappings = []
     labels: dict[str, str] = {}
     for index, cluster in enumerate(clusters, start=1):
         previous = {**existing_mappings.get(cluster, {}), **review_baseline.get(cluster, {})}
         accepted_name = previous.get("display_name") if previous.get("status") == "accepted" else None
+        owned_microphone = cluster == "mic:S1" and microphone_owner
         display_name = (
             manual.get(cluster) or accepted_name
             or (review_baseline.get(cluster) or {}).get("display_name")
+            or ("Tu" if owned_microphone else None)
             or known_labels.get(cluster) or f"Speaker {index}"
         )
-        source = "manual" if cluster in manual else previous.get("source") or (
-            "visual" if accepted_name else "diarization"
+        if cluster in manual:
+            source = "manual"
+        elif accepted_name:
+            source = previous.get("source") or "visual"
+        elif owned_microphone:
+            source = "microphone_track"
+        else:
+            source = previous.get("source") or "diarization"
+        status = (
+            "accepted" if cluster in manual or accepted_name or owned_microphone
+            else "unassigned"
         )
-        status = "accepted" if cluster in manual or accepted_name else "unassigned"
         labels[cluster] = display_name
         mappings.append({
             **previous,

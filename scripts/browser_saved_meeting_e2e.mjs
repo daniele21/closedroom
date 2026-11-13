@@ -13,6 +13,7 @@ const MEETING_ID = 'e2e-meeting';
 const ALTERNATE_MEETING_ID = 'e2e-meeting-other';
 const AUTO_LINK_MEETING_ID = 'e2e-meeting-auto-link';
 const CONFIRM_MEETING_ID = 'e2e-meeting-confirm';
+const MIC_OWNED_MEETING_ID = 'e2e-meeting-mic-owned';
 const VIDEO_FPS = 4;
 const DIAGNOSTICS_DELAY_MS = 1400;
 const root = path.resolve(process.cwd());
@@ -140,6 +141,33 @@ const confirmMeetingFixture = {
 let confirmBefore = null;
 let confirmFingerprint = 'd'.repeat(64);
 let confirmUndoToken = null;
+
+// Synthetic read response representing the canonical backend's derived mic
+// identity. No user confirmation or new diarization job is involved.
+const micOwnedMeetingFixture = {
+  ...meetingFixture,
+  id: MIC_OWNED_MEETING_ID,
+  recording: {
+    ...meetingFixture.recording, id: MIC_OWNED_MEETING_ID,
+    title: 'Automatically recognized microphone',
+    audio_tracks: [{ id: 'mic', source: 'mic', label: 'Tu' }],
+  },
+  transcription: {
+    ...meetingFixture.transcription,
+    id: 'e2e-mic-owned-transcription', recording_id: MIC_OWNED_MEETING_ID,
+    text: '[00:52] Tu: My microphone voice.',
+    source_tracks: [{ id: 'mic', source: 'mic', label: 'Tu' }],
+    segments: [{
+      id: 0, start: 52, end: 55, text: 'My microphone voice.',
+      provider_speaker: 'mic:S1', speaker_group: 'mic:S1',
+      speaker_label: 'Tu', speaker_name: 'Tu', track_id: 'mic',
+    }],
+    stats: { speaker_attribution: { mappings: [{
+      speaker_cluster: 'mic:S1', speaker_group: 'mic:S1',
+      display_name: 'Tu', status: 'accepted', source: 'microphone_track',
+    }] } },
+  },
+};
 
 const screenshotFixture = {
   screenshot_id: 'synthetic-shared-key',
@@ -282,6 +310,12 @@ function fixtureServer(port) {
         recordings: true,
       });
     }
+    if (pathname === `/v1/meetings/${MIC_OWNED_MEETING_ID}`) {
+      const compact = structuredClone(micOwnedMeetingFixture);
+      delete compact.transcription.segments;
+      delete compact.transcription.source_tracks;
+      return json(res, 200, compact);
+    }
     if (pathname === `/v1/meetings/${CONFIRM_MEETING_ID}`) {
       const compact = structuredClone(confirmMeetingFixture);
       delete compact.transcription.segments;
@@ -371,6 +405,13 @@ function fixtureServer(port) {
       return json(res, 200, { items: [screenshotFixture], total: 1 });
     }
 
+    if (pathname === '/v1/transcriptions/e2e-mic-owned-transcription' && req.method === 'GET') {
+      return json(res, 200, micOwnedMeetingFixture.transcription);
+    }
+    if (pathname === '/v1/transcriptions/e2e-mic-owned-transcription/speaker-review/auto-link'
+        && req.method === 'POST') {
+      return json(res, 200, { status: 'no_verified_diarization', linked_segments: 0 });
+    }
     if (pathname === '/v1/transcriptions/e2e-confirm-transcription' && req.method === 'GET') {
       return json(res, 200, confirmMeetingFixture.transcription);
     }
@@ -2142,6 +2183,32 @@ try {
   }
   if (!restoredPendingSelf) throw new Error('identity undo did not restore pending speaker');
   await checkpoint(browser, '28-undo-self-identity-preserves-name');
+
+  // A fixed personal-microphone speaker is a capture-source identity, not a
+  // pending voice to recognize. The meeting is already readable on first open.
+  await setMeetingHash(MIC_OWNED_MEETING_ID);
+  await waitText(browser, ['Automatically recognized microphone'], 5000, true);
+  let microphoneRecognized = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    microphoneRecognized = await browser.execute(`
+      const turn = document.querySelector('#meeting-panel-transcript [data-transcript-turn="conversation"]');
+      const text = turn?.textContent || '';
+      return Boolean(turn &&
+        text.includes('Tu') && text.includes('My microphone voice.') &&
+        !text.includes('Verifica voce') && !text.includes('Verify voice') &&
+        !text.includes('Voce da identificare') && !text.includes('Unidentified voice'));
+    `);
+    if (microphoneRecognized) break;
+    await sleep(100);
+  }
+  if (!microphoneRecognized) {
+    throw new Error('verified personal mic voice still asks for speaker identification');
+  }
+  if (counts.speaker_audio_request !== audioRequestsBeforeEmptyRead ||
+      counts.benchmark_start !== benchmarkRequestsBeforeEmptyRead) {
+    throw new Error('default microphone identity unexpectedly downloaded audio or ran inference');
+  }
+  await checkpoint(browser, '29-mic-source-automatically-recognized');
 
   video = await renderVideo();
 } catch (caught) {

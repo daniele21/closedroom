@@ -489,6 +489,56 @@ class SpeakerReviewApiTests(unittest.TestCase):
             "Giulia",
         )
 
+    def test_preexisting_saved_mic_transcript_is_recognized_on_read_without_rewrite(self):
+        from local_asr_server.app_services import get_services
+        services = get_services(self.app)
+        payload = transcription()
+        payload["segments"] = [
+            {"id": 0, "track_id": "mic", "start": 0.0, "end": 2.0,
+             "text": "Ciao", "provider_speaker": "mic:S1", "speaker_label": "Tu",
+             "words": [{"word": "Ciao", "start": 0.1, "end": 0.4}]},
+            {"id": 1, "track_id": "system", "start": 3.0, "end": 5.0,
+             "text": "Salve", "provider_speaker": "system:S1",
+             "speaker_label": "Computer"},
+        ]
+        payload["source_tracks"] = [
+            {"id": "mic", "source": "mic", "label": "Tu"},
+            {"id": "system", "source": "system", "label": "Computer"},
+        ]
+        payload["stats"]["speaker_diarization"]["clusters_by_track"] = {
+            "mic": ["mic:S1"], "system": ["system:S1"],
+        }
+        payload["stats"]["speaker_attribution"] = {
+            "mappings": [
+                {"speaker_cluster": "mic:S1", "display_name": "Tu",
+                 "status": "unassigned", "source": "diarization"},
+                {"speaker_cluster": "system:S1", "display_name": "Computer",
+                 "status": "unassigned", "source": "diarization"},
+            ],
+        }
+        saved = services.transcriptions.save(payload, recording_id=self.recording_id)
+        raw_path = services.transcriptions.root / services.transcriptions._file_name_for(saved["id"])
+        original_bytes = raw_path.read_bytes()
+        for _ in range(2):
+            response = self.client.get(f"/v1/transcriptions/{saved['id']}")
+            self.assertEqual(response.status_code, 200, response.text)
+            result = response.json()
+            mappings = {
+                m["speaker_cluster"]: m
+                for m in result["stats"]["speaker_attribution"]["mappings"]
+            }
+            self.assertEqual((mappings["mic:S1"]["display_name"],
+                              mappings["mic:S1"]["status"],
+                              mappings["mic:S1"]["source"]),
+                             ("Tu", "accepted", "microphone_track"))
+            self.assertEqual(mappings["system:S1"]["status"], "unassigned")
+            self.assertEqual(result["segments"][0]["speaker_name"], "Tu")
+            self.assertEqual(result["segments"][0]["provider_speaker"], "mic:S1")
+            self.assertEqual(result["segments"][0]["words"], payload["segments"][0]["words"])
+            self.assertEqual(raw_path.read_bytes(), original_bytes,
+                             "read-only historical compatibility must not mutate source")
+            self.assertFalse(result["stats"].get("speaker_review"))
+
     def test_confirm_existing_tu_name_api_with_exact_revision_and_undo(self):
         from local_asr_server.app_services import get_services
         services = get_services(self.app)
