@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "frontend" / "src" / "pages" / "RecordingOverlayPage.tsx"
 CONTROLS = ROOT / "frontend" / "src" / "components" / "recording" / "RecordingOverlayActions.tsx"
+COMPOSER = ROOT / "frontend" / "src" / "components" / "recording" / "RecordingOverlayNoteComposer.tsx"
 TRANSCRIPT = ROOT / "frontend" / "src" / "components" / "transcription" / "TranscriptTextView.tsx"
 MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
 ACCESSORIES = ROOT / "frontend" / "src" / "hooks" / "useMeetingAccessories.ts"
@@ -21,6 +22,7 @@ class FrontendMeetingMomentNotesContractTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.overlay = OVERLAY.read_text(encoding="utf-8")
         cls.controls = CONTROLS.read_text(encoding="utf-8")
+        cls.composer = COMPOSER.read_text(encoding="utf-8")
         cls.transcript = TRANSCRIPT.read_text(encoding="utf-8")
         cls.meeting = MEETING.read_text(encoding="utf-8")
         cls.accessories = ACCESSORIES.read_text(encoding="utf-8")
@@ -36,15 +38,27 @@ class FrontendMeetingMomentNotesContractTests(unittest.TestCase):
             self.overlay.index("ApiClient.recordingNoteAnchor(recordingId)"),
             self.overlay.index("ApiClient.createRecordingNote(recordingId"),
         )
-        self.assertIn('data-note-composer="true"', self.overlay)
+        self.assertIn("<RecordingOverlayNoteComposer", self.overlay)
+        self.assertIn('data-note-composer="true"', self.composer)
         self.assertIn('data-note-action="true"', self.controls)
         self.assertIn('data-persisted={lastSavedNoteId !== null}', self.controls)
         self.assertIn("onOpenNote={() => void handleOpenNote()}", self.overlay)
         self.assertIn('data-note-undo="true"', self.controls)
-        self.assertIn("event.key === 'Enter' && !event.shiftKey", self.overlay)
-        self.assertIn("event.key === 'Escape'", self.overlay)
-        self.assertIn("maxLength={4000}", self.overlay)
-        self.assertNotIn("contentEditable", self.overlay)
+        self.assertIn("event.key === 'Enter' && !event.shiftKey", self.composer)
+        self.assertIn("event.key === 'Escape'", self.composer)
+        self.assertIn("maxLength={4000}", self.composer)
+        self.assertNotIn("contentEditable", self.composer)
+
+    def test_collapsing_a_draft_preserves_text_and_original_anchor(self) -> None:
+        self.assertIn("setNoteComposerVisible(false);", self.overlay)
+        self.assertIn("if (!noteDraft.trim()) setNoteAnchor(null);", self.overlay)
+        self.assertIn("if (noteAnchor !== null && noteDraft.trim())", self.overlay)
+        self.assertIn("setNoteComposerVisible(true);", self.overlay)
+        self.assertIn("resetSavedNoteComposer();", self.overlay)
+        self.assertIn("onClose={closeNoteComposer}", self.overlay)
+        self.assertIn("hasNoteDraft={Boolean(noteDraft.trim())}", self.overlay)
+        self.assertIn("data-note-draft={hasNoteDraft}", self.controls)
+        self.assertIn("onSave={() => void handleSaveNote()}", self.overlay)
 
     def test_meeting_projects_notes_by_timestamp_without_mutating_asr_segments(self) -> None:
         self.assertIn("segment.start <= note.timestamp && note.timestamp <= segment.end", self.transcript)
