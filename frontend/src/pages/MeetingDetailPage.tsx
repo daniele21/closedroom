@@ -45,6 +45,7 @@ import { MeetingRecordingDetails } from '../components/meeting/MeetingRecordingD
 import AudioIntelligencePanel from './recording/AudioIntelligencePanel';
 import { StructuredNotesEditor } from '../components/meeting/StructuredNotesEditor';
 import { MeetingSourcesGallery } from '../components/meeting/MeetingSourcesGallery';
+import { MeetingAnalysisChoices } from '../components/meeting/MeetingAnalysisChoices';
 import { useMeetingJobEvents } from '../hooks/useMeetingJobEvents';
 import { useVisualIntelligence } from '../hooks/useVisualIntelligence';
 import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
@@ -1771,21 +1772,13 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
                       </div>
                     )
                   ) : (
-                    <div className="text-center py-12">
-                      <Sparkles className="w-8 h-8 mx-auto text-text-muted mb-3" aria-hidden="true" />
-                      <p className="text-sm text-text-secondary">{t('meeting.noAnalysisAvailable', { type: analysisLabel(selectedAnalysisType) })}</p>
-                      {!isBusy && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={startPreparation}
-                          isLoading={busyAction === 'meeting_preparation'}
-                          className="mt-4"
-                        >
-                          {lang === 'it' ? 'Prepara note' : 'Prepare notes'}
-                        </Button>
-                      )}
-                    </div>
+                    <MeetingAnalysisChoices
+                      lang={lang}
+                      hasTranscription={Boolean(meeting.transcription)}
+                      disabled={demoMode || isBusy}
+                      onPrepare={() => void startPreparation()}
+                      onDeepAnalysis={() => openAnalysisSetup('meeting_deep')}
+                    />
                   )}
                   </div>
                   {meeting.transcription && (
