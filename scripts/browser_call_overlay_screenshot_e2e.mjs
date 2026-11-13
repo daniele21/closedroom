@@ -681,7 +681,7 @@ try {
     return true;
   `);
   if (!draftSet) throw new Error('Could not write a local overlay draft');
-  await waitText(browser, ['Draft while speaking'], 3000, true);
+  await waitSelector(browser, 'button[data-note-action="true"][data-note-draft="true"]', 3000, true);
   await browser.clickCss('button[data-note-close="true"]');
   await waitSelector(browser, 'button[data-note-action="true"][data-note-draft="true"]', 3000, true);
   await browser.clickCss('button[data-note-action="true"]');
