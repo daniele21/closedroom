@@ -25,12 +25,9 @@ Code audit (`dev`):
 - `frontend/src/App.tsx:267-312,546-550`: route switch mounts/unmounts page components and uses lazy page chunks. `frontend/src/components/workspace/MeetingSearchDialog.tsx:82-131` introduces 180ms debounce even for an initial unfiltered archive load.
 - Existing `docs/workstreams/meeting-ux-consolidation.md` and `design/ux-contract.json` already specify a canonical Meeting and shared local library; this reset must **finish and simplify** that ownership, not invent a competing architecture.
 
-## Competitive research (patterns only)
+## Competitive patterns
 
-- Granola: meeting list/notes first, folders/spaces and contextual chat; official guide https://docs.granola.ai/help-center/getting-started/granola-101
-- Fireflies: combined meeting notes/transcript/audio/actions with a search-to-timestamp path; https://guide.fireflies.ai/articles/6653885315-learn-about-the-fireflies-notepad
-- Fathom: live scratchpad to unified post-meeting view; https://www.fathom.ai/whats-new
-- Code references to inspect selectively: Meetily https://github.com/Zackriya-Solutions/meetily; Meet2Notes https://github.com/estebanstifli/Meet2Notes; MeetMind https://github.com/aslahtp/meetmind. Verify license and source owner before reuse. No code/network dependency in the product.
+Granola: notes/list/folders first (https://docs.granola.ai/help-center/getting-started/granola-101); Fireflies: synced notes/transcript/audio (https://guide.fireflies.ai/articles/6653885315-learn-about-the-fireflies-notepad); Fathom: call scratchpad (https://www.fathom.ai/whats-new). Inspect Meetily, Meet2Notes and MeetMind GitHub sources for patterns only; verify licenses and never add external runtime dependencies.
 
 ## Product decision / IA
 
@@ -84,15 +81,12 @@ Parallelism: R1/R3/R4 can proceed with disjoint owners; R0 writes Projects; R2 o
 - P1: note and screenshot during an active recording survive Stop/reopen; failed captures never show success; switching devices must retain available recording source and report real gaps honestly.
 - Validation: `python3 scripts/select_validation_profile.py --base <dev> --head <feature> --stage integration` selects mandatory gates; frontend lint+tsc; backend contract/source tests when changed; `scripts/browser_workspace_coherence_e2e.mjs`, saved Meeting, archive, note/screenshot and recording journeys in FULL_MEDIA when materially affected; exact-head/base preflight and relevant Mac automation. WKWebView/TCC, real physical audio switching, MLX/Metal and VoiceOver user judgement remain RELEASE / REAL_ENVIRONMENT, never inferred from fixtures.
 
-## Product risk and observability
+## Risks and measurement
 
-VALUE: faster meeting discovery and fewer duplicated actions; test scripted task success.
-USABILITY: first-viewport meeting list, consistent verbs, clear empty/failure states; test three sample projects (empty, one meeting, many).
-FEASIBILITY: expensive project aggregation and massive saved Meeting component; profile read path before introducing a new cache/invalidation owner.
-VIABILITY: preserve local/offline data and low resource overhead; do not automatically start heavy AI to populate dashboards.
-PRIVACY/RELIABILITY: preserve loopback auth, original source audio/transcript/markers, explicit optional storage, cancel/retry and rollback.
-
-No product-success or latency PASS claim until user journey tests and representative measurements exist.
+VALUE/USABILITY: scripted find/open/return task at 0/1/many meetings; measure success/time, discoverability and redundant actions.
+FEASIBILITY/VIABILITY: profile expensive per-recording reads before adding new cache owners or auto-triggered AI.
+PRIVACY/RELIABILITY: retain loopback auth, local original source/markers, explicit storage, cancellation, retry and rollback.
+No performance or product-success PASS without representative evidence.
 
 ## Checkpoint and next action
 
