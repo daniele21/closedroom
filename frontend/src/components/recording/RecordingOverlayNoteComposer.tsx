@@ -20,7 +20,7 @@ export function RecordingOverlayNoteComposer({
   const it = lang === 'it';
   const timestamp = `${Math.floor(anchor / 60)}:${String(Math.floor(anchor % 60)).padStart(2, '0')}`;
   return (
-    <section className="mt-2 rounded-xl border border-amber-200/20 bg-amber-100/[0.07] p-2"
+    <section id="overlay-note-composer" className="mt-2 rounded-xl border border-amber-200/20 bg-amber-100/[0.07] p-2"
       data-note-composer="true" aria-label={it ? 'Nota del meeting' : 'Meeting note'}>
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className="font-mono text-[10px] font-semibold tabular-nums text-amber-100/85"
