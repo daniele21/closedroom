@@ -38,6 +38,7 @@ class FrontendMeetingMomentNotesContractTests(unittest.TestCase):
         )
         self.assertIn('data-note-composer="true"', self.overlay)
         self.assertIn('data-note-action="true"', self.controls)
+        self.assertIn('data-persisted={lastSavedNoteId !== null}', self.controls)
         self.assertIn("onOpenNote={() => void handleOpenNote()}", self.overlay)
         self.assertIn('data-note-undo="true"', self.controls)
         self.assertIn("event.key === 'Enter' && !event.shiftKey", self.overlay)
