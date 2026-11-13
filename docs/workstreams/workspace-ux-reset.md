@@ -1,7 +1,7 @@
 # ClosedRoom — UX/UI meeting-first redesign
 
-Status: ACTIVE — UX0/UX3/UX5 integrated; UX1 archive and project-return slices integrated; UX2 transcript and analysis batching integrated; UX4 controls integrated; UX7 outcome choices integrated. Full redesign remains open. Owner: product/front-end. Target: dev.
-Resume identity: dev 39b19a03aebc2111da16152112c99f6e1f84cfbd (2026-11-13); refresh head/base/PRs before work.
+Status: ACTIVE — UX0/UX3/UX5 integrated; UX1 archive/project return, UX2 transcript/analysis batching, UX4 overlay controls+draft, UX6 truthful voice evidence and UX7 outcome choices integrated. Full redesign remains open. Owner: product/front-end. Target: dev.
+Resume identity: dev 5677426a97d3fd0be3010b49807a7d098b2f1012 (2026-11-13); refresh head/base/PRs before work.
 
 ## Product outcome and boundaries
 
@@ -38,9 +38,9 @@ Primary rail: **Riunioni**, **Progetti**, persistent **Nuovo meeting**. Utilitie
 | UX1 ACTIVE | PR #214 library first-open and #216 project selection/search/disclosure return integrated; finish shell origin/Back across Today and archive | #214/#216 integrated |
 | UX2 ACTIVE | #213 batches latest transcripts; #217 batches last 50 analysis runs per recording/transcript with equivalent results. Profile 1/25/200 and remaining preparation-job reads | Both integrated; actual latency unknown |
 | UX3 DONE | PR #212: MeetingSourcesGallery presents notes/screenshots before AI tabs; same source API, thumbnail, seek and original preview | dev integrated + Mac FULL_MEDIA |
-| UX4 ACTIVE | PR #211: modular stateless RecordingOverlayActions integrated, semantic persistence/Undo E2E passed; complete compact/expanded UX polish | dev integrated; interaction design pending |
+| UX4 ACTIVE | #211 stateless overlay controls + #220 timestamped note draft/compact composer integrated with Mac FULL_MEDIA; finish display-source/recovery polish | dev integrated; draft not crash-durable |
 | UX5 DONE | #215: settings/readiness independent of optional project suggestions, real checking/error/retry states; existing native capture flow retained | dev integrated; target-Mac TCC pending |
-| UX6 BLOCKED | TranscriptTextView + SpeakerDiarizationEditor: no “Computer” person; mic identity, readable correction/undo. MeetingDetailPage tab wiring serialized after UX3 | UX3 shared parent |
+| UX6 ACTIVE | #219 audio intervals vs transcript-linked turns, merged attribution and no phantom Computer person integrated; remaining physical speaker/mic identification UX | #219 Mac FULL_MEDIA PASS; installed WKWebView pending |
 | UX7 ACTIVE | #218: stateless MeetingAnalysisChoices integrates existing summary and deep-analysis pipelines; custom-question and additional outcome UX remain to shape | #218 integrated; outcomes remainder |
 | UX8 BLOCKED | Semantic UI components + workspace.css/index.css: consistent controls/type/spacing, 1280/900/640 layouts, light/dark tokens, accessibility, restrained motion | UX1 + UX3 hierarchy |
 | UX9 BLOCKED | End-to-end UX convergence: critical journeys, performance, accessibility, source docs, exact-head validation and PR-to-dev integration | affected slices |
@@ -71,6 +71,6 @@ Use repository selector `python3 scripts/select_validation_profile.py --base <ba
 
 ## Resume and durable closeout
 
-**Next:** UX1 shell navigation/Back, UX2 real project latency benchmark, UX4 compact overlay polish, UX6 Voices/Transcript review (reconcile existing #204 first), then UX7 additional outcomes and UX8/9 integration. Source deliveries ≠ product success; latency, usability and physical Mac outcomes remain unmeasured.
+**Next:** UX2 profile /v1/projects 1/25/200 and preparation-job reads, UX1 archive scroll/focus, UX4 display-source/recovery polish, UX6 representative mic/speaker evidence, UX7 custom outcome and UX8/9 convergence. Existing stale #204 was superseded by #219 and closed. Source deliveries ≠ product success; latency, usability and physical Mac outcomes remain unmeasured.
 
 At convergence update design/ux-contract.json, affected docs/features.md or bounded feature owner, docs/current-state.md and executable tests; update design/brand-kit.json only if approved tokens change. Remove temporary workstream after durable truth and deferred release obligations are transferred.
