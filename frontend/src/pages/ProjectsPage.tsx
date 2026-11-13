@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Edit3,
@@ -73,9 +73,12 @@ const ACTION_SCOPE_OPTIONS = [
 type ActionScope = typeof ACTION_SCOPE_OPTIONS[number]['value'];
 
 const PROJECT_VIEW_STORAGE_KEY = 'closedroom.projects.view';
+// Ephemeral, in-memory view snapshot. The backend remains the canonical project owner.
+// Show it immediately on return and always reconcile against the local API.
+let projectViewSnapshot: Project[] | null = null;
 
 function restoreProjectView(): { name: string; range: TimeRangeState; actionScope: ActionScope } {
-  const fallback = { name: '', range: { mode: 'last7' } as TimeRangeState, actionScope: 'week' as ActionScope };
+  const fallback = { name: '', range: { mode: 'all' } as TimeRangeState, actionScope: 'all' as ActionScope };
   try {
     const raw = sessionStorage.getItem(PROJECT_VIEW_STORAGE_KEY);
     if (!raw) return fallback;
@@ -104,8 +107,13 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
   const { showToast } = useToast();
 
   const savedProjectView = useMemo(restoreProjectView, []);
-  const [loading, setLoading] = useState(true);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(() => !demoMode && projectViewSnapshot === null);
+  const [projects, setProjects] = useState<Project[]>(() =>
+    demoMode ? getDemoProjects(lang) : (projectViewSnapshot ?? [])
+  );
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
   const [selectedProjectName, setSelectedProjectName] = useState(savedProjectView.name);
   const [sidebarQuery, setSidebarQuery] = useState('');
   const [projectRange, setProjectRange] = useState<TimeRangeState>(savedProjectView.range);
@@ -152,29 +160,50 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
   ], [lang]);
 
   const loadProjects = async () => {
-    try {
-      setLoading(true);
-      if (demoMode) {
-        setProjects(getDemoProjects(lang));
-        setSelectedProjectName('ClosedRoom Beta Launch');
-        return;
-      }
-      const data = await ApiClient.listProjects();
-      setProjects(data.items || []);
-    } catch (err: any) {
-      if (demoMode) {
-        setProjects(getDemoProjects(lang));
-        setSelectedProjectName('ClosedRoom Beta Launch');
-        return;
-      }
-      showToast(err.message || t('projects.loading') || 'Errore', 'error');
-    } finally {
+    const generation = ++requestGeneration.current;
+    setRefreshError(null);
+    if (demoMode) {
+      setProjects(getDemoProjects(lang));
+      setSelectedProjectName('ClosedRoom Beta Launch');
       setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    // Do not remount the heavy route loader for a previously explored project.
+    // All reads and refreshes still go to the local canonical /v1/projects API.
+    if (projectViewSnapshot !== null) {
+      setProjects(projectViewSnapshot);
+      setLoading(false);
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    try {
+      const response = await ApiClient.listProjects();
+      if (generation !== requestGeneration.current) return;
+      const items = response.items || [];
+      projectViewSnapshot = items;
+      setProjects(items);
+    } catch (err: unknown) {
+      if (generation !== requestGeneration.current) return;
+      const message = err instanceof Error ? err.message : String(err);
+      if (projectViewSnapshot !== null) {
+        setRefreshError(message);
+      } else {
+        showToast(message || t('projects.loading') || 'Errore', 'error');
+      }
+    } finally {
+      if (generation === requestGeneration.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadProjects();
+    void loadProjects();
+    return () => { requestGeneration.current += 1; };
   }, [demoMode, lang]);
 
   useEffect(() => {
@@ -250,7 +279,7 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
   );
 
   const visibleTimelineItems = useMemo(
-    () => showAllTimeline ? periodItems : periodItems.slice(0, 3),
+    () => showAllTimeline ? periodItems : periodItems.slice(0, 12),
     [periodItems, showAllTimeline]
   );
 
@@ -322,35 +351,21 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
 
   const handleGenerateProjectSituation = () => {
     const insightCount = digestItems.length + actionItemsAll.length + decisions.length + risks.length;
-    setIsProjectGenerating(true);
-    window.setTimeout(() => {
-      const timestamp = new Date().toLocaleString(lang === 'it' ? 'it-IT' : 'en-US', {
-        dateStyle: 'short',
-        timeStyle: 'short',
-      });
-      setProjectDigestGeneratedAt(timestamp);
-      setIsProjectGenerating(false);
-      showToast(
-        insightCount > 0
-          ? t('projects.toastDigestSuccess')
-          : t('projects.toastDigestEmpty'),
-        insightCount > 0 ? 'success' : 'info'
-      );
-    }, 850);
+    const timestamp = new Date().toLocaleString(lang === 'it' ? 'it-IT' : 'en-US', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    setProjectDigestGeneratedAt(timestamp);
+    showToast(
+      insightCount > 0 ? t('projects.toastDigestSuccess') : t('projects.toastDigestEmpty'),
+      insightCount > 0 ? 'success' : 'info',
+    );
   };
 
   if (loading) {
     return (
-      <div className="py-16">
-        <TaskProcessingLoader
-          title={t('workspace.loaderProjectsTitle')}
-          description={t('workspace.loaderProjectsDesc')}
-          steps={[t('workspace.loaderProjectsStep1'), t('workspace.loaderProjectsStep2'), t('workspace.loaderProjectsStep3')]}
-          activeStep={1}
-          progress={62}
-          variant="project"
-          helperText={t('workspace.loaderLocalHelper')}
-        />
+      <div role="status" aria-live="polite" aria-busy="true" className="surface-supporting rounded-xl px-4 py-5 text-sm text-text-secondary">
+        {lang === 'it' ? 'Caricamento elenco progetti dal dispositivo…' : 'Loading projects from this device…'}
       </div>
     );
   }
@@ -458,6 +473,70 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
             </div>
           </section>
 
+        {refreshing && (
+          <p role="status" className="text-xs text-text-muted">
+            {lang === 'it' ? 'Aggiornamento progetti dal dispositivo…' : 'Refreshing projects from this device…'}
+          </p>
+        )}
+        {refreshError && (
+          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-border-subtle px-3 py-2 text-xs text-text-secondary">
+            <span>{lang === 'it' ? 'Dati precedenti: aggiornamento non riuscito.' : 'Showing previous data: refresh failed.'}</span>
+            <Button size="sm" variant="secondary" onClick={() => void loadProjects()}>
+              {lang === 'it' ? 'Riprova' : 'Retry'}
+            </Button>
+          </div>
+        )}
+
+        {/* Timeline of meetings - full width */}
+        <section className="surface-supporting flex flex-col gap-3 rounded-2xl p-4" data-tour="project-timeline">
+          <SectionHeader
+            icon={History}
+            title={t('projects.timelineTitle')}
+            description={t('projects.timelineDesc')}
+            action={
+              periodItems.length > 12 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllTimeline(!showAllTimeline)}
+                  className="view-all-link text-xs font-semibold text-accent hover:text-accent/80 transition-colors"
+                >
+                  {showAllTimeline
+                    ? (lang === 'it' ? 'Mostra meno' : 'Show less')
+                    : `${lang === 'it' ? 'Mostra tutti' : 'Show all'} (${periodItems.length})`}
+                </button>
+              )
+            }
+          />
+          {periodItems.length === 0 ? (
+            <EmptyState
+              icon={FileAudio}
+              title={t('projects.emptyTimelineTitle')}
+              description={t('projects.emptyTimelineDesc')}
+              action={<Button onClick={handleNewMeetingForProject} disabled={demoMode}>{t('projects.btnNewMeetingShort')}</Button>}
+            />
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-border-subtle bg-bg-glass shadow-[var(--shadow-soft)]">
+              {visibleTimelineItems.map((item) => (
+                <ProjectTimelineItem
+                  key={item.recording.id}
+                  item={item}
+                  lang={lang}
+                  isEditing={editingRecordingId === item.recording.id}
+                  editTitleValue={editTitleValue}
+                  setEditTitleValue={setEditTitleValue}
+                  onRename={() => handleRenameClick(item.recording)}
+                  onSaveRename={() => handleSaveRename(item.recording)}
+                  onCancelRename={() => setEditingRecordingId(null)}
+                  onAssignProject={() => handleAssignProject(item.recording)}
+                  onOpen={() => navigateTo('meeting', item.recording.id)}
+                  onTranscribe={() => navigateTo('transcription', recordingTranscriptionRoute(item.recording.id))}
+                  demoMode={demoMode}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
         {/* Compact project status KPIs */}
         {periodItems.length > 0 && (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4" data-tour="project-status">
@@ -502,8 +581,16 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
           </div>
         )}
 
+        {periodItems.length > 0 && readyCount === 0 && (
+          <p className="text-xs text-text-muted">
+            {lang === 'it'
+              ? 'I meeting sono disponibili qui sopra. Azioni, decisioni e rischi appariranno dopo un’analisi del meeting.'
+              : 'Meetings are available above. Actions, decisions and risks will appear after meeting analysis.'}
+          </p>
+        )}
+
         {/* Project Situation (Digest) - full width */}
-        <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
+        {readyCount > 0 && <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
           <SectionHeader
             icon={Sparkles}
             title={t('workspace.projectDigestTitle')}
@@ -590,10 +677,10 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
               )}
             </div>
           )}
-        </section>
+        </section>}
 
         {/* Actions - full width */}
-        <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4" data-tour="project-actions">
+        {actionItems.length > 0 && <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4" data-tour="project-actions">
           <SectionHeader
             icon={ListChecks}
             title={t('projects.actionsTitle')}
@@ -626,10 +713,10 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
             }
           />
           <ActionChecklist items={actionItems.slice(0, 5)} />
-        </section>
+        </section>}
 
         {/* Decisions and Risks Side-by-Side */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {(decisions.length > 0 || risks.length > 0) && <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div className="surface-primary flex flex-col gap-3 rounded-2xl p-4">
             <SectionHeader
               icon={Target}
@@ -661,57 +748,7 @@ export default function ProjectsPage({ navigateTo, demoMode = false }: ProjectsP
             />
             <RiskPanel items={risks.slice(0, 4)} />
           </div>
-        </div>
-
-        {/* Timeline of meetings - full width */}
-        <section className="surface-supporting flex flex-col gap-3 rounded-2xl p-4" data-tour="project-timeline">
-          <SectionHeader
-            icon={History}
-            title={t('projects.timelineTitle')}
-            description={t('projects.timelineDesc')}
-            action={
-              periodItems.length > 3 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllTimeline(!showAllTimeline)}
-                  className="view-all-link text-xs font-semibold text-accent hover:text-accent/80 transition-colors"
-                >
-                  {showAllTimeline
-                    ? (lang === 'it' ? 'Mostra meno' : 'Show less')
-                    : `${lang === 'it' ? 'Mostra tutti' : 'Show all'} (${periodItems.length})`}
-                </button>
-              )
-            }
-          />
-          {periodItems.length === 0 ? (
-            <EmptyState
-              icon={FileAudio}
-              title={t('projects.emptyTimelineTitle')}
-              description={t('projects.emptyTimelineDesc')}
-              action={<Button onClick={handleNewMeetingForProject} disabled={demoMode}>{t('projects.btnNewMeetingShort')}</Button>}
-            />
-          ) : (
-            <div className="overflow-hidden rounded-xl border border-border-subtle bg-bg-glass shadow-[var(--shadow-soft)]">
-              {visibleTimelineItems.map((item) => (
-                <ProjectTimelineItem
-                  key={item.recording.id}
-                  item={item}
-                  lang={lang}
-                  isEditing={editingRecordingId === item.recording.id}
-                  editTitleValue={editTitleValue}
-                  setEditTitleValue={setEditTitleValue}
-                  onRename={() => handleRenameClick(item.recording)}
-                  onSaveRename={() => handleSaveRename(item.recording)}
-                  onCancelRename={() => setEditingRecordingId(null)}
-                  onAssignProject={() => handleAssignProject(item.recording)}
-                  onOpen={() => navigateTo('meeting', item.recording.id)}
-                  onTranscribe={() => navigateTo('transcription', recordingTranscriptionRoute(item.recording.id))}
-                  demoMode={demoMode}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+        </div>}
 
         {/* Advanced details at the bottom */}
         <div className="mt-2">
