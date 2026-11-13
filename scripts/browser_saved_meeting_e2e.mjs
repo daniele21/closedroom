@@ -2111,6 +2111,25 @@ try {
   // to confirm it directly without changing text/timing, and undo locally.
   await setMeetingHash(CONFIRM_MEETING_ID);
   await waitText(browser, ['Saved Tu speaker confirmation'], 5000, true);
+  // Outcome-first analysis uses existing Meeting pipelines and never launches
+  // a job merely by opening the tab.
+  await browser.clickCss('#meeting-tab-analysis');
+  await waitSelector(browser, '[data-meeting-analysis-choices="true"]', 5000, true);
+  const outcomeChoices = await browser.execute(`
+    const root = document.querySelector('[data-meeting-analysis-choices="true"]');
+    const summary = root?.querySelector('[data-meeting-outcome="summary"]');
+    const deep = root?.querySelector('[data-meeting-outcome="deep"]');
+    return {
+      heading: root?.querySelector('h4')?.textContent || '',
+      summaryEnabled: Boolean(summary && !summary.disabled),
+      deepEnabled: Boolean(deep && !deep.disabled),
+    };
+  `);
+  if (!/Cosa vuoi ottenere|What would you like to get/.test(outcomeChoices.heading)
+    || !outcomeChoices.summaryEnabled || !outcomeChoices.deepEnabled) {
+    throw new Error('Meeting analysis choices were not available after transcription: ' + JSON.stringify(outcomeChoices));
+  }
+  await checkpoint(browser, '27a-analysis-outcomes-visible');
   await browser.clickCss('#meeting-tab-speakers');
   await waitText(browser, ['Conferma questa voce', 'Confirm this voice'], 7000, true);
   // Name input is hydrated in a React effect after the selected voice appears.
