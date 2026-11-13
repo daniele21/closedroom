@@ -618,12 +618,13 @@ try {
     if (!button || button.disabled) return false; button.click(); return true;
   `);
   if (!clickedShot) throw new Error('screenshot button unavailable');
-  await waitText(browser, ['Saved', 'Screenshots 1'], 8000, true);
+  // The persisted screenshot ID, not translated copy, is the authoritative saved state.
+  await waitSelector(browser, 'button[data-screenshot-action="true"][data-persisted="true"]', 8000, true);
   await waitSelector(browser, 'button[data-screenshot-undo="true"]', 3000, true);
   const screenshotFeedbackMatchesUndo = await browser.execute(`
     const action = document.querySelector('button[data-screenshot-action="true"]');
     const undo = document.querySelector('button[data-screenshot-undo="true"]');
-    return Boolean(action && undo && action.textContent.trim() === 'Saved');
+    return Boolean(action && undo && action.dataset.persisted === 'true');
   `);
   if (!screenshotFeedbackMatchesUndo) throw new Error('screenshot saved feedback and undo target diverged');
   if (counts.screenshots_post !== 1) throw new Error('unexpected screenshot POST count: ' + counts.screenshots_post);
@@ -688,11 +689,11 @@ try {
     throw new Error('quick note was not persisted: ' + JSON.stringify(counts));
   }
   if (notes[0].timestamp !== 14) throw new Error('quick note did not preserve composer-open anchor');
-  await waitText(browser, ['Notes 1', 'Saved'], 5000, true);
+  await waitSelector(browser, 'button[data-note-action="true"][data-persisted="true"]', 5000, true);
   const noteFeedbackMatchesUndo = await browser.execute(`
     const action = document.querySelector('button[data-note-action="true"]');
     const undo = document.querySelector('button[data-note-undo="true"]');
-    return Boolean(action && undo && action.textContent.trim() === 'Saved');
+    return Boolean(action && undo && action.dataset.persisted === 'true');
   `);
   if (!noteFeedbackMatchesUndo) throw new Error('note saved feedback and undo target diverged');
   const composerClosedAfterSave = await browser.execute(`
