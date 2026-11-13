@@ -529,6 +529,33 @@ try {
   if (observations.projects.projectsCurrent !== 'page' || observations.projects.homeCurrent === 'page') {
     throw new Error(`Projects navigation hierarchy is not exclusive: ${JSON.stringify(observations.projects)}`);
   }
+  // A project is a collection of Meetings, not a blocking analytics dashboard.
+  // Verify hierarchy and absence of simulated AI progress in the assembled browser.
+  observations.projectMeetingFirst = await browser.execute(`
+    const timeline = document.querySelector('[data-tour="project-timeline"]');
+    const status = document.querySelector('[data-tour="project-status"]');
+    const openButtons = Array.from(timeline?.querySelectorAll('button') || []).filter(
+      (button) => /^(Open|Apri)$/i.test((button.textContent || '').trim())
+    );
+    return {
+      timelinePresent: Boolean(timeline),
+      meetingRows: openButtons.length,
+      timelineBeforeStatus: Boolean(
+        timeline && status && (timeline.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING)
+      ),
+      simulatedProgress: Boolean(document.querySelector('[role="progressbar"][aria-valuenow="62"]')),
+      duplicateTranscribeButtons: Array.from(timeline?.querySelectorAll('button') || []).filter(
+        (button) => /^(Transcribe|Trascrivi)$/i.test((button.textContent || '').trim())
+      ).length,
+    };
+  `);
+  if (!observations.projectMeetingFirst.timelinePresent
+    || observations.projectMeetingFirst.meetingRows === 0
+    || !observations.projectMeetingFirst.timelineBeforeStatus
+    || observations.projectMeetingFirst.simulatedProgress
+    || observations.projectMeetingFirst.duplicateTranscribeButtons > 0) {
+    throw new Error(`Project meeting-first contract failed: ${JSON.stringify(observations.projectMeetingFirst)}`);
+  }
   await checkpoint(browser, '03-projects-container');
 
   const openedProjectMeeting = await browser.execute(`
