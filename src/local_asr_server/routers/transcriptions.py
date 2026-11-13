@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -22,6 +22,17 @@ from local_asr_server.transcription_jobs import (
     TranscriptionJob,
 )
 from local_asr_server.settings import load_settings
+from local_asr_server.speaker_diarization_benchmark import (
+    BENCHMARK_JOB_TYPE, run_benchmark, validate_options,
+    public_benchmark_job, benchmark_timeline_window,
+)
+from local_asr_server.transcription_diarization_review import (
+    REVIEW_JOB_TYPE, fingerprint, project_review,
+)
+from local_asr_server.speaker_review import (
+    project_speaker_action, project_verified_speaker_links,
+    speaker_audio_samples, speaker_timeline_window,
+)
 from local_asr_server.env import get_env_var
 from local_asr_server.services.transcription_service import TranscriptionService
 from local_asr_server.services.transcription_application import (
@@ -61,6 +72,29 @@ class SpeakerNamesRequest(BaseModel):
     names: dict[str, str] = Field(default_factory=dict)
 
 
+class ReviewedDiarizationUndoRequest(BaseModel):
+    revision_id: str
+
+
+class SpeakerReviewActionRequest(BaseModel):
+    action: Literal["rename", "confirm", "merge", "exclude", "restore", "reassign_turn"]
+    cluster: str = Field(min_length=1, max_length=160)
+    target: str | None = Field(default=None, max_length=160)
+    name: str | None = Field(default=None, max_length=120)
+    segment_id: int | None = Field(default=None, ge=0)
+    expected_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class DiarizationBenchmarkRequest(BaseModel):
+    engines: list[Literal["community-1", "nemotron3-fast128", "nemotron3-compact"]] = Field(
+        default_factory=lambda: ["community-1", "nemotron3-fast128", "nemotron3-compact"],
+        min_length=2, max_length=3,
+    )
+    scope: Literal["sample", "full", "range"] = "sample"
+    start_seconds: Optional[float] = None
+    end_seconds: Optional[float] = None
+
+
 def _get_transcribe_file_sync():
     import sys
     server_mod = sys.modules.get("local_asr_server.server")
@@ -96,29 +130,6 @@ def _normalize_diarization_provider(provider: str | None) -> str:
     if selected not in DIARIZATION_PROVIDERS:
         raise ValueError(f"Unsupported diarization provider: {provider}")
     return selected
-
-
-def _apply_initial_diarization(
-    app: Any,
-    audio_path: Path,
-    payload: dict[str, Any],
-    *,
-    provider: str,
-    speechmatics_region: str | None,
-    speechmatics_model: str | None,
-) -> dict[str, Any]:
-    if provider == DIARIZATION_PROVIDER_DISABLED:
-        return payload
-    existing = payload.get("stats", {}).get("speaker_diarization") or {}
-    if existing.get("status") == "completed" and existing.get("provider") == provider:
-        return payload
-    return get_services(app).diarization.process_audio_payload(
-        audio_path,
-        payload,
-        provider=provider,
-        speechmatics_region=speechmatics_region,
-        speechmatics_model=speechmatics_model,
-    )
 
 
 def run_recording_transcription(
@@ -342,7 +353,7 @@ async def transcribe_upload(
                             backend=TranscriptionService.backend(provider, target_model),
                             provider_options=public_options,
                             payload_postprocessor=(
-                                lambda source_path, payload: _apply_initial_diarization(
+                                lambda source_path, payload: SingleFileTranscriptionUseCase.apply_initial_diarization(
                                     request.app,
                                     source_path,
                                     payload,
@@ -449,7 +460,7 @@ def transcribe_path(request: Request, body: TranscribePathRequest):
                 **TranscriptionService.payload_metadata(provider, target_model, public_options),
             },
         }
-        payload = _apply_initial_diarization(
+        payload = SingleFileTranscriptionUseCase.apply_initial_diarization(
             request.app,
             audio_path,
             payload,
@@ -521,6 +532,95 @@ def create_transcription_job(recording_id: str, request: Request, body: Transcri
     )
 
 
+@router.post("/v1/recordings/{recording_id}/diarization-benchmarks", status_code=202)
+def create_diarization_benchmark(
+    recording_id: str, request: Request, body: DiarizationBenchmarkRequest,
+):
+    try:
+        validate_options(
+            body.engines, body.scope, start_seconds=body.start_seconds,
+            end_seconds=body.end_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    services = get_services(request.app)
+    try:
+        recording = services.recordings.get(recording_id, include_result=False)
+        if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
+            raise RecordingConflict("Finish the recording before comparing speakers")
+        services.recordings.diarization_track(recording_id)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    existing = services.transcription_jobs.list(
+        job_type=BENCHMARK_JOB_TYPE, scope_type="recording", scope_id=recording_id, limit=10,
+    )
+    active = next((item for item in existing if item["status"] not in {
+        "completed", "failed", "cancelled", "interrupted",
+    }), None)
+    if active:
+        raise HTTPException(status_code=409, detail="A comparison is already running for this meeting")
+
+    def runner(job: TranscriptionJob) -> dict[str, Any]:
+        def progress(percent: int, step: str, detail: dict[str, Any]) -> None:
+            services.transcription_jobs.update_progress(
+                job.id, "running", percent, step, event_payload=detail,
+            )
+
+        return run_benchmark(
+            services.recordings, recording_id, engines=list(body.engines), scope=body.scope,
+            start_seconds=body.start_seconds, end_seconds=body.end_seconds,
+            cancel_requested=lambda: job.cancel_requested,
+            on_progress=progress,
+        )
+
+    return services.transcription_jobs.create(
+        recording_id, runner, job_type=BENCHMARK_JOB_TYPE,
+        scope_type="recording", scope_id=recording_id,
+        payload={
+            "recording_id": recording_id, "engines": list(body.engines),
+            "scope": body.scope, "start_seconds": body.start_seconds,
+            "end_seconds": body.end_seconds,
+        },
+    )
+
+
+@router.get("/v1/recordings/{recording_id}/diarization-benchmarks")
+def list_diarization_benchmarks(recording_id: str, request: Request):
+    try:
+        get_services(request.app).recordings.get(recording_id, include_result=False)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    return {"items": [public_benchmark_job(job) for job in get_services(request.app).transcription_jobs.list(
+        job_type=BENCHMARK_JOB_TYPE, scope_type="recording", scope_id=recording_id, limit=10,
+    )]}
+
+
+@router.get("/v1/recordings/{recording_id}/diarization-benchmarks/{job_id}/timeline")
+def get_diarization_benchmark_timeline(
+    recording_id: str, job_id: str, request: Request,
+    start_seconds: float = Query(ge=0), end_seconds: float = Query(gt=0),
+):
+    services = get_services(request.app)
+    try:
+        services.recordings.get(recording_id, include_result=False)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    job = services.transcription_jobs.get(job_id)
+    if not job or job.get("type") != BENCHMARK_JOB_TYPE or job.get("scope_id") != recording_id:
+        raise HTTPException(status_code=404, detail="Benchmark not found for this recording")
+    if job.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="Benchmark is not completed")
+    try:
+        return benchmark_timeline_window(
+            job, start_seconds=start_seconds, end_seconds=end_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/v1/activities")
 def list_activities(request: Request, recent_limit: int = Query(default=30, ge=1, le=100)):
     arbiter = request.app.state.heavy_workload_arbiter.snapshot()
@@ -548,6 +648,260 @@ def list_jobs(
             limit=limit,
         )
     }
+
+
+def _transcription_review_context(transcription_id: str, app: Any, *, require_segments: bool = True):
+    services = get_services(app)
+    try:
+        transcription = services.transcriptions.get(transcription_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Transcription not found") from exc
+    if not transcription.get("recording_id") or transcription.get("merged_sources"):
+        raise HTTPException(status_code=409, detail="Review requires an unmerged saved meeting")
+    if require_segments and not transcription.get("segments"):
+        raise HTTPException(status_code=409, detail="Review requires a timed transcription")
+    return services, transcription
+
+
+def _completed_review_job(transcription_id: str, job_id: str, app: Any):
+    services, transcription = _transcription_review_context(transcription_id, app)
+    job = services.transcription_jobs.get(job_id)
+    if not job or job.get("type") != REVIEW_JOB_TYPE or job.get("scope_id") != transcription_id:
+        raise HTTPException(status_code=404, detail="Speaker review not found for this transcription")
+    if job.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="Speaker review has not completed")
+    if job.get("recording_id") != transcription.get("recording_id"):
+        raise HTTPException(status_code=404, detail="Speaker review belongs to another meeting")
+    return services, transcription, job
+
+
+@router.get("/v1/transcriptions/{transcription_id}/speaker-review")
+def get_speaker_review(transcription_id: str, request: Request):
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
+    return {
+        "fingerprint": fingerprint(transcription),
+        "undo": services.transcriptions.reviewed_diarization_undo(transcription_id),
+    }
+
+
+@router.get("/v1/transcriptions/{transcription_id}/speaker-review/samples")
+def get_speaker_review_samples(transcription_id: str, request: Request):
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
+    try:
+        return speaker_audio_samples(transcription, services.recordings)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except (RecordingConflict, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/v1/transcriptions/{transcription_id}/speaker-review/timeline")
+def get_speaker_review_timeline(
+    transcription_id: str, request: Request,
+    start: float = Query(default=0.0, ge=0),
+    end: float = Query(default=300.0, gt=0),
+):
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
+    diarization = (transcription.get("speaker_diarization")
+                   or (transcription.get("stats") or {}).get("speaker_diarization") or {})
+    job_id = str(diarization.get("applied_review_job_id") or "")
+    review_job = services.transcription_jobs.get(job_id) if (
+        diarization.get("source") == "reviewed_meeting" and job_id
+    ) else None
+    try:
+        return speaker_timeline_window(
+            transcription, services.recordings, start_seconds=start, end_seconds=end,
+            review_job=review_job,
+        )
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except (RecordingConflict, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/transcriptions/{transcription_id}/speaker-review/auto-link")
+def auto_link_verified_speakers(transcription_id: str, request: Request):
+    """Idempotent local reconciliation; no inference or remote processing.
+
+    The timeline endpoint's provenance rules remain the sole authority for
+    native intervals. Only a verified match can create an undoable revision.
+    """
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
+    if services.transcriptions.reviewed_diarization_undo(transcription_id):
+        return {"status": "undo_pending", "linked_segments": 0}
+    if not any(str(item.get("text") or "").strip()
+               for item in transcription.get("segments") or []):
+        return {"status": "no_timed_text", "linked_segments": 0}
+    diarization = (transcription.get("speaker_diarization")
+                   or (transcription.get("stats") or {}).get("speaker_diarization") or {})
+    if diarization.get("status") != "completed" or not diarization.get("clusters_by_track"):
+        return {"status": "no_verified_diarization", "linked_segments": 0}
+    job_id = str(diarization.get("applied_review_job_id") or "")
+    review_job = services.transcription_jobs.get(job_id) if (
+        diarization.get("source") == "reviewed_meeting" and job_id
+    ) else None
+    try:
+        timeline = speaker_timeline_window(
+            transcription, services.recordings,
+            start_seconds=0, end_seconds=28800,
+            review_job=review_job,
+        )
+        candidate, status, linked = project_verified_speaker_links(transcription, timeline)
+        if candidate is None:
+            return {"status": status, "linked_segments": 0}
+        committed = services.transcriptions.apply_reviewed_diarization(
+            transcription_id, candidate=candidate,
+            expected_fingerprint=fingerprint(transcription),
+            preserve_raw_text=True,
+        )
+        return {"status": "linked", "linked_segments": linked, **committed}
+    except (RecordingConflict, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+
+
+@router.post("/v1/transcriptions/{transcription_id}/speaker-review")
+def commit_speaker_review(
+    transcription_id: str, body: SpeakerReviewActionRequest, request: Request,
+):
+    services, transcription = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
+    if fingerprint(transcription) != body.expected_fingerprint:
+        raise HTTPException(
+            status_code=409, detail="Speaker review is stale; reload the meeting before editing",
+        )
+    try:
+        candidate = project_speaker_action(
+            transcription, action=body.action, cluster=body.cluster,
+            target=body.target, name=body.name, segment_id=body.segment_id,
+        )
+        return services.transcriptions.apply_reviewed_diarization(
+            transcription_id,
+            candidate=candidate,
+            expected_fingerprint=body.expected_fingerprint,
+            preserve_raw_text=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/v1/transcriptions/{transcription_id}/speaker-review/undo")
+def undo_speaker_review(
+    transcription_id: str, body: ReviewedDiarizationUndoRequest, request: Request,
+):
+    services, _ = _transcription_review_context(
+        transcription_id, request.app, require_segments=False,
+    )
+    try:
+        return {
+            "transcription": services.transcriptions.undo_reviewed_diarization(
+                transcription_id, body.revision_id,
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/transcriptions/{transcription_id}/diarization-reviews", status_code=202)
+def start_community_review(transcription_id: str, request: Request):
+    services, transcription = _transcription_review_context(transcription_id, request.app)
+    recording_id = str(transcription["recording_id"])
+    try:
+        recording = services.recordings.get(recording_id, include_result=False)
+        if recording.get("status") in {"recording", "finalizing", "recoverable", "interrupted"}:
+            raise RecordingConflict("Finish the recording before reviewing speaker labels")
+        services.recordings.diarization_track(recording_id)
+    except RecordingNotFound as exc:
+        raise HTTPException(status_code=404, detail="Recording not found") from exc
+    except RecordingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # A staged result is scoped to its exact transcription and checks for
+    # concurrent modifications at both preview and explicit apply time.
+    pending = services.transcription_jobs.list(
+        job_type=REVIEW_JOB_TYPE, scope_type="transcription", scope_id=transcription_id, limit=10,
+    )
+    if any(item["status"] not in {"completed", "failed", "cancelled", "interrupted"} for item in pending):
+        raise HTTPException(status_code=409, detail="A speaker review is already running")
+    source_fingerprint = fingerprint(transcription)
+
+    def runner(job: TranscriptionJob) -> dict[str, Any]:
+        def progress(percent: int, step: str, detail: dict[str, Any]) -> None:
+            services.transcription_jobs.update_progress(
+                job.id, "running", percent, step, event_payload=detail,
+            )
+
+        result = run_benchmark(
+            services.recordings, recording_id, engines=["community-1"], scope="full",
+            cancel_requested=lambda: job.cancel_requested, on_progress=progress,
+            allow_single=True,
+        )
+        result["transcription_fingerprint"] = source_fingerprint
+        return result
+
+    return public_benchmark_job(services.transcription_jobs.create(
+        recording_id, runner, job_type=REVIEW_JOB_TYPE,
+        scope_type="transcription", scope_id=transcription_id,
+        payload={"recording_id": recording_id, "transcription_id": transcription_id,
+                 "engine": "fluidaudio-community-1"},
+    ))
+
+
+@router.get("/v1/transcriptions/{transcription_id}/diarization-reviews")
+def list_community_reviews(transcription_id: str, request: Request):
+    services, _ = _transcription_review_context(transcription_id, request.app)
+    jobs = services.transcription_jobs.list(
+        job_type=REVIEW_JOB_TYPE, scope_type="transcription", scope_id=transcription_id, limit=5,
+    )
+    return {
+        "items": [public_benchmark_job(job) for job in jobs],
+        "undo": services.transcriptions.reviewed_diarization_undo(transcription_id),
+    }
+
+
+@router.get("/v1/transcriptions/{transcription_id}/diarization-reviews/{job_id}/preview")
+def preview_community_review(transcription_id: str, job_id: str, request: Request):
+    _, transcription, job = _completed_review_job(transcription_id, job_id, request.app)
+    try:
+        projected = project_review(transcription, job)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {key: value for key, value in projected.items() if key != "candidate"}
+
+
+@router.post("/v1/transcriptions/{transcription_id}/diarization-reviews/{job_id}/apply")
+def apply_community_review(transcription_id: str, job_id: str, request: Request):
+    services, transcription, job = _completed_review_job(transcription_id, job_id, request.app)
+    try:
+        projection = project_review(transcription, job)
+        return services.transcriptions.apply_reviewed_diarization(
+            transcription_id, candidate=projection["candidate"],
+            expected_fingerprint=job["result"]["transcription_fingerprint"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/v1/transcriptions/{transcription_id}/diarization-reviews/undo")
+def undo_community_review(transcription_id: str, request: Request, body: ReviewedDiarizationUndoRequest):
+    services, _ = _transcription_review_context(transcription_id, request.app)
+    try:
+        return {"transcription": services.transcriptions.undo_reviewed_diarization(
+            transcription_id, body.revision_id,
+        )}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/v1/transcriptions/{transcription_id}/diarization-jobs", status_code=202)
@@ -612,7 +966,7 @@ def get_job(job_id: str, request: Request):
     job = get_services(request.app).transcription_jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return public_benchmark_job(job)
 
 
 @router.get("/v1/jobs/{job_id}/events")
@@ -644,7 +998,7 @@ def cancel_job(job_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Job not found")
     job = (
         get_services(request.app).transcription_jobs.cancel(job_id)
-        if existing["type"] in {TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE, VISUAL_INTELLIGENCE_JOB_TYPE}
+        if existing["type"] in {TRANSCRIPTION_JOB_TYPE, DIARIZATION_JOB_TYPE, VISUAL_INTELLIGENCE_JOB_TYPE, BENCHMARK_JOB_TYPE, REVIEW_JOB_TYPE}
         else get_services(request.app).analysis_jobs.cancel(job_id)
         if existing["type"] == "analysis"
         else get_services(request.app).jobs.request_cancel(job_id)

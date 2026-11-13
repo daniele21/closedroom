@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   AlertTriangle,
-  Camera,
   Check,
   ChevronDown,
   ChevronUp,
@@ -9,19 +8,21 @@ import {
   Loader2,
   Mic,
   Monitor,
-  PencilLine,
-  Square,
   Volume2,
   X,
 } from 'lucide-react';
 import { ApiClient, CaptureDisplay } from '../api/apiClient';
+import { RecordingOverlayActions } from '../components/recording/RecordingOverlayActions';
+import { RecordingOverlayNoteComposer } from '../components/recording/RecordingOverlayNoteComposer';
 import { useTranslation } from '../i18n/i18n';
+import type { AudioSourceHealth } from '../hooks/useRecorder';
 
 export default function RecordingOverlayPage() {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const [timer, setTimer] = useState('00:00');
   const [signalLevelMic, setSignalLevelMic] = useState('-∞ dB');
   const [signalLevelSystem, setSignalLevelSystem] = useState('-∞ dB');
+  const [audioSourceHealth, setAudioSourceHealth] = useState<AudioSourceHealth>({ mic: 'healthy', system: 'healthy' });
   const [isRecording, setIsRecording] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
@@ -41,17 +42,16 @@ export default function RecordingOverlayPage() {
   const [isDisplayPickerOpen, setIsDisplayPickerOpen] = useState(false);
   const [pendingDisplayId, setPendingDisplayId] = useState<number | null>(null);
   const [isSelectingDisplay, setIsSelectingDisplay] = useState(false);
-  const [screenshotFeedback, setScreenshotFeedback] = useState<'idle' | 'saved'>('idle');
   const [lastSavedScreenshotId, setLastSavedScreenshotId] = useState<string | null>(null);
   const [isUndoingScreenshot, setIsUndoingScreenshot] = useState(false);
   const [noteCount, setNoteCount] = useState(0);
-  const [noteComposerOpen, setNoteComposerOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   const [noteAnchor, setNoteAnchor] = useState<number | null>(null);
+  const [noteComposerVisible, setNoteComposerVisible] = useState(false);
+  const noteComposerOpen = noteComposerVisible && noteAnchor !== null;
   const [isAnchoringNote, setIsAnchoringNote] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isUndoingNote, setIsUndoingNote] = useState(false);
-  const [noteFeedback, setNoteFeedback] = useState<'idle' | 'saved'>('idle');
   const [lastSavedNoteId, setLastSavedNoteId] = useState<string | null>(null);
 
   const logOverlay = useCallback((level: 'info' | 'warn' | 'error', message: string, data?: any) => {
@@ -101,6 +101,14 @@ export default function RecordingOverlayPage() {
   const screenshotFeedbackTimerRef = useRef<number | null>(null);
   const noteFeedbackTimerRef = useRef<number | null>(null);
 
+  // A draft belongs to one recording ID. Never carry unsaved text/timestamps
+  // into a different Meeting when the overlay reconnects or switches sessions.
+  useEffect(() => {
+    setNoteDraft('');
+    setNoteAnchor(null);
+    setNoteComposerVisible(false);
+  }, [recordingId]);
+
   useEffect(() => {
     selectedDisplayIdRef.current = selectedDisplayId;
   }, [selectedDisplayId]);
@@ -125,10 +133,7 @@ export default function RecordingOverlayPage() {
     return null;
   };
 
-  const loadDisplays = useCallback(async (
-    preferredDisplayId?: number | null,
-    _autoSelectSingle = true,
-  ) => {
+  const loadDisplays = useCallback(async (preferredDisplayId?: number | null) => {
     try {
       const payload = await ApiClient.captureDisplays();
       const available = payload.displays || [];
@@ -161,6 +166,35 @@ export default function RecordingOverlayPage() {
     }
   }, []);
 
+  // One acknowledgement policy for both SSE updates and the HTTP status snapshot.
+  // Pending optimistic selection must not be overwritten by a stale backend display.
+  const reconcileBackendDisplaySelection = useCallback((backendDisplayId: number | null) => {
+    const pendingSelection = pendingDisplayIdRef.current;
+    if (backendDisplayId === null || (pendingSelection !== null && backendDisplayId !== pendingSelection)) {
+      return;
+    }
+    selectedDisplayIdRef.current = backendDisplayId;
+    setSelectedDisplayId(backendDisplayId);
+    if (pendingSelection === backendDisplayId) {
+      pendingDisplayIdRef.current = null;
+      setPendingDisplayId(null);
+    }
+  }, []);
+
+  // HTTP and SSE report the same persisted counters. Keep their event-specific
+  // responsibilities separate (timer, stream lifetime, recording metadata).
+  const applyBackendProgress = useCallback((
+    data: Awaited<ReturnType<typeof ApiClient.getActiveRecording>>,
+    backendDisplayId: number | null,
+  ) => {
+    setIsRecording(true);
+    setBytesWritten(data.bytes_written || 0);
+    setWarnings(data.warnings || []);
+    setScreenshotCount(data.screenshot_count || 0);
+    setNoteCount(data.note_count || 0);
+    reconcileBackendDisplaySelection(backendDisplayId);
+  }, [reconcileBackendDisplaySelection]);
+
   const connectSSE = useCallback((recId: string) => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -179,9 +213,9 @@ export default function RecordingOverlayPage() {
           setRecordingId(null);
           setScreenshotCount(0);
           setNoteCount(0);
-          setNoteComposerOpen(false);
           setNoteDraft('');
           setNoteAnchor(null);
+          setNoteComposerVisible(false);
           setLastScreenshotAt(null);
           setLastSavedScreenshotId(null);
           if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -195,26 +229,10 @@ export default function RecordingOverlayPage() {
           return;
         }
 
-        setIsRecording(true);
-        setBytesWritten(data.bytes_written || 0);
         setSignalLevelMic(formatDb(data.mic_db));
         setSignalLevelSystem(formatDb(data.system_db));
-        setWarnings(data.warnings || []);
-        setScreenshotCount(data.screenshot_count || 0);
-        setNoteCount(data.note_count || 0);
         const backendDisplayId = data.screenshot_display_id ? Number(data.screenshot_display_id) : null;
-        const pendingSelection = pendingDisplayIdRef.current;
-        if (
-          backendDisplayId !== null
-          && (pendingSelection === null || backendDisplayId === pendingSelection)
-        ) {
-          selectedDisplayIdRef.current = backendDisplayId;
-          setSelectedDisplayId(backendDisplayId);
-          if (pendingSelection === backendDisplayId) {
-            pendingDisplayIdRef.current = null;
-            setPendingDisplayId(null);
-          }
-        }
+        applyBackendProgress(data, backendDisplayId);
 
         if (data.started_at && !startedAtRef.current) {
           startedAtRef.current = recordingStartedAtMs(data.started_at);
@@ -229,7 +247,7 @@ export default function RecordingOverlayPage() {
       sse.close();
       eventSourceRef.current = null;
     };
-  }, []);
+  }, [applyBackendProgress]);
 
   const checkActiveRecording = useCallback(async () => {
     try {
@@ -244,27 +262,12 @@ export default function RecordingOverlayPage() {
       });
       if (activeData.active && activeData.recording_id) {
         setRecordingId(activeData.recording_id);
-        setIsRecording(true);
         setTitle(activeData.title || 'Registrazione');
         setCaptureBackend(activeData.capture_backend || 'browser');
         setCaptureMode(activeData.capture_mode || 'both');
-        setBytesWritten(activeData.bytes_written || 0);
-        setWarnings(activeData.warnings || []);
-        setScreenshotCount(activeData.screenshot_count || 0);
-        setNoteCount(activeData.note_count || 0);
         const backendDisplayId = activeData.screenshot_display_id ?? null;
         const pendingSelection = pendingDisplayIdRef.current;
-        if (
-          backendDisplayId !== null
-          && (pendingSelection === null || backendDisplayId === pendingSelection)
-        ) {
-          selectedDisplayIdRef.current = backendDisplayId;
-          setSelectedDisplayId(backendDisplayId);
-          if (pendingSelection === backendDisplayId) {
-            pendingDisplayIdRef.current = null;
-            setPendingDisplayId(null);
-          }
-        }
+        applyBackendProgress(activeData, backendDisplayId);
         if ((activeData.capture_backend || 'browser') === 'native') {
           const preferredDisplayId = pendingSelection ?? backendDisplayId ?? selectedDisplayIdRef.current;
           void loadDisplays(preferredDisplayId ?? undefined);
@@ -306,7 +309,7 @@ export default function RecordingOverlayPage() {
       bc.postMessage({ type: 'request-status' });
       bc.close();
     }
-  }, [connectSSE, loadDisplays, logOverlay]);
+  }, [applyBackendProgress, connectSSE, loadDisplays, logOverlay]);
 
   // Poll/Check state on mount and connect SSE/BroadcastChannel
   useEffect(() => {
@@ -321,6 +324,7 @@ export default function RecordingOverlayPage() {
         setTimer(data.timer);
         setSignalLevelMic(data.signalLevelMic || '-∞ dB');
         setSignalLevelSystem(data.signalLevelSystem || '-∞ dB');
+        if (data.audioSourceHealth) setAudioSourceHealth(data.audioSourceHealth);
         setVisualCaptureLabel(data.visualCaptureLabel || '');
 
         if (data.isRecording) {
@@ -514,11 +518,9 @@ export default function RecordingOverlayPage() {
         selectedDisplayIdRef.current = saved.display_id;
         setSelectedDisplayId(saved.display_id);
       }
-      setScreenshotFeedback('saved');
       setLastSavedScreenshotId(saved.screenshot_id);
       if (screenshotFeedbackTimerRef.current) window.clearTimeout(screenshotFeedbackTimerRef.current);
       screenshotFeedbackTimerRef.current = window.setTimeout(() => {
-        setScreenshotFeedback('idle');
         setLastSavedScreenshotId(null);
       }, 4500);
       logOverlay('info', 'Screenshot captured and stored successfully', {
@@ -530,14 +532,11 @@ export default function RecordingOverlayPage() {
     } catch (err: any) {
       const message = String(err?.message || t('recording.screenshotFailed'));
       logOverlay('error', 'Screenshot capture failed with error', { error: message });
-      if (message.includes('selected_display_unavailable')) {
-        setErrorMsg(t('recording.screenshotDisplayUnavailable'));
-        await loadDisplays(undefined, false);
-        setIsDisplayPickerOpen(true);
-        void resizeOverlayForState(isExpanded, true);
-      } else if (message.includes('display_selection_required')) {
-        setErrorMsg(t('recording.screenshotChooseMonitorError'));
-        await loadDisplays(undefined, false);
+      const displayUnavailable = message.includes('selected_display_unavailable');
+      const selectionRequired = message.includes('display_selection_required');
+      if (displayUnavailable || selectionRequired) {
+        setErrorMsg(t(displayUnavailable ? 'recording.screenshotDisplayUnavailable' : 'recording.screenshotChooseMonitorError'));
+        await loadDisplays();
         setIsDisplayPickerOpen(true);
         void resizeOverlayForState(isExpanded, true);
       } else {
@@ -555,7 +554,6 @@ export default function RecordingOverlayPage() {
     try {
       await ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId);
       setLastSavedScreenshotId(null);
-      setScreenshotFeedback('idle');
       setScreenshotCount((current) => Math.max(0, current - 1));
       setLastScreenshotAt(null);
       if (screenshotFeedbackTimerRef.current) {
@@ -584,10 +582,22 @@ export default function RecordingOverlayPage() {
     }
   };
 
+  // Collapsing a draft must not silently discard the text or its *original*
+  // local capture timestamp. An empty composer is intentionally reset so a new
+  // note receives a fresh authoritative anchor.
   const closeNoteComposer = useCallback(() => {
-    setNoteComposerOpen(false);
+    setNoteComposerVisible(false);
+    if (!noteDraft.trim()) setNoteAnchor(null);
+    // The textarea unmounts; return keyboard/VoiceOver focus to its trigger.
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>('[data-note-action="true"]')?.focus();
+    });
+  }, [noteDraft]);
+
+  const resetSavedNoteComposer = useCallback(() => {
     setNoteDraft('');
     setNoteAnchor(null);
+    setNoteComposerVisible(false);
   }, []);
 
   const handleOpenNote = async () => {
@@ -596,12 +606,18 @@ export default function RecordingOverlayPage() {
       return;
     }
     if (!recordingId || !isRecording || isStopping || isAnchoringNote || isSavingNote) return;
+    if (noteAnchor !== null && noteDraft.trim()) {
+      setNoteComposerVisible(true);
+      setIsDisplayPickerOpen(false);
+      window.requestAnimationFrame(() => noteInputRef.current?.focus());
+      return;
+    }
     setIsAnchoringNote(true);
     setErrorMsg(null);
     try {
       const anchor = await ApiClient.recordingNoteAnchor(recordingId);
       setNoteAnchor(anchor.timestamp);
-      setNoteComposerOpen(true);
+      setNoteComposerVisible(true);
       setIsDisplayPickerOpen(false);
       window.requestAnimationFrame(() => noteInputRef.current?.focus());
     } catch (err: any) {
@@ -627,11 +643,9 @@ export default function RecordingOverlayPage() {
       });
       setNoteCount((current) => Math.max(current + 1, saved.sequence + 1));
       setLastSavedNoteId(saved.note_id);
-      setNoteFeedback('saved');
-      closeNoteComposer();
+      resetSavedNoteComposer();
       if (noteFeedbackTimerRef.current) window.clearTimeout(noteFeedbackTimerRef.current);
       noteFeedbackTimerRef.current = window.setTimeout(() => {
-        setNoteFeedback('idle');
         setLastSavedNoteId(null);
       }, 4500);
       logOverlay('info', 'User note committed', {
@@ -656,7 +670,6 @@ export default function RecordingOverlayPage() {
       await ApiClient.deleteRecordingNote(recordingId, lastSavedNoteId);
       setNoteCount((current) => Math.max(0, current - 1));
       setLastSavedNoteId(null);
-      setNoteFeedback('idle');
       if (noteFeedbackTimerRef.current) {
         window.clearTimeout(noteFeedbackTimerRef.current);
         noteFeedbackTimerRef.current = null;
@@ -825,6 +838,9 @@ export default function RecordingOverlayPage() {
     ? displayName(selectedDisplay, selectedDisplayIndex)
     : (displays.length > 0 ? 'Choose screen' : 'Screen unavailable');
 
+  const degradedSources = (Object.entries(audioSourceHealth) as Array<[keyof AudioSourceHealth, AudioSourceHealth['mic']]>)
+    .filter(([, state]) => state !== 'healthy')
+    .map(([source]) => t(source === 'mic' ? 'recording.sourceMic' : 'recording.sourceSystem'));
   const micHealth = getDeviceHealth(signalLevelMic);
   const systemHealth = getDeviceHealth(signalLevelSystem);
 
@@ -857,6 +873,12 @@ export default function RecordingOverlayPage() {
           <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/60">
             {isStopping ? 'Finalizing' : isRecording ? 'REC' : 'Ready'}
           </span>
+          {isRecording && degradedSources.length > 0 && (
+            <span role="status" aria-live="polite" className="truncate rounded bg-amber-400/15 px-1.5 py-0.5 text-[10px] text-amber-200"
+              title={`${t('recording.sourceDegraded')} ${degradedSources.join(', ')}`}>
+              {t('recording.sourceDegraded')}
+            </span>
+          )}
           {isExpanded && (
             <span className="max-w-[150px] truncate text-[10px] text-white/55" title={title}>
               {title || t('recording.noActiveRecording')}
@@ -915,61 +937,17 @@ export default function RecordingOverlayPage() {
         </div>
       )}
 
-      {noteComposerOpen && (
-        <div
-          className="mt-2 rounded-xl border border-amber-200/20 bg-amber-100/[0.07] p-2"
-          data-note-composer="true"
-        >
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="font-mono text-[10px] font-semibold tabular-nums text-amber-100/85">
-              {noteAnchor === null
-                ? '—'
-                : `${Math.floor(noteAnchor / 60)}:${String(Math.floor(noteAnchor % 60)).padStart(2, '0')}`}
-            </span>
-            <button
-              type="button"
-              onClick={closeNoteComposer}
-              disabled={isSavingNote}
-              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-40"
-              aria-label="Close note editor"
-              data-note-close="true"
-            >
-              <X className="h-3 w-3" aria-hidden="true" />
-              Close
-            </button>
-          </div>
-          <textarea
-            ref={noteInputRef}
-            value={noteDraft}
-            maxLength={4000}
-            rows={2}
-            placeholder="Add a note about this moment…"
-            onChange={(event) => setNoteDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                closeNoteComposer();
-                return;
-              }
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                void handleSaveNote();
-              }
-            }}
-            className="w-full select-text resize-none rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-[11px] leading-relaxed text-white/90 outline-none placeholder:text-white/30 focus:border-amber-200/35"
-            aria-label="Note about this meeting moment"
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="text-[9px] text-white/40">Enter to save · Shift+Enter for a new line</span>
-            <div className="flex gap-1.5">
-              <button type="button" onClick={closeNoteComposer} disabled={isSavingNote} className="rounded-md px-2 py-1 text-[10px] text-white/60 hover:bg-white/10 disabled:opacity-40">Cancel</button>
-              <button type="button" onClick={() => void handleSaveNote()} disabled={!noteDraft.trim() || isSavingNote} className="rounded-md bg-amber-200/20 px-2.5 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-200/30 disabled:opacity-40" data-note-save="true">{isSavingNote ? 'Saving…' : 'Save note'}</button>
-            </div>
-          </div>
-          {noteDraft.length >= 3600 && (
-            <div className="mt-1 text-right text-[8px] text-white/35">{noteDraft.length}/4000</div>
-          )}
-        </div>
+      {noteComposerOpen && noteAnchor !== null && (
+        <RecordingOverlayNoteComposer
+          lang={lang}
+          anchor={noteAnchor}
+          draft={noteDraft}
+          saving={isSavingNote}
+          inputRef={noteInputRef}
+          onChange={setNoteDraft}
+          onClose={closeNoteComposer}
+          onSave={() => void handleSaveNote()}
+        />
       )}
 
       <div className="mt-2 flex items-center gap-1.5">
@@ -1083,106 +1061,31 @@ export default function RecordingOverlayPage() {
           )}
         </div>
 
-        <div className={`flex h-9 shrink-0 overflow-hidden rounded-lg border ${
-          noteFeedback === 'saved'
-            ? 'border-amber-200/30 bg-amber-200/10'
-            : 'border-white/10 bg-white/[0.08]'
-        }`}>
-          <button
-            type="button"
-            onClick={() => void handleOpenNote()}
-            disabled={isStopping || isAnchoringNote || isSavingNote || isUndoingNote || !isRecording}
-            className="flex h-full items-center gap-1.5 px-2.5 text-[10px] font-semibold text-white/90 transition hover:bg-white/[0.05] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-35"
-            aria-label={noteComposerOpen ? 'Close note' : 'Add note'}
-            aria-expanded={noteComposerOpen}
-            title={noteComposerOpen ? 'Close note editor' : 'Add note about this moment'}
-            data-note-action="true"
-          >
-            {isAnchoringNote || isSavingNote ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : noteFeedback === 'saved' ? (
-              <Check className="h-3.5 w-3.5 text-amber-100" aria-hidden="true" />
-            ) : (
-              <PencilLine className="h-3.5 w-3.5 text-amber-100/85" aria-hidden="true" />
-            )}
-            <span>{noteFeedback === 'saved' ? 'Saved' : noteCount}</span>
-          </button>
-          {lastSavedNoteId && (
-            <button
-              type="button"
-              onClick={() => void handleUndoNote()}
-              disabled={isUndoingNote || isStopping}
-              className="flex h-full items-center border-l border-amber-100/15 px-2 text-[9px] font-semibold text-amber-100/75 transition hover:bg-amber-100/10 disabled:opacity-35"
-              data-note-undo="true"
-            >
-              {isUndoingNote ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
-            </button>
-          )}
-        </div>
-
-        <div className={`flex h-9 shrink-0 overflow-hidden rounded-lg border ${
-          screenshotFeedback === 'saved'
-            ? 'border-emerald-300/30 bg-emerald-300/12'
-            : 'border-white/10 bg-white/[0.08]'
-        }`}>
-          <button
-            type="button"
-            onClick={handleCaptureScreenshot}
-            disabled={isStopping || isCapturingScreenshot || isUndoingScreenshot || !isRecording || captureBackend !== 'native' || selectedDisplayId === null}
-            className={`flex h-full items-center gap-1.5 px-2.5 text-[10px] font-semibold transition active:scale-[0.97] ${
-              screenshotFeedback === 'saved'
-                ? 'text-emerald-100'
-                : 'text-white/90 hover:bg-white/[0.05]'
-            } disabled:cursor-not-allowed disabled:opacity-35`}
-            title={selectedDisplayId === null ? 'Choose a screen first' : t('recording.screenshotShortcut')}
-            aria-label={t('recording.screenshotAction')}
-            data-screenshot-action="true"
-          >
-            {isCapturingScreenshot ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : screenshotFeedback === 'saved' ? (
-              <Check className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <Camera className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            <span>{screenshotFeedback === 'saved' ? 'Saved' : screenshotCount}</span>
-          </button>
-
-          {lastSavedScreenshotId && (
-            <button
-              type="button"
-              onClick={() => void handleUndoScreenshot()}
-              disabled={isUndoingScreenshot || isStopping}
-              className="flex h-full items-center border-l border-emerald-200/20 px-2 text-[9px] font-semibold text-emerald-100/75 transition hover:bg-emerald-200/10 hover:text-emerald-50 disabled:cursor-not-allowed disabled:opacity-35"
-              aria-label="Undo last screenshot"
-              title="Undo last screenshot"
-              data-screenshot-undo="true"
-            >
-              {isUndoingScreenshot ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> : 'Undo'}
-            </button>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={handleStop}
-          disabled={isStopping || !isRecording}
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition active:scale-90 ${
-            isStopping
-              ? 'bg-amber-500/70 text-white'
-              : !isRecording
-              ? 'bg-white/10 text-white/30'
-              : 'bg-red-500 text-white shadow-[0_0_18px_rgba(239,68,68,0.18)] hover:bg-red-400'
-          } disabled:cursor-not-allowed`}
-          title="Stop recording"
-          aria-label="Stop recording"
-        >
-          {isStopping ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-          ) : (
-            <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
-          )}
-        </button>
+        <RecordingOverlayActions
+          lang={lang}
+          noteComposerOpen={noteComposerOpen}
+          hasNoteDraft={Boolean(noteDraft.trim())}
+          noteCount={noteCount}
+          screenshotCount={screenshotCount}
+          isRecording={isRecording}
+          isStopping={isStopping}
+          isAnchoringNote={isAnchoringNote}
+          isSavingNote={isSavingNote}
+          isUndoingNote={isUndoingNote}
+          isCapturingScreenshot={isCapturingScreenshot}
+          isUndoingScreenshot={isUndoingScreenshot}
+          lastSavedNoteId={lastSavedNoteId}
+          lastSavedScreenshotId={lastSavedScreenshotId}
+          captureBackend={captureBackend}
+          selectedDisplayId={selectedDisplayId}
+          screenshotShortcut={t('recording.screenshotShortcut')}
+          screenshotLabel={t('recording.screenshotAction')}
+          onOpenNote={() => void handleOpenNote()}
+          onUndoNote={() => void handleUndoNote()}
+          onCaptureScreenshot={() => void handleCaptureScreenshot()}
+          onUndoScreenshot={() => void handleUndoScreenshot()}
+          onStop={() => void handleStop()}
+        />
       </div>
 
       {isExpanded && (

@@ -28,6 +28,42 @@ class RecordingStoreTests(unittest.TestCase):
             language="it",
         )
 
+    def test_legacy_meeting_reports_safe_local_only_storage(self) -> None:
+        recording = self.create_recording()
+        public = self.store.get(recording["id"], include_result=False)
+        self.assertEqual(public["audio_storage"]["state"], "local_only")
+        self.assertFalse(public["audio_storage"]["cleanup_candidate"])
+        self.assertFalse(public["audio_storage"]["automatic_eviction_implemented"])
+        self.assertTrue(public["audio_storage"]["transcriptions_kept_local"])
+        self.assertEqual(public["audio_local_retention_days"], 14)
+
+    def test_internal_proof_is_not_exposed_in_public_meeting_metadata(self) -> None:
+        recording = self.create_recording()
+        session_dir, metadata = self.store._load(recording["id"])
+        metadata["_audio_cloud_proof"] = {
+            "state": "remote_verified",
+            "bucket": "sensitive-bucket-name",
+            "object_name": "private-meeting-object",
+            "ciphertext_sha256": "secret-secret",
+        }
+        self.store._write_metadata(session_dir, metadata)
+        public = self.store.get(recording["id"], include_result=False)
+        self.assertNotIn("_audio_cloud_proof", public)
+        self.assertNotIn("sensitive-bucket-name", json.dumps(public))
+        self.assertNotIn("private-meeting-object", json.dumps(public))
+        self.assertFalse(public["audio_storage"]["cleanup_candidate"])
+
+    def test_recovered_legacy_meeting_does_not_gain_automatic_cleanup(self) -> None:
+        recording = self.create_recording()
+        session_dir, metadata = self.store._load(recording["id"])
+        metadata.pop("audio_local_retention_days")
+        self.store._write_metadata(session_dir, metadata)
+        public = RecordingStore(self.root, use_settings_dir=False).get(
+            recording["id"], include_result=False
+        )
+        self.assertFalse(public["audio_storage"]["cleanup_candidate"])
+        self.assertEqual(public["audio_storage"]["state"], "local_only")
+
     def test_atomic_json_writes_use_independent_temporary_files(self) -> None:
         target = self.root / "state.json"
         errors = []
@@ -192,6 +228,51 @@ class RecordingStoreTests(unittest.TestCase):
 
         tracks = self.store.transcribable_tracks(recording["id"])
         self.assertEqual([track["id"] for track, _ in tracks], ["mic", "system"])
+
+    def test_diarization_prefers_system_and_does_not_require_mic(self) -> None:
+        recording = self.store.create(
+            title="System audio survived microphone loss",
+            mime_type="audio/webm;codecs=opus",
+            model="test-model",
+            language="it",
+            capture_mode="both",
+        )
+        meeting_id = recording["id"]
+        self.store.append_track_chunk(meeting_id, "system", 0, b"system")
+        self.store.append_track_chunk(meeting_id, "mixed", 0, b"mixed")
+        with self.assertRaisesRegex(RecordingConflict, "Finish the recording"):
+            self.store.diarization_track(meeting_id)
+        self.store.finalize(meeting_id)
+        self.store.track_audio_path(meeting_id, "mic").unlink()
+
+        # The transcription contract is deliberately NOT weakened.
+        with self.assertRaisesRegex(RecordingConflict, "Track mic"):
+            self.store.transcribable_tracks(meeting_id)
+        track, path = self.store.diarization_track(meeting_id)
+        self.assertEqual(track["id"], "system")
+        self.assertEqual(path.read_bytes(), b"system")
+
+        # If system is unavailable, mixed is an explicit, verified fallback;
+        # never select microphone audio as though it were remote speakers.
+        path.unlink()
+        track, path = self.store.diarization_track(meeting_id)
+        self.assertEqual(track["id"], "mixed")
+        self.assertEqual(path.read_bytes(), b"mixed")
+
+        path.write_bytes(b"")
+        with self.assertRaisesRegex(RecordingConflict, "No finalized system or mixed audio"):
+            self.store.diarization_track(meeting_id)
+
+    def test_diarization_rejects_mic_only_without_remote_audio(self) -> None:
+        recording = self.store.create(
+            title="Mic only", mime_type="audio/webm",
+            model="test-model", language="it", capture_mode="mic_only",
+        )
+        meeting_id = recording["id"]
+        self.store.append_track_chunk(meeting_id, "mic", 0, b"voice")
+        self.store.finalize(meeting_id)
+        with self.assertRaisesRegex(RecordingConflict, "No finalized system or mixed audio"):
+            self.store.diarization_track(meeting_id)
 
     def test_native_capture_files_update_track_sizes_on_finalize(self) -> None:
         recording = self.store.create(

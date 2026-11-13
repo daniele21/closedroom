@@ -10,6 +10,7 @@ on:
 permissions:
   actions: read
   contents: read
+  statuses: read
 
 concurrency:
   group: closedroom-preflight-${{ github.event.pull_request.number || github.ref }}
@@ -150,38 +151,74 @@ jobs:
     name: Source tests / ${{ needs.select.outputs.stage }} / ${{ needs.select.outputs.profile }}
     needs: [select, reuse]
     if: >-
-      ${{ always() && contains(needs.select.outputs.required_gates, 'source-tests') && needs.reuse.outputs.reused != 'true' }}
-    runs-on: macos-14
+      ${{ needs.select.result == 'success' && contains(needs.select.outputs.required_gates, 'source-tests') && needs.reuse.outputs.reused != 'true' }}
+    # Only orchestration runs in this source repository. All Mac checks execute
+    # on local-runner-infra, where self-hosted registrations actually live.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.select.outputs.head_sha }}
-          fetch-depth: 0
-      - run: test "$(git rev-parse HEAD)" = "${{ needs.select.outputs.head_sha }}" && test "$(uname -m)" = "arm64"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install project toolchain
-        run: |
-          brew list uv >/dev/null 2>&1 || brew install uv
-          npm install --global pnpm@9
-          uv sync --all-extras --frozen --python 3.12
-          cd frontend && pnpm install --frozen-lockfile
-      - name: Frontend deterministic checks
-        run: cd frontend && pnpm run lint && pnpm exec tsc --noEmit
-      - name: Python unit and integration suite
+      - name: Reject untrusted PR commits before shared-Mac execution
+        shell: bash
         env:
-          UV_CACHE_DIR: .cache/uv
-        run: uv run --frozen --python 3.12 python -m unittest discover -s test -v
-      - name: Saved Meeting browser FULL_MEDIA journey
-        if: contains(needs.select.outputs.required_gates, 'browser-e2e')
-        env:
-          E2E_SOURCE_REVISION: ${{ needs.select.outputs.head_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.select.outputs.head_sha }}
         run: |
-          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-          node scripts/browser_meeting_ui_e2e.mjs
-      # FULL_MEDIA is exercised on the runner; bulky screenshots/videos stay
-      # ephemeral. CI publishes only tiny validation identity records.
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REPO" != "$SOURCE_REPO" ]]; then
+            echo "::error::Fork pull requests must never execute on the nonisolated shared Mac" >&2
+            exit 2
+          fi
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+
+      - name: Dispatch exact HEAD to central Mac and await real source status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CENTRAL_DISPATCH_TOKEN }}
+          STATUS_TOKEN: ${{ github.token }}
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.select.outputs.head_sha }}
+          CENTRAL_REPO: daniele21/local-runner-infra
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::CENTRAL_DISPATCH_TOKEN is missing; cannot route to central Mac CI" >&2
+            exit 2
+          fi
+          if [[ -z "$STATUS_TOKEN" ]]; then
+            echo "::error::Missing source status-read credential" >&2
+            exit 2
+          fi
+
+          # Ignore old statuses for this SHA: dispatch acceptance != validation.
+          status_endpoint="repos/$SOURCE_REPO/commits/$SOURCE_SHA/statuses?per_page=100"
+          baseline=$(GH_TOKEN="$STATUS_TOKEN" gh api "$status_endpoint" \
+            --jq '[.[] | select(.context == "local-ci/mac") | .id] | max // 0')
+          gh api --method POST "repos/$CENTRAL_REPO/dispatches" \
+            -f event_type=run-ci \
+            -f "client_payload[repository]=$SOURCE_REPO" \
+            -f "client_payload[sha]=$SOURCE_SHA"
+          echo "Central Mac request accepted for $SOURCE_REPO@$SOURCE_SHA"
+          echo "Waiting for a NEW local-ci/mac status (baseline=$baseline); dispatch alone cannot PASS"
+
+          deadline=$((SECONDS + 3300))
+          while (( SECONDS < deadline )); do
+            latest=$(GH_TOKEN="$STATUS_TOKEN" gh api "$status_endpoint" \
+              --jq "[.[] | select(.context == \"local-ci/mac\" and .id > $baseline)][0] // {}")
+            state=$(jq -r '.state // "absent"' <<<"$latest")
+            target=$(jq -r '.target_url // ""' <<<"$latest")
+            if [[ "$state" == "success" ]]; then
+              echo "Central Mac tests PASS on exact source SHA: $target"
+              exit 0
+            elif [[ "$state" == "failure" || "$state" == "error" ]]; then
+              echo "::error::Central Mac tests $state on exact source SHA: $target" >&2
+              exit 1
+            fi
+            sleep 20
+          done
+          echo "::error::No successful central Mac result within 55 minutes; runner offline/queued or status not reported" >&2
+          exit 1
 
   validation:
     name: Remote source validation / ${{ needs.select.outputs.stage }} / ${{ needs.select.outputs.profile }}
@@ -228,7 +265,7 @@ jobs:
           set -euo pipefail
           gate_key=$(printf '%s' "$GATES" | sha256sum | cut -c1-16)
           e2e_environment=none
-          if [[ "$GATES" == *browser-e2e* ]]; then e2e_environment=browser-macos-arm64-ci; fi
+          if [[ "$GATES" == *browser-e2e* ]]; then e2e_environment=browser-macos-arm64-central-self-hosted; fi
           mkdir -p validation-evidence
           # This record is REMOTE evidence only. Required local/release gates are
           # explicitly pending and must never be reused as a packaged-app PASS.

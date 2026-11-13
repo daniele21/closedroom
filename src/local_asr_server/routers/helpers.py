@@ -9,6 +9,7 @@ from local_asr_server.transcription_quality import dedupe_cross_track_segments
 from local_asr_server.asr_models import get_asr_backend
 from local_asr_server.asr_provider import ASR_PROVIDER_LOCAL, public_asr_metadata
 from local_asr_server.speaker_labels import apply_speaker_labels
+from local_asr_server.analysis_source_provenance import project_speaker_source_validity
 from local_asr_server.structured_notes_projection import expand_analysis_runs
 
 if TYPE_CHECKING:
@@ -136,7 +137,29 @@ def _exclude_incomplete_preparation_runs(
 
 
 def _build_projects(app: FastAPI) -> dict:
-    recordings = get_services(app).recordings.list(limit=999)
+    services = get_services(app)
+    recordings = services.recordings.list(limit=999)
+    # One bounded catalog read replaces N standalone latest-transcript lookups.
+    # Keep compatibility with temporary mocked transcription owners in tests.
+    batch_reader = getattr(services.transcriptions, "find_for_recordings", None)
+    transcriptions_by_recording = (
+        batch_reader([recording["id"] for recording in recordings])
+        if callable(batch_reader) else None
+    )
+    # Project analysis is also a per-record N+1 read. Fetch the same latest
+    # 50 recording and transcription runs per source in bounded local batches.
+    grouped_runs = getattr(services.catalog, "list_analysis_runs_grouped", None)
+    if callable(grouped_runs) and transcriptions_by_recording is not None:
+        recording_runs = grouped_runs("recording_id", [recording["id"] for recording in recordings], limit=50)
+        transcription_runs = grouped_runs(
+            "transcription_id",
+            [transcription["id"] for transcription in transcriptions_by_recording.values()]
+            if transcriptions_by_recording is not None else [],
+            limit=50,
+        )
+    else:
+        recording_runs = None
+        transcription_runs = None
     projects: dict[str, dict] = {}
     unassigned_name = "Senza progetto"
     for recording in recordings:
@@ -146,21 +169,33 @@ def _build_projects(app: FastAPI) -> dict:
             "is_unassigned": project_name == unassigned_name,
             "items": [],
         })
-        transcription = get_services(app).transcriptions.find_for_recording(recording["id"])
-        runs = get_services(app).catalog.list_analysis_runs(recording_id=recording["id"], limit=50)
+        transcription = (
+            transcriptions_by_recording.get(recording["id"])
+            if transcriptions_by_recording is not None
+            else services.transcriptions.find_for_recording(recording["id"])
+        )
+        runs = list(recording_runs.get(recording["id"], [])) if recording_runs is not None else (
+            services.catalog.list_analysis_runs(recording_id=recording["id"], limit=50)
+        )
         if transcription:
-            transcription_runs = get_services(app).catalog.list_analysis_runs(transcription_id=transcription["id"], limit=50)
+            matched_transcription_runs = (
+                transcription_runs.get(transcription["id"], [])
+                if transcription_runs is not None else
+                services.catalog.list_analysis_runs(transcription_id=transcription["id"], limit=50)
+            )
             existing = {run["id"] for run in runs}
-            runs.extend(run for run in transcription_runs if run["id"] not in existing)
+            runs.extend(run for run in matched_transcription_runs if run["id"] not in existing)
         current_runs = _current_analysis_runs(runs, transcription)
-        preparation_jobs = get_services(app).transcription_jobs.list(
+        preparation_jobs = services.transcription_jobs.list(
             job_type="meeting_preparation",
             scope_type="recording",
             scope_id=recording["id"],
             limit=50,
         )
         canonical_runs = expand_analysis_runs(
-            _exclude_incomplete_preparation_runs(current_runs, preparation_jobs)
+            project_speaker_source_validity(
+                _exclude_incomplete_preparation_runs(current_runs, preparation_jobs), transcription,
+            )
         )
         latest_analysis = next((run for run in sorted(canonical_runs, key=lambda item: item.get("created_at") or 0, reverse=True) if run.get("status") == "completed"), None)
         legacy_analysis = (
@@ -172,7 +207,10 @@ def _build_projects(app: FastAPI) -> dict:
             "recording": recording,
             "transcription": transcription,
             "analysis": latest_analysis or legacy_analysis,
-            "analysis_runs": sorted(expand_analysis_runs(runs), key=lambda item: item.get("created_at") or 0, reverse=True),
+            "analysis_runs": sorted(
+                expand_analysis_runs(project_speaker_source_validity(runs, transcription)),
+                key=lambda item: item.get("created_at") or 0, reverse=True,
+            ),
         })
     items = sorted(projects.values(), key=lambda item: (item["is_unassigned"], item["name"].lower()))
     return {"items": items}
@@ -280,7 +318,9 @@ def _build_meeting(app: FastAPI, recording: dict[str, Any], *, compact: bool = F
     }
     related_jobs = [{**job, "parent_job_id": parent_ids.get(job["id"])} for job in related_jobs]
     canonical_runs = _exclude_incomplete_preparation_runs(current_runs, related_jobs)
-    expanded_canonical_runs = expand_analysis_runs(canonical_runs)
+    expanded_canonical_runs = expand_analysis_runs(
+        project_speaker_source_validity(canonical_runs, transcription)
+    )
     jobs = [
         _compact_job(job)
         for job in sorted(
@@ -294,7 +334,10 @@ def _build_meeting(app: FastAPI, recording: dict[str, Any], *, compact: bool = F
         analysis_type = run.get("analysis_type") or "meeting_brief"
         if analysis_type not in latest_by_type and run.get("status") == "completed":
             latest_by_type[analysis_type] = run
-    public_runs = sorted(expand_analysis_runs(runs), key=lambda item: item.get("created_at") or 0, reverse=True)
+    public_runs = sorted(
+        expand_analysis_runs(project_speaker_source_validity(runs, transcription)),
+        key=lambda item: item.get("created_at") or 0, reverse=True,
+    )
     public_latest = latest_by_type
     if compact:
         public_runs = [_compact_analysis_run(run) for run in public_runs]

@@ -286,6 +286,19 @@ def locate_session(recordings_root: Path, recording_id: str) -> Path:
     return matches[0]
 
 
+def local_managed_transcription_payload() -> dict[str, Any]:
+    """Request local ASR with diarization off via the backend's 'none' contract.
+
+    The exact local/none provider contract is asserted in the source test
+    against DIARIZATION_PROVIDER_DISABLED; no feature/runtime policy changes.
+    """
+    return {
+        "asr_provider": "local",
+        "diarization_provider": "none",
+        "visual_intelligence_enabled": False,
+    }
+
+
 def summarize_job(job: dict[str, Any]) -> dict[str, Any]:
     result = job.get("result") if isinstance(job.get("result"), dict) else {}
     stats = result.get("stats") if isinstance(result.get("stats"), dict) else {}
@@ -506,11 +519,7 @@ def main() -> int:
         job = api.json(
             f"/v1/recordings/{recording_id}/transcription-jobs",
             "POST",
-            {
-                "asr_provider": "local",
-                "diarization_provider": "disabled",
-                "visual_intelligence_enabled": False,
-            },
+            local_managed_transcription_payload(),
             20,
         )
         job_id = str(job.get("id") or "")

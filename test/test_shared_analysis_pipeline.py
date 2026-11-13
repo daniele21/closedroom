@@ -13,6 +13,7 @@ from local_asr_server.analysis_templates import list_templates
 from local_asr_server.jobs import JobStore
 from local_asr_server.schemas import AnalysisPipelineRequest, AnalysisRequest
 from local_asr_server.services.analysis_service import AnalysisService
+from local_asr_server.analysis_source_provenance import project_speaker_source_validity
 from local_asr_server.structured_notes import STRUCTURED_NOTES_TEMPLATE_ID
 from local_asr_server.structured_notes_projection import expand_analysis_run
 from support import deterministic_settings
@@ -210,6 +211,13 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
         self.assertNotIn(STRUCTURED_NOTES_TEMPLATE_ID, {item["id"] for item in list_templates()})
 
     def test_structured_cache_identity_includes_source_segments(self) -> None:
+        # Both source and target clusters must exist in the synthetic provider
+        # metadata, just as they do for a genuine speaker-review correction.
+        self.transcriptions.transcription["stats"] = {
+            "speaker_diarization": {
+                "clusters_by_track": {"system": ["Alex", "system:S2"]},
+            },
+        }
         provider = CountingStructuredProvider()
         service = AnalysisService(self.services)
         body = AnalysisRequest(
@@ -227,11 +235,23 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
             second = service.analyze(body)
             self.transcriptions.transcription["segments"][0]["start"] = 2.0
             third = service.analyze(body)
+            # A changed group with the same displayed name cannot reuse
+            # the previously cached speaker-attributed source.
+            self.transcriptions.transcription.setdefault("stats", {})["speaker_review"] = {
+                "segment_assignments": {"0": "system:S2"},
+            }
+            # Store writes the effective segment group together with its
+            # canonical review intent; this fake does not call the resolver.
+            self.transcriptions.transcription["segments"][0]["speaker_group"] = "system:S2"
+            fourth = service.analyze(body)
 
-        self.assertEqual(provider.calls, 2)
+        self.assertEqual(provider.calls, 3)
         self.assertEqual(first["schema"]["version"], 2)
         self.assertEqual(second, first)
         self.assertEqual(third["generated"]["summary"]["source_refs"][0]["start"], 2.0)
+        self.assertIn("speaker_attribution_sha256", first["source_snapshot"])
+        self.assertNotEqual(third["source_snapshot"]["speaker_attribution_sha256"],
+                            fourth["source_snapshot"]["speaker_attribution_sha256"])
         self.assertGreaterEqual(len(self.transcriptions.saved), 3)
         _transcription_id, legacy = self.transcriptions.saved[-1]
         self.assertEqual(legacy["summary"], "Supported summary")
@@ -275,6 +295,7 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
 
         run = {
             "id": "run-1",
+            "transcription_id": "trans-1",
             "job_id": "job-1",
             "analysis_type": "meeting_brief",
             "template_id": STRUCTURED_NOTES_TEMPLATE_ID,
@@ -285,7 +306,11 @@ class SharedAnalysisPipelineTests(unittest.TestCase):
             "result_markdown": result["markdown"],
             "created_at": 1.0,
         }
-        expanded = expand_analysis_run(run)
+        annotated = project_speaker_source_validity([run], self.transcriptions.transcription)[0]
+        expanded = expand_analysis_run(annotated)
+        self.assertTrue(all(
+            item["speaker_source_validity"]["status"] == "current" for item in expanded
+        ))
 
         self.assertEqual(
             [item["analysis_type"] for item in expanded],

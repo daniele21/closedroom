@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# Source-run data and logs must not share the installed app profile.
+export CLOSEDROOM_DEV_PROFILE=1
+
 llm_log_file="$(uv run python -c 'from local_asr_server.paths import get_service_log_file; print(get_service_log_file("llm-server", create_parent=False))')"
 mkdir -p "$(dirname "$llm_log_file")"
 touch "$llm_log_file"
@@ -16,4 +19,4 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-uv run local-asr serve --port 1230 --llm-port 1231 --recordings-dir ~/Recordings/ClosedRoom
+uv run local-asr serve --port 1230 --llm-port 1231

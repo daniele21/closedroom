@@ -5,7 +5,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
@@ -166,6 +166,105 @@ class CaptureAdmissionApiTests(unittest.TestCase):
         self.assertNotIn('payload', item)
         self.assertNotIn('result', item)
         self.assertNotIn('SECRET', response.text)
+
+    def test_capture_cancel_preserves_audio_for_recovery_and_releases_lease(self) -> None:
+        services = self.app.state.services
+        recording = self.client.post('/v1/recordings', json={
+            'title': 'Interrupted capture', 'mime_type': 'audio/wav',
+            'capture_backend': 'native', 'capture_mode': 'mic_only',
+        }).json()
+        recording_id = recording['id']
+        session_dir = services.recordings.session_dir(recording_id)
+        audio = b'RIFF interrupted microphone audio'
+        (session_dir / 'mic.wav').write_bytes(audio)
+        reservation = self.client.post('/v1/capture/reservations').json()
+        self.app.state.heavy_workload_arbiter.bind_capture(reservation['reservation_id'], recording_id)
+
+        with patch.object(services.capture, 'cancel', return_value={'status': 'cancelled'}):
+            response = self.client.post(f'/v1/recordings/{recording_id}/capture/cancel')
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual((session_dir / 'mic.wav').read_bytes(), audio)
+        saved = self.client.get(f'/v1/recordings/{recording_id}')
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json()['status'], 'recoverable')
+        self.assertEqual(saved.json()['capture_status'], 'stopped')
+        self.assertFalse(self.app.state.heavy_workload_arbiter.snapshot()['capture_reservation']['active'])
+        recovered = self.client.post(f'/v1/recordings/{recording_id}/recover')
+        self.assertEqual(recovered.status_code, 200)
+        self.assertEqual(recovered.json()['status'], 'recorded')
+        self.assertEqual((session_dir / 'mic.wav').read_bytes(), audio)
+
+    def test_empty_capture_cancel_keeps_interruption_diagnostics(self) -> None:
+        services = self.app.state.services
+        recording = self.client.post('/v1/recordings', json={
+            'title': 'Empty interruption', 'mime_type': 'audio/wav',
+            'capture_backend': 'native', 'capture_mode': 'mic_only',
+        }).json()
+        with patch.object(services.capture, 'cancel', return_value={'status': 'cancelled'}):
+            response = self.client.post(f'/v1/recordings/{recording["id"]}/capture/cancel')
+        self.assertEqual(response.status_code, 202)
+        saved = self.client.get(f'/v1/recordings/{recording["id"]}')
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json()['status'], 'interrupted')
+        self.assertTrue(saved.json()['error'])
+
+    def test_native_start_cannot_reuse_a_finalized_recording(self) -> None:
+        services = self.app.state.services
+        recording = self.client.post('/v1/recordings', json={
+            'title': 'Saved original', 'mime_type': 'audio/wav',
+            'capture_backend': 'native', 'capture_mode': 'mic_only',
+        }).json()
+        recording_id = recording['id']
+        session_dir = services.recordings.session_dir(recording_id)
+        (session_dir / 'mic.wav').write_bytes(b'original saved audio')
+        services.recordings.finalize(recording_id)
+        with patch.object(services.capture, 'start') as start:
+            response = self.client.post(f'/v1/recordings/{recording_id}/capture/start', json={})
+        self.assertEqual(response.status_code, 409)
+        start.assert_not_called()
+        self.assertEqual((session_dir / 'mic.wav').read_bytes(), b'original saved audio')
+
+    def test_recovery_refuses_a_live_helper_even_after_an_error_event(self) -> None:
+        services = self.app.state.services
+        session = Mock(stopped=True)
+        session.process.poll.return_value = None
+        with patch.object(services.capture, 'get_session', return_value=session), \
+             patch.object(services.recordings, 'recover') as recover:
+            response = self.client.post('/v1/recordings/active-session/recover')
+        self.assertEqual(response.status_code, 409)
+        recover.assert_not_called()
+
+    def test_capture_cancel_persists_error_and_is_safe_to_retry_after_recovery(self) -> None:
+        services = self.app.state.services
+        recording = self.client.post('/v1/recordings', json={
+            'title': 'Retry interruption', 'mime_type': 'audio/wav',
+            'capture_backend': 'native', 'capture_mode': 'mic_only',
+        }).json()
+        recording_id = recording['id']
+        session_dir = services.recordings.session_dir(recording_id)
+        (session_dir / 'mic.wav').write_bytes(b'partial audio')
+        event = {'type': 'error', 'source': 'mic', 'message': 'Capture interrupted'}
+        with patch.object(services.capture, 'cancel', return_value={'events': [event]}):
+            self.assertEqual(self.client.post(f'/v1/recordings/{recording_id}/capture/cancel').status_code, 202)
+        self.assertIn('Capture interrupted', services.recordings.get(recording_id)['warnings'])
+        self.assertIn('Capture interrupted', (session_dir / 'timeline.json').read_text())
+        self.assertEqual(self.client.post(f'/v1/recordings/{recording_id}/recover').status_code, 200)
+        with patch.object(services.capture, 'cancel', return_value={'status': 'not_active'}):
+            self.assertEqual(self.client.post(f'/v1/recordings/{recording_id}/capture/cancel').status_code, 202)
+        self.assertEqual(services.recordings.get(recording_id)['status'], 'recorded')
+        self.assertEqual((session_dir / 'mic.wav').read_bytes(), b'partial audio')
+
+    def test_cancel_persistence_failure_releases_terminated_capture(self) -> None:
+        services = self.app.state.services
+        arbiter = self.app.state.heavy_workload_arbiter
+        reservation = self.client.post('/v1/capture/reservations').json()
+        arbiter.bind_capture(reservation['reservation_id'], 'recording-one')
+        with patch.object(services.capture, 'cancel', return_value={}), \
+             patch.object(services.recordings, 'interrupt_capture', side_effect=OSError('disk unavailable')):
+            with self.assertRaises(OSError):
+                self.client.post('/v1/recordings/recording-one/capture/cancel')
+        self.assertFalse(arbiter.snapshot()['capture_reservation']['active'])
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 import subprocess
+import time
 from typing import Any, Callable
 
 from local_asr_server.settings import load_settings
@@ -15,6 +16,9 @@ from local_asr_server.diagnostics import diagnostic
 
 logger = logging.getLogger("uvicorn.error")
 DIARIZATION_ENGINE = "fluidaudio-community-1"
+NEMOTRON3_ENGINE = "nemotron3-coreml"
+DIARIZATION_ENGINES = frozenset({DIARIZATION_ENGINE, NEMOTRON3_ENGINE})
+NEMOTRON3_PRESETS = frozenset({"fast128", "c128-split-w8a8"})
 
 
 def clusters_from_timeline(track_id: str, timeline: list[dict[str, Any]]) -> list[str]:
@@ -53,7 +57,7 @@ class LocalSpeakerDiarizationService:
         *,
         model_phases: ModelRuntimeLeaseManager | None = None,
     ) -> None:
-        self._runner = runner or self._run_helper
+        self._runner = runner
         self.model_phases = model_phases or ModelRuntimeLeaseManager()
 
     def process(
@@ -74,15 +78,20 @@ class LocalSpeakerDiarizationService:
             }
         try:
             inputs = {str(track["id"]): path for track, path in track_paths}
-            model_path = get_models_dir() / "fluidaudio-speaker-diarization"
+            requested_engine = str(settings.get("speaker_diarization_engine") or DIARIZATION_ENGINE)
+            model_path = get_models_dir() / (
+                "nemotron3-speaker-diarization"
+                if requested_engine == NEMOTRON3_ENGINE else "fluidaudio-speaker-diarization"
+            )
             result = self.diarize_paths(inputs)
             tracks = result.get("tracks") or {}
+            actual_engine = str(result.get("engine") or requested_engine)
             minimum_overlap = float(settings.get("speaker_diarization_minimum_overlap", 0.25))
             assigned = 0
             for item in track_results:
                 track_id = str(item["track"]["id"])
                 diarized = (tracks.get(track_id) or {}).get("segments") or []
-                assigned += self.assign_segments(item["result"], track_id, diarized, minimum_overlap)
+                assigned += self.assign_segments(item["result"], track_id, diarized, minimum_overlap, engine=actual_engine)
             clusters_by_track = {
                 track_id: clusters_from_timeline(
                     track_id,
@@ -103,7 +112,8 @@ class LocalSpeakerDiarizationService:
             }
             summary = {
                 "status": "completed",
-                "engine": result.get("engine") or DIARIZATION_ENGINE,
+                "engine": actual_engine,
+                "preset": result.get("preset"),
                 "assigned_segments": assigned,
                 "cluster_count": sum(len(items) for items in clusters_by_track.values()),
                 "clusters_by_track": clusters_by_track,
@@ -114,8 +124,8 @@ class LocalSpeakerDiarizationService:
                 **diagnostic(
                     "speaker_diarization",
                     "completed",
-                    requested_backend=DIARIZATION_ENGINE,
-                    actual_backend=result.get("engine") or DIARIZATION_ENGINE,
+                    requested_backend=requested_engine,
+                    actual_backend=actual_engine,
                     counts={
                         "assigned_segments": assigned,
                         "clusters": sum(len(items) for items in clusters_by_track.values()),
@@ -131,11 +141,11 @@ class LocalSpeakerDiarizationService:
             logger.warning("[Speaker diarization] Recording %s skipped: %s", recording_id, exc)
             summary = {
                 "status": "failed",
-                "engine": DIARIZATION_ENGINE,
+                "engine": str(settings.get("speaker_diarization_engine") or DIARIZATION_ENGINE),
                 **diagnostic(
                     "speaker_diarization",
                     "failed",
-                    requested_backend=DIARIZATION_ENGINE,
+                    requested_backend=str(settings.get("speaker_diarization_engine") or DIARIZATION_ENGINE),
                     error=str(exc),
                     details={"model_path": str(model_path)},
                 ),
@@ -143,11 +153,32 @@ class LocalSpeakerDiarizationService:
             store.save_speaker_diarization(recording_id, summary)
             return summary
 
-    def diarize_paths(self, inputs: dict[str, Path]) -> dict[str, Any]:
-        """Run FluidAudio for explicit audio paths without requiring persistence."""
+    def diarize_paths(
+        self,
+        inputs: dict[str, Path],
+        *,
+        engine: str | None = None,
+        preset: str | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        """Run local native diarization. Overrides support isolated A/B runs."""
+        settings = load_settings()
+        selected = engine or settings.get("speaker_diarization_engine") or DIARIZATION_ENGINE
+        selected_preset = preset or settings.get("speaker_diarization_nemotron_preset") or "fast128"
+        if selected not in DIARIZATION_ENGINES:
+            raise ValueError(f"Unsupported diarization engine: {selected}")
+        if selected_preset not in NEMOTRON3_PRESETS:
+            raise ValueError(f"Unsupported Nemotron 3 preset: {selected_preset}")
         self.model_phases.acquire_lease("diarization")
         try:
-            return self._runner(inputs)
+            if self._runner is not None:
+                return self._runner(inputs)
+            if cancel_requested is None:
+                return self._run_helper(inputs, engine=selected, preset=selected_preset)
+            return self._run_helper(
+                inputs, engine=selected, preset=selected_preset,
+                cancel_requested=cancel_requested,
+            )
         finally:
             self.model_phases.release_lease("diarization")
 
@@ -157,6 +188,8 @@ class LocalSpeakerDiarizationService:
         track_id: str,
         diarized: list[dict[str, Any]],
         minimum_overlap: float,
+        *,
+        engine: str = DIARIZATION_ENGINE,
     ) -> int:
         assigned = 0
         for segment in result.get("segments", []) or []:
@@ -177,19 +210,58 @@ class LocalSpeakerDiarizationService:
                 )
                 assigned += 1
         result.setdefault("metadata", {})["speaker_diarization"] = {
-            "engine": DIARIZATION_ENGINE,
+            "engine": engine,
             "assigned_segments": assigned,
         }
         return assigned
 
     @staticmethod
-    def _run_helper(inputs: dict[str, Path]) -> dict[str, Any]:
-        models_dir = get_models_dir() / "fluidaudio-speaker-diarization"
+    def _run_helper(
+        inputs: dict[str, Path], *, engine: str = DIARIZATION_ENGINE, preset: str = "fast128",
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        models_dir = get_models_dir() / (
+            "nemotron3-speaker-diarization"
+            if engine == NEMOTRON3_ENGINE else "fluidaudio-speaker-diarization"
+        )
         models_dir.mkdir(parents=True, exist_ok=True)
-        command = [get_helper_binary(), "process", "--models-dir", str(models_dir)]
+        command = [
+            get_helper_binary(), "process", "--models-dir", str(models_dir),
+            "--engine", engine, "--preset", preset,
+        ]
         for track_id, path in inputs.items():
             command.extend(["--input", f"{track_id}={path}"])
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
-        if completed.returncode != 0:
-            raise RuntimeError(completed.stderr.strip() or "FluidAudio helper failed")
-        return json.loads(completed.stdout)
+        if cancel_requested is None:
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+            stdout, stderr, returncode = completed.stdout, completed.stderr, completed.returncode
+        else:
+            # Benchmark subprocesses are run-owned: cancellation stops inference
+            # and reaps the child rather than waiting for a model to finish.
+            if cancel_requested():
+                raise RuntimeError("Diarization cancelled")
+            with subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            ) as child:
+                deadline = time.monotonic() + 1800
+                while True:
+                    if cancel_requested():
+                        child.kill()
+                        child.communicate()
+                        raise RuntimeError("Diarization cancelled")
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        child.kill()
+                        child.communicate()
+                        raise RuntimeError("Native diarization timed out")
+                    try:
+                        stdout, stderr = child.communicate(timeout=min(0.25, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+                returncode = child.returncode
+        if returncode != 0:
+            raise RuntimeError(stderr.strip() or "FluidAudio helper failed")
+        result = json.loads(stdout)
+        if result.get("engine") != engine or not isinstance(result.get("tracks"), dict):
+            raise RuntimeError("Diarization helper returned an unexpected engine or output shape")
+        return result

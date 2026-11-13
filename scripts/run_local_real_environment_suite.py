@@ -45,6 +45,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Build a fresh exact ad-hoc app even if one already exists for this revision",
     )
+    parser.add_argument(
+        "--install-to-applications",
+        action="store_true",
+        help="Install/reuse a verified test-only copy under /Applications and run physical tests from it; never overwrite ClosedRoom.app",
+    )
+    parser.add_argument(
+        "--use-installed-app",
+        action="store_true",
+        help="Test the existing verified /Applications/ClosedRoom.app; do not rebuild or replace it, and pause for TCC permissions",
+    )
+    parser.add_argument(
+        "--install-main-app",
+        action="store_true",
+        help="Opt in to building and installing a stable-signed exact main app if /Applications/ClosedRoom.app is missing; never overwrite an existing app; pause for permissions",
+    )
+    parser.add_argument(
+        "--upgrade-main-app",
+        action="store_true",
+        help="Explicitly update existing /Applications/ClosedRoom.app from signed exact HEAD; preserve prior signed app as hidden backup, then wait for permissions",
+    )
     parser.add_argument("--output")
     parser.add_argument("--record-seconds", type=float, default=8.0)
     parser.add_argument("--seed-record-seconds", type=float, default=20.0)
@@ -67,6 +87,24 @@ def restore_generated_frontend(root: Path) -> None:
     subprocess.run(["git", "clean", "-fd", "--", target], cwd=root, check=True)
 
 
+def permission_checkpoint(app: Path) -> None:
+    """Let the human grant macOS TCC/Accessibility permissions before evidence starts."""
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "--use-installed-app requires an interactive Terminal for the "
+            "permission checkpoint; tests did not start"
+        )
+    print(f"\nInstalled app verified: {app}", flush=True)
+    print("Open this ClosedRoom app in Finder to grant Microphone and Screen & System Audio Recording.", flush=True)
+    print("Allow Terminal (or your terminal app) under Screen & System Audio Recording for screencapture.", flush=True)
+    print("Allow closedroom-ax-helper under Accessibility if macOS requests it.", flush=True)
+    print("Quit ClosedRoom completely after granting permissions (macOS may require relaunch).", flush=True)
+    try:
+        input("Press ENTER only after permissions are enabled and ClosedRoom is closed: ")
+    except EOFError as exc:
+        raise RuntimeError("permission checkpoint cancelled; tests did not start") from exc
+
+
 def required_tools_missing() -> list[str]:
     return [name for name in ("uv", "pnpm", "ffmpeg") if shutil.which(name) is None]
 
@@ -80,6 +118,32 @@ def read_last_build(root: Path) -> Path:
     app = Path(str(payload.get("app") or "")).expanduser().resolve()
     if not app.is_dir():
         raise RuntimeError(f"local build app missing: {app}")
+    return app
+
+
+def build_identified_main_artifact(root: Path, checkout_revision: str) -> Path:
+    """Build one exact local artifact using the operator's stable signing identity."""
+    identity = os.environ.get("CLOSEDROOM_SIGN_IDENTITY", "").strip()
+    if not identity or identity == "-":
+        raise RuntimeError(
+            "--install-main-app requires CLOSEDROOM_SIGN_IDENTITY to be set "
+            "to a valid stable Code Signing certificate; no ad-hoc main app was installed. "
+            "Inspect: security find-identity -v -p codesigning"
+        )
+    env = os.environ.copy()
+    env["CLOSEDROOM_BUILD_CHANNEL"] = "local-real-environment"
+    subprocess.run(
+        ["bash", "scripts/build_artifact.sh", "--no-dmg"],
+        cwd=root, env=env, check=True, timeout=3600,
+    )
+    restore_generated_frontend(root)
+    after_revision, dirty_entries = measured.git_state(root)
+    if not local_policy.revisions_match(checkout_revision, after_revision) or dirty_entries:
+        raise RuntimeError("main app build changed HEAD or left the checkout dirty")
+    app = read_last_build(root)
+    _, manifest = local_policy.local_manifest_for(app, allow_identified=True)
+    if (manifest.get("configuration") or {}).get("signing") != "identified":
+        raise RuntimeError("main app build did not use an identified code-signing certificate")
     return app
 
 
@@ -196,6 +260,12 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
     print("\nClosedRoom LOCAL REAL_ENVIRONMENT suite")
     print(f"candidate: {report.get('checkout_revision') or 'unknown'}")
     print(f"artifact selection: {report.get('artifact_selection') or 'unknown'}")
+    if report.get("installed_app"):
+        print(f"installed app: {report['installed_app']} ({report['installation_status']})")
+    if report.get("previous_app_backup"):
+        print(f"previous main app backup: {report['previous_app_backup']}")
+    if report.get("permission_checkpoint"):
+        print(f"permission checkpoint: {report['permission_checkpoint']}")
     for name in ("measured_release", "record_while_ai_busy"):
         child = (report.get("tests") or {}).get(name) or {}
         label = name.replace("_", " ")
@@ -206,6 +276,10 @@ def print_summary(report: dict[str, Any], output: Path) -> None:
         diagnostic = child.get("ui_failure_diagnostic")
         if diagnostic:
             print(f"  bounded UI diagnostic: {json.dumps(diagnostic, sort_keys=True)}")
+        if child.get("ui_smoke_status"):
+            print(f"  UI functional smoke: {child['ui_smoke_status'].upper()}")
+        if child.get("ui_media_status"):
+            print(f"  UI media evidence: {child['ui_media_status']}")
         if child.get("error_count"):
             print(f"  child errors: {child['error_count']} (see child evidence)")
         if child.get("timeout_seconds"):
@@ -235,6 +309,10 @@ def main() -> int:
         "app": None,
         "build_manifest": None,
         "artifact_selection": None,
+        "installation_status": None,
+        "installed_app": None,
+        "previous_app_backup": None,
+        "permission_checkpoint": None,
         "tests": {},
         "errors": [],
         "distribution_authority": {
@@ -264,6 +342,15 @@ def main() -> int:
     }
 
     try:
+        main_mode = args.use_installed_app or args.install_main_app or args.upgrade_main_app
+        if sum((args.use_installed_app, args.install_main_app, args.upgrade_main_app)) > 1:
+            raise RuntimeError("select only one main-app mode")
+        if main_mode and (args.install_to_applications or args.app or args.rebuild):
+            raise RuntimeError(
+                "main-app mode cannot be combined with --install-to-applications, --app or --rebuild"
+            )
+        if main_mode and not sys.stdin.isatty():
+            raise RuntimeError("main-app mode requires an interactive Terminal for macOS permissions")
         if platform.system() != "Darwin" or platform.machine() != "arm64":
             raise RuntimeError("LOCAL REAL_ENVIRONMENT requires an Apple-Silicon Mac")
         missing = required_tools_missing()
@@ -278,18 +365,70 @@ def main() -> int:
             )
         report["checkout_revision"] = checkout_revision
 
-        app, manifest_path, manifest, selection = select_local_artifact(
-            root,
-            checkout_revision,
-            args.app,
-            args.rebuild,
-        )
+        if main_mode:
+            definitive = Path("/Applications/ClosedRoom.app")
+            if args.install_main_app and not definitive.exists() and not definitive.is_symlink():
+                source_app = build_identified_main_artifact(root, checkout_revision)
+                manifest_path, manifest = local_policy.local_manifest_for(
+                    source_app, allow_identified=True
+                )
+                local_policy.install_main_app(source_app, manifest)
+                installation_kind = "installed_new_main"
+            elif args.upgrade_main_app:
+                if definitive.is_symlink() or not definitive.is_dir():
+                    raise RuntimeError(
+                        "--upgrade-main-app requires existing /Applications/ClosedRoom.app; "
+                        "use --install-main-app for first installation"
+                    )
+                source_app = build_identified_main_artifact(root, checkout_revision)
+                manifest_path, manifest = local_policy.local_manifest_for(
+                    source_app, allow_identified=True
+                )
+                _, backup = local_policy.upgrade_main_app(source_app, manifest)
+                report["previous_app_backup"] = str(backup)
+                installation_kind = "upgraded_main_verified"
+            else:
+                installation_kind = "existing_main_verified"
+            installed_app, source_app, manifest_path, manifest = (
+                local_policy.installed_main_artifact(root, checkout_revision)
+            )
+            app, selection = source_app, "installed_main_exact"
+        else:
+            app, manifest_path, manifest, selection = select_local_artifact(
+                root,
+                checkout_revision,
+                args.app,
+                args.rebuild,
+            )
         source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
         source_revision = str(source.get("revision") or "")
         report["source_revision"] = source_revision
         report["app"] = str(app)
         report["build_manifest"] = str(manifest_path)
         report["artifact_selection"] = selection
+        child_env = os.environ.copy()
+        evidence_app = app
+        if args.install_to_applications:
+            evidence_app, install_status = local_policy.install_test_app(app, manifest)
+            report["app"] = str(evidence_app)
+            report["source_artifact_app"] = str(app)
+            report["installed_app"] = str(evidence_app)
+            report["installation_status"] = install_status
+            child_env[local_policy.INSTALLED_APP_ENV] = str(evidence_app)
+            child_env[local_policy.SOURCE_APP_ENV] = str(app)
+        elif main_mode:
+            evidence_app = installed_app
+            report["app"] = str(evidence_app)
+            report["source_artifact_app"] = str(app)
+            report["installed_app"] = str(evidence_app)
+            report["installation_status"] = installation_kind
+            child_env[local_policy.INSTALLED_APP_ENV] = str(evidence_app)
+            child_env[local_policy.SOURCE_APP_ENV] = str(app)
+            child_env[local_policy.MAIN_APP_ENV] = "1"
+            permission_checkpoint(evidence_app)
+            # Recheck the exact installation after the operator's TCC interaction.
+            local_policy.verify_installed_copy(evidence_app, manifest)
+            report["permission_checkpoint"] = "acknowledged"
 
         evidence_root = root / "dist" / "evidence" / "local-real-environment" / source_revision
         if not args.output:
@@ -299,7 +438,7 @@ def main() -> int:
 
         for name, command, child_output, timeout in build_commands(
             root,
-            app,
+            evidence_app,
             measured_output,
             contention_output,
             args,
@@ -310,6 +449,7 @@ def main() -> int:
                     cwd=root,
                     check=False,
                     timeout=timeout,
+                    env=child_env,
                 )
                 summary = aggregate.child_summary(child_output, completed.returncode)
             except subprocess.TimeoutExpired:

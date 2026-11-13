@@ -194,6 +194,7 @@ function fixtureServer(port) {
           notification_available: true, notification_error: null,
           active_apps: ['Microsoft Teams'],
           active_input_processes: 2, unattributed_input_processes: 1,
+          suggestion_active: true, notification_delivery: { state: "retry_exhausted", attempts: 3 },
         },
       });
     }
@@ -440,6 +441,7 @@ class Browser {
         alwaysMatch: {
           browserName: 'chrome',
           'goog:chromeOptions': {
+            ...(process.env.CI_CHROME_BINARY ? { binary: process.env.CI_CHROME_BINARY } : {}),
             args: [
               '--headless=new',
               '--disable-gpu',
@@ -657,6 +659,7 @@ try {
     await browser.navigate(`http://127.0.0.1:${vitePort}/#settings`);
     await waitText(browser, ['Microfono attivo: Microsoft Teams', 'Active microphone: Microsoft Teams'], 16000, true);
     await waitText(browser, ['Notifiche: unknown', 'Notifications: unknown'], 8000, true);
+    await waitText(browser, ['Tentativi: 3', 'Attempts: 3'], 8000, true);
     await checkpoint(browser, '05-detection-diagnostics');
     await browser.clickButton(['Apri Barra dei menu di macOS', 'Open macOS Menu Bar settings']);
     await browser.clickButton(['Impostazioni notifiche macOS', 'macOS notification settings']);

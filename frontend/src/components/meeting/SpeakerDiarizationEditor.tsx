@@ -1,136 +1,687 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ApiClient, Transcription } from '../../api/apiClient';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertCircle, CheckCircle2, ChevronDown, GitMerge, Headphones,
+  MoreHorizontal, Pause, Play, RotateCcw, SkipBack, SkipForward,
+} from 'lucide-react';
+import {
+  ApiClient, type SpeakerClip, type SpeakerReviewAction,
+  type SpeakerReviewInfo, type SpeakerReviewSamples, type SpeakerTimelineWindow, type Transcription,
+} from '../../api/apiClient';
+import { useSpeakerReviewPlayback, type SpeakerTurn } from '../../hooks/useSpeakerReviewPlayback';
+import { SpeakerTimeline } from './SpeakerTimeline';
+import { linkedTranscriptTurns } from '../../utils/speakerEvidence';
 import { useToast } from '../../context/ToastContext';
 import { useTranslation } from '../../i18n/i18n';
-import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 
-interface SpeakerDiarizationEditorProps {
+interface Props {
   transcription: Transcription;
+  recordingId?: string;
   onUpdated: (transcription: Transcription) => void;
+  onPlaybackStart?: () => void;
+  onJumpToTranscript?: (time: number) => void;
   readOnly?: boolean;
+  durationSeconds?: number;
+}
+
+type SpeakerRow = {
+  cluster: string;
+  group: string;
+  name: string;
+  status: string;
+  count: number;
+  sourceOnly: boolean;
+};
+
+function clock(seconds: number) {
+  const total = Math.max(0, Math.floor(seconds));
+  return String(Math.floor(total / 60)).padStart(2, '0') + ':' +
+    String(total % 60).padStart(2, '0');
 }
 
 export function SpeakerDiarizationEditor({
-  transcription,
-  onUpdated,
-  readOnly = false,
-}: SpeakerDiarizationEditorProps) {
-  const { t } = useTranslation();
+  transcription, recordingId, onUpdated, onPlaybackStart, onJumpToTranscript, readOnly = false,
+  durationSeconds = 0,
+}: Props) {
+  const { lang } = useTranslation();
+  const tr = (it: string, en: string) => lang === 'it' ? it : en;
   const { showToast } = useToast();
-  const [speakerNames, setSpeakerNames] = useState<Record<string, string>>({});
+  const id = transcription.id || transcription.saved_id || '';
+  const meetingId = recordingId || transcription.recording_id || '';
+  const [review, setReview] = useState<SpeakerReviewInfo | null>(null);
+  const [samples, setSamples] = useState<SpeakerReviewSamples | null>(null);
+  const [evidence, setEvidence] = useState<{
+    source: Transcription; overview: SpeakerTimelineWindow['overview'];
+  } | null>(null);
+  // The timeline owns the read-only evidence request; never fetch it twice.
+  const onEvidenceSummary = useCallback((source: Transcription, overview: SpeakerTimelineWindow['overview']) => {
+    setEvidence({ source, overview });
+  }, []);
+  const [loadError, setLoadError] = useState('');
+  const [selectedCluster, setSelectedCluster] = useState('');
+  const [editedName, setEditedName] = useState('');
+  const skipBlurSaveRef = useRef(false);
   const [saving, setSaving] = useState(false);
-  const mappings = transcription.stats?.speaker_attribution?.mappings || [];
-  const diarization = transcription.stats?.speaker_diarization;
+  const [mutationError, setMutationError] = useState('');
+  const [sampleIndex, setSampleIndex] = useState(0);
+  const [filter, setFilter] = useState<'all' | 'pending'>('all');
+  const [showHidden, setShowHidden] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [action, setAction] = useState<'none' | 'merge' | 'exclude'>('none');
+  const [mergeTarget, setMergeTarget] = useState('');
+  const [showActions, setShowActions] = useState(false);
+  const [listenError, setListenError] = useState('');
+  const playback = useSpeakerReviewPlayback(meetingId, onPlaybackStart);
+  const activeListenRequest = useRef<AbortController | null>(null);
+  const selectedGroupRef = useRef<string | null>(null);
+  const [timelineCursor, setTimelineCursor] = useState<number | null>(null);
 
-  // Se non ci sono mapping espliciti dalla diarizzazione, estraiamo
-  // le speaker label distinte dai segmenti per permettere la rinomina manuale.
-  const effectiveMappings = useMemo(() => {
-    if (mappings.length > 0) return mappings;
-    const segments = transcription.segments || [];
-    const labels = new Set<string>();
-    segments.forEach((seg) => {
-      if (seg.speaker_label) labels.add(seg.speaker_label);
-    });
-    return Array.from(labels).map((label, _i) => ({
-      speaker_cluster: label,
-      display_name: null as string | null,
-      status: 'pending',
-      source: 'segment',
-      transcript_segment_count: segments.filter((s) => s.speaker_label === label).length,
+  const mappings = transcription.stats?.speaker_attribution?.mappings || [];
+  const rows = useMemo<SpeakerRow[]>(() => {
+    const fromMetadata: Array<{
+      speaker_cluster: string; display_name?: string | null; status: string;
+      speaker_group?: string; transcript_segment_count?: number;
+    }> = mappings.length ? mappings : Array.from(
+      new Set((transcription.segments || []).map((s) => s.provider_speaker || s.speaker_label).filter(Boolean)),
+    ).map((cluster) => ({
+      speaker_cluster: cluster as string, display_name: cluster as string, status: 'unassigned',
     }));
-  }, [mappings, transcription.segments]);
+    const groupCounts = linkedTranscriptTurns(transcription.segments || [], fromMetadata);
+    const sourceLabels = new Set((transcription.source_tracks || []).map((track) => track.label));
+    return fromMetadata.map((item) => {
+      const cluster = item.speaker_cluster;
+      const group = item.speaker_group || cluster;
+      const sourceOnly = !cluster.includes(':') && (
+        sourceLabels.has(cluster) || ['computer', 'system', 'system track'].includes(cluster.toLowerCase())
+      ) && item.status !== 'accepted';
+      return {
+        cluster, group, name: item.display_name || cluster || 'Speaker',
+        status: item.status, count: groupCounts.get(group) || 0, sourceOnly,
+      };
+    });
+  }, [mappings, transcription.segments, transcription.source_tracks]);
+
+  // Full-meeting evidence counts are not ASR turn counts. Preserve the raw
+  // cluster identity and aggregate by the canonical merged speaker group.
+  const timelineCounts = useMemo(() => {
+    if (evidence?.source !== transcription || !evidence.overview) return null;
+    const groups = new Map(rows.map((row) => [row.cluster, row.group]));
+    const counts = new Map<string, number>();
+    for (const item of evidence.overview) {
+      const group = groups.get(item.cluster);
+      if (!group || !Number.isFinite(item.interval_count) || item.interval_count < 0) continue;
+      counts.set(group, (counts.get(group) || 0) + item.interval_count);
+    }
+    return counts;
+  }, [evidence, rows, transcription]);
+
+  const visible = rows.filter((r) =>
+    !r.sourceOnly &&
+    (showHidden || (r.status !== 'merged' && r.status !== 'excluded')) &&
+    (filter === 'all' || r.status !== 'accepted'),
+  );
+  const selected = visible.find((r) => r.cluster === selectedCluster) || visible[0] || null;
+  const mergedTextTurnCount = (selected?.count || 0) +
+    (rows.find((row) => row.cluster === mergeTarget)?.count || 0);
+  const isPlaceholderName = !selected?.name.trim() ||
+    /^Speaker\s+\d+$/i.test(selected.name.trim()) ||
+    /^(computer|system|system track|mic|mixed|unknown|non identificato|voce da identificare|unidentified voice)$/i
+      .test(selected.name.trim());
+  const canConfirmSelected = Boolean(selected && selected.status === 'unassigned' &&
+    !selected.sourceOnly && !isPlaceholderName);
+  const active = rows.filter((r) => r.status !== 'merged' && r.status !== 'excluded' && !r.sourceOnly);
+  const confirmed = active.filter((r) => r.status === 'accepted').length;
+  const pending = active.length - confirmed;
+  const unattributedSources = rows.filter((row) => row.sourceOnly && (
+    row.count > 0 || (transcription.segments || []).some((segment) =>
+      segment.speaker_label === row.cluster || segment.provider_speaker === row.cluster)
+  ));
+
+  selectedGroupRef.current = selected?.group || null;
+  useEffect(() => () => activeListenRequest.current?.abort(), [meetingId]);
+  const selectedIntervalCount = selected && timelineCounts ? timelineCounts.get(selected.group) || 0 : null;
+  const sampleList = useMemo(() => (
+    samples?.speakers.find((item) => item.speaker_cluster === selected?.cluster)?.samples || []
+  ), [samples, selected?.cluster]);
+
+  // Never fetch voice media eagerly; metadata is bounded, audio loads on Play.
+  useEffect(() => {
+    let cancelled = false;
+    setReview(null);
+    setSamples(null);
+    setLoadError('');
+    if (!id || !meetingId || readOnly || transcription.merged_sources?.length) return;
+    void ApiClient.getSpeakerReview(id).then((data) => {
+      if (!cancelled) setReview(data);
+    }).catch((e: Error) => {
+      if (!cancelled) setLoadError(e.message);
+    });
+    void ApiClient.getSpeakerReviewSamples(id).then((data) => {
+      if (!cancelled && data.recording_id === meetingId && data.transcription_id === id) {
+        setSamples(data);
+      }
+    }).catch((e: Error) => {
+      if (!cancelled) setLoadError(e.message);
+    });
+    return () => { cancelled = true; };
+  }, [id, meetingId, readOnly, transcription]);
 
   useEffect(() => {
-    setSpeakerNames(Object.fromEntries(
-      effectiveMappings.map((mapping) => [mapping.speaker_cluster, mapping.display_name || '']),
-    ));
-  }, [transcription]);
+    if (!visible.length) { setSelectedCluster(''); return; }
+    if (!selectedCluster || !visible.some((r) => r.cluster === selectedCluster)) {
+      setSelectedCluster(visible[0].cluster);
+    }
+  }, [selectedCluster, visible.map((r) => r.cluster).join('|')]);
 
-  const save = async () => {
-    const transcriptionId = transcription.id || transcription.saved_id;
-    if (!transcriptionId) return;
+  useEffect(() => {
+    setEditedName(selected?.name || '');
+    setSampleIndex(0);
+    setAction('none');
+    setShowActions(false);
+    setMergeTarget('');
+  }, [selected?.cluster, transcription.id]);
+
+  useEffect(() => {
+    // Reprojecting a saved edit must update the displayed text of the selected row.
+    setEditedName(selected?.name || '');
+  }, [selected?.name]);
+
+  const selectable = rows.filter((r) =>
+    r.cluster !== selected?.cluster && r.status !== 'excluded' && r.status !== 'merged' &&
+    r.group !== selected?.group,
+  );
+
+  const commit = async (
+    kind: SpeakerReviewAction['action'], cluster: string, options: { target?: string; name?: string } = {},
+  ) => {
+    if (!review || !id || readOnly || saving) return;
+    setSaving(true);
+    setMutationError('');
+    setListenError('');
+    activeListenRequest.current?.abort();
+    playback.stop();
     try {
-      setSaving(true);
-      const updated = await ApiClient.updateTranscriptionSpeakers(transcriptionId, speakerNames);
-      onUpdated(updated);
-      showToast(t('transcription.speakerNamesSaved'), 'success');
-    } catch (err: any) {
-      showToast(t('transcription.speakerNamesSaveError', { error: err.message }), 'error');
+      const response = await ApiClient.commitSpeakerReview(id, {
+        action: kind, cluster, ...options, expected_fingerprint: review.fingerprint,
+      });
+      if (kind === 'merge' && options.target) setSelectedCluster(options.target);
+      setAction('none');
+      setReview(null); // new fingerprint is read from the canonical persisted owner
+      onUpdated(response.transcription);
+      if (kind === 'confirm') showToast(tr('Identità confermata', 'Identity confirmed'), 'success');
+      else if (kind !== 'rename') showToast(tr('Modifica speaker salvata', 'Speaker correction saved'), 'success');
+    } catch (error: any) {
+      setMutationError(error?.message || tr('Modifica non salvata', 'Change not saved'));
     } finally {
       setSaving(false);
     }
   };
 
-  return (
-    <section className="rounded-xl border border-border-subtle bg-bg-glass p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-text-primary">
-              {t('meeting.diarizationAndSpeakersTitle')}
-            </h3>
-            <Badge variant={diarization?.status === 'completed' ? 'success' : diarization?.status ? 'warning' : 'idle'}>
-              {diarization?.status || t('transcription.enrichmentNotRun')}
-            </Badge>
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-text-secondary">
-            {t('transcription.speakerNamesDesc')}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted">
-            {diarization?.provider && <span>{t('meeting.diarizationProviderLabel')}: <b>{diarization.provider}</b></span>}
-            {typeof diarization?.cluster_count === 'number' && (
-              <span>{t('transcription.detectedSpeakerCount', { count: diarization.cluster_count })}</span>
-            )}
-            {typeof diarization?.assigned_segments === 'number' && (
-              <span>{t('transcription.assignedSegmentCount', { count: diarization.assigned_segments })}</span>
-            )}
-          </div>
-        </div>
-        {!readOnly && effectiveMappings.length > 0 && (
-          <Button size="sm" onClick={save} isLoading={saving} disabled={saving}>
-            {t('transcription.speakerNamesSave')}
-          </Button>
-        )}
-      </div>
+  const saveName = () => {
+    if (!selected || saving || readOnly) return;
+    const next = editedName.trim();
+    if (next && next !== selected.name && selected.status !== 'merged' && selected.status !== 'excluded') {
+      void commit('rename', selected.cluster, { name: next });
+    }
+  };
 
-      {effectiveMappings.length > 0 ? (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {effectiveMappings.map((mapping, index) => (
-            <label key={mapping.speaker_cluster} className="rounded-xl border border-border-subtle bg-bg-surface p-3">
-              <span className="flex items-center justify-between gap-3 text-[10px] font-bold uppercase tracking-wider text-text-muted">
-                <span>{t('transcription.speakerCluster', { number: index + 1 })}</span>
-                <code className="normal-case tracking-normal">{mapping.speaker_cluster}</code>
-              </span>
-              <input
-                value={speakerNames[mapping.speaker_cluster] || ''}
-                onChange={(event) => setSpeakerNames((previous) => ({
-                  ...previous,
-                  [mapping.speaker_cluster]: event.target.value,
-                }))}
-                placeholder={t('transcription.speakerNamePlaceholder', { number: index + 1 })}
-                className="mt-2 w-full rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-border-focus disabled:opacity-70"
-                maxLength={120}
-                disabled={readOnly || saving}
-              />
-              <span className="mt-1.5 block text-[10px] text-text-muted">
-                {mapping.transcript_segment_count === 0
-                  ? t('transcription.speakerWithoutTranscript')
-                  : mapping.source === 'visual'
-                    ? t('transcription.speakerNameVisual')
-                    : mapping.source === 'manual'
-                      ? t('transcription.speakerNameManual')
-                      : mapping.source === 'segment'
-                        ? t('transcription.speakerNameDiarization')
-                        : t('transcription.speakerNameDiarization')}
-              </span>
-            </label>
-          ))}
+  const undo = async () => {
+    if (!review?.undo || saving || !id) return;
+    setSaving(true);
+    setMutationError('');
+    playback.stop();
+    try {
+      const result = await ApiClient.undoSpeakerReview(id, review.undo.revision_id);
+      setReview(null);
+      onUpdated(result.transcription);
+      showToast(tr('Ultima modifica annullata', 'Last correction undone'), 'success');
+    } catch (error: any) {
+      setMutationError(error?.message || tr('Impossibile annullare', 'Undo unavailable'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reload = async () => {
+    if (!id) return;
+    try {
+      onUpdated(await ApiClient.getTranscription(id));
+      setMutationError('');
+    } catch (error: any) {
+      setMutationError(error?.message || tr('Ricaricamento non riuscito', 'Reload failed'));
+    }
+  };
+
+  const playClip = (clip: SpeakerClip) => {
+    playback.playSample(clip);
+  };
+
+  const playSelectedTurns = async () => {
+    if (!selected || !id || saving) return;
+    setListenError('');
+    const group = selected.group;
+    activeListenRequest.current?.abort();
+    const abort = new AbortController();
+    activeListenRequest.current = abort;
+    try {
+      const maxSampleEnd = (samples?.speakers || []).reduce((last, item) =>
+        Math.max(last, ...item.samples.map((clip) => clip.end), 0), 0);
+      const lastAsr = (transcription.segments || []).reduce((last, segment) =>
+        Math.max(last, Number(segment.end) || 0), 0);
+      const end = Math.min(28800, Math.max(300, durationSeconds, maxSampleEnd, lastAsr));
+      const response = await ApiClient.getSpeakerTimeline(id, 0, end, abort.signal);
+      if (abort.signal.aborted || selectedGroupRef.current !== group) return;
+      if (response.truncated) {
+        setListenError(tr('Troppi intervalli: ascolta una finestra temporale dalla timeline.',
+          'Too many intervals: play a shorter timeline window.'));
+        return;
+      }
+      const groups = new Map(rows.map((row) => [row.cluster, row.group]));
+      const turns: SpeakerTurn[] = response.intervals
+        .filter((item) => groups.get(item.cluster) === group && item.playable)
+        .map((item) => ({
+          track_id: item.track_id, start: item.start, end: item.end,
+          kind: item.origin === 'diarization' ? 'diarization' : 'transcript',
+          overlap: item.overlap,
+        }));
+      if (turns.length) {
+        setTimelineCursor(turns[0].start);
+        playback.playTurns(turns);
+        return;
+      }
+      setListenError(tr('Nessun intervallo audio disponibile per questa voce.',
+        'No playable audio intervals for this voice.'));
+    } catch (reason) {
+      if (!abort.signal.aborted) setListenError(String(reason));
+    } finally {
+      if (activeListenRequest.current === abort) activeListenRequest.current = null;
+    }
+  };
+
+  const currentSample = sampleList[sampleIndex % Math.max(1, sampleList.length)];
+  const canEdit = !readOnly && !!review && !saving && !transcription.merged_sources?.length;
+  const showTurnPlayer = playback.state.mode === 'turns';
+
+  return (
+    <section className="rounded-xl border border-border-subtle bg-bg-glass p-4 sm:p-5" data-speaker-review-workspace="true">
+      <audio
+        ref={playback.audioRef} preload="metadata"
+        onTimeUpdate={() => {
+          setTimelineCursor(playback.audioRef.current?.currentTime ?? null);
+          playback.onTimeUpdate();
+        }} onEnded={playback.onEnded}
+        onPlay={playback.onPlay} onPause={playback.onPause} onError={playback.onError}
+        aria-label={tr('Riproduzione campioni speaker', 'Speaker sample playback')}
+      />
+      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-text-primary">{tr('Voci', 'Voices')}</h3>
+          <p className="mt-1 text-sm text-text-secondary">
+            {tr('Ascolta e identifica le persone del meeting.', 'Listen and identify the people in the meeting.')}
+          </p>
+          <p className="mt-2 text-xs text-text-muted" aria-live="polite">
+            {confirmed} / {active.length} {tr('voci confermate', 'voices confirmed')}
+            {pending > 0 && ' · ' + pending + tr(' da identificare', ' to identify')}
+          </p>
         </div>
-      ) : (
-        <p className="mt-4 rounded-lg border border-border-subtle bg-bg-surface px-3 py-3 text-xs text-text-muted">
-          {t('meeting.noSpeakerClusters')}
+        <div className="flex flex-wrap gap-2">
+          {review?.undo && !readOnly && (
+            <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={() => void undo()}>
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+              {tr('Annulla ultima modifica', 'Undo last correction')}
+            </Button>
+          )}
+        </div>
+      </header>
+
+      {loadError && <div role="alert" className="mb-3 flex items-center gap-2 rounded-lg border border-warning/30 p-3 text-sm text-text-secondary">
+        <AlertCircle className="h-4 w-4 text-warning" aria-hidden="true" />
+        {tr('Alcuni dati audio non sono disponibili: ', 'Some audio data is unavailable: ')}{loadError}
+      </div>}
+      {mutationError && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-danger/30 bg-danger/5 p-3 text-sm text-text-primary">
+          <AlertCircle className="h-4 w-4 text-danger" aria-hidden="true" />
+          <span className="flex-1">{mutationError}</span>
+          <Button variant="secondary" size="sm" onClick={() => void reload()}>{tr('Ricarica', 'Reload')}</Button>
+        </div>
+      )}
+
+      {unattributedSources.length > 0 && (
+        <p role="status" className="mb-3 rounded-lg border border-border-subtle bg-bg-surface p-3 text-xs text-text-secondary">
+          {tr('Alcuni interventi provengono da una sorgente audio, ma non sono attribuiti a una persona. Puoi provare Migliora riconoscimento nelle opzioni avanzate.',
+            'Some passages have an audio source but no identified person. You can try Improve recognition in advanced options.')}
         </p>
+      )}
+      {!rows.length ? (
+        <p className="rounded-lg bg-bg-surface p-4 text-sm text-text-muted">
+          {tr('Nessuna voce rilevata. Puoi migliorarne il riconoscimento nelle opzioni.', 'No voices found. Improve voice recognition in options.')}
+        </p>
+      ) : (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-1">
+            <button type="button" onClick={() => setFilter('all')} aria-pressed={filter === 'all'}
+              className={'min-h-9 rounded-lg px-3 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-border-focus ' +
+                (filter === 'all' ? 'bg-accent/15 font-semibold text-text-primary' : 'text-text-secondary hover:bg-bg-elevated')}>
+              {tr('Tutte le voci', 'All voices')}
+            </button>
+            <button type="button" onClick={() => setFilter('pending')} aria-pressed={filter === 'pending'}
+              className={'min-h-9 rounded-lg px-3 py-1.5 text-xs focus-visible:outline-2 focus-visible:outline-border-focus ' +
+                (filter === 'pending' ? 'bg-accent/15 font-semibold text-text-primary' : 'text-text-secondary hover:bg-bg-elevated')}>
+              {tr('Da identificare', 'To identify')}{pending > 0 ? ` · ${pending}` : ''}
+            </button>
+          </div>
+          <SpeakerTimeline
+            transcription={transcription}
+            recordingId={meetingId}
+            durationSeconds={durationSeconds}
+            rows={rows}
+            showHidden={showHidden}
+            pendingOnly={filter === 'pending'}
+            selectedGroup={selected?.group || null}
+            cursorSeconds={timelineCursor}
+            lang={lang}
+            onEvidenceSummary={onEvidenceSummary}
+            onSelect={(cluster) => { activeListenRequest.current?.abort(); playback.stop(); setTimelineCursor(null); setSelectedCluster(cluster); }}
+            sampleAvailable={(cluster) => Boolean(samples?.speakers.find((s) => s.speaker_cluster === cluster)?.samples.length)}
+            onPlaySample={(cluster) => {
+              const clip = samples?.speakers.find((s) => s.speaker_cluster === cluster)?.samples[0];
+              if (!clip) return;
+              activeListenRequest.current?.abort();
+              setSelectedCluster(cluster);
+              setSampleIndex(0);
+              setTimelineCursor(clip.start);
+              playback.playSample(clip);
+            }}
+            onPlayInterval={(clip) => { activeListenRequest.current?.abort(); setTimelineCursor(clip.start); playback.playTurns([clip]); }}
+            onJumpToTranscript={onJumpToTranscript}
+          >
+          {selected && (
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h4 className="truncate text-base font-semibold text-text-primary">{selected.name}</h4>
+                  <p className="mt-1 text-xs text-text-muted">
+                    {selected.status === 'accepted' ? tr('Identità confermata', 'Confirmed identity') :
+                      selected.status === 'excluded' ? tr('Esclusa (ripristinabile)', 'Excluded (restorable)') :
+                      selected.status === 'merged' ? tr('Unita a un’altra voce', 'Merged into another voice') :
+                      tr('Da identificare', 'Not yet identified')}
+                  </p>
+                  <p className="mt-1 text-xs text-text-secondary" data-speaker-evidence-counts="true" aria-live="polite">
+                    <span data-speaker-timeline-count={selectedIntervalCount ?? 'unknown'}>
+                      {selectedIntervalCount === null
+                        ? tr('Intervalli non ancora verificati', 'Intervals not yet verified')
+                        : selectedIntervalCount > 0
+                          ? `${selectedIntervalCount} ${selectedIntervalCount === 1
+                            ? tr('intervallo attribuito nella timeline', 'attributed interval in the timeline')
+                            : tr('intervalli attribuiti nella timeline', 'attributed intervals in the timeline')}`
+                          : sampleList.length > 0
+                            ? tr('Voce rilevata · intervalli non disponibili', 'Voice detected · intervals unavailable')
+                            : tr('Nessun intervallo attribuito', 'No attributed intervals')}
+                    </span>
+                    {' · '}
+                    <span data-speaker-text-count={selected.count}>
+                      {selected.count > 0
+                        ? `${selected.count} ${selected.count === 1
+                          ? tr('intervento collegato al testo', 'text-linked turn')
+                          : tr('interventi collegati al testo', 'text-linked turns')}`
+                        : tr('Nessun intervento collegato al testo', 'No text-linked turns')}
+                    </span>
+                  </p>
+                </div>
+                {canEdit && selected.status !== 'excluded' && selected.status !== 'merged' && (
+                  <Button variant="ghost" size="sm" onClick={() => setShowActions((value) => !value)}
+                    aria-label={tr('Gestisci questa voce', 'Manage this voice')}>
+                    <MoreHorizontal className="h-5 w-5" />
+                  </Button>
+                )}
+              </div>
+
+              <div className="mt-4 rounded-lg border border-border-subtle bg-bg-surface p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="primary" disabled={!currentSample} onClick={() => {
+                    if (!currentSample) return;
+                    if (playback.state.mode === 'sample' && playback.state.current?.start === currentSample.start &&
+                      playback.state.current?.track_id === currentSample.track_id) playback.toggle();
+                    else playClip(currentSample);
+                  }}>
+                    {playback.state.playing && playback.state.mode === 'sample'
+                      ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    {tr('Ascolta campione', 'Play sample')}
+                    {currentSample && ' · ' + Math.round(currentSample.end - currentSample.start) + 's'}
+                  </Button>
+                  {sampleList.length > 1 && (
+                    <Button variant="ghost" size="sm" onClick={() => { playback.stop(); setSampleIndex((value) => (value + 1) % sampleList.length); }}>
+                      {tr('Altro campione', 'Another sample')} ({sampleIndex % sampleList.length + 1}/{sampleList.length})
+                    </Button>
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-text-muted">
+                  {currentSample
+                    ? clock(currentSample.start) + '–' + clock(currentSample.end) + ' · ' +
+                      (currentSample.kind === 'diarization'
+                        ? tr('Voce rilevata nell’audio, senza testo collegato', 'Voice detected in audio, without linked text')
+                        : tr('Estratto della trascrizione', 'Transcript excerpt'))
+                    : tr('Campione non disponibile: nessun intervallo audio verificabile.', 'Sample unavailable: no verifiable audio interval.')}
+                </p>
+                {currentSample?.overlap && <p className="mt-1 text-xs text-warning">
+                  {tr('Questo intervallo può contenere voci sovrapposte.', 'This interval may contain overlapping voices.')}
+                </p>}
+              </div>
+
+              <div className="mt-4">
+                <label className="mb-1 block text-xs font-medium text-text-secondary" htmlFor="speaker-review-name">
+                  {tr('Nome della persona', 'Person name')}
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input id="speaker-review-name" className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-surface px-3 py-2 text-sm text-text-primary focus:outline-2 focus:outline-border-focus disabled:opacity-60"
+                    value={editedName} maxLength={120}
+                    disabled={!canEdit || selected.status === 'excluded' || selected.status === 'merged'}
+                    onChange={(event) => setEditedName(event.target.value)}
+                    onBlur={() => {
+                      if (skipBlurSaveRef.current) {
+                        skipBlurSaveRef.current = false;
+                        return;
+                      }
+                      saveName();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        skipBlurSaveRef.current = true;
+                        setEditedName(selected.name);
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                  <span role="status" aria-live="polite" className="text-xs text-text-muted">
+                    {saving ? tr('Salvataggio…', 'Saving…') : review && editedName === selected.name
+                      ? tr('Nome salvato', 'Name saved') : ''}
+                  </span>
+                </div>
+              </div>
+
+              {selected.status === 'unassigned' && !selected.sourceOnly && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-subtle bg-bg-surface p-3"
+                  data-speaker-identity-status="unconfirmed">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-text-primary">
+                      {tr('Identità non ancora confermata', 'Identity not yet confirmed')}
+                    </p>
+                    <p className="mt-1 text-xs text-text-secondary">
+                      {isPlaceholderName
+                        ? tr('Assegna prima un nome alla persona.', 'Name this person before confirming.')
+                        : editedName.trim() !== selected.name
+                          ? tr('Salva prima il nome modificato.', 'Save the changed name first.')
+                          : tr('Hai riconosciuto questa voce? Puoi confermarla senza cambiare il nome.',
+                            'Recognize this voice? Confirm it without changing the name.')}
+                    </p>
+                  </div>
+                  <Button type="button" size="sm" variant="primary"
+                    data-speaker-confirm={selected.cluster}
+                    disabled={!canEdit || saving || !canConfirmSelected || editedName.trim() !== selected.name}
+                    onClick={() => void commit('confirm', selected.cluster)}>
+                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                    {tr('Conferma questa voce', 'Confirm this voice')}
+                  </Button>
+                </div>
+              )}
+
+              <div className="mt-4 border-t border-border-subtle pt-4">
+                <Button variant="secondary" onClick={() => void playSelectedTurns()}
+                  disabled={!selected || selected.sourceOnly || selected.status === 'excluded' || selected.status === 'merged'}>
+                  <Headphones className="h-4 w-4" aria-hidden="true" />
+                  {tr('Ascolta i suoi interventi', 'Listen to this speaker’s turns')}
+                </Button>
+                <p className="mt-2 text-xs text-text-muted">
+                  {tr('Riproduce gli intervalli attribuiti a questa voce, saltando gli altri. Le sovrapposizioni restano udibili.', 'Plays attributed intervals and skips other turns. Overlapping voices can still be heard.')}
+                </p>
+                {showTurnPlayer && playback.state.current && (
+                  <div className="mt-3 rounded-lg border border-border-subtle bg-bg-surface p-3">
+                    <p className="mb-2 text-xs text-text-secondary" aria-live="polite">
+                      {tr('Intervento', 'Turn')} {playback.state.index + 1}/{playback.state.total} · {clock(playback.state.current.start)}
+                    </p>
+                    <p className="mb-2 line-clamp-2 text-sm text-text-primary">{playback.state.current.text}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="ghost" size="sm" disabled={playback.state.index === 0} onClick={playback.previous}
+                        aria-label={tr('Intervento precedente', 'Previous turn')}><SkipBack className="h-4 w-4" /></Button>
+                      <Button variant="secondary" size="sm" onClick={playback.toggle}>
+                        {playback.state.playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        {playback.state.playing ? tr('Pausa', 'Pause') : tr('Riprendi', 'Resume')}
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={playback.next}
+                        disabled={playback.state.index + 1 >= playback.state.total}
+                        aria-label={tr('Intervento successivo', 'Next turn')}><SkipForward className="h-4 w-4" /></Button>
+                      {onJumpToTranscript && (
+                        <Button variant="ghost" size="sm" onClick={() => onJumpToTranscript(playback.state.current!.start)}>
+                          {tr('Vai al testo', 'Go to transcript')}
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" onClick={playback.stop}>
+                        {tr('Termina ascolto', 'Stop listening')}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {listenError && <p role="alert" className="mt-2 text-xs text-warning">{listenError}</p>}
+                {playback.state.error && <p role="alert" className="mt-2 text-xs text-danger">{playback.state.error}</p>}
+              </div>
+
+              {action !== 'none' && selected.status !== 'excluded' && selected.status !== 'merged' && (
+                <div className="mt-4 rounded-lg border border-border-subtle bg-bg-surface p-3">
+                  {action === 'merge' ? (
+                    <>
+                      <h5 className="text-sm font-semibold">{tr('Unisci con un’altra voce', 'Merge with another voice')}</h5>
+                      <p className="mt-1 text-xs text-text-secondary">
+                        {tr('Le etichette verranno unite; audio e testo originali rimarranno invariati.', 'The labels will be grouped; original audio and text remain unchanged.')}
+                      </p>
+                      <select className="my-3 w-full rounded-lg border border-border-subtle bg-bg-elevated p-2 text-sm"
+                        aria-label={tr('Voce di destinazione', 'Target voice')} value={mergeTarget}
+                        onChange={(event) => setMergeTarget(event.target.value)}>
+                        <option value="">{tr('Scegli una voce', 'Select a voice')}</option>
+                        {selectable.map((r) => <option key={r.cluster} value={r.cluster}>{r.name}</option>)}
+                      </select>
+                      {mergeTarget && (
+                        <p className="mb-3 text-xs text-text-secondary" data-speaker-merge-count="true">
+                          {mergedTextTurnCount > 0
+                            ? `${mergedTextTurnCount} ${mergedTextTurnCount === 1
+                              ? tr('intervento collegato al testo', 'transcript-linked turn')
+                              : tr('interventi collegati al testo', 'transcript-linked turns')}`
+                            : tr('Testo non ancora collegato a queste voci', 'No transcript text linked to these voices')}
+                          {' · '}
+                          {tr('Gli intervalli audio restano disponibili.', 'Audio intervals remain available.')}
+                        </p>
+                      )}
+                      {mergeTarget && samples?.speakers.find((s) => s.speaker_cluster === mergeTarget)?.samples[0] && (
+                        <Button variant="ghost" size="sm" onClick={() => {
+                          const clip = samples?.speakers.find((s) => s.speaker_cluster === mergeTarget)?.samples[0];
+                          if (clip) playClip(clip);
+                        }}>{tr('Ascolta voce di destinazione', 'Play target voice')}</Button>
+                      )}
+                      <div className="mt-3 flex gap-2">
+                        <Button disabled={!canEdit || !mergeTarget} size="sm"
+                          onClick={() => void commit('merge', selected.cluster, { target: mergeTarget })}>
+                          <GitMerge className="h-4 w-4" aria-hidden="true" />{tr('Conferma unione', 'Confirm merge')}
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setAction('none')}>{tr('Annulla', 'Cancel')}</Button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <h5 className="text-sm font-semibold">{tr('Escludere questa voce?', 'Exclude this voice?')}</h5>
+                      <p className="mt-1 text-xs text-text-secondary">
+                        {selected.count === 0
+                          ? tr('Nessun intervento collegato al testo. La voce può avere intervalli audio; sarà nascosta ma recuperabile, senza cambiare audio e testo.', 'No transcript-linked turns. This voice may have audio intervals; it will be hidden but recoverable without changing audio or text.')
+                          : tr('Gli interventi resteranno nel testo come “Non identificato”. Audio e testo originali rimarranno invariati.', 'Turns will remain as “Unidentified”. Original audio and text remain unchanged.')}
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <Button variant="warning" size="sm" disabled={!canEdit}
+                          onClick={() => void commit('exclude', selected.cluster)}>
+                          {tr('Conferma esclusione', 'Confirm exclusion')}
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setAction('none')}>{tr('Annulla', 'Cancel')}</Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              {canEdit && showActions && action === 'none' && selected.status !== 'merged' && selected.status !== 'excluded' && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setAction('merge')}>
+                    <GitMerge className="h-4 w-4" aria-hidden="true" />{tr('Unisci voce', 'Merge voice')}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setAction('exclude')}>
+                    {tr('Escludi voce', 'Exclude voice')}
+                  </Button>
+                </div>
+              )}
+              {canEdit && (selected.status === 'merged' || selected.status === 'excluded') && (
+                <Button variant="secondary" size="sm" className="mt-3"
+                  onClick={() => void commit('restore', selected.cluster)}>
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  {tr('Ripristina voce', 'Restore voice')}
+                </Button>
+              )}
+              <div className="mt-3 border-t border-border-subtle pt-2">
+                <button type="button" className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary"
+                  aria-expanded={advanced} onClick={() => setAdvanced((value) => !value)}>
+                  <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                  {tr('Dettagli tecnici', 'Technical details')}
+                </button>
+                {advanced && <div className="mt-2 text-xs text-text-muted">
+                  <p>{tr('Identificatore originale: ', 'Original cluster: ')}<code>{selected.cluster}</code></p>
+                  <p>{tr('Gruppo attuale: ', 'Current group: ')}<code>{selected.group}</code></p>
+                  <p>{tr('Origine: ', 'Source: ')}<code>{transcription.stats?.speaker_diarization?.provider || 'local'}</code></p>
+                </div>}
+              </div>
+            </div>
+          )}
+          </SpeakerTimeline>
+          {showHidden && rows.some((r) => r.status === 'merged') && (
+            <div className="mt-2 flex flex-wrap items-center gap-1 text-xs" aria-label={tr('Voci unite', 'Merged voices')}>
+              <span className="px-2 text-text-muted">{tr('Voci unite:', 'Merged voices:')}</span>
+              {rows.filter((r) => r.status === 'merged').map((r) => (
+                <Button key={r.cluster} variant="ghost" size="sm"
+                  data-speaker-merged-restore={r.cluster}
+                  disabled={!canEdit || saving}
+                  onClick={() => { setSelectedCluster(r.cluster); void commit('restore', r.cluster); }}
+                  aria-label={tr(`Ripristina voce ${r.name}`, `Restore voice ${r.name}`)}>
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  {r.name} · {tr('Ripristina', 'Restore')}
+                </Button>
+              ))}
+            </div>
+          )}
+          {rows.some((r) => r.status === 'merged' || r.status === 'excluded') && (
+            <button type="button" aria-expanded={showHidden}
+              onClick={() => { setShowHidden((value) => !value); setFilter('all'); }}
+              className="mt-3 inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-text-secondary hover:bg-bg-elevated focus-visible:outline-2 focus-visible:outline-border-focus">
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              {showHidden ? tr('Nascondi voci unite ed escluse', 'Hide merged and excluded voices') :
+                tr('Mostra voci unite ed escluse', 'Show merged and excluded voices')}
+            </button>
+          )}
+        </>
       )}
     </section>
   );

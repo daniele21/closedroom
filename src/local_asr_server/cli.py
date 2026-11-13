@@ -134,8 +134,8 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "HTTP port. Defaults to 1236, or 1237 when --reload is used "
-            "so the development server stays separate from the macOS app."
+            "HTTP port. Source development defaults to 1237 (with or without "
+            "--reload), independent from the installed macOS app on 1236."
         ),
     )
     serve.add_argument(
@@ -173,10 +173,6 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "doctor",
         help="Check the macOS audio capture configuration.",
-    )
-    subparsers.add_parser(
-        "setup-audio",
-        help="Install macOS audio routing prerequisites.",
     )
     subparsers.add_parser(
         "app",
@@ -236,83 +232,29 @@ def _inspect_meeting(recording_id: str, *, as_json: bool = False) -> bool:
 def _resolve_serve_port(args: argparse.Namespace) -> int:
     if args.port is not None:
         return args.port
-    return DEV_SERVER_PORT if args.reload else DEFAULT_SERVER_PORT
+    from local_asr_server.paths import is_development_profile
+    return DEV_SERVER_PORT if args.reload or is_development_profile() else DEFAULT_SERVER_PORT
 
 
 def _print_audio_status() -> bool:
-    """Check and display the audio routing configuration status."""
-    from local_asr_server.audio_router import AudioRouter
+    """Report native AVFoundation/ScreenCaptureKit capability without mutating the audio route."""
+    from local_asr_server.native_capture import NativeCaptureManager
 
-    status = AudioRouter.get_status()
+    capture = NativeCaptureManager()
+    capabilities = capture.capabilities()
+    available = capabilities.get("available") is True
+    print(f"{'OK' if available else 'MISSING':7} Native macOS capture")
+    if not available:
+        print(f"        Reason: {capabilities.get('reason') or 'unknown'}")
+        return False
 
-    # Check Swift audio helper
-    helper_ok = status.get("audio_helper_available", False)
-    swift_check = "OK" if helper_ok else "MISSING"
-
-    checks = (
-        ("macOS", status["platform"] == "darwin"),
-        ("BlackHole 2ch", status["blackhole_installed"]),
-        ("Audio Helper", helper_ok),
-    )
-    for label, passed in checks:
-        print(f"{'OK' if passed else 'MISSING':7} {label}")
-
-    if status.get("physical_output"):
-        print(f"        Current output: {status['physical_output']}")
-
-    routing_active = status.get("routing_active", False)
-    if routing_active:
-        print(f"        Routing:        Active (temporary device)")
-
-    if status["ready_to_record"]:
-        print(
-            "\nAudio routing is ready."
-            "\nMulti-Output devices are created automatically when recording."
-        )
-        return True
-
-    print("\nAudio routing is not ready.")
-    missing = status.get("missing", [])
-    if "audio_helper" in missing:
-        print("- Audio helper not available. Run: local-asr setup-audio")
-    if "blackhole" in missing:
-        print("- BlackHole 2ch not installed. Run: brew install blackhole-2ch")
-    return False
-
-
-def _setup_audio() -> None:
-    """Install audio prerequisites and compile the Swift helper."""
-    if sys.platform != "darwin":
-        raise SystemExit("setup-audio is supported only on macOS.")
-    brew = shutil.which("brew")
-    if not brew:
-        raise SystemExit("Homebrew is required: https://brew.sh")
-
-    # Install BlackHole (SwitchAudioSource no longer required)
-    print("Installing BlackHole 2ch...")
-    subprocess.run(
-        [brew, "install", "blackhole-2ch"],
-        check=True,
-    )
-
-    # Compile the Swift audio helper
-    print("\nCompiling Core Audio helper...")
-    try:
-        from local_asr_server.macos_audio_helper.compile import compile_helper
-        binary_path = compile_helper(force=True)
-        print(f"Audio helper compiled: {binary_path}")
-    except RuntimeError as exc:
-        print(f"WARNING: Failed to compile audio helper: {exc}")
-        print("You may need to install Xcode Command Line Tools:")
-        print("  xcode-select --install")
-        return
-
-    print(
-        "\nSetup complete! Multi-Output devices are now created "
-        "automatically when you start a recording.\n"
-        "No manual Audio MIDI Setup configuration is needed.\n"
-        "Run 'local-asr doctor' to verify."
-    )
+    permissions = capture.permissions()
+    mic_ok = permissions.get("microphone") == "authorized"
+    screen_ok = permissions.get("screen_capture") == "granted"
+    print(f"{'OK' if mic_ok else 'MISSING':7} Microphone permission")
+    print(f"{'OK' if screen_ok else 'MISSING':7} Screen/system audio permission")
+    print("        ClosedRoom captures computer audio natively; it never changes the system output.")
+    return mic_ok and screen_ok
 
 
 def main() -> None:
@@ -322,12 +264,16 @@ def main() -> None:
         argv = ["serve"]
     args = parser.parse_args(argv)
 
+    # The source launcher must never share the installed app's recording,
+    # transcript, catalog or settings stores. Bundled apps always stay prod.
+    if args.command in {"serve", "app"}:
+        from local_asr_server.paths import is_bundled
+        if not is_bundled():
+            os.environ["CLOSEDROOM_DEV_PROFILE"] = "1"
+
     if args.command == "doctor":
         if not _print_audio_status():
             raise SystemExit(1)
-        return
-    if args.command == "setup-audio":
-        _setup_audio()
         return
     if args.command == "app":
         _ensure_dev_frontend_bundle()
@@ -352,84 +298,88 @@ def main() -> None:
         clear_api_runtime,
         prepare_api_port,
         register_api_runtime,
+        runtime_instance_lock,
     )
 
-    port = _resolve_serve_port(args)
-    prepare_api_port(port, host=args.host)
-    register_api_runtime(port, host=args.host)
-    app = create_app(
-        default_model=args.model,
-        recordings_dir=Path(args.recordings_dir).expanduser() if args.recordings_dir else None,
-    )
+    with runtime_instance_lock():
+        port = _resolve_serve_port(args)
+        prepare_api_port(port, host=args.host)
+        register_api_runtime(port, host=args.host)
+        try:
+            os.environ["CLOSEDROOM_API_PORT"] = str(port)
+            llm_process = None
+            if args.llm_port:
+                from local_asr_server.settings import load_settings, save_settings
+                settings = load_settings()
+                settings["local_llm_mode"] = "external"
+                settings["local_llm_url"] = f"http://{LOCAL_SERVICE_HOST}:{args.llm_port}"
+                
+                # Get model key from args, settings, or default
+                llm_model = args.llm_model or settings.get("local_llm_model") or "nemotron-nano-4b-q8"
+                from local_asr_server.runtime.models import resolve_local_llm_model_path
+                llm_model_path = args.llm_model_path or resolve_local_llm_model_path(settings, llm_model)
+                settings["local_llm_model"] = llm_model
+                settings["local_llm_model_path"] = llm_model_path
+                save_settings(settings)
 
-    llm_process = None
-    if args.llm_port:
-        from local_asr_server.settings import load_settings, save_settings
-        settings = load_settings()
-        settings["local_llm_mode"] = "external"
-        settings["local_llm_url"] = f"http://{LOCAL_SERVICE_HOST}:{args.llm_port}"
-        
-        # Get model key from args, settings, or default
-        llm_model = args.llm_model or settings.get("local_llm_model") or "nemotron-nano-4b-q8"
-        from local_asr_server.runtime.models import resolve_local_llm_model_path
-        llm_model_path = args.llm_model_path or resolve_local_llm_model_path(settings, llm_model)
-        settings["local_llm_model"] = llm_model
-        settings["local_llm_model_path"] = llm_model_path
-        save_settings(settings)
+                # Build command to start local-llm-server
+                visual_model = settings.get("visual_llm_model") or "qwen3-vl-4b"
+                cmd = [
+                    sys.executable, "-m", "local_llm_server", "serve",
+                    "--host", LOCAL_SERVICE_HOST, "--port", str(args.llm_port),
+                    "--enable-admin-api",
+                    "--models", llm_model, visual_model
+                ]
 
-        # Build command to start local-llm-server
-        visual_model = settings.get("visual_llm_model") or "qwen3-vl-4b"
-        cmd = [
-            sys.executable, "-m", "local_llm_server", "serve",
-            "--host", LOCAL_SERVICE_HOST, "--port", str(args.llm_port),
-            "--enable-admin-api",
-            "--models", llm_model, visual_model
-        ]
+                binary = shutil.which("local-llm-server")
+                if binary:
+                    cmd = [
+                        binary, "serve",
+                        "--host", LOCAL_SERVICE_HOST, "--port", str(args.llm_port),
+                        "--enable-admin-api",
+                        "--models", llm_model, visual_model
+                    ]
+                
+                desc = f"path: {llm_model_path}" if llm_model_path else f"model: {llm_model}"
+                print(f"Starting local LLM server ({desc}) on port {args.llm_port} in background...")
+                llm_process = subprocess.Popen(cmd)
 
-        binary = shutil.which("local-llm-server")
-        if binary:
-            cmd = [
-                binary, "serve",
-                "--host", LOCAL_SERVICE_HOST, "--port", str(args.llm_port),
-                "--enable-admin-api",
-                "--models", llm_model, visual_model
-            ]
-        
-        desc = f"path: {llm_model_path}" if llm_model_path else f"model: {llm_model}"
-        print(f"Starting local LLM server ({desc}) on port {args.llm_port} in background...")
-        llm_process = subprocess.Popen(cmd)
-
-    try:
-        if args.reload:
-            import os
-            if args.model:
-                os.environ["CLOSEDROOM_DEFAULT_MODEL"] = args.model
-            if args.recordings_dir:
-                os.environ["CLOSEDROOM_RECORDINGS_DIR"] = str(Path(args.recordings_dir).expanduser())
-            uvicorn.run(
-                "local_asr_server.server:create_app",
-                factory=True,
-                host=args.host,
-                port=port,
-                reload=True,
-            )
-        else:
-            uvicorn.run(
-                app,
-                host=args.host,
-                port=port,
-                reload=False,
-            )
-    finally:
-        clear_api_runtime(port, host=args.host)
-        if llm_process:
-            print("Stopping local LLM server...")
-            llm_process.terminate()
             try:
-                llm_process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                llm_process.kill()
+                if args.reload:
+                    if args.model:
+                        os.environ["CLOSEDROOM_DEFAULT_MODEL"] = args.model
+                    if args.recordings_dir:
+                        os.environ["CLOSEDROOM_RECORDINGS_DIR"] = str(Path(args.recordings_dir).expanduser())
+                    uvicorn.run(
+                        "local_asr_server.server:create_app",
+                        factory=True,
+                        host=args.host,
+                        port=port,
+                        reload=True,
+                    )
+                else:
+                    app = create_app(
+                        default_model=args.model,
+                        recordings_dir=Path(args.recordings_dir).expanduser() if args.recordings_dir else None,
+                    )
+                    app.state.port = port
+                    uvicorn.run(
+                        app,
+                        host=args.host,
+                        port=port,
+                        reload=False,
+                    )
+            finally:
+                if llm_process:
+                    print("Stopping local LLM server...")
+                    llm_process.terminate()
+                    try:
+                        llm_process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        llm_process.kill()
 
+        finally:
+            clear_api_runtime(port, host=args.host)
 
 def _run_transcribe_worker() -> None:
     import sys

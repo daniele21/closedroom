@@ -8,7 +8,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from local_asr_server.paths import get_app_support_dir
+import os
+from local_asr_server.paths import APP_NAME, get_app_support_dir, is_development_profile
 from local_asr_server.settings import load_settings
 
 
@@ -49,15 +50,70 @@ class CatalogStore:
             self._init_db(conn)
 
     @staticmethod
-    def default_db_path() -> Path:
+    def default_db_path(
+        recordings_dir: Path | None = None,
+        transcriptions_dir: Path | None = None,
+    ) -> Path:
         settings = load_settings()
-        transcriptions_dir = Path(settings["transcriptions_dir"]).expanduser().resolve()
-        recordings_dir = Path(settings["recordings_dir"]).expanduser().resolve()
+        if is_development_profile():
+            # Never fall through the legacy production DB discovery heuristics:
+            # a new development database must not accidentally open the user's
+            # ~/ClosedRoom/closedroom.db just because that file already exists.
+            from local_asr_server.settings import validate_development_storage
+            selected = os.environ.get("CLOSEDROOM_CATALOG_DB") or settings["catalog_db_path"]
+            validate_development_storage(settings, catalog_db=selected, recordings_dir=recordings_dir)
+            return Path(selected).expanduser().resolve()
+        resolved_transcriptions = (
+            transcriptions_dir.expanduser().resolve()
+            if transcriptions_dir is not None
+            else Path(settings.get("transcriptions_dir", "")).expanduser().resolve()
+        )
+        resolved_recordings = (
+            recordings_dir.expanduser().resolve()
+            if recordings_dir is not None
+            else Path(settings.get("recordings_dir", "")).expanduser().resolve()
+        )
         temp_root = Path(tempfile.gettempdir()).resolve()
-        if temp_root in transcriptions_dir.parents or temp_root in recordings_dir.parents:
-            transcriptions_dir.mkdir(parents=True, exist_ok=True)
-            return transcriptions_dir / "closedroom.db"
-        return get_app_support_dir() / "closedroom.db"
+        if temp_root in resolved_transcriptions.parents or resolved_transcriptions == temp_root:
+            resolved_transcriptions.mkdir(parents=True, exist_ok=True)
+            return resolved_transcriptions / "closedroom.db"
+        if temp_root in resolved_recordings.parents or resolved_recordings == temp_root:
+            resolved_recordings.mkdir(parents=True, exist_ok=True)
+            return resolved_recordings / "closedroom.db"
+
+        # Explicit environment variable override
+        env_db = os.environ.get("CLOSEDROOM_CATALOG_DB")
+        if env_db:
+            return Path(env_db).expanduser().resolve()
+
+        # Explicit setting override if defined
+        setting_db = settings.get("catalog_db_path")
+        if setting_db:
+            candidate = Path(setting_db).expanduser().resolve()
+            if candidate.exists() or not candidate.parent.exists():
+                return candidate
+
+        # Workspace search: check candidate locations for existing closedroom.db
+        candidates: list[Path] = [
+            Path.home() / APP_NAME / "closedroom.db",
+            Path.home() / "ClosedRoom" / "closedroom.db",
+            resolved_recordings.parent.parent / "closedroom.db",
+            resolved_transcriptions.parent.parent / "closedroom.db",
+            resolved_recordings.parent / "closedroom.db",
+            resolved_transcriptions.parent / "closedroom.db",
+            resolved_transcriptions / "closedroom.db",
+            resolved_recordings / "closedroom.db",
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate.resolve()
+
+        # If ~/ClosedRoom directory exists, place catalog DB there by default
+        app_home = Path.home() / APP_NAME
+        if app_home.is_dir():
+            return (app_home / "closedroom.db").resolve()
+
+        return (get_app_support_dir() / "closedroom.db").resolve()
 
     @contextlib.contextmanager
     def connection(self):
@@ -520,6 +576,39 @@ class CatalogStore:
             ).fetchall()
         return [self._row_to_analysis_run(row) for row in rows]
 
+    def list_analysis_runs_grouped(
+        self, source_key: str, source_ids: list[str], *, limit: int = 50,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Batch per-source latest runs without changing list_analysis_runs semantics.
+
+        Each recording/transcription keeps its own limit and newest-first order;
+        no cross-record cap or new cache/persistence owner is introduced.
+        """
+        if source_key not in {"recording_id", "transcription_id"}:
+            raise ValueError("Unsupported analysis run source")
+        ids = list(dict.fromkeys(source_id for source_id in source_ids if source_id))
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        bounded_limit = max(1, min(limit, 500))
+        for start in range(0, len(ids), 400):
+            batch = ids[start:start + 400]
+            placeholders = ", ".join("?" for _ in batch)
+            with self.connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT * FROM (
+                        SELECT analysis_runs.*, ROW_NUMBER() OVER (
+                            PARTITION BY {source_key} ORDER BY created_at DESC
+                        ) AS source_rank
+                        FROM analysis_runs WHERE {source_key} IN ({placeholders})
+                    ) WHERE source_rank <= ?
+                    ORDER BY {source_key}, created_at DESC
+                    """,
+                    [*batch, bounded_limit],
+                ).fetchall()
+            for row in rows:
+                grouped.setdefault(row[source_key], []).append(self._row_to_analysis_run(row))
+        return grouped
+
     def _row_to_analysis_run(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
             "id": row["id"],
@@ -594,6 +683,43 @@ class CatalogStore:
         with self.connection() as conn:
             row = conn.execute("SELECT * FROM transcriptions WHERE id = ?", (transcription_id,)).fetchone()
         return self.row_to_transcription(row) if row else None
+
+    def find_transcriptions_for_recordings(
+        self, recording_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve the latest transcript for many local recordings with bounded SQLite reads.
+
+        Same effective selection as find_transcription_for_recording; a merged
+        transcription resolves to its canonical target. No new index/cache owner.
+        """
+        ids = list(dict.fromkeys(recording_id for recording_id in recording_ids if recording_id))
+        items: dict[str, dict[str, Any]] = {}
+        if not ids:
+            return items
+
+        # Keep below SQLite's historic 999-variable limit and avoid one DB
+        # connection/SELECT per meeting during /v1/projects aggregation.
+        for start in range(0, len(ids), 400):
+            batch = ids[start:start + 400]
+            placeholders = ", ".join("?" for _ in batch)
+            with self.connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT * FROM (
+                        SELECT *, ROW_NUMBER() OVER (
+                            PARTITION BY recording_id ORDER BY timestamp DESC
+                        ) AS row_rank
+                        FROM transcriptions WHERE recording_id IN ({placeholders})
+                    ) WHERE row_rank = 1
+                    """,
+                    batch,
+                ).fetchall()
+            for row in rows:
+                item = self.row_to_transcription(row)
+                if item.get("merged_into"):
+                    item = self.get_transcription(item["merged_into"]) or item
+                items[row["recording_id"]] = item
+        return items
 
     def find_transcription_for_recording(self, recording_id: str, audio_filename: str = "") -> dict[str, Any] | None:
         with self.connection() as conn:

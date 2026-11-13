@@ -6,8 +6,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "frontend" / "src" / "pages" / "RecordingOverlayPage.tsx"
+CONTROLS = ROOT / "frontend" / "src" / "components" / "recording" / "RecordingOverlayActions.tsx"
 RECORDER = ROOT / "frontend" / "src" / "hooks" / "useRecorder.ts"
 MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
+GALLERY = ROOT / "frontend" / "src" / "components" / "meeting" / "MeetingSourcesGallery.tsx"
 MEETING_ACCESSORIES = ROOT / "frontend" / "src" / "hooks" / "useMeetingAccessories.ts"
 TRANSCRIPT = ROOT / "frontend" / "src" / "components" / "transcription" / "TranscriptTextView.tsx"
 NOTES = ROOT / "frontend" / "src" / "components" / "meeting" / "StructuredNotesEditor.tsx"
@@ -20,8 +22,10 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.overlay = OVERLAY.read_text(encoding="utf-8")
+        cls.controls = CONTROLS.read_text(encoding="utf-8")
         cls.recorder = RECORDER.read_text(encoding="utf-8")
         cls.meeting = MEETING.read_text(encoding="utf-8")
+        cls.gallery = GALLERY.read_text(encoding="utf-8")
         cls.meeting_accessories = MEETING_ACCESSORIES.read_text(encoding="utf-8")
         cls.transcript = TRANSCRIPT.read_text(encoding="utf-8")
         cls.notes = NOTES.read_text(encoding="utf-8")
@@ -42,9 +46,19 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("/screenshots", self.client)
 
     def test_source_mode_uses_browser_overlay_without_false_warning(self) -> None:
-        self.assertIn("res?.fallback_expected", self.recorder)
+        self.assertIn("if (result?.fallback_expected) {", self.recorder)
         self.assertIn("setFallbackNotice(null)", self.recorder)
         self.assertIn("openBrowserPopup()", self.recorder)
+
+    def test_browser_and_native_recording_share_one_overlay_fallback_owner(self) -> None:
+        self.assertEqual(self.recorder.count("ApiClient.toggleOverlay(true)"), 1)
+        self.assertEqual(self.recorder.count("requestRecordingOverlay();"), 2)
+        self.assertIn("if (result?.success) return;", self.recorder)
+        self.assertIn("if (result?.fallback_expected) {", self.recorder)
+        self.assertIn("setFallbackNotice(null)", self.recorder)
+        self.assertIn("showToast(t('recording.overlayFallbackNotice'), 'warning')", self.recorder)
+        self.assertIn("openBrowserPopup()", self.recorder)
+        self.assertIn("requestRecordingOverlay]);", self.recorder)
 
     def test_browser_overlay_uses_control_center_dimensions_and_local_resize(self) -> None:
         self.assertIn("const width = 420;", self.recorder)
@@ -60,18 +74,21 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("ApiClient.selectScreenshotDisplay(recordingId, displayId)", self.overlay)
         self.assertIn("/screenshot-display", self.client)
         self.assertIn("pendingDisplayIdRef.current", self.overlay)
-        self.assertIn("pendingSelection === null || backendDisplayId === pendingSelection", self.overlay)
+        self.assertIn("backendDisplayId === null || (pendingSelection !== null && backendDisplayId !== pendingSelection)", self.overlay)
         self.assertIn('data-overlay-control-center="true"', self.overlay)
         self.assertIn('data-display-selector="true"', self.overlay)
         self.assertIn('data-display-picker="true"', self.overlay)
-        self.assertIn('data-screenshot-action="true"', self.overlay)
+        self.assertIn('data-screenshot-action="true"', self.controls)
+        self.assertIn('data-persisted={lastSavedScreenshotId !== null}', self.controls)
+        self.assertIn("<RecordingOverlayActions", self.overlay)
+        self.assertIn("onCaptureScreenshot={() => void handleCaptureScreenshot()}", self.overlay)
         self.assertNotIn("<select", self.overlay)
         self.assertIn("display.width} × {display.height", self.overlay)
-        self.assertIn("screenshotFeedback === 'saved'", self.overlay)
+        self.assertIn("lastSavedScreenshotId !== null", self.controls)
         self.assertIn("ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId)", self.overlay)
         self.assertIn("if (isUndoingScreenshot)", self.overlay)
-        self.assertIn("isCapturingScreenshot || isUndoingScreenshot", self.overlay)
-        self.assertIn('data-screenshot-undo="true"', self.overlay)
+        self.assertIn("isCapturingScreenshot || isUndoingScreenshot", self.controls)
+        self.assertIn('data-screenshot-undo="true"', self.controls)
 
     def test_transcript_keeps_asr_segments_immutable_and_anchors_screenshot_by_time(self) -> None:
         self.assertIn("segment.start <= shot.timestamp && shot.timestamp <= segment.end", self.transcript)
@@ -83,7 +100,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
 
     def test_meeting_and_structured_notes_share_the_same_screenshot_assets(self) -> None:
         self.assertIn("useMeetingAccessories", self.meeting)
-        self.assertIn("ApiClient.recordingScreenshots(recordingId)", self.meeting_accessories)
+        self.assertIn("useMeetingItemList<RecordingScreenshot>(recordingId, demoMode, ApiClient.recordingScreenshots)", self.meeting_accessories)
         self.assertIn("screenshots,", self.meeting)
         self.assertGreaterEqual(self.meeting.count("screenshots={screenshots}"), 2)
         self.assertIn("onOpenScreenshot={openKeyMoment}", self.meeting)
@@ -91,29 +108,38 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("onOpenScreenshot(screenshot)", self.notes)
 
     def test_meeting_surfaces_saved_screenshots_as_progressive_gallery(self) -> None:
-        self.assertIn('data-meeting-screenshot-gallery="true"', self.meeting)
-        self.assertIn('data-key-moments="true"', self.meeting)
+        self.assertIn("<MeetingSourcesGallery", self.meeting)
+        self.assertIn('data-meeting-notes-sources="true"', self.gallery)
+        self.assertIn("notes={notes}", self.meeting)
+        self.assertIn("onSeek={handleTimestampClick}", self.meeting)
+        self.assertIn("onOpenScreenshot={openKeyMoment}", self.meeting)
+        self.assertIn('data-meeting-user-note-id={note.note_id}', self.gallery)
+        self.assertIn("screenshotsState === 'ready' && savedScreenshotCount === 0", self.gallery)
+        self.assertIn('data-meeting-screenshot-gallery="true"', self.gallery)
+        self.assertIn('data-key-moments="true"', self.gallery)
         self.assertIn("keyMomentContext(", self.meeting)
         self.assertIn("collapsedKeyMoments.slice(0, 6)", self.meeting)
-        self.assertIn("setShowAllScreenshots((value) => !value)", self.meeting)
-        self.assertIn("src={shot.thumbnail_url}", self.meeting)
-        self.assertIn("onClick={() => openKeyMoment(shot)}", self.meeting)
-        self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.meeting)
-        self.assertIn("data-key-moment-id={shot.screenshot_id}", self.meeting)
+        self.assertIn("onToggleShowAll={() => setShowAllScreenshots((value) => !value)}", self.meeting)
+        self.assertIn("src={shot.thumbnail_url}", self.gallery)
+        self.assertIn("onClick={() => onOpenScreenshot(shot)}", self.gallery)
+        self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.gallery)
+        self.assertIn("data-key-moment-id={shot.screenshot_id}", self.gallery)
         self.assertIn("data-key-moment-context=\"true\"", self.meeting)
-        self.assertIn("openKeyMoment(shot)", self.meeting)
-        self.assertIn("keyMomentVisualRequested", self.meeting)
+        self.assertIn("onClick={() => onOpenScreenshot(shot)}", self.gallery)
+        self.assertIn("visualResultAvailable && selectedScreenshot !== null", self.meeting)
+        self.assertNotIn("keyMomentVisualRequested", self.meeting)
+        self.assertIn("setSelectedScreenshotKey(null)", self.meeting)
         self.assertIn('data-key-moment-ask="true"', self.meeting)
         self.assertIn("source_ids: ['screenshot:' + selectedScreenshot.screenshot_id]", self.meeting)
         self.assertIn("llm_provider: 'nemotron_local'", self.meeting)
         self.assertIn("CLOSEDROOM_KEY_MOMENT_QA_V1", self.meeting)
         self.assertIn("data-key-moment-answer=\"true\"", self.meeting)
-        self.assertIn("visualContext?.contentType", self.meeting)
-        self.assertIn("visualContext?.title", self.meeting)
+        self.assertIn("visualContext?.contentType", self.gallery)
+        self.assertIn("visualContext?.title", self.gallery)
         self.assertIn("manual_screenshot_groups", self.meeting)
-        self.assertIn("data-key-moment-group={group?.group_id || undefined}", self.meeting)
+        self.assertIn("data-key-moment-group={group?.group_id || undefined}", self.gallery)
         self.assertIn("data-key-moment-group-strip=\"true\"", self.meeting)
-        self.assertIn("group.screenshot_ids.length", self.meeting)
+        self.assertIn("group.screenshot_ids.length", self.gallery)
         self.assertIn("src={selectedScreenshot.original_url}", self.meeting)
         self.assertIn("handleTimestampClick(selectedScreenshot.timestamp)", self.meeting)
 

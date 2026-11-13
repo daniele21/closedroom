@@ -5,7 +5,7 @@ let package = Package(
     name: "ClosedRoomSpeakerDiarizer",
     platforms: [.macOS(.v14)],
     dependencies: [
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.15.5")
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.7")
     ],
     targets: [
         .executableTarget(

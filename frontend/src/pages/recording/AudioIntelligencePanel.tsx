@@ -9,6 +9,7 @@ interface AudioIntelligencePanelProps {
   loading?: boolean;
   hasTranscription: boolean;
   onTranscribe: () => void;
+  compact?: boolean;
 }
 
 function channelLabel(channel: string, labels: Record<string, string>) {
@@ -25,6 +26,7 @@ export default function AudioIntelligencePanel({
   loading = false,
   hasTranscription,
   onTranscribe,
+  compact = false,
 }: AudioIntelligencePanelProps) {
   const { t } = useTranslation();
   const metrics = intelligence?.conversation_metrics;
@@ -46,16 +48,16 @@ export default function AudioIntelligencePanel({
   ].sort((a, b) => a.time - b.time).slice(0, 6);
 
   return (
-    <Card className="md:col-span-3 flex flex-col gap-5">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-        <div>
+    <Card className={compact ? 'flex flex-col gap-3 !p-3 shadow-none' : 'md:col-span-3 flex flex-col gap-5'}>
+      <div className={compact ? 'flex flex-wrap items-center justify-between gap-2' : 'flex flex-col sm:flex-row sm:items-start justify-between gap-3'}>
+        {!compact && <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-accent font-bold">04</span>
             <h3 className="text-sm font-bold text-text-primary">{t('audioIntelligence.title')}</h3>
             {intelligence?.mock && <Badge variant="info" className="py-0.5 px-2 text-[10px]">{t('audioIntelligence.mockBadge')}</Badge>}
           </div>
           <p className="text-xs text-text-secondary mt-1">{t('audioIntelligence.description')}</p>
-        </div>
+        </div>}
+        {compact && intelligence?.mock && <Badge variant="info" className="py-0.5 px-2 text-[10px]">{t('audioIntelligence.mockBadge')}</Badge>}
         {intelligence && (
           <span className="text-[10px] text-text-muted font-mono uppercase tracking-wider">
             {intelligence.backend} · {intelligence.mode}

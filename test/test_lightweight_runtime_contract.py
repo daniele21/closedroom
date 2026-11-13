@@ -26,7 +26,10 @@ class LightweightRuntimeContractTests(unittest.TestCase):
         source = (ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
 
         self.assertIn("lazy(() => import('./pages/MeetingDetailPage'))", source)
-        self.assertIn("lazy(() => import('./pages/RecordingPage'))", source)
+        # The retired detail page must never be loaded; recording setup is
+        # the intentionally eager primary action, while heavy tools stay lazy.
+        self.assertNotIn("pages/RecordingPage", source)
+        self.assertIn("import NewRecordingPage from './pages/NewRecordingPage'", source)
         self.assertIn("lazy(() => import('./pages/TranscriptionPage'))", source)
         self.assertIn("lazy(() => import('./pages/ProjectsPage'))", source)
         self.assertIn("lazy(() => import('./pages/AnalysisPage'))", source)

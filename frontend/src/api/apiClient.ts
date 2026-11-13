@@ -150,6 +150,48 @@ export interface TranscriptionJob {
   updated_at: number;
 }
 
+export type DiarizationBenchmarkEngine = 'community-1' | 'nemotron3-fast128' | 'nemotron3-compact';
+
+export interface DiarizationBenchmarkRun {
+  key: DiarizationBenchmarkEngine;
+  engine: string;
+  preset: string | null;
+  status: 'completed' | 'failed';
+  elapsed_seconds?: number;
+  speed_vs_realtime?: number | null;
+  clusters?: number;
+  error_type?: string;
+  preview?: Array<{ speaker: string; start: number; end: number }>;
+  preview_truncated?: boolean;
+}
+
+export interface DiarizationTimelineWindow {
+  schema_version: number;
+  start_seconds: number;
+  end_seconds: number;
+  range_start_seconds: number;
+  range_end_seconds: number;
+  runs: Array<{
+    key: DiarizationBenchmarkEngine;
+    status: 'completed' | 'failed';
+    partial: boolean;
+    segments: Array<{ speaker: string; start: number; end: number }>;
+    speakers?: Array<{ speaker: string; first_start: number; in_window: boolean }>;
+  }>;
+}
+
+export interface DiarizationBenchmarkResult {
+  schema_version: number;
+  scope: 'sample' | 'full' | 'range';
+  range_start_seconds?: number;
+  range_end_seconds?: number;
+  track_id: string;
+  audio_seconds: number | null;
+  preview_seconds: number;
+  runs: DiarizationBenchmarkRun[];
+  reference_scored: boolean;
+}
+
 export interface ActivityJob extends TranscriptionJob {
   source_label?: string | null;
   parent_job_id?: string | null;
@@ -252,6 +294,10 @@ export interface AnalysisRun {
   prompt_version: string;
   input_hash: string;
   status: string;
+  speaker_source_validity?: {
+    status: 'current' | 'stale' | 'unverifiable';
+    reason?: 'speaker_attribution_changed' | 'legacy_without_speaker_provenance' | null;
+  };
   result?: any;
   result_markdown?: string | null;
   source_ids?: string[];
@@ -325,12 +371,73 @@ export interface TranscriptionSegment {
   speaker_label?: string;
   speaker_name?: string;
   provider_speaker?: string;
+  speaker_group?: string;
   pause_before?: number;
   speech_rate_wpm?: number;
   energy?: 'low' | 'medium_low' | 'medium' | 'high' | string | null;
   overlap?: boolean;
   words?: Array<{ word: string; start: number; end: number }>;
 }
+
+export interface SpeakerClip {
+  track_id: string;
+  start: number;
+  end: number;
+  kind: 'transcript' | 'diarization';
+  overlap: boolean;
+}
+
+export interface SpeakerTimelineWindow {
+  recording_id: string;
+  transcription_id: string;
+  start: number;
+  end: number;
+  intervals: Array<{
+    cluster: string;
+    track_id: string;
+    start: number;
+    end: number;
+    origin: 'diarization' | 'transcript';
+    overlap: boolean;
+    playable: boolean;
+  }>;
+  coverage: 'diarization' | 'transcript' | 'mixed' | 'none';
+  window_coverage?: 'diarization' | 'transcript' | 'mixed' | 'none';
+  duration_seconds?: number | null;
+  duration_source?: 'recording' | 'recording_clock' | 'evidence' | 'unknown';
+  max_evidence_end_seconds?: number | null;
+  total_interval_count?: number;
+  overview_bucket_count?: number;
+  overview?: Array<{
+    cluster: string;
+    bins: number[];
+    interval_count: number;
+    first_start: number | null;
+    playable_count: number;
+  }>;
+  truncated: boolean;
+  has_audio: boolean;
+}
+
+export interface SpeakerReviewInfo {
+  fingerprint: string;
+  undo: { revision_id: string } | null;
+}
+
+export interface SpeakerReviewSamples {
+  recording_id: string;
+  transcription_id: string;
+  speakers: Array<{ speaker_cluster: string; samples: SpeakerClip[] }>;
+}
+
+export type SpeakerReviewAction = {
+  action: 'rename' | 'confirm' | 'merge' | 'exclude' | 'restore' | 'reassign_turn';
+  cluster: string;
+  target?: string;
+  name?: string;
+  segment_id?: number;
+  expected_fingerprint: string;
+};
 
 export interface AudioIntelligenceEvent {
   start: number;
@@ -496,6 +603,8 @@ export interface Transcription {
         temporal_support_seconds?: number;
         margin?: number;
         transcript_segment_count?: number;
+        speaker_group?: string;
+        merged_into?: string;
       }>;
     };
     [key: string]: unknown;
@@ -553,6 +662,9 @@ export interface MenuBarStatus {
   meeting_detection?: {
     enabled: boolean;
     capability: string;
+    reason?: string;
+    suggestion_active?: boolean;
+    notification_delivery?: { state: string; attempts: number };
     notifications: string;
     notification_available?: boolean;
     notification_error?: string | null;
@@ -566,6 +678,16 @@ export interface Settings {
   meeting_detection_enabled?: boolean;
   transcriptions_dir: string;
   recordings_dir: string;
+  /** Requested destination only. GCS is NOT enabled until the backend reports it as effective. */
+  storage_preference?: 'local' | 'gcs';
+  storage_effective_mode?: 'local' | 'gcs';
+  storage_capability?: 'preparation_only';
+  gcs_project_id?: string;
+  gcs_bucket_name?: string;
+  gcs_region?: string;
+  gcs_configuration_complete?: boolean;
+  audio_local_retention_days?: 7 | 14 | 30;
+  audio_auto_cleanup_enabled?: boolean;
   asr_provider?: 'local' | 'speechmatics' | string;
   speechmatics_api_key?: string;
   speechmatics_api_key_configured?: boolean;
@@ -597,6 +719,8 @@ export interface Settings {
   meeting_auto_analysis?: boolean;
   meeting_default_pipeline?: string;
   speaker_diarization_enabled?: boolean;
+  speaker_diarization_engine?: "fluidaudio-community-1" | "nemotron3-coreml";
+  speaker_diarization_nemotron_preset?: "fast128" | "c128-split-w8a8";
   speaker_diarization_minimum_overlap?: number;
   visual_intelligence_enabled?: boolean;
   visual_llm_model?: string;
@@ -928,6 +1052,72 @@ export const ApiClient = {
     })).json();
   },
 
+  async createDiarizationBenchmark(
+    recordingId: string,
+    payload: { engines: DiarizationBenchmarkEngine[]; scope: 'sample' | 'full' | 'range'; start_seconds?: number; end_seconds?: number },
+  ): Promise<TranscriptionJob> {
+    return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/diarization-benchmarks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })).json();
+  },
+
+  async getDiarizationBenchmarkTimeline(
+    recordingId: string, jobId: string, startSeconds: number, endSeconds: number,
+  ): Promise<DiarizationTimelineWindow> {
+    const params = new URLSearchParams({
+      start_seconds: String(startSeconds), end_seconds: String(endSeconds),
+    });
+    return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/diarization-benchmarks/${encodeURIComponent(jobId)}/timeline?${params}`)).json();
+  },
+
+  async listDiarizationBenchmarks(recordingId: string): Promise<{ items: TranscriptionJob[] }> {
+    return (await request(`/v1/recordings/${encodeURIComponent(recordingId)}/diarization-benchmarks`)).json();
+  },
+
+  async createCommunityOneReview(transcriptionId: string): Promise<TranscriptionJob> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews`, {
+      method: 'POST',
+    })).json();
+  },
+
+  async listCommunityOneReviews(transcriptionId: string): Promise<{
+    items: TranscriptionJob[];
+    undo: { revision_id: string } | null;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews`)).json();
+  },
+
+  async previewCommunityOneReview(transcriptionId: string, jobId: string): Promise<{
+    engine: string;
+    assigned_segments: number;
+    changed_segments: number;
+    cluster_count: number;
+    examples: Array<{
+      start: number; end: number; text: string; before: string; after: string;
+    }>;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews/${encodeURIComponent(jobId)}/preview`)).json();
+  },
+
+  async applyCommunityOneReview(transcriptionId: string, jobId: string): Promise<{
+    transcription: Transcription; revision_id: string;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews/${encodeURIComponent(jobId)}/apply`, {
+      method: 'POST',
+    })).json();
+  },
+
+  async undoCommunityOneReview(transcriptionId: string, revisionId: string): Promise<{
+    transcription: Transcription;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(transcriptionId)}/diarization-reviews/undo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision_id: revisionId }),
+    })).json();
+  },
+
   async createDiarizationJob(transcriptionId: string, payload: {
     provider: 'local' | 'speechmatics' | string;
     speechmatics_region?: string;
@@ -1206,24 +1396,54 @@ export const ApiClient = {
     await request(`/v1/recordings/${recordingId}/screenshots/${screenshotId}`, { method: 'DELETE' });
   },
 
+  async autoLinkVerifiedSpeakers(id: string): Promise<{
+    status: 'linked' | 'undo_pending' | 'no_timed_text' | 'no_verified_diarization' | 'no_safe_matches' | 'suppressed';
+    linked_segments: number;
+    transcription?: Transcription;
+    revision_id?: string;
+  }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review/auto-link`, {
+      method: 'POST',
+    })).json();
+  },
+
+  async getSpeakerReview(id: string): Promise<SpeakerReviewInfo> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review`)).json();
+  },
+
+  async getSpeakerTimeline(
+    transcriptionId: string, start: number, end: number, signal?: AbortSignal,
+  ): Promise<SpeakerTimelineWindow> {
+    const params = new URLSearchParams({ start: String(start), end: String(end) });
+    return (await request(
+      `/v1/transcriptions/${encodeURIComponent(transcriptionId)}/speaker-review/timeline?${params}`,
+      { signal },
+    )).json();
+  },
+
+  async getSpeakerReviewSamples(id: string): Promise<SpeakerReviewSamples> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review/samples`)).json();
+  },
+
+  async commitSpeakerReview(id: string, action: SpeakerReviewAction): Promise<{ transcription: Transcription; revision_id: string }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action),
+    })).json();
+  },
+
+  async undoSpeakerReview(id: string, revisionId: string): Promise<{ transcription: Transcription }> {
+    return (await request(`/v1/transcriptions/${encodeURIComponent(id)}/speaker-review/undo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision_id: revisionId }),
+    })).json();
+  },
+
   async updateTranscriptionSpeakers(id: string, names: Record<string, string>): Promise<Transcription> {
     return (await request(`/v1/transcriptions/${id}/speakers`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ names }),
     })).json();
-  },
-
-  async testAudioRoute(): Promise<any> {
-    return (await request('/v1/system/audio/activate', { method: 'POST' })).json();
-  },
-
-  async testAudioRestore(): Promise<any> {
-    return (await request('/v1/system/audio/restore', { method: 'POST' })).json();
-  },
-  
-  async getAudioRouteStatus(): Promise<any> {
-    return (await request('/v1/system/audio/status')).json();
   },
 
   async getActiveRecording(): Promise<{

@@ -3,13 +3,11 @@ import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState,
 import {
   Archive,
   ArrowLeft,
-  Bookmark,
   ChevronDown,
   CheckCircle2,
   FileText,
   History,
   Info,
-  Images,
   ListChecks,
   Loader2,
   MessageCircleQuestion,
@@ -23,6 +21,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { ApiClient, AnalysisRun, Meeting, RecordingNote, RecordingScreenshot, TranscriptionSegment } from '../api/apiClient';
+import { useToast } from '../context/ToastContext';
 import { createVisualIntelligenceJob, cancelVisualIntelligenceJob } from '../api/visualJobs';
 import type { VisualIntelligenceResponseV2, VisualManualScreenshotGroup } from '../api/visualIntelligence';
 import { prepareMeetingNotes, cancelMeetingPreparation } from '../api/meetingPreparation';
@@ -35,23 +34,32 @@ import { formatBytes, formatProjectDate, getDurationSeconds } from '../utils/for
 import { useTranslation } from '../i18n/i18n';
 import { getDemoMeetings } from '../features/demo/demoData';
 import { AnalysisSetupModal, AnalysisSetupSelection } from '../components/ui/AnalysisSetupModal';
+import { ProjectPromptModal } from '../components/ui/ProjectPromptModal';
 import { Sheet, SheetContent, SheetHeader, SheetBody } from '../components/ui/Sheet';
 import { Dialog, DialogContent, DialogHeader, DialogBody } from '../components/ui/Dialog';
 import { cn } from '../utils/cn';
 import { MeetingProcessingStatus } from '../components/meeting/MeetingProcessingStatus';
 import { VisualIntelligencePanel } from '../components/meeting/VisualIntelligencePanel';
 import { VisualDebugPanel } from '../components/meeting/VisualDebugPanel';
+import { MeetingRecordingDetails } from '../components/meeting/MeetingRecordingDetails';
+import AudioIntelligencePanel from './recording/AudioIntelligencePanel';
 import { StructuredNotesEditor } from '../components/meeting/StructuredNotesEditor';
+import { MeetingSourcesGallery } from '../components/meeting/MeetingSourcesGallery';
+import { MeetingAnalysisChoices } from '../components/meeting/MeetingAnalysisChoices';
 import { useMeetingJobEvents } from '../hooks/useMeetingJobEvents';
 import { useVisualIntelligence } from '../hooks/useVisualIntelligence';
 import { recordingTranscriptionRoute } from '../utils/transcriptionRoute';
 import { SpeakerDiarizationEditor } from '../components/meeting/SpeakerDiarizationEditor';
+import { CommunityOneReviewPanel } from '../components/meeting/CommunityOneReviewPanel';
+import { DiarizationBenchmarkPanel } from '../components/meeting/DiarizationBenchmarkPanel';
 import TranscriptTextView from '../components/transcription/TranscriptTextView';
 import { useMeetingAccessories } from '../hooks/useMeetingAccessories';
 
 interface MeetingDetailPageProps {
   recordingId: string | null;
   navigateTo: (page: string, detail?: string | null) => void;
+  onBack?: () => void;
+  backLabel?: string;
   demoMode?: boolean;
 }
 
@@ -181,12 +189,27 @@ function keyMomentContext(
   };
 }
 
-export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = false }: MeetingDetailPageProps) {
+export default function MeetingDetailPage({ recordingId, navigateTo, onBack, backLabel, demoMode = false }: MeetingDetailPageProps) {
   const { t, lang } = useTranslation();
+  const { showToast } = useToast();
+  const goBack = () => (onBack ? onBack() : navigateTo('home'));
+
   const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState('');
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [existingProjects, setExistingProjects] = useState<string[]>([]);
+  const currentRecordingIdRef = useRef(recordingId);
+  useEffect(() => {
+    currentRecordingIdRef.current = recordingId;
+    setEditingTitle(false);
+    setProjectPickerOpen(false);
+    setExistingProjects([]);
+    setTurnCorrectionUndo(null);
+  }, [recordingId]);
   const [includeScreenshots, setIncludeScreenshots] = useState(true);
-  const [selectedScreenshot, setSelectedScreenshot] = useState<RecordingScreenshot | null>(null);
-  const [keyMomentVisualRequested, setKeyMomentVisualRequested] = useState(false);
+  // The screenshot list owns current content; selection retains only its meeting-scoped identity.
+  const [selectedScreenshotKey, setSelectedScreenshotKey] = useState<{ meetingId: string; id: string } | null>(null);
   const [showAllScreenshots, setShowAllScreenshots] = useState(false);
   const [momentQuestion, setMomentQuestion] = useState('');
   const [momentAskRunId, setMomentAskRunId] = useState<string | null>(null);
@@ -201,12 +224,30 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const [analysisSetupOpen, setAnalysisSetupOpen] = useState(false);
   const [analysisPipelineTarget, setAnalysisPipelineTarget] = useState('meeting_default');
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [audioIntelligenceOpen, setAudioIntelligenceOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showAudioPlayer, setShowAudioPlayer] = useState(false);
   const [activeTab, setActiveTab] = useState<MeetingTab>('transcript');
   const [currentTime, setCurrentTime] = useState(0);
+  const [transcriptJumpTime, setTranscriptJumpTime] = useState<number | null>(null);
+  const [turnCorrectionUndo, setTurnCorrectionUndo] = useState<{
+    meetingId: string; transcriptionId: string; revisionId: string;
+  } | null>(null);
+  const [speakerAutoLink, setSpeakerAutoLink] = useState<{
+    meetingId: string; transcriptionId: string;
+    status: 'linked' | 'undo_pending' | 'no_timed_text' | 'no_verified_diarization' | 'no_safe_matches' | 'suppressed' | 'error' | 'undone';
+    linkedSegments: number; revisionId?: string;
+  } | null>(null);
+  const [transcriptDetailLoad, setTranscriptDetailLoad] = useState<{
+    key: string; status: 'loading' | 'error'; message?: string;
+  } | null>(null);
+  const [transcriptDetailRetry, setTranscriptDetailRetry] = useState(0);
   const {
+    audioIntelligence,
+    audioIntelligenceState,
+    audioIntelligenceError,
+    loadAudioIntelligence,
     diagnosticReport,
     diagnosticsLoading,
     diagnosticsError,
@@ -222,18 +263,23 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     notesState,
     loadNotes,
   } = useMeetingAccessories({ recordingId, demoMode, lang });
+  // The optional audio disclosure belongs to the selected Meeting, never its predecessor.
+  useEffect(() => { setAudioIntelligenceOpen(false); }, [recordingId]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tabListRef = useRef<HTMLDivElement | null>(null);
   const analysisMenuRef = useRef<HTMLDivElement | null>(null);
   const analysisMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const loadGenerationRef = useRef(0);
-  const loadInFlightRef = useRef<{ key: string; generation: number; promise: Promise<void> } | null>(null);
-  const loadQueuedRef = useRef(false);
+  // One request identity owns stale-response protection, coalescing and queued reloads.
+  const loadInFlightRef = useRef<{
+    key: string;
+    queued: boolean;
+    promise: Promise<void>;
+  } | null>(null);
   const userSelectedTabRef = useRef(false);
 
   const openKeyMoment = (shot: RecordingScreenshot) => {
-    setKeyMomentVisualRequested(true);
-    setSelectedScreenshot(shot);
+    if (!recordingId) return;
+    setSelectedScreenshotKey({ meetingId: recordingId, id: shot.screenshot_id });
   };
 
   const handleTimestampClick = (time: number) => {
@@ -245,6 +291,56 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
       }
     }, 100);
   };
+  // One canonical server owner for scoped reattribution, fingerprints and undo.
+  const handleReassignTurn = async (segment: TranscriptionSegment, target: string | null) => {
+    const id = recordingId;
+    const transcriptionId = meeting?.transcription?.id || meeting?.transcription?.saved_id;
+    if (!id || !transcriptionId || demoMode) throw new Error('Meeting unavailable for correction');
+    const rawCluster = segment.provider_speaker || segment.speaker_label;
+    if (!rawCluster) throw new Error(lang === 'it' ? 'Nessuna voce originale verificabile' : 'No verifiable original voice');
+    const latest = await ApiClient.getTranscription(transcriptionId);
+    if (currentRecordingIdRef.current !== id) throw new Error('Meeting changed');
+    const matches = (latest.segments || []).filter((item) => item.id === segment.id);
+    if (matches.length !== 1 || matches[0].start !== segment.start ||
+      matches[0].end !== segment.end || matches[0].text !== segment.text ||
+      (matches[0].provider_speaker || matches[0].speaker_label) !== rawCluster) {
+      throw new Error(lang === 'it' ? 'La battuta è cambiata. Ricarica prima di correggere.'
+        : 'This turn changed. Reload before editing.');
+    }
+    const review = await ApiClient.getSpeakerReview(transcriptionId);
+    if (currentRecordingIdRef.current !== id) throw new Error('Meeting changed');
+    const response = await ApiClient.commitSpeakerReview(transcriptionId, {
+      action: 'reassign_turn', cluster: rawCluster, segment_id: segment.id,
+      target: target || undefined, expected_fingerprint: review.fingerprint,
+    });
+    if (currentRecordingIdRef.current !== id) return;
+    setMeeting((current) => current?.id === id
+      ? { ...current, transcription: response.transcription } : current);
+    setTurnCorrectionUndo({ meetingId: id, transcriptionId, revisionId: response.revision_id });
+    showToast(lang === 'it' ? 'Attribuzione salvata · solo questa battuta' : 'Attribution saved · this turn only', 'success');
+  };
+
+  const undoTurnCorrection = async () => {
+    const token = turnCorrectionUndo;
+    if (!token || currentRecordingIdRef.current !== token.meetingId) return;
+    const review = await ApiClient.getSpeakerReview(token.transcriptionId);
+    if (review.undo?.revision_id !== token.revisionId) {
+      setTurnCorrectionUndo(null);
+      showToast(lang === 'it' ? 'Un’altra modifica ha sostituito questo annullamento' : 'Another edit replaced this undo', 'error');
+      return;
+    }
+    try {
+      const result = await ApiClient.undoSpeakerReview(token.transcriptionId, token.revisionId);
+      if (currentRecordingIdRef.current !== token.meetingId) return;
+      setMeeting((current) => current?.id === token.meetingId
+        ? { ...current, transcription: result.transcription } : current);
+      setTurnCorrectionUndo(null);
+      showToast(lang === 'it' ? 'Attribuzione ripristinata' : 'Attribution restored', 'success');
+    } catch (reason) {
+      showToast(String(reason), 'error');
+    }
+  };
+
   const handleUpdateNote = async (note: RecordingNote, text: string) => {
     if (!recordingId || demoMode) return;
     await ApiClient.updateRecordingNote(recordingId, note.note_id, {
@@ -272,6 +368,13 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     ),
     [screenshots, meeting?.transcription?.segments],
   );
+  const screenshotById = useMemo(
+    () => new Map(screenshots.map((shot) => [shot.screenshot_id, shot])),
+    [screenshots],
+  );
+  const selectedScreenshot = selectedScreenshotKey?.meetingId === recordingId
+    ? screenshotById.get(selectedScreenshotKey.id) || null
+    : null;
   const selectedKeyMomentContext = selectedScreenshot
     ? keyMomentContexts.get(selectedScreenshot.screenshot_id)
     : null;
@@ -280,7 +383,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     demoMode ? null : recordingId,
     Boolean(
       (visualResultAvailable && activeTab === 'analysis')
-      || (visualResultAvailable && keyMomentVisualRequested),
+      || (visualResultAvailable && selectedScreenshot !== null),
     ),
   );
   const selectedKeyMomentVisual = selectedScreenshot
@@ -291,10 +394,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
   const screenshotGroups = useMemo(
     () => visualSourcesStale ? [] : (visualData?.document.manual_screenshot_groups || []),
     [visualData?.document.manual_screenshot_groups, visualSourcesStale],
-  );
-  const screenshotById = useMemo(
-    () => new Map(screenshots.map((shot) => [shot.screenshot_id, shot])),
-    [screenshots],
   );
   const groupByScreenshotId = useMemo(() => {
     const groups = new Map<string, VisualManualScreenshotGroup>();
@@ -334,7 +433,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     : null;
 
   useEffect(() => {
-    setKeyMomentVisualRequested(false);
+    setSelectedScreenshotKey(null);
   }, [recordingId]);
 
   useEffect(() => {
@@ -444,13 +543,15 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     const key = `${recordingId}:${demoMode ? 'demo' : 'live'}:${lang}`;
     const activeLoad = loadInFlightRef.current;
     if (activeLoad?.key === key) {
-      loadQueuedRef.current = true;
+      activeLoad.queued = true;
       return activeLoad.promise;
     }
 
-    const generation = ++loadGenerationRef.current;
-    loadQueuedRef.current = false;
-    const promise = (async () => {
+    // Assign identity before starting the request so stale completions cannot
+    // publish state for another meeting or an unmounted view.
+    const request = { key, queued: false, promise: Promise.resolve() };
+    loadInFlightRef.current = request;
+    request.promise = (async () => {
       try {
         setError(null);
         let data: Meeting;
@@ -464,7 +565,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         } else {
           data = await ApiClient.getMeeting(recordingId);
         }
-        if (generation !== loadGenerationRef.current) return;
+        if (loadInFlightRef.current !== request) return;
         setMeeting(data);
         const availableTypes = Object.keys(data.latest_analysis || {});
         if (availableTypes.length > 0) {
@@ -476,23 +577,19 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           }
         }
       } catch (err: any) {
-        if (generation !== loadGenerationRef.current) return;
+        if (loadInFlightRef.current !== request) return;
         setError(err?.message || t('meeting.errorNotAvailable'));
       } finally {
-        if (generation === loadGenerationRef.current) {
+        if (loadInFlightRef.current === request) {
           setLoading(false);
         }
       }
     })().finally(() => {
-      if (loadInFlightRef.current?.generation !== generation) return;
+      if (loadInFlightRef.current !== request) return;
       loadInFlightRef.current = null;
-      if (loadQueuedRef.current) {
-        loadQueuedRef.current = false;
-        void load();
-      }
+      if (request.queued) void load();
     });
-    loadInFlightRef.current = { key, generation, promise };
-    return promise;
+    return request.promise;
   };
 
   useEffect(() => {
@@ -503,9 +600,98 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     userSelectedTabRef.current = false;
     void load();
     return () => {
-      loadGenerationRef.current += 1;
+      // Invalidates the previous request and any queued same-key refresh.
+      loadInFlightRef.current = null;
     };
   }, [recordingId, demoMode, lang]);
+
+  // Saved meeting reconciliation is local, idempotent and version-checked on
+  // the server. Only verified native intervals may label timestamped ASR text.
+  // Never launch model work or fabricate timestamps merely by opening Meeting.
+  useEffect(() => {
+    const selectedMeeting = meeting;
+    const trans = selectedMeeting?.transcription;
+    const transcriptionId = trans?.id || trans?.saved_id;
+    if (!selectedMeeting || !transcriptionId || demoMode ||
+      ['recording', 'finalizing', 'recoverable', 'interrupted'].includes(selectedMeeting.recording.status)) return;
+    // One idempotent reconciliation per meeting visit. A return from another
+    // meeting must re-read the canonical source and honor any newer edits.
+    let live = true;
+    void ApiClient.autoLinkVerifiedSpeakers(transcriptionId).then((result) => {
+      if (!live || currentRecordingIdRef.current !== selectedMeeting.id) return;
+      setSpeakerAutoLink({
+        meetingId: selectedMeeting.id, transcriptionId,
+        status: result.status, linkedSegments: result.linked_segments,
+        revisionId: result.revision_id,
+      });
+      if (result.status === 'linked' && result.transcription) {
+        setMeeting((current) => current?.id === selectedMeeting.id &&
+          (current.transcription?.id || current.transcription?.saved_id) === transcriptionId
+          ? { ...current, transcription: result.transcription! } : current);
+      }
+    }).catch(() => {
+      if (live && currentRecordingIdRef.current === selectedMeeting.id) {
+        setSpeakerAutoLink({
+          meetingId: selectedMeeting.id, transcriptionId,
+          status: 'error', linkedSegments: 0,
+        });
+      }
+    });
+    return () => { live = false; };
+  }, [meeting?.id, meeting?.transcription?.id, meeting?.transcription?.saved_id,
+    meeting?.recording?.status, demoMode]);
+
+  // The Meeting read model deliberately omits heavy ASR segments. Fetch the
+  // existing canonical full transcription on demand, after local automatic
+  // reconciliation settles; never mistake an absent field for zero turns.
+  // Preserve newer speaker edits if a concurrent fetch finishes later.
+  useEffect(() => {
+    const selectedMeeting = meeting;
+    const trans = selectedMeeting?.transcription;
+    const transcriptionId = trans?.id || trans?.saved_id;
+    if (!selectedMeeting || !transcriptionId || demoMode || Array.isArray(trans?.segments)) return;
+    const identity = selectedMeeting.id + ':' + transcriptionId;
+    const settled = speakerAutoLink?.meetingId === selectedMeeting.id &&
+      speakerAutoLink.transcriptionId === transcriptionId;
+    const recordingActive = ['recording', 'finalizing', 'recoverable', 'interrupted']
+      .includes(selectedMeeting.recording.status);
+    if (!settled && !recordingActive) return;
+
+    let live = true;
+    setTranscriptDetailLoad({ key: identity, status: 'loading' });
+    void ApiClient.getTranscription(transcriptionId).then((full) => {
+      if (!live || currentRecordingIdRef.current !== selectedMeeting.id) return;
+      setMeeting((current) => {
+        if (current?.id !== selectedMeeting.id ||
+          (current.transcription?.id || current.transcription?.saved_id) !== transcriptionId ||
+          Array.isArray(current.transcription?.segments)) return current;
+        return { ...current, transcription: { ...current.transcription, ...full } };
+      });
+      setTranscriptDetailLoad(null);
+    }).catch((reason) => {
+      if (!live || currentRecordingIdRef.current !== selectedMeeting.id) return;
+      setTranscriptDetailLoad({ key: identity, status: 'error', message: String(reason) });
+    });
+    return () => { live = false; };
+  }, [meeting?.id, meeting?.transcription?.id, meeting?.transcription?.saved_id,
+    meeting?.transcription?.segments, meeting?.recording?.status, demoMode,
+    speakerAutoLink?.meetingId, speakerAutoLink?.transcriptionId, speakerAutoLink?.status,
+    transcriptDetailRetry]);
+
+  const undoAutomaticSpeakerLink = async () => {
+    const token = speakerAutoLink;
+    if (!token?.revisionId || token.meetingId !== recordingId) return;
+    try {
+      const response = await ApiClient.undoSpeakerReview(token.transcriptionId, token.revisionId);
+      if (currentRecordingIdRef.current !== token.meetingId) return;
+      setMeeting((current) => current?.id === token.meetingId
+        ? { ...current, transcription: response.transcription } : current);
+      setSpeakerAutoLink({ ...token, status: 'undone', revisionId: undefined });
+      showToast(lang === 'it' ? 'Attribuzione automatica annullata' : 'Automatic attribution undone', 'success');
+    } catch (reason) {
+      showToast(String(reason), 'error');
+    }
+  };
 
   useEffect(() => {
     if (!detailsOpen || !recordingId || demoMode || diagnosticReport || diagnosticsLoading || diagnosticsError) return;
@@ -538,12 +724,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     () => (meeting?.jobs || []).filter((job) => activeJobStatuses.has(job.status)),
     [meeting],
   );
-  const preparationJobs = useMemo(
-    () => (meeting?.jobs || []).filter((job) => job.type === 'meeting_preparation'),
-    [meeting],
-  );
   const activePreparation = activeJobs.find((job) => job.type === 'meeting_preparation');
-  const latestPreparation = preparationJobs[0];
+  const latestPreparation = (meeting?.jobs || []).find((job) => job.type === 'meeting_preparation');
   const displayedActiveJobs = activePreparation
     ? [{ ...activePreparation, progress_detail: activeJobs.find((job) => job.parent_job_id === activePreparation.id
       && job.progress_detail && job.status !== 'queued')?.progress_detail || activePreparation.progress_detail }]
@@ -573,6 +755,61 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     );
   };
 
+  // Reuse the existing recording metadata owner; never create a second Meeting record.
+  const handleSaveTitle = async () => {
+    if (!meeting || !recordingId || demoMode || isBusy) return;
+    const title = editedTitle.trim();
+    if (!title) { showToast(t('transcription.titleEmptyError'), 'error'); return; }
+    const id = recordingId;
+    setBusyAction('metadata-title');
+    try {
+      const recording = await ApiClient.updateRecording(id, { title });
+      if (currentRecordingIdRef.current !== id) return;
+      setMeeting((current) => current?.id === id ? { ...current, recording } : current);
+      setEditingTitle(false);
+      showToast(t('transcription.titleSaveSuccess'), 'success');
+    } catch (err: any) {
+      if (currentRecordingIdRef.current === id) {
+        showToast(t('transcription.titleSaveError', { error: String(err?.message || err) }), 'error');
+      }
+    } finally { setBusyAction(null); }
+  };
+
+  const openProjectPicker = async () => {
+    if (!meeting || !recordingId || demoMode || isBusy) return;
+    const id = recordingId;
+    setExistingProjects([]);
+    setProjectPickerOpen(true);
+    try {
+      const response = await ApiClient.listProjects();
+      if (currentRecordingIdRef.current !== id) return;
+      setExistingProjects((response.items || [])
+        .filter((project) => !project.is_unassigned)
+        .map((project) => project.name));
+    } catch {
+      // Suggestions are optional; manual project assignment still works offline.
+    }
+  };
+
+  const handleSaveProject = async (projectName: string) => {
+    if (!meeting || !recordingId || demoMode || isBusy) return;
+    const id = recordingId;
+    setBusyAction('metadata-project');
+    try {
+      const recording = await ApiClient.updateRecording(id, { project_name: projectName });
+      if (currentRecordingIdRef.current !== id) return;
+      setMeeting((current) => current?.id === id
+        ? { ...current, project_name: recording.project_name || '', recording }
+        : current);
+      setProjectPickerOpen(false);
+      showToast(t('transcription.projectUpdateSuccess'), 'success');
+    } catch (err: any) {
+      if (currentRecordingIdRef.current === id) {
+        showToast(t('transcription.projectUpdateError', { error: String(err?.message || err) }), 'error');
+      }
+    } finally { setBusyAction(null); }
+  };
+
   const handleArchiveState = async (archived: boolean) => {
     if (!meeting || demoMode || isBusy) return;
     setBusyAction('archive');
@@ -580,7 +817,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     try {
       if (archived) {
         await ApiClient.archiveMeeting(meeting.id);
-        navigateTo('home');
+        goBack();
       } else {
         await ApiClient.restoreMeeting(meeting.id);
         await load();
@@ -599,7 +836,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     try {
       await ApiClient.deleteMeeting(meeting.id);
       setDeleteConfirmOpen(false);
-      navigateTo('home');
+      goBack();
     } catch (err: any) {
       setDeleteError(err?.message || (lang === 'it' ? 'Impossibile eliminare il meeting' : 'Could not delete meeting'));
     } finally {
@@ -746,7 +983,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     return (
       <div className="border border-border-subtle rounded-lg p-8 text-center">
         <p className="text-text-secondary">{t('meeting.selectMeetingFromToday')}</p>
-        <Button className="mt-4" variant="secondary" onClick={() => navigateTo('home')}>{t('meeting.backToToday')}</Button>
+        <Button className="mt-4" variant="secondary" onClick={() => goBack()}>{t('meeting.backToToday')}</Button>
       </div>
     );
   }
@@ -764,7 +1001,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
     return (
       <div className="border border-border-subtle rounded-lg p-8 text-center" role="alert">
         <p className="text-danger">{error || t('meeting.errorNotFound')}</p>
-        <Button className="mt-4" variant="secondary" onClick={() => navigateTo('home')}>{t('meeting.backToToday')}</Button>
+        <Button className="mt-4" variant="secondary" onClick={() => goBack()}>{t('meeting.backToToday')}</Button>
       </div>
     );
   }
@@ -817,22 +1054,53 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
         <div className="flex items-center justify-between gap-4">
           <button
             type="button"
-            onClick={() => navigateTo('home')}
+            onClick={() => goBack()}
             className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>{t('dashboard.title')}</span>
+            <span>{backLabel || t('dashboard.title')}</span>
           </button>
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-2xl font-bold text-text-primary tracking-tight truncate">{title}</h2>
-              {meeting.project_name && (
-                <span className="rounded-md border border-border-subtle bg-bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">
-                  {meeting.project_name}
-                </span>
+              {editingTitle ? (
+                <form className="flex min-w-0 flex-wrap items-center gap-2"
+                  onSubmit={(event) => { event.preventDefault(); void handleSaveTitle(); }}>
+                  <input autoFocus type="text" aria-label={lang === 'it' ? 'Nome meeting' : 'Meeting title'}
+                    value={editedTitle} onChange={(event) => setEditedTitle(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Escape') setEditingTitle(false); }}
+                    disabled={isBusy} maxLength={200}
+                    className="min-w-0 rounded-lg border border-border-focus bg-bg-surface px-2 py-1 text-lg font-semibold text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                    data-meeting-title-input="true" />
+                  <Button type="submit" size="sm" disabled={isBusy || !editedTitle.trim()}>{lang === 'it' ? 'Salva' : 'Save'}</Button>
+                  <Button type="button" size="sm" variant="ghost" disabled={isBusy}
+                    onClick={() => setEditingTitle(false)}>{t('common.cancel')}</Button>
+                </form>
+              ) : (
+                <div className="flex min-w-0 items-center gap-2">
+                  <h2 className="min-w-0 truncate text-2xl font-bold tracking-tight text-text-primary">{title}</h2>
+                  {!demoMode && (
+                    <button type="button" disabled={isBusy}
+                      onClick={() => { setEditedTitle(meeting.recording.title || ''); setEditingTitle(true); }}
+                      aria-label={lang === 'it' ? 'Rinomina meeting' : 'Rename meeting'}
+                      className="shrink-0 rounded-md p-1 text-text-muted hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                      data-meeting-rename="true">
+                      <PencilLine className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              )}
+              {demoMode ? (
+                meeting.project_name && <span className="rounded-md border border-border-subtle bg-bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">{meeting.project_name}</span>
+              ) : (
+                <button type="button" disabled={isBusy} onClick={() => void openProjectPicker()}
+                  aria-label={lang === 'it' ? 'Cambia progetto' : 'Change project'}
+                  className="rounded-md border border-border-subtle bg-bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted hover:border-border-focus hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  data-meeting-project-edit="true">
+                  {meeting.project_name || (lang === 'it' ? '+ Progetto' : '+ Project')}
+                </button>
               )}
               <Badge variant={meeting.status === 'ready' ? 'success' : meeting.status === 'analyzing' ? 'warning' : 'idle'}>
                 {meetingStatusLabel(meeting.status, lang)}
@@ -920,6 +1188,26 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
         )}
       </section>
+
+      {!demoMode && (
+        <MeetingSourcesGallery
+          lang={lang}
+          notes={notes}
+          screenshotsState={screenshotsState}
+          savedScreenshotCount={savedScreenshotCount}
+          showAllScreenshots={showAllScreenshots}
+          canExpandScreenshots={canExpandScreenshots}
+          hiddenScreenshotCount={hiddenScreenshotCount}
+          visibleKeyMoments={visibleKeyMoments}
+          keyMomentContexts={keyMomentContexts}
+          getVisualContext={(shot) => keyMomentVisualContext(shot, visualData)}
+          screenshotTimestampLabel={screenshotTimestampLabel}
+          onOpenScreenshot={openKeyMoment}
+          onSeek={handleTimestampClick}
+          onReloadScreenshots={() => void loadScreenshots()}
+          onToggleShowAll={() => setShowAllScreenshots((value) => !value)}
+        />
+      )}
 
       {outcomeStatus === 'completed_with_warnings' && (
         <section className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-xs text-text-secondary">
@@ -1065,181 +1353,6 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </section>
         )}
 
-        {!demoMode && screenshotsState === 'loading' && (
-          <section
-            className="rounded-xl border border-border-subtle bg-bg-surface/40 px-4 py-4"
-            aria-label={lang === 'it' ? 'Screenshot del meeting' : 'Meeting screenshots'}
-            aria-busy="true"
-          >
-            <div className="flex items-center gap-2 text-xs text-text-muted">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              <span>{lang === 'it' ? 'Caricamento screenshot…' : 'Loading screenshots…'}</span>
-            </div>
-          </section>
-        )}
-
-        {!demoMode && screenshotsState === 'error' && (
-          <section className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-start gap-2">
-                <Images className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-                <div>
-                  <p className="text-xs font-semibold text-text-primary">
-                    {lang === 'it' ? 'Screenshot non disponibili' : 'Screenshots unavailable'}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-text-muted">
-                    {lang === 'it'
-                      ? 'ClosedRoom non è riuscito a caricare le immagini salvate per questo meeting.'
-                      : 'ClosedRoom could not load the images saved for this meeting.'}
-                  </p>
-                </div>
-              </div>
-              <Button size="sm" variant="ghost" onClick={loadScreenshots}>
-                {lang === 'it' ? 'Riprova' : 'Retry'}
-              </Button>
-            </div>
-          </section>
-        )}
-
-        {!demoMode && screenshotsState === 'ready' && savedScreenshotCount > 0 && (
-          <section
-            data-meeting-screenshot-gallery="true"
-            data-key-moments="true"
-            className="rounded-xl border border-border-subtle bg-bg-elevated p-4"
-            aria-labelledby="meeting-screenshots-title"
-          >
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-2.5">
-                <Bookmark className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 id="meeting-screenshots-title" className="text-xs font-semibold text-text-primary">
-                      {lang === 'it' ? 'Momenti chiave' : 'Key moments'}
-                    </h3>
-                    <Badge variant="idle">{savedScreenshotCount}</Badge>
-                  </div>
-                  <p className="mt-0.5 max-w-2xl text-[11px] leading-relaxed text-text-muted">
-                    {lang === 'it'
-                      ? 'Momenti che hai segnato durante il meeting. ClosedRoom li collega al transcript e all’audio senza registrare lo schermo in continuo.'
-                      : 'Moments you marked during the meeting. ClosedRoom connects them to the transcript and audio without continuous screen recording.'}
-                  </p>
-                </div>
-              </div>
-              {canExpandScreenshots && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setShowAllScreenshots((value) => !value)}
-                  aria-expanded={showAllScreenshots}
-                  className="shrink-0"
-                >
-                  {showAllScreenshots
-                    ? (lang === 'it' ? 'Raggruppa simili' : 'Group similar')
-                    : (lang === 'it' ? `Mostra tutti gli scatti (${savedScreenshotCount})` : `Show all captures (${savedScreenshotCount})`)}
-                  <ChevronDown
-                    className={cn('h-3.5 w-3.5 transition-transform', showAllScreenshots && 'rotate-180')}
-                    aria-hidden="true"
-                  />
-                </Button>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2.5">
-              {visibleKeyMoments.map(({ shot, group }) => {
-                const context = keyMomentContexts.get(shot.screenshot_id);
-                const visualContext = keyMomentVisualContext(shot, visualData);
-                return (
-                  <button
-                    key={group?.group_id || shot.screenshot_id}
-                    type="button"
-                    onClick={() => openKeyMoment(shot)}
-                    className="group grid min-h-[124px] w-full max-w-3xl grid-cols-[128px_minmax(0,1fr)] overflow-hidden rounded-xl border border-border-subtle bg-bg-surface text-left transition hover:border-border-focus hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:grid-cols-[190px_minmax(0,1fr)]"
-                    aria-label={
-                      lang === 'it'
-                        ? `Apri momento chiave a ${screenshotTimestampLabel(shot.timestamp)}`
-                        : `Open key moment at ${screenshotTimestampLabel(shot.timestamp)}`
-                    }
-                    title={shot.display_title || undefined}
-                    data-key-moment-id={shot.screenshot_id}
-                    data-key-moment-group={group?.group_id || undefined}
-                  >
-                    <div className="flex h-full min-h-[124px] items-center justify-center overflow-hidden bg-black/5 p-1.5">
-                      {shot.available && shot.thumbnail_available ? (
-                        <img
-                          src={shot.thumbnail_url}
-                          alt=""
-                          loading="lazy"
-                          className="max-h-[120px] w-full object-contain transition-transform duration-200 group-hover:scale-[1.01]"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-text-muted">
-                          {lang === 'it' ? 'Immagine non disponibile' : 'Image unavailable'}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex min-w-0 flex-col justify-between gap-2 p-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-[11px] font-semibold tabular-nums text-text-primary">
-                            {group
-                              ? `${screenshotTimestampLabel(group.start)}–${screenshotTimestampLabel(group.end)}`
-                              : screenshotTimestampLabel(shot.timestamp)}
-                          </span>
-                          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[9px] font-semibold text-accent">
-                            {lang === 'it' ? 'Segnato da te' : 'Marked by you'}
-                          </span>
-                          {group && (
-                            <span className="rounded-full border border-border-subtle px-2 py-0.5 text-[9px] font-semibold text-text-muted">
-                              {lang === 'it'
-                                ? `${group.screenshot_ids.length} scatti simili`
-                                : `${group.screenshot_ids.length} similar captures`}
-                            </span>
-                          )}
-                          {visualContext?.contentType && (
-                            <span className="rounded-full border border-border-subtle px-2 py-0.5 text-[9px] font-medium capitalize text-text-muted">
-                              {visualContext.contentType}
-                            </span>
-                          )}
-                        </div>
-                        {visualContext?.title && (
-                          <p className="mt-1.5 truncate text-xs font-semibold text-text-primary" title={visualContext.title}>
-                            {visualContext.title}
-                          </p>
-                        )}
-                        <p className="mt-2 max-h-14 overflow-hidden text-xs leading-relaxed text-text-secondary">
-                          {context?.excerpt || (
-                            lang === 'it'
-                              ? 'Nessun parlato vicino a questo momento. L’immagine e il riferimento temporale restano disponibili.'
-                              : 'No nearby speech for this moment. The image and timestamp remain available.'
-                          )}
-                        </p>
-                      </div>
-                      <div className="flex min-w-0 items-center justify-between gap-2 text-[10px] text-text-muted">
-                        <span className="truncate">
-                          {context?.speakers?.length
-                            ? context.speakers.join(' · ')
-                            : (shot.display_title || (lang === 'it' ? 'Contesto visuale' : 'Visual context'))}
-                        </span>
-                        <span className="shrink-0 font-medium text-accent">
-                          {lang === 'it' ? 'Apri momento' : 'Open moment'}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {!showAllScreenshots && hiddenScreenshotCount > 0 && (
-              <p className="mt-2.5 text-right text-[10px] text-text-muted">
-                {lang === 'it'
-                  ? `+${hiddenScreenshotCount} scatti raccolti negli stack`
-                  : `+${hiddenScreenshotCount} captures grouped into stacks`}
-              </p>
-            )}
-          </section>
-        )}
-
         {activeTab === 'analysis' && !isBusy && meeting.transcription && visualEvidenceCount > 0 && !visualEnabled && (
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 rounded-xl border border-border-subtle bg-bg-surface/30">
             <div className="flex items-start gap-2.5 min-w-0">
@@ -1314,12 +1427,12 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
             >
               <FileText className="w-4 h-4" aria-hidden="true" />
               <span>{t('meeting.tabTranscript')}</span>
-              {meeting.transcription && (
+              {Boolean(meeting.transcription?.segments?.length) && (
                 <span className={cn(
                   'ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border',
                   activeTab === 'transcript' ? 'bg-white/20 border-white/20 text-white' : 'bg-bg-elevated border-border-subtle text-text-secondary',
-                )}>
-                  {meeting.transcription.segments?.length || 0}
+                )} title={lang === 'it' ? 'Interventi temporizzati' : 'Timed transcript turns'}>
+                  {meeting.transcription!.segments!.length}
                 </span>
               )}
             </button>
@@ -1339,7 +1452,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
               )}
             >
               <Sparkles className="w-4 h-4" aria-hidden="true" />
-              <span>{t('meeting.tabAnalysis')}</span>
+              <span>{hasCurrentNotes ? (lang === 'it' ? 'Note e azioni' : 'Notes & actions') : t('meeting.tabAnalysis')}</span>
               {meeting.analysis_runs.length > 0 && (
                 <span className={cn(
                   'ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border',
@@ -1365,15 +1478,8 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
               )}
             >
               <Users className="w-4 h-4" aria-hidden="true" />
-              <span>{t('meeting.tabSpeakers')}</span>
-              {speakerMappings.length > 0 && (
-                <span className={cn(
-                  'ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border',
-                  activeTab === 'speakers' ? 'bg-white/20 border-white/20 text-white' : 'bg-bg-elevated border-border-subtle text-text-secondary',
-                )}>
-                  {speakerMappings.length}
-                </span>
-              )}
+              <span>{lang === 'it' ? 'Voci' : 'Speakers'}</span>
+
             </button>
           </div>
 
@@ -1395,20 +1501,85 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                         </span>
                       )}
                     </span>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => navigateTo('transcription', meeting.transcription?.id || null)}
-                    >
-                      {t('meeting.openTranscriptTools')}
-                    </Button>
+                    {turnCorrectionUndo?.meetingId === meeting.id &&
+                      turnCorrectionUndo.transcriptionId === (meeting.transcription?.id || meeting.transcription?.saved_id) && (
+                        <Button size="sm" variant="ghost" onClick={() => void undoTurnCorrection()}>
+                          {lang === 'it' ? 'Annulla ultima correzione' : 'Undo last speaker correction'}
+                        </Button>
+                      )}
+
                   </div>
                 )}
-                {meeting.transcription?.segments?.length ? (
+                {speakerAutoLink?.meetingId === meeting.id &&
+                  speakerAutoLink.transcriptionId === (meeting.transcription?.id || meeting.transcription?.saved_id) &&
+                  speakerAutoLink.status === 'linked' && (
+                    <div role="status" data-transcript-speaker-link="linked"
+                      className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-4 py-3 text-xs text-text-secondary">
+                      <span>{lang === 'it'
+                        ? `${speakerAutoLink.linkedSegments} interventi collegati automaticamente alle voci rilevate. Testo e tempi invariati.`
+                        : `${speakerAutoLink.linkedSegments} turns automatically linked to detected voices. Text and timing unchanged.`}</span>
+                      {speakerAutoLink.revisionId && (
+                        <Button size="sm" variant="ghost" onClick={() => void undoAutomaticSpeakerLink()}>
+                          {lang === 'it' ? 'Annulla attribuzione' : 'Undo attribution'}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                {speakerAutoLink?.meetingId === meeting.id &&
+                  speakerAutoLink.transcriptionId === (meeting.transcription?.id || meeting.transcription?.saved_id) &&
+                  ((speakerAutoLink.status === 'no_timed_text' && Boolean(meeting.transcription?.text?.trim())) ||
+                    (speakerAutoLink.status === 'no_verified_diarization' &&
+                      (meeting.transcription?.segments || []).some((segment) => segment.text?.trim() &&
+                        (!segment.provider_speaker || ['computer', 'system', 'mixed'].includes(segment.provider_speaker.toLowerCase()))))) && (
+                    <div role="status" data-transcript-speaker-link={speakerAutoLink.status}
+                      className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 text-xs text-text-secondary">
+                      <span>{speakerAutoLink.status === 'no_timed_text'
+                        ? (lang === 'it'
+                          ? 'Il testo non contiene interventi temporizzati utilizzabili: per attribuirlo alle voci serve una trascrizione con timestamp.'
+                          : 'This text has no usable timed turns: speaker attribution requires a timestamped transcript.')
+                        : (lang === 'it'
+                          ? 'La timeline non contiene una diarizzazione audio verificata da applicare al testo.'
+                          : 'The timeline has no verified audio diarization to apply to the transcript.')}</span>
+                      <Button size="sm" variant="secondary" onClick={openAdvancedTranscription}>
+                        {lang === 'it' ? 'Apri strumenti trascrizione' : 'Open transcription tools'}
+                      </Button>
+                    </div>
+                  )}
+                {meeting.transcription && !Array.isArray(meeting.transcription.segments) &&
+                  transcriptDetailLoad?.key === meeting.id + ':' +
+                    (meeting.transcription.id || meeting.transcription.saved_id) &&
+                  transcriptDetailLoad.status === 'error' && (
+                    <div role="alert" data-transcript-detail-error="true"
+                      className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 text-xs text-text-secondary">
+                      <span>{lang === 'it'
+                        ? 'Impossibile caricare gli interventi della trascrizione. Il testo originale rimane disponibile.'
+                        : 'Could not load transcript turns. The original text remains available.'}</span>
+                      <Button size="sm" variant="secondary" onClick={() => setTranscriptDetailRetry((n) => n + 1)}>
+                        {lang === 'it' ? 'Riprova' : 'Retry'}
+                      </Button>
+                    </div>
+                  )}
+                {meeting.transcription && !Array.isArray(meeting.transcription.segments) &&
+                  !(transcriptDetailLoad?.key === meeting.id + ':' +
+                    (meeting.transcription.id || meeting.transcription.saved_id) &&
+                    transcriptDetailLoad.status === 'error') ? (
+                  <div data-transcript-detail-loading="true" role="status" aria-live="polite"
+                    className="flex items-center gap-2 bg-bg-elevated p-5 text-sm text-text-secondary">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    {lang === 'it' ? 'Caricamento interventi e voci…' : 'Loading turns and speakers…'}
+                  </div>
+                ) : meeting.transcription?.segments?.length ? (
                   <div className="p-4 sm:p-5 bg-bg-elevated">
                     <TranscriptTextView
                       segments={meeting.transcription.segments}
                       speakerMappings={speakerMappings}
+                      sourceTrackLabels={(meeting.transcription.source_tracks || []).map((track) => track.label)}
+                      initialDisplayMode="conversation"
+                      onIdentifySpeakers={() => selectTab('speakers')}
+                      onReassignTurn={demoMode ? undefined : handleReassignTurn}
+                      onRefreshTranscript={load}
+                      turnOverrides={(meeting.transcription.stats?.speaker_review as { segment_assignments?: Record<string, string> } | undefined)?.segment_assignments || {}}
+                      jumpToTime={transcriptJumpTime}
                       onTimestampClick={handleTimestampClick}
                       currentTime={currentTime}
                       screenshots={screenshots}
@@ -1551,7 +1722,38 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                     })}
                 </div>
 
-                <div className="p-5 sm:p-6 bg-bg-elevated min-h-[220px]">
+                {(selectedRun?.speaker_source_validity?.status === 'stale' ||
+                  selectedRun?.speaker_source_validity?.status === 'unverifiable') && (
+                  <div role="status" data-speaker-analysis-source-warning="true"
+                    className="mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 sm:mx-6">
+                    <div className="flex min-w-0 flex-1 items-start gap-2">
+                      <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                      <div className="min-w-0 text-sm">
+                        <p className="font-semibold text-text-primary">
+                          {lang === 'it' ? 'Verifica gli speaker nelle note' : 'Review speakers in these notes'}
+                        </p>
+                        <p className="mt-1 text-xs text-text-secondary">
+                          {selectedRun.speaker_source_validity.status === 'stale'
+                            ? (lang === 'it'
+                              ? 'L’attribuzione delle voci è cambiata dopo questa analisi. I nomi nelle note potrebbero non essere aggiornati.'
+                              : 'Speaker attribution changed after this analysis. Names in these notes may be outdated.')
+                            : (lang === 'it'
+                              ? 'Questa analisi precedente non conserva una prova verificabile delle attribuzioni speaker.'
+                              : 'This older analysis has no verifiable record of speaker attribution.')}
+                        </p>
+                      </div>
+                    </div>
+                    {canAnalyze && (
+                      <Button size="sm" variant="secondary" disabled={isBusy}
+                        onClick={() => void startPipeline('meeting_default')}>
+                        {lang === 'it' ? 'Rigenera solo analisi' : 'Regenerate analysis only'}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                <div className={meeting.transcription ? 'grid grid-cols-1 xl:grid-cols-2' : ''} data-meeting-notes-workspace="true">
+                  <div className="min-w-0 p-4 sm:p-6 bg-bg-elevated min-h-[220px]" data-meeting-primary-notes="true">
                   {selectedRun ? (
                     selectedRun.result?.schema?.id === 'closedroom.meeting_notes' && selectedRun.result?.schema?.version === 2 ? (
                       <StructuredNotesEditor
@@ -1570,21 +1772,63 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                       </div>
                     )
                   ) : (
-                    <div className="text-center py-12">
-                      <Sparkles className="w-8 h-8 mx-auto text-text-muted mb-3" aria-hidden="true" />
-                      <p className="text-sm text-text-secondary">{t('meeting.noAnalysisAvailable', { type: analysisLabel(selectedAnalysisType) })}</p>
-                      {!isBusy && (
+                    <MeetingAnalysisChoices
+                      lang={lang}
+                      hasTranscription={Boolean(meeting.transcription)}
+                      disabled={demoMode || isBusy}
+                      onPrepare={() => void startPreparation()}
+                      onDeepAnalysis={() => openAnalysisSetup('meeting_deep')}
+                    />
+                  )}
+                  </div>
+                  {meeting.transcription && (
+                    <section
+                      aria-label={lang === 'it' ? 'Trascrizione di riferimento' : 'Reference transcript'}
+                      data-meeting-transcript-companion="true"
+                      className="min-w-0 border-t border-border-subtle bg-bg-surface/40 xl:border-l xl:border-t-0"
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-4 py-3">
+                        <span className="inline-flex items-center gap-2 text-xs font-semibold text-text-primary">
+                          <FileText className="h-4 w-4 text-accent" aria-hidden="true" />
+                          {lang === 'it' ? 'Trascrizione' : 'Transcript'}
+                        </span>
                         <Button
                           size="sm"
-                          variant="secondary"
-                          onClick={startPreparation}
-                          isLoading={busyAction === 'meeting_preparation'}
-                          className="mt-4"
+                          variant="ghost"
+                          onClick={() => focusTab('transcript')}
+                          aria-controls={panelId('transcript')}
+                          aria-label={lang === 'it' ? 'Apri la trascrizione completa' : 'Open full transcript'}
                         >
-                          {lang === 'it' ? 'Prepara note' : 'Prepare notes'}
+                          {lang === 'it' ? 'Apri completa' : 'Open full'}
                         </Button>
-                      )}
-                    </div>
+                      </div>
+                      <div className="max-h-[min(60vh,640px)] overflow-y-auto p-4 focus-within:ring-2 focus-within:ring-inset focus-within:ring-border-focus" data-meeting-transcript-companion-content="true">
+                        {meeting.transcription.segments?.length ? (
+                          <TranscriptTextView
+                            segments={meeting.transcription.segments}
+                            speakerMappings={speakerMappings}
+                            sourceTrackLabels={(meeting.transcription.source_tracks || []).map((track) => track.label)}
+                            initialDisplayMode="conversation"
+                            onIdentifySpeakers={() => selectTab('speakers')}
+                            onReassignTurn={demoMode ? undefined : handleReassignTurn}
+                            onRefreshTranscript={load}
+                            turnOverrides={(meeting.transcription.stats?.speaker_review as { segment_assignments?: Record<string, string> } | undefined)?.segment_assignments || {}}
+                            jumpToTime={transcriptJumpTime}
+                            onTimestampClick={handleTimestampClick}
+                            currentTime={currentTime}
+                            screenshots={screenshots}
+                            onOpenScreenshot={openKeyMoment}
+                            notes={notes}
+                            onUpdateNote={handleUpdateNote}
+                            onDeleteNote={handleDeleteNote}
+                          />
+                        ) : (
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
+                            {meeting.transcription.text}
+                          </p>
+                        )}
+                      </div>
+                    </section>
                   )}
                 </div>
               </div>
@@ -1599,18 +1843,49 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 className="animate-in fade-in duration-200"
               >
                 {meeting.transcription ? (
-                  <SpeakerDiarizationEditor
-                    transcription={meeting.transcription}
-                    readOnly={demoMode}
-                    onUpdated={(transcription) => setMeeting((current) => (
-                      current ? { ...current, transcription } : current
-                    ))}
-                  />
+                  <>
+                    <SpeakerDiarizationEditor
+                      key={meeting.transcription.id || meeting.transcription.saved_id}
+                      transcription={meeting.transcription}
+                      recordingId={meeting.id}
+                      durationSeconds={recordingDuration}
+                      readOnly={demoMode}
+                      onPlaybackStart={() => audioRef.current?.pause()}
+                      onJumpToTranscript={(time) => {
+                        setTranscriptJumpTime(time);
+                        selectTab('transcript');
+                        handleTimestampClick(time);
+                      }}
+                      onUpdated={(transcription) => setMeeting((current) => (
+                        current ? { ...current, transcription } : current
+                      ))}
+                    />
+                  </>
                 ) : (
                   <div className="text-center py-16 bg-bg-elevated rounded-xl border border-border-subtle">
                     <Users className="w-8 h-8 mx-auto text-text-muted mb-3" aria-hidden="true" />
                     <p className="text-sm text-text-secondary">{t('meeting.noSpeakerClusters')}</p>
                   </div>
+                )}
+                {!demoMode && meeting.recording.status !== 'recording' && (
+                  <details data-speaker-advanced-tools="true" className="mt-3 rounded-xl border border-border-subtle bg-bg-surface/40">
+                    <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-text-secondary hover:text-text-primary focus-visible:outline-2 focus-visible:outline-border-focus">
+                      {lang === 'it' ? 'Migliora riconoscimento · opzioni avanzate' : 'Improve recognition · advanced options'}
+                    </summary>
+                    <div className="px-4 pb-4">
+                      {meeting.transcription && !meeting.transcription.merged_sources?.length && (
+                        <CommunityOneReviewPanel
+                          key={meeting.transcription.id || meeting.transcription.saved_id}
+                          transcriptionId={(meeting.transcription.id || meeting.transcription.saved_id)!}
+                          lang={lang}
+                          onUpdated={(transcription) => setMeeting((current) => (
+                            current ? { ...current, transcription } : current
+                          ))}
+                        />
+                      )}
+                      <DiarizationBenchmarkPanel recordingId={meeting.id} durationSeconds={recordingDuration} />
+                    </div>
+                  </details>
                 )}
               </div>
             )}
@@ -1633,7 +1908,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
             title={t('meeting.statusTitle')}
             description={t('workspace.advancedDesc')}
           />
-          <SheetBody className="flex flex-col gap-5 overflow-y-auto pt-2">
+          <SheetBody className="flex flex-col gap-5 overflow-y-auto pt-2 [&>*]:shrink-0">
             <div className="rounded-xl border border-border-subtle bg-bg-surface p-4">
               <h4 className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-3">
                 {lang === 'it' ? 'Stato Componenti' : 'Component Status'}
@@ -1684,6 +1959,58 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                   <p className="text-xs text-text-muted">{t('meeting.noSpeakerAttribution')}</p>
                 )}
               </div>
+            )}
+
+            <MeetingRecordingDetails recording={meeting.recording} />
+
+            {meeting.transcription && !demoMode && (
+              <section className="surface-advanced rounded-xl overflow-hidden" data-meeting-audio-intelligence="true">
+                <button
+                  type="button"
+                  aria-expanded={audioIntelligenceOpen}
+                  aria-controls="meeting-audio-intelligence-panel"
+                  onClick={() => {
+                    const opening = !audioIntelligenceOpen;
+                    setAudioIntelligenceOpen(opening);
+                    if (opening && audioIntelligenceState === 'idle') void loadAudioIntelligence();
+                  }}
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-text-primary hover:bg-bg-hover/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                >
+                  <span>
+                    {t('audioIntelligence.title')}
+                    <span className="block text-xs font-normal text-text-muted">{t('audioIntelligence.description')}</span>
+                  </span>
+                  <ChevronDown className={cn('h-4 w-4 shrink-0 text-text-muted transition-transform', audioIntelligenceOpen && 'rotate-180')} aria-hidden="true" />
+                </button>
+                <div id="meeting-audio-intelligence-panel" hidden={!audioIntelligenceOpen} className="border-t border-border-subtle p-3" aria-live="polite">
+                  {audioIntelligenceOpen && (
+                    <>
+                      {audioIntelligenceState === 'loading' && (
+                        <p role="status" className="flex items-center gap-2 text-xs text-text-muted">
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          {lang === 'it' ? 'Caricamento delle metriche audio locali…' : 'Loading local audio metrics…'}
+                        </p>
+                      )}
+                      {audioIntelligenceState === 'error' && (
+                        <div role="alert" className="rounded-lg border border-warning/30 p-3 text-xs text-text-secondary">
+                          <p>{audioIntelligenceError || (lang === 'it' ? 'Metriche non disponibili' : 'Metrics unavailable')}</p>
+                          <Button variant="secondary" size="sm" className="mt-2" onClick={() => void loadAudioIntelligence()}>
+                            {lang === 'it' ? 'Riprova' : 'Retry'}
+                          </Button>
+                        </div>
+                      )}
+                      {audioIntelligenceState === 'ready' && (
+                        <AudioIntelligencePanel
+                          compact
+                          intelligence={audioIntelligence}
+                          hasTranscription={Boolean(meeting.transcription)}
+                          onTranscribe={startDefaultTranscription}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+              </section>
             )}
 
             {diagnosticsLoading && (
@@ -1886,7 +2213,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           role="dialog"
           aria-modal="true"
           aria-label={lang === 'it' ? 'Screenshot della riunione' : 'Meeting screenshot'}
-          onClick={() => setSelectedScreenshot(null)}
+          onClick={() => setSelectedScreenshotKey(null)}
         >
           <div
             className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-subtle bg-bg-elevated shadow-2xl"
@@ -1912,7 +2239,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
                 </Button>
                 <button
                   type="button"
-                  onClick={() => setSelectedScreenshot(null)}
+                  onClick={() => setSelectedScreenshotKey(null)}
                   className="rounded-lg p-2 text-text-muted hover:bg-bg-surface hover:text-text-primary"
                   aria-label={lang === 'it' ? 'Chiudi screenshot' : 'Close screenshot'}
                 >
@@ -2096,6 +2423,14 @@ export default function MeetingDetailPage({ recordingId, navigateTo, demoMode = 
           </div>
         </div>
       )}
+
+      <ProjectPromptModal
+        isOpen={projectPickerOpen && !demoMode}
+        initialValue={meeting.project_name || ''}
+        onConfirm={(value) => void handleSaveProject(value)}
+        onCancel={() => { if (!isBusy) setProjectPickerOpen(false); }}
+        existingProjects={existingProjects}
+      />
 
       <Dialog
         open={deleteConfirmOpen}

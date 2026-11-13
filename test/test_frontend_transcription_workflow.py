@@ -40,7 +40,11 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertIn("const startPreparation = async () =>", page)
         self.assertIn("await prepareMeetingNotes(meeting.id, requestedIncludeScreenshots)", page)
         self.assertIn("latestPreparation?.result?.include_screenshots", page)
-        self.assertIn("onClick={startPreparation}", page)
+        choices = (ROOT / "frontend/src/components/meeting/MeetingAnalysisChoices.tsx").read_text(encoding="utf-8")
+        self.assertIn("onPrepare={() => void startPreparation()}", page)
+        self.assertIn('data-meeting-outcome="summary"', choices)
+        self.assertIn("onClick={onPrepare}", choices)
+        self.assertIn("disabled={disabled}", choices)
         self.assertIn("'Trascrivi e riassumi' : 'Transcribe and summarize'", page)
         self.assertIn("'Crea sintesi e azioni' : 'Create summary and actions'", page)
 
@@ -60,6 +64,14 @@ class FrontendTranscriptionWorkflowTests(unittest.TestCase):
         self.assertIn("'Rigenera solo analisi' : 'Regenerate analysis only'", page)
         self.assertIn("openAnalysisSetup('meeting_deep')", page)
         self.assertIn("<AnalysisSetupModal", page)
+
+    def test_recording_linked_transcript_returns_to_canonical_meeting(self) -> None:
+        results = (ROOT / "frontend/src/pages/transcription/components/ResultsStep.tsx").read_text(encoding="utf-8")
+        self.assertIn("onClick={() => navigateTo('meeting', recordingId)}", results)
+        self.assertIn("if (recordingId) navigateTo('meeting', recordingId);", results)
+        self.assertIn("else navigateTo('analysis', transcriptionResult.id || transcriptionResult.saved_id);", results)
+        self.assertIn("variant={recordingId ? 'secondary' : 'primary'}", results)
+        self.assertIn("Prepare notes in Meeting", results)
 
     def test_recording_route_contract_is_centralized(self) -> None:
         route_helper = (ROOT / "frontend/src/utils/transcriptionRoute.ts").read_text(encoding="utf-8")
