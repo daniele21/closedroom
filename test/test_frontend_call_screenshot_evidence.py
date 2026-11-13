@@ -81,10 +81,10 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("onCaptureScreenshot={() => void handleCaptureScreenshot()}", self.overlay)
         self.assertNotIn("<select", self.overlay)
         self.assertIn("display.width} × {display.height", self.overlay)
-        self.assertIn("lastSavedScreenshotId !== null", self.overlay)
+        self.assertIn("lastSavedScreenshotId !== null", self.controls)
         self.assertIn("ApiClient.deleteScreenshot(recordingId, lastSavedScreenshotId)", self.overlay)
         self.assertIn("if (isUndoingScreenshot)", self.overlay)
-        self.assertIn("isCapturingScreenshot || isUndoingScreenshot", self.overlay)
+        self.assertIn("isCapturingScreenshot || isUndoingScreenshot", self.controls)
         self.assertIn('data-screenshot-undo="true"', self.controls)
 
     def test_transcript_keeps_asr_segments_immutable_and_anchors_screenshot_by_time(self) -> None:
