@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "frontend" / "src" / "pages" / "RecordingOverlayPage.tsx"
 RECORDER = ROOT / "frontend" / "src" / "hooks" / "useRecorder.ts"
 MEETING = ROOT / "frontend" / "src" / "pages" / "MeetingDetailPage.tsx"
+GALLERY = ROOT / "frontend" / "src" / "components" / "meeting" / "MeetingSourcesGallery.tsx"
 MEETING_ACCESSORIES = ROOT / "frontend" / "src" / "hooks" / "useMeetingAccessories.ts"
 TRANSCRIPT = ROOT / "frontend" / "src" / "components" / "transcription" / "TranscriptTextView.tsx"
 NOTES = ROOT / "frontend" / "src" / "components" / "meeting" / "StructuredNotesEditor.tsx"
@@ -22,6 +23,7 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         cls.overlay = OVERLAY.read_text(encoding="utf-8")
         cls.recorder = RECORDER.read_text(encoding="utf-8")
         cls.meeting = MEETING.read_text(encoding="utf-8")
+        cls.gallery = GALLERY.read_text(encoding="utf-8")
         cls.meeting_accessories = MEETING_ACCESSORIES.read_text(encoding="utf-8")
         cls.transcript = TRANSCRIPT.read_text(encoding="utf-8")
         cls.notes = NOTES.read_text(encoding="utf-8")
@@ -101,15 +103,22 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("onOpenScreenshot(screenshot)", self.notes)
 
     def test_meeting_surfaces_saved_screenshots_as_progressive_gallery(self) -> None:
-        self.assertIn('data-meeting-screenshot-gallery="true"', self.meeting)
-        self.assertIn('data-key-moments="true"', self.meeting)
+        self.assertIn("<MeetingSourcesGallery", self.meeting)
+        self.assertIn('data-meeting-notes-sources="true"', self.gallery)
+        self.assertIn("notes={notes}", self.meeting)
+        self.assertIn("onSeek={handleTimestampClick}", self.meeting)
+        self.assertIn("onOpenScreenshot={openKeyMoment}", self.meeting)
+        self.assertIn('data-meeting-user-note-id={note.note_id}', self.gallery)
+        self.assertIn("screenshotsState === 'ready' && savedScreenshotCount === 0", self.gallery)
+        self.assertIn('data-meeting-screenshot-gallery="true"', self.gallery)
+        self.assertIn('data-key-moments="true"', self.gallery)
         self.assertIn("keyMomentContext(", self.meeting)
         self.assertIn("collapsedKeyMoments.slice(0, 6)", self.meeting)
-        self.assertIn("setShowAllScreenshots((value) => !value)", self.meeting)
-        self.assertIn("src={shot.thumbnail_url}", self.meeting)
-        self.assertIn("onClick={() => openKeyMoment(shot)}", self.meeting)
-        self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.meeting)
-        self.assertIn("data-key-moment-id={shot.screenshot_id}", self.meeting)
+        self.assertIn("onToggleShowAll={() => setShowAllScreenshots((value) => !value)}", self.meeting)
+        self.assertIn("src={shot.thumbnail_url}", self.gallery)
+        self.assertIn("onClick={() => onOpenScreenshot(shot)}", self.gallery)
+        self.assertIn("screenshotTimestampLabel(shot.timestamp)", self.gallery)
+        self.assertIn("data-key-moment-id={shot.screenshot_id}", self.gallery)
         self.assertIn("data-key-moment-context=\"true\"", self.meeting)
         self.assertIn("openKeyMoment(shot)", self.meeting)
         self.assertIn("visualResultAvailable && selectedScreenshot !== null", self.meeting)
@@ -120,12 +129,12 @@ class FrontendCallScreenshotEvidenceContractTests(unittest.TestCase):
         self.assertIn("llm_provider: 'nemotron_local'", self.meeting)
         self.assertIn("CLOSEDROOM_KEY_MOMENT_QA_V1", self.meeting)
         self.assertIn("data-key-moment-answer=\"true\"", self.meeting)
-        self.assertIn("visualContext?.contentType", self.meeting)
-        self.assertIn("visualContext?.title", self.meeting)
+        self.assertIn("visualContext?.contentType", self.gallery)
+        self.assertIn("visualContext?.title", self.gallery)
         self.assertIn("manual_screenshot_groups", self.meeting)
-        self.assertIn("data-key-moment-group={group?.group_id || undefined}", self.meeting)
+        self.assertIn("data-key-moment-group={group?.group_id || undefined}", self.gallery)
         self.assertIn("data-key-moment-group-strip=\"true\"", self.meeting)
-        self.assertIn("group.screenshot_ids.length", self.meeting)
+        self.assertIn("group.screenshot_ids.length", self.gallery)
         self.assertIn("src={selectedScreenshot.original_url}", self.meeting)
         self.assertIn("handleTimestampClick(selectedScreenshot.timestamp)", self.meeting)
 
