@@ -405,7 +405,18 @@ export function SpeakerDiarizationEditor({
             <div className="min-w-0">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h4 className="truncate text-base font-semibold text-text-primary">{selected.name}</h4>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <h4 className="truncate text-base font-semibold text-text-primary"
+                      data-speaker-confirmed-name={selected.status === 'accepted' && !renameOpen ? 'true' : undefined}>
+                      {selected.name}
+                    </h4>
+                    {selected.status === 'accepted' && !renameOpen && canEdit && (
+                      <Button type="button" size="sm" variant="ghost" data-speaker-rename-open="true"
+                        onClick={() => setRenameOpen(true)}>
+                        {tr('Rinomina', 'Rename')}
+                      </Button>
+                    )}
+                  </div>
                   <p className="mt-1 text-xs text-text-muted">
                     {selected.status === 'accepted' ? tr('Identità confermata', 'Confirmed identity') :
                       selected.status === 'excluded' ? tr('Esclusa (ripristinabile)', 'Excluded (restorable)') :
@@ -474,20 +485,8 @@ export function SpeakerDiarizationEditor({
                 </p>}
               </div>
 
-              {selected.status === 'accepted' && !renameOpen ? (
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2" data-speaker-confirmed-name="true">
-                  <p className="min-w-0 break-words text-sm text-text-secondary">
-                    {tr('Persona:', 'Person:')} <strong className="text-text-primary">{selected.name}</strong>
-                  </p>
-                  {canEdit && (
-                    <Button type="button" size="sm" variant="ghost" data-speaker-rename-open="true"
-                      onClick={() => setRenameOpen(true)}>
-                      {tr('Rinomina', 'Rename')}
-                    </Button>
-                  )}
-                </div>
-              ) : (
-              <div className="mt-4">
+              {(selected.status !== 'accepted' || renameOpen) && (
+                <div className="mt-4">
                 <label className="mb-1 block text-xs font-medium text-text-secondary" htmlFor="speaker-review-name">
                   {tr('Nome della persona', 'Person name')}
                 </label>
@@ -523,7 +522,7 @@ export function SpeakerDiarizationEditor({
                       ? tr('Nome salvato', 'Name saved') : ''}
                   </span>
                 </div>
-              </div>
+                </div>
               )}
 
               {selected.status === 'unassigned' && !selected.sourceOnly && (
