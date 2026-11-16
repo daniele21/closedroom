@@ -70,6 +70,8 @@ export function SpeakerDiarizationEditor({
   const [action, setAction] = useState<'none' | 'merge' | 'exclude'>('none');
   const [mergeTarget, setMergeTarget] = useState('');
   const [showActions, setShowActions] = useState(false);
+  // Confirmed identity labels are read-only until the person explicitly chooses to rename.
+  const [renameOpen, setRenameOpen] = useState(false);
   const [listenError, setListenError] = useState('');
   const playback = useSpeakerReviewPlayback(meetingId, onPlaybackStart);
   const activeListenRequest = useRef<AbortController | null>(null);
@@ -178,6 +180,7 @@ export function SpeakerDiarizationEditor({
     setSampleIndex(0);
     setAction('none');
     setShowActions(false);
+    setRenameOpen(false);
     setMergeTarget('');
   }, [selected?.cluster, transcription.id]);
 
@@ -205,6 +208,7 @@ export function SpeakerDiarizationEditor({
         action: kind, cluster, ...options, expected_fingerprint: review.fingerprint,
       });
       if (kind === 'merge' && options.target) setSelectedCluster(options.target);
+      if (kind === 'rename') setRenameOpen(false);
       setAction('none');
       setReview(null); // new fingerprint is read from the canonical persisted owner
       onUpdated(response.transcription);
@@ -222,6 +226,8 @@ export function SpeakerDiarizationEditor({
     const next = editedName.trim();
     if (next && next !== selected.name && selected.status !== 'merged' && selected.status !== 'excluded') {
       void commit('rename', selected.cluster, { name: next });
+    } else if (selected.status === 'accepted') {
+      setRenameOpen(false);
     }
   };
 
@@ -399,7 +405,18 @@ export function SpeakerDiarizationEditor({
             <div className="min-w-0">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h4 className="truncate text-base font-semibold text-text-primary">{selected.name}</h4>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <h4 className="truncate text-base font-semibold text-text-primary"
+                      data-speaker-confirmed-name={selected.status === 'accepted' && !renameOpen ? 'true' : undefined}>
+                      {selected.name}
+                    </h4>
+                    {selected.status === 'accepted' && !renameOpen && canEdit && (
+                      <Button type="button" size="sm" variant="ghost" data-speaker-rename-open="true"
+                        onClick={() => setRenameOpen(true)}>
+                        {tr('Rinomina', 'Rename')}
+                      </Button>
+                    )}
+                  </div>
                   <p className="mt-1 text-xs text-text-muted">
                     {selected.status === 'accepted' ? tr('Identità confermata', 'Confirmed identity') :
                       selected.status === 'excluded' ? tr('Esclusa (ripristinabile)', 'Excluded (restorable)') :
@@ -468,12 +485,13 @@ export function SpeakerDiarizationEditor({
                 </p>}
               </div>
 
-              <div className="mt-4">
+              {(selected.status !== 'accepted' || renameOpen) && (
+                <div className="mt-4">
                 <label className="mb-1 block text-xs font-medium text-text-secondary" htmlFor="speaker-review-name">
                   {tr('Nome della persona', 'Person name')}
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
-                  <input id="speaker-review-name" className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-surface px-3 py-2 text-sm text-text-primary focus:outline-2 focus:outline-border-focus disabled:opacity-60"
+                  <input id="speaker-review-name" autoFocus={selected.status === 'accepted'} className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-surface px-3 py-2 text-sm text-text-primary focus:outline-2 focus:outline-border-focus disabled:opacity-60"
                     value={editedName} maxLength={120}
                     disabled={!canEdit || selected.status === 'excluded' || selected.status === 'merged'}
                     onChange={(event) => setEditedName(event.target.value)}
@@ -488,9 +506,14 @@ export function SpeakerDiarizationEditor({
                       if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); }
                       if (event.key === 'Escape') {
                         event.preventDefault();
-                        skipBlurSaveRef.current = true;
                         setEditedName(selected.name);
-                        event.currentTarget.blur();
+                        if (selected.status === 'accepted') {
+                          // Closing the field does not commit a rename or arm the blur-save skip flag.
+                          setRenameOpen(false);
+                        } else {
+                          skipBlurSaveRef.current = true;
+                          event.currentTarget.blur();
+                        }
                       }
                     }}
                   />
@@ -499,7 +522,8 @@ export function SpeakerDiarizationEditor({
                       ? tr('Nome salvato', 'Name saved') : ''}
                   </span>
                 </div>
-              </div>
+                </div>
+              )}
 
               {selected.status === 'unassigned' && !selected.sourceOnly && (
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-subtle bg-bg-surface p-3"
