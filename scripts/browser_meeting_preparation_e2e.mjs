@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { uxAuditCheckpoint } from './ux_as_is_fixture_probe.mjs';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -464,6 +465,7 @@ async function checkpoint(browser, name, holdFrames = VIDEO_FPS) {
   const destination = path.join(evidenceRoot, 'screenshots', `${name}.png`);
   await browser.screenshot(destination);
   checkpoints.push({ name, screenshot: path.relative(evidenceRoot, destination) });
+  await uxAuditCheckpoint(browser, 'preparation', name, destination);
   for (let index = 0; index < holdFrames; index += 1) await frame(browser, destination);
 }
 
