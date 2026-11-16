@@ -492,7 +492,7 @@ export function SpeakerDiarizationEditor({
                   {tr('Nome della persona', 'Person name')}
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
-                  <input id="speaker-review-name" className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-surface px-3 py-2 text-sm text-text-primary focus:outline-2 focus:outline-border-focus disabled:opacity-60"
+                  <input id="speaker-review-name" autoFocus={selected.status === 'accepted'} className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-bg-surface px-3 py-2 text-sm text-text-primary focus:outline-2 focus:outline-border-focus disabled:opacity-60"
                     value={editedName} maxLength={120}
                     disabled={!canEdit || selected.status === 'excluded' || selected.status === 'merged'}
                     onChange={(event) => setEditedName(event.target.value)}
@@ -507,10 +507,14 @@ export function SpeakerDiarizationEditor({
                       if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); }
                       if (event.key === 'Escape') {
                         event.preventDefault();
-                        skipBlurSaveRef.current = true;
                         setEditedName(selected.name);
-                        if (selected.status === 'accepted') setRenameOpen(false);
-                        event.currentTarget.blur();
+                        if (selected.status === 'accepted') {
+                          // Closing the field does not commit a rename or arm the blur-save skip flag.
+                          setRenameOpen(false);
+                        } else {
+                          skipBlurSaveRef.current = true;
+                          event.currentTarget.blur();
+                        }
                       }
                     }}
                   />
