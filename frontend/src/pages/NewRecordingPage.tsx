@@ -17,6 +17,7 @@ import { ApiClient, CaptureWindow, Recording } from '../api/apiClient';
 import { NEW_RECORDING_PROJECT_STORAGE_KEY } from '../api/config';
 import { useTranslation } from '../i18n/i18n';
 import { useToast } from '../context/ToastContext';
+import { capturePermissionFailureMessage, getNativeCaptureUnavailableMessage } from '../utils/capturePermissionMessages';
 import { openBrowserPopup, useRecorder } from '../hooks/useRecorder';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -38,6 +39,8 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
   const [recordingsDir, setRecordingsDir] = useState('');
   const [storageConfigured, setStorageConfigured] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [settingsLoadError, setSettingsLoadError] = useState(false);
+  const [settingsRetry, setSettingsRetry] = useState(0);
   const autoStartClaimedRef = useRef<string | null>(null);
   const [projectsList, setProjectsList] = useState<string[]>([]);
   const [permissionLoading, setPermissionLoading] = useState(false);
@@ -62,38 +65,22 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
   const nativeCaptureUnavailableReason = recorder.captureCapabilities?.native.reason
     || recorder.captureCapabilities?.native.error
     || '';
-  const nativeCaptureUnavailableMessage = (() => {
-    if (nativeCaptureUnavailableReason === 'screen_capture_stream_pending') return t('recording.nativeCapturePendingReason');
-    if (nativeCaptureUnavailableReason === 'helper_missing') return t('recording.nativeCaptureHelperMissingReason');
-    if (nativeCaptureUnavailableReason === 'macos_required' || nativeCaptureUnavailableReason === 'macos_14_required') {
-      return t('recording.nativeCaptureMacosRequiredReason');
-    }
-    if (nativeCaptureUnavailableReason === 'screen_recording_permission_required') return t('recording.nativeCaptureScreenPermissionReason');
-    if (nativeCaptureUnavailableReason === 'microphone_permission_required') return t('recording.nativeCaptureMicPermissionReason');
-    return nativeCaptureUnavailableReason || t('recording.nativeCaptureUnavailableUnknown');
-  })();
+  const nativeCaptureUnavailableMessage = getNativeCaptureUnavailableMessage(nativeCaptureUnavailableReason, t);
 
-  const needsComputerAudio = sourceMode !== 'mic_only';
   const micReady = nativeCaptureReady
     ? (sourceMode === 'pc_only' || recorder.capturePermissions?.microphone === 'authorized')
     : (sourceMode === 'pc_only' || recorder.microphones.length > 0 || recorder.selectedMicrophone === '');
-  const computerReady = nativeCaptureReady
-    ? (sourceMode === 'mic_only' || recorder.capturePermissions?.screen_capture === 'granted')
-    : (!needsComputerAudio || Boolean(recorder.audioRouteStatus?.ready_to_record) || recorder.systemDevices.length > 0);
+  const computerReady = sourceMode === 'mic_only'
+    || (nativeCaptureReady && recorder.capturePermissions?.screen_capture === 'granted');
   const storageReady = storageConfigured && recordingsDir.trim().length > 0;
-  const readyToRecord = micReady && computerReady && storageReady;
+  const readyToRecord = settingsLoaded && micReady && computerReady && storageReady;
   const selectedVisualWindow = captureWindows.find((window) => String(window.id) === visualWindowId);
   const recordingFlowLocked = recorder.isRecording || recorder.isPreparingRecording;
 
   const captureModeOptions = [
     { value: 'both', label: t('recording.captureModeBoth') },
     { value: 'mic_only', label: t('recording.captureModeMicOnly') },
-    {
-      value: 'pc_only',
-      label: nativeCaptureReady
-        ? t('recording.captureModeComputerOnly')
-        : t('recording.captureModeComputerOnlyFallback'),
-    },
+    { value: 'pc_only', label: t('recording.captureModeComputerOnly') },
   ] as const;
 
   useEffect(() => {
@@ -104,22 +91,35 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
     }
   }, []);
 
+  // Storage readiness is required to start recording; the optional project
+  // suggestions must never delay it. Keep these requests independent.
   useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const settings = await ApiClient.getSettings();
-        const configuredDir = settings.recordings_dir || '';
-        setRecordingsDir(configuredDir);
-        setStorageConfigured(Boolean(configuredDir.trim()));
-        const projects = await ApiClient.listProjects();
+    let cancelled = false;
+    setSettingsLoaded(false);
+    setSettingsLoadError(false);
+    void ApiClient.getSettings().then((settings) => {
+      if (cancelled) return;
+      const configuredDir = settings.recordings_dir || '';
+      setRecordingsDir(configuredDir);
+      setStorageConfigured(Boolean(configuredDir.trim()));
+    }).catch(() => {
+      if (!cancelled) setSettingsLoadError(true);
+    }).finally(() => {
+      if (!cancelled) setSettingsLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [settingsRetry]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void ApiClient.listProjects().then((projects) => {
+      if (!cancelled) {
         setProjectsList((projects.items || []).filter((project) => !project.is_unassigned).map((project) => project.name));
-      } catch {
-        // Readiness below exposes configuration gaps without blocking the rest of the app shell.
-      } finally {
-        setSettingsLoaded(true);
       }
-    };
-    void loadSettings();
+    }).catch(() => {
+      // Suggestions are optional. The user can type any project name directly.
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const handleAuthorizeCapture = async () => {
@@ -129,12 +129,7 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
       const result = await ApiClient.ensureCapturePermissions(sourceMode);
       await recorder.refreshCapturePermissions();
       if (!result.ok) {
-        const message = result.diagnostics?.code_signature && result.diagnostics.code_signature !== 'signed'
-          ? t('recording.permissionsUnsignedHelper')
-          : result.diagnostics?.bundle_identifier && result.diagnostics.bundle_identifier !== 'com.closedroom.nativecapture'
-            ? t('recording.permissionsInvalidHelper')
-            : t('recording.permissionsRequired');
-        setPermissionError(message);
+        setPermissionError(capturePermissionFailureMessage(result.diagnostics, t));
       }
     } catch (err) {
       setPermissionError(err instanceof Error ? err.message : String(err));
@@ -229,13 +224,24 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
             : (lang === 'it' ? 'L’audio del computer è pronto.' : 'Computer audio is ready.'),
       };
     }
+    if (!settingsLoaded) {
+      return {
+        tone: 'working',
+        title: lang === 'it' ? 'Verifica archivio locale' : 'Checking local storage',
+        detail: lang === 'it'
+          ? 'Controllo la cartella dei meeting sul dispositivo.'
+          : 'Checking the meetings folder on this device.',
+      };
+    }
     if (!storageReady) {
       return {
         tone: 'blocked',
-        title: lang === 'it' ? 'Scegli dove salvare i meeting' : 'Choose where meetings are saved',
+        title: settingsLoadError
+          ? (lang === 'it' ? 'Impossibile leggere le impostazioni' : 'Cannot read settings')
+          : (lang === 'it' ? 'Scegli dove salvare i meeting' : 'Choose where meetings are saved'),
         detail: lang === 'it'
-          ? 'Serve una cartella locale prima della prima registrazione.'
-          : 'A local folder is required before the first recording.',
+          ? 'Seleziona una cartella locale o riprova a leggere le impostazioni.'
+          : 'Choose a local folder or retry loading settings.',
       };
     }
     if (nativeCaptureReady && (!micReady || !computerReady)) {
@@ -379,16 +385,22 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
                 {lang === 'it' ? 'Consenti accesso' : 'Allow access'}
               </Button>
             )}
-            {!recordingFlowLocked && !storageReady && (
+            {!recordingFlowLocked && settingsLoadError && !storageReady && (
+              <Button type="button" size="sm" variant="secondary" onClick={() => setSettingsRetry((value) => value + 1)} className="shrink-0">
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                {lang === 'it' ? 'Riprova' : 'Retry'}
+              </Button>
+            )}
+            {!recordingFlowLocked && !storageReady && !settingsLoadError && (
               <Button type="button" size="sm" variant="secondary" onClick={handleBrowseDir} isLoading={storageSaving} className="shrink-0">
                 <FolderOpen className="h-4 w-4" />
                 {t('settings.btnBrowse')}
               </Button>
             )}
             {!recordingFlowLocked && !nativeCaptureReady && nativeCaptureChecked && !readyToRecord && storageReady && (
-              <Button type="button" size="sm" variant="secondary" onClick={() => setShowAudioRecovery(true)} className="shrink-0">
-                <SlidersHorizontal className="h-4 w-4" />
-                {lang === 'it' ? 'Recupero audio' : 'Audio recovery'}
+              <Button type="button" size="sm" variant="secondary" onClick={() => { setSourceMode('mic_only'); setShowAudioRecovery(true); }} className="shrink-0">
+                <Mic className="h-4 w-4" />
+                {lang === 'it' ? 'Registra solo microfono' : 'Record microphone only'}
               </Button>
             )}
           </div>
@@ -445,6 +457,16 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
               </div>
             </div>
           </div>
+          {Object.entries(recorder.audioSourceHealth).some(([, state]) => state !== 'healthy') && (
+            <p role="status" aria-live="polite" className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-text-primary">
+              {t('recording.sourceDegraded')}
+              {' '}
+              {Object.entries(recorder.audioSourceHealth)
+                .filter(([, state]) => state !== 'healthy')
+                .map(([source]) => t(source === 'mic' ? 'recording.sourceMic' : 'recording.sourceSystem'))
+                .join(', ')}
+            </p>
+          )}
           <canvas ref={recorder.canvasRef} width={900} height={70} className="mt-4 h-16 w-full rounded-lg bg-bg-surface" aria-hidden="true" />
         </section>
 
@@ -562,7 +584,7 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
             >
               <span className="inline-flex items-center gap-2">
                 <SlidersHorizontal className="h-4 w-4 text-text-muted" aria-hidden="true" />
-                {lang === 'it' ? 'Recupero audio' : 'Audio recovery'}
+                {lang === 'it' ? 'Sorgente microfono (opzionale)' : 'Microphone source (optional)'}
               </span>
               <ChevronDown className={`h-4 w-4 text-text-muted transition-transform ${showAudioRecovery ? 'rotate-180' : ''}`} aria-hidden="true" />
             </button>
@@ -571,8 +593,8 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
               <div id="new-meeting-audio-recovery" className="flex flex-col gap-5 border-t border-border-subtle p-4">
                 <p className="text-xs leading-relaxed text-text-muted">
                   {lang === 'it'
-                    ? 'Queste opzioni servono solo quando ClosedRoom non riesce a configurare automaticamente microfono e audio del computer.'
-                    : 'Use these options only when ClosedRoom cannot configure microphone and computer audio automatically.'}
+                    ? 'Senza cattura nativa puoi selezionare esplicitamente soltanto la registrazione del microfono. L’audio computer richiede ScreenCaptureKit.'
+                    : 'Without native capture, you can explicitly select microphone-only recording. Computer audio requires ScreenCaptureKit.'}
                 </p>
                 <Select
                   label={lang === 'it' ? 'Audio da registrare' : 'Audio to record'}
@@ -584,7 +606,7 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
                   disabled={recorder.isRecording}
                 >
                   {captureModeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                    <option key={option.value} value={option.value} disabled={!nativeCaptureReady && option.value !== 'mic_only'}>{option.label}</option>
                   ))}
                 </Select>
 
@@ -598,19 +620,6 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
                     >
                       <option value="">{t('recording.microphoneDefault')}</option>
                       {recorder.microphones.map((device) => (
-                        <option key={device.deviceId} value={device.deviceId}>{device.label || device.deviceId}</option>
-                      ))}
-                    </Select>
-                  )}
-                  {sourceMode !== 'mic_only' && (
-                    <Select
-                      label={t('recording.systemAudioLabel')}
-                      value={recorder.selectedSystemDevice}
-                      onChange={(event) => recorder.setSelectedSystemDevice(event.target.value)}
-                      disabled={recorder.isRecording}
-                    >
-                      <option value="">{t('recording.systemAudioDefault')}</option>
-                      {recorder.systemDevices.map((device) => (
                         <option key={device.deviceId} value={device.deviceId}>{device.label || device.deviceId}</option>
                       ))}
                     </Select>
@@ -641,7 +650,7 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border-subtle bg-bg-surface p-3">
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-text-muted">Capture</span>
-                  <strong className="mt-1 block text-text-primary">{nativeCaptureReady ? 'Native' : 'Browser fallback'}</strong>
+                  <strong className="mt-1 block text-text-primary">{nativeCaptureReady ? 'Native' : (lang === 'it' ? 'Solo microfono (opzionale)' : 'Microphone only (optional)')}</strong>
                   {!nativeCaptureReady && nativeCaptureChecked && <p className="mt-1 text-warning">{nativeCaptureUnavailableMessage}</p>}
                 </div>
                 <div className="rounded-lg border border-border-subtle bg-bg-surface p-3">
@@ -672,16 +681,6 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
                 </div>
               )}
 
-              {!nativeCaptureReady && recorder.audioRouteStatus && (
-                <div className="rounded-lg border border-border-subtle bg-bg-surface p-3">
-                  <div><strong className="text-text-primary">Audio route:</strong> {recorder.audioRouteStatus.ready_to_record ? 'ready' : 'not ready'}</div>
-                  {recorder.audioRouteStatus.physical_output && <div className="mt-1">Output: {recorder.audioRouteStatus.physical_output}</div>}
-                  {recorder.audioRouteStatus.missing && recorder.audioRouteStatus.missing.length > 0 && (
-                    <div className="mt-1 text-warning">Missing: {recorder.audioRouteStatus.missing.join(', ')}</div>
-                  )}
-                </div>
-              )}
-
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant="secondary" onClick={() => recorder.verifyAudioSetup()} isLoading={recorder.isVerifying}>
                   <RefreshCw className="h-4 w-4" />
@@ -691,12 +690,6 @@ export default function NewRecordingPage({ navigateTo, autoStartToken }: NewReco
                   <Button type="button" size="sm" variant="secondary" onClick={handleAuthorizeCapture} isLoading={permissionLoading}>
                     <Info className="h-4 w-4" />
                     {t('recording.authorizeCapture')}
-                  </Button>
-                )}
-                {!nativeCaptureReady && (
-                  <Button type="button" size="sm" variant="secondary" onClick={() => recorder.toggleTestAudioRoute()} isLoading={recorder.isVerifying}>
-                    <Monitor className="h-4 w-4" />
-                    {recorder.isTestRouted ? t('recording.restoreRoute') : t('recording.testRoute')}
                   </Button>
                 )}
               </div>

@@ -1,4 +1,4 @@
-"""Content-free, opt-in microphone activity suggestions for supported macOS apps.
+"""Content-free, default-on microphone activity suggestions for supported macOS apps.
 
 CoreAudio is queried for input-running processes. No audio stream is opened,
 and browser processes are deliberately excluded: Chrome using a microphone
@@ -202,6 +202,13 @@ class MeetingCandidate:
     last_seen: float
     prompted: bool = False
     dismissed: bool = False
+    # Delivery is separate from offering the menu-bar action. macOS acceptance
+    # is asynchronous and may fail even after a candidate is recognized.
+    notification_attempts: int = 0
+    notification_pending_since: float | None = None
+    notification_retry_at: float = 0.0
+    notification_enqueued: bool = False
+    notification_last_result: str = "not_requested"
 
 
 class MeetingSuggestionPolicy:
@@ -213,8 +220,63 @@ class MeetingSuggestionPolicy:
         self.end_grace_seconds = end_grace_seconds
         self._sessions: dict[str, MeetingCandidate] = {}
 
+    NOTIFICATION_MAX_ATTEMPTS = 3
+    NOTIFICATION_TIMEOUT_SECONDS = 20.0
+    NOTIFICATION_RETRY_SECONDS = 15.0
+
     def reset(self) -> None:
         self._sessions.clear()
+
+    def begin_notification(self, candidate_id: str, *, now: float | None = None) -> int | None:
+        """Reserve one bounded OS submission; never consume retries for denied permission."""
+        now = time.monotonic() if now is None else now
+        candidate = self.active_candidate(candidate_id, now=now)
+        if candidate is None or not candidate.prompted or candidate.dismissed or candidate.notification_enqueued:
+            return None
+        if candidate.notification_pending_since is not None:
+            if now - candidate.notification_pending_since < self.NOTIFICATION_TIMEOUT_SECONDS:
+                return None
+            # A missing callback is not a successful submission.
+            candidate.notification_pending_since = None
+            candidate.notification_last_result = "timeout"
+            candidate.notification_retry_at = now + self.NOTIFICATION_RETRY_SECONDS
+        if (candidate.notification_attempts >= self.NOTIFICATION_MAX_ATTEMPTS
+                or now < candidate.notification_retry_at):
+            return None
+        candidate.notification_attempts += 1
+        candidate.notification_pending_since = now
+        candidate.notification_last_result = "pending"
+        return candidate.notification_attempts
+
+    def finish_notification(self, candidate_id: str, attempt: int, accepted: bool,
+                            *, now: float | None = None) -> bool:
+        """Reject stale/duplicate callbacks, including after a call was dismissed."""
+        now = time.monotonic() if now is None else now
+        candidate = self.active_candidate(candidate_id, now=now)
+        if (candidate is None or candidate.dismissed or candidate.notification_enqueued
+                or candidate.notification_pending_since is None
+                or candidate.notification_attempts != attempt):
+            return False
+        candidate.notification_pending_since = None
+        candidate.notification_enqueued = accepted
+        candidate.notification_last_result = "enqueued" if accepted else "failed"
+        if not accepted:
+            candidate.notification_retry_at = now + self.NOTIFICATION_RETRY_SECONDS
+        return True
+
+    def notification_status(self, candidate_id: str | None) -> dict:
+        candidate = self.active_candidate(candidate_id) if candidate_id else None
+        if candidate is None:
+            return {"state": "idle", "attempts": 0}
+        if candidate.notification_enqueued:
+            state = "enqueued"
+        elif candidate.notification_pending_since is not None:
+            state = "pending"
+        elif candidate.notification_attempts >= self.NOTIFICATION_MAX_ATTEMPTS:
+            state = "retry_exhausted"
+        else:
+            state = candidate.notification_last_result
+        return {"state": state, "attempts": candidate.notification_attempts}
 
     def active_candidate(self, candidate_id: str, *, now: float | None = None) -> MeetingCandidate | None:
         now = time.monotonic() if now is None else now

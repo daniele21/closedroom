@@ -153,6 +153,67 @@ class RealEnvironmentUIEvidenceTest(unittest.TestCase):
                 200,
             )
 
+    def test_media_is_isolated_per_child_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            measured = self.runner.media_directory(parent / "ui-target-mac-report.json")
+            contention = self.runner.media_directory(parent / "contention-seed-ui-report.json")
+            self.assertNotEqual(measured, contention)
+            self.assertEqual(measured.name, "meeting-recording-ui")
+            self.assertEqual(contention.name, "meeting-recording-ui")
+            self.assertEqual(measured.parent.name, "ui-target-mac-report")
+            self.assertEqual(contention.parent.name, "contention-seed-ui-report")
+
+    def test_known_executable_never_falls_back_to_another_closedroom(self) -> None:
+        wanted = "/Applications/ClosedRoom Test-id.app/Contents/MacOS/ClosedRoom"
+        running = [
+            (101, "/Applications/ClosedRoom.app/Contents/MacOS/ClosedRoom"),
+            (102, "/Applications/ClosedRoom Test-other.app/Contents/MacOS/ClosedRoom"),
+            (103, wanted + "-spurious"),
+        ]
+        with mock.patch.object(self.runner, "process_snapshot", return_value=running):
+            self.assertIsNone(self.runner.find_closedroom_pid(expected_executable=wanted))
+        running.append((104, wanted))
+        with mock.patch.object(self.runner, "process_snapshot", return_value=running):
+            self.assertEqual(self.runner.find_closedroom_pid(expected_executable=wanted), 104)
+
+    def test_video_duration_is_bounded_and_covers_normal_smoke(self) -> None:
+        self.assertEqual(self.runner.video_duration(8), 90)
+        self.assertEqual(self.runner.video_duration(20), 90)
+        self.assertEqual(self.runner.video_duration(150), 180)
+
+    def test_screencapture_uses_natural_duration_not_sigint_for_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            movie = Path(tmp) / "journey.mov"
+            with mock.patch.object(self.runner.subprocess, "Popen") as popen:
+                self.runner.start_video("0,0,640,480", movie, 90)
+            cmd = popen.call_args.args[0]
+            self.assertEqual(cmd[:5], ["screencapture", "-v", "-V", "90", "-R"])
+            self.assertEqual(cmd[-1], str(movie))
+            self.assertIn("0,0,640,480", cmd)
+
+    def test_video_requires_natural_success_and_full_journey(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            movie = Path(tmp) / "journey.mov"
+            self.assertFalse(self.runner.video_passes(0, movie, True))
+            movie.write_bytes(b"sample")
+            self.assertFalse(self.runner.video_passes(-2, movie, True))
+            self.assertFalse(self.runner.video_passes(0, movie, False))
+            self.assertTrue(self.runner.video_passes(0, movie, True))
+
+    def test_video_cleanup_does_not_interrupt_completed_recorder(self) -> None:
+        finished = mock.Mock()
+        finished.poll.return_value = 0
+        self.assertFalse(self.runner.abort_unfinished_video(finished))
+        finished.terminate.assert_not_called()
+        finished.send_signal.assert_not_called()
+
+        ongoing = mock.Mock()
+        ongoing.poll.return_value = None
+        self.assertTrue(self.runner.abort_unfinished_video(ongoing))
+        ongoing.terminate.assert_called_once()
+        ongoing.send_signal.assert_not_called()
+
     def test_find_closedroom_pid_excludes_processes_present_before_smoke(self) -> None:
         snapshot = [
             (100, "/old/ClosedRoom.app/Contents/MacOS/ClosedRoom"),

@@ -28,8 +28,8 @@
 </p>
 
 <p align="center">
-  <a href="docs/assets/closedroom-product-overview.png">
-    <img src="docs/assets/closedroom-product-overview.png" alt="ClosedRoom product workflow from a new meeting through recording, transcription, structured notes, review, and project memory">
+  <a href="docs/assets/closedroom-product-overview.webp">
+    <img src="docs/assets/closedroom-product-overview.webp" alt="ClosedRoom product workflow from a new meeting through recording, transcription, structured notes, review, and project memory">
   </a>
 </p>
 
@@ -77,9 +77,9 @@ Under that simple flow, ClosedRoom saves the meeting before expensive AI work, e
     <th>Meeting intelligence</th>
   </tr>
   <tr>
-    <td align="center"><a href="docs/assets/0.home.png"><img src="docs/assets/0.home.png" width="240" alt="ClosedRoom Today workspace"></a></td>
-    <td align="center"><a href="docs/assets/1.recording.png"><img src="docs/assets/1.recording.png" width="240" alt="ClosedRoom recording setup"></a></td>
-    <td align="center"><a href="docs/assets/5.meeting-analysis.png"><img src="docs/assets/5.meeting-analysis.png" width="240" alt="ClosedRoom meeting intelligence workspace"></a></td>
+    <td align="center"><a href="docs/assets/0.home.webp"><img src="docs/assets/0.home.webp" width="240" alt="ClosedRoom Today workspace"></a></td>
+    <td align="center"><a href="docs/assets/1.recording.webp"><img src="docs/assets/1.recording.webp" width="240" alt="ClosedRoom recording setup"></a></td>
+    <td align="center"><a href="docs/assets/5.meeting-analysis.webp"><img src="docs/assets/5.meeting-analysis.webp" width="240" alt="ClosedRoom meeting intelligence workspace"></a></td>
   </tr>
   <tr>
     <td align="center">Meetings, actions, decisions, risks and context</td>
@@ -94,8 +94,8 @@ Under that simple flow, ClosedRoom saves the meeting before expensive AI work, e
     <th>Deep-dive actions</th>
   </tr>
   <tr>
-    <td align="center"><a href="docs/assets/6.project-analysis.png"><img src="docs/assets/6.project-analysis.png" width="320" alt="ClosedRoom project memory workspace"></a></td>
-    <td align="center"><a href="docs/assets/4.deep-dive-actions.png"><img src="docs/assets/4.deep-dive-actions.png" width="320" alt="ClosedRoom deep-dive action items"></a></td>
+    <td align="center"><a href="docs/assets/6.project-analysis.webp"><img src="docs/assets/6.project-analysis.webp" width="320" alt="ClosedRoom project memory workspace"></a></td>
+    <td align="center"><a href="docs/assets/4.deep-dive-actions.webp"><img src="docs/assets/4.deep-dive-actions.webp" width="320" alt="ClosedRoom deep-dive action items"></a></td>
   </tr>
   <tr>
     <td align="center">Cross-meeting status, decisions, risks and updates</td>
@@ -110,14 +110,14 @@ A normal ClosedRoom workflow does not require choosing models, audio devices or 
 1. **Start and record a meeting.** Add a title or project if useful, grant the required macOS capture permissions, and let ClosedRoom write audio progressively so the meeting remains recoverable.
 2. **Stop and transcribe.** ClosedRoom finalizes the recording first, then runs the default local ASR path as a persisted, observable job.
 3. **Turn the transcript into meeting intelligence.** Structured analysis produces the summary, actions, decisions, risks and other reusable outputs shown in the main workspace.
-4. **Review and edit.** Generated items stay human-reviewable; corrections are persisted instead of being silently replaced on refresh or regeneration.
+4. **Review and edit.** Read the saved Meeting in the compact **Conversation** transcript (switch to **Details** for source-level information), open **Voices** to audition and name speakers, and use **Correct speaker** on an individual transcript turn when attribution is wrong. These corrections preserve the recorded audio and original words/timestamps and support one-step undo. Generated notes remain separately reviewable.
 5. **Reuse the result.** Today and Project workspaces carry decisions, commitments, risks and context across meetings instead of treating each transcript as an isolated file.
 
 Optional visual intelligence can be enabled for a specifically selected macOS window. It may contribute evidence for naming existing speaker clusters, but **audio diarization remains the source of who spoke when and uncertain identity mappings abstain rather than pretending certainty**.
 
 During native recording, the compact overlay can also save a **manual full-display screenshot** as local meeting evidence. The image is timestamped against the recording clock, reopens from the transcript/notes at that point, and stays separate from spoken evidence. This action is manual rather than continuous, and remote-provider selection does not silently send the screenshot outside the Mac.
 
-![ClosedRoom speaker intelligence: audio diarization produces stable speaker clusters, while optional visual evidence can support conservative names or abstain](docs/assets/closedroom-speaker-intelligence.png)
+![ClosedRoom speaker intelligence: audio diarization produces stable speaker clusters, while optional visual evidence can support conservative names or abstain](docs/assets/closedroom-speaker-intelligence.webp)
 
 _Visual evidence may support naming an existing speaker cluster; it never replaces audio diarization, and low-confidence mappings remain unknown._
 
@@ -134,11 +134,13 @@ The default product path keeps the sensitive meeting workflow on the Mac. Cloud 
 | Speaker diarization | Local FluidAudio on supported Macs | Speechmatics when explicitly selected |
 | Meeting analysis | Local [Korgis](https://github.com/daniele21/korgis) runtime | Gemini when explicitly selected |
 | Visual speaker evidence | Local selected-window frames + local VLM path | Disabled unless explicitly enabled |
-| Persistence | Local filesystem + SQLite | No implicit remote persistence |
+| Persistence | Local filesystem + SQLite | You may preconfigure a GCS destination in Settings; automated upload/sync is not yet active |
+
+In **Settings → Storage**, select **On this Mac** (default) or **Google Cloud Storage (preparation only)**. For GCS you can save a project ID, bucket name and region without granting credentials or triggering transfers. The settings screen explicitly shows the **effective** storage mode, which remains local in this iteration; the existing one-shot GCS migration backup does not make live storage available. Never delete local recordings based on this preference.
 
 This is a product boundary, not a marketing label: provider selection, runtime ownership and failure states are explicit so a local failure does not silently move meeting content to a cloud API.
 
-![ClosedRoom high-level local-first architecture](docs/assets/closedroom-high-level-architecture.png)
+![ClosedRoom high-level local-first architecture](docs/assets/closedroom-high-level-architecture.webp)
 
 _The default trust boundary stays on the user's Mac; cloud providers sit outside it and are used only when explicitly selected._
 
@@ -174,7 +176,7 @@ The key ownership split is:
 - **[Korgis](https://github.com/daniele21/korgis) owns reusable Local AI runtime infrastructure:** model loading, backend selection, runtime lifecycle, text/vision inference, logs and diagnostics. The current integration still uses the internal `local-llm-server` package/runtime identity where required by the implementation.
 - **Native helpers own platform-specific capture and diarization work** behind explicit process boundaries.
 
-![ClosedRoom detailed technical architecture](docs/assets/closedroom-detailed-technical-architecture.png)
+![ClosedRoom detailed technical architecture](docs/assets/closedroom-detailed-technical-architecture.webp)
 
 For durable ownership and extension rules, read [`docs/architecture.md`](docs/architecture.md).
 
@@ -221,21 +223,29 @@ cd closedroom
 ./run.sh
 ```
 
-Then open:
+Then open the source-run server (the `run.sh` script explicitly uses port `1230`):
 
 ```text
-http://127.0.0.1:1236
+http://127.0.0.1:1230
 ```
+
+The **installed** `ClosedRoom.app` normally uses port `1236` and is never
+terminated when starting the source server. Source-mode `local-asr serve` defaults
+to `1237`, including with `--reload`, and keeps settings, recordings, transcripts,
+catalog and local runtime state in
+`~/Library/Application Support/ClosedRoom/Development/`. Production data under
+`~/ClosedRoom/` and production settings are not touched. A second instance of the
+same profile or an explicitly requested occupied port **fails with an error**,
+without killing either app or recording. Close an existing instance normally
+before reopening the same profile.
 
 The repository still uses the internal Python package / CLI name `local-asr-server` / `local-asr` for the local backend. That is an implementation boundary inside the **ClosedRoom** product, not a separate repository to clone.
 
 ### Start the local API directly
 
 ```bash
-local-asr serve \
-  --model mlx-community/nemotron-3.5-asr-streaming-0.6b \
-  --recordings-dir ~/Recordings/local-asr \
-  --port 1236
+uv run local-asr serve \
+  --model mlx-community/nemotron-3.5-asr-streaming-0.6b
 ```
 
 For development with reload:
@@ -244,7 +254,17 @@ For development with reload:
 UV_CACHE_DIR=.cache/uv uv run local-asr serve --reload
 ```
 
+Open `http://127.0.0.1:1237`. Explicit `--recordings-dir` and
+`CLOSEDROOM_CATALOG_DB` overrides must remain inside
+`~/Library/Application Support/ClosedRoom/Development/Data/` in source mode;
+unsafe paths are refused before writable services start.
+
 ### Build the native macOS application
+
+The macOS bundle uses Python **3.12** by default, while source/CLI support remains `>=3.10,<3.14`. `CLOSEDROOM_BUILD_PYTHON_VERSION` overrides packaging Python only when validating an alternative toolchain; builds fail if SciPy/MLX Whisper native imports fail.
+
+The build compiles the React UI into tracked `src/local_asr_server/static/` for packaging. It now requires that generated directory to be clean before starting, then restores **only** those Vite outputs on exit (including build failures), leaving other source changes and finalized artifacts untouched. If it refuses to start, inspect `git status --short -- src/local_asr_server/static` before choosing any cleanup; never run a repository-wide hard reset.
+
 
 ```bash
 ./build.sh --no-dmg
@@ -290,7 +310,7 @@ ClosedRoom is not a guarantee of perfect transcription, speaker identity or meet
 | --- | --- | --- |
 | Product UI | `frontend/src/` | Today, recording, meeting, project, settings and guided workflows |
 | API / composition | `src/local_asr_server/server.py`, `app_services.py` | FastAPI boundary, route wiring and long-lived services |
-| Recording / capture | `recordings.py`, native helpers, `audio_router.py` | Progressive capture, recovery, macOS audio and optional visual frames |
+| Recording / capture | `recordings.py`, AVFoundation/ScreenCaptureKit helpers | Progressive capture, recovery, macOS audio and optional visual frames |
 | Transcription / diarization | `transcriptions.py`, `asr_provider.py`, `speaker_diarization_helper/` | ASR providers, transcript persistence and speaker clustering |
 | Meeting intelligence | analysis jobs, templates, structured notes | Structured meeting outputs, source references, edits and revisions |
 | Local model runtime | [Korgis](https://github.com/daniele21/korgis) + internal `local-llm-server` integration | Local LLM/VLM lifecycle and inference |

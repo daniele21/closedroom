@@ -14,6 +14,7 @@ from local_asr_server.env import get_env_var
 from local_asr_server.runtime.llm_sidecar import LocalLLMSidecarError
 from local_asr_server.runtime.local_ai import KorgisTextAdapter
 from local_asr_server.runtime.models import ANALYSIS_QUALITY_DEFAULTS, resolve_local_llm_model_path
+from local_asr_server.analysis_source_provenance import speaker_attribution_digest
 from local_asr_server.schemas import ANALYSIS_SETTING_OVERRIDE_FIELDS, AnalysisRequest
 from local_asr_server.recordings import RecordingError
 from local_asr_server.settings import load_settings
@@ -33,7 +34,7 @@ from local_asr_server.structured_notes import (
 
 logger = logging.getLogger("uvicorn.error")
 ANALYSIS_CACHE_VERSION = "analysis-v1"
-STRUCTURED_ANALYSIS_CACHE_VERSION = "analysis-structured-v3"
+STRUCTURED_ANALYSIS_CACHE_VERSION = "analysis-structured-v4"
 MAX_STRUCTURED_VISUAL_SOURCES = 12
 
 
@@ -387,6 +388,7 @@ class AnalysisService:
             "version": 2,
             "transcription_id": transcription.get("id"),
             "transcript_segment_count": len(transcription.get("segments") or []),
+            "speaker_attribution_sha256": speaker_attribution_digest(transcription),
             "visual_sources": [
                 {
                     "screenshot_id": source.get("screenshot_id"),
@@ -441,6 +443,8 @@ class AnalysisService:
                     "start": segment.get("start"),
                     "end": segment.get("end"),
                     "speaker": segment.get("speaker_name") or segment.get("speaker_label") or segment.get("speaker"),
+                    "speaker_group": segment.get("speaker_group"),
+                    "provider_speaker": segment.get("provider_speaker"),
                     "text": segment.get("text") or "",
                 }
             )

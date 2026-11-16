@@ -43,11 +43,13 @@ export async function searchMeetingArchive(
   page = 1,
   limit = 25,
   signal?: AbortSignal,
+  archived = false,
 ): Promise<MeetingArchiveSearchResponse> {
   const params = new URLSearchParams({
     q: query,
     page: String(Math.max(1, page)),
     limit: String(Math.max(1, Math.min(limit, 50))),
   });
+  if (archived) params.set('archived', 'true');
   return (await requestArchive(`/v1/meetings?${params.toString()}`, signal)).json();
 }

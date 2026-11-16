@@ -152,7 +152,14 @@ class SingleFileTranscriptionUseCase:
                 },
             })
 
-        payload = self._apply_diarization(app, audio_path, payload, request)
+        payload = self.apply_initial_diarization(
+            app,
+            audio_path,
+            payload,
+            provider=request.diarization_provider,
+            speechmatics_region=request.diarization_region,
+            speechmatics_model=request.diarization_model,
+        )
         payload["recording_id"] = recording_id or payload.get("recording_id", "")
         if cached is None:
             save_cached_result(cache_key, payload)
@@ -168,24 +175,25 @@ class SingleFileTranscriptionUseCase:
         return payload
 
     @staticmethod
-    def _apply_diarization(
+    def apply_initial_diarization(
         app: Any,
         audio_path: Path,
         payload: dict[str, Any],
-        request: SingleFileTranscriptionRequest,
+        *,
+        provider: str,
+        speechmatics_region: str | None,
+        speechmatics_model: str | None,
     ) -> dict[str, Any]:
-        if request.diarization_provider == DIARIZATION_PROVIDER_DISABLED:
+        """Apply one idempotent diarization policy for upload and file-path inputs."""
+        if provider == DIARIZATION_PROVIDER_DISABLED:
             return payload
         existing = payload.get("stats", {}).get("speaker_diarization") or {}
-        if (
-            existing.get("status") == "completed"
-            and existing.get("provider") == request.diarization_provider
-        ):
+        if existing.get("status") == "completed" and existing.get("provider") == provider:
             return payload
         return get_services(app).diarization.process_audio_payload(
             audio_path,
             payload,
-            provider=request.diarization_provider,
-            speechmatics_region=request.diarization_region,
-            speechmatics_model=request.diarization_model,
+            provider=provider,
+            speechmatics_region=speechmatics_region,
+            speechmatics_model=speechmatics_model,
         )

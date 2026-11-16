@@ -69,6 +69,29 @@ class MeetingLifecycleApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/v1/meetings?q=zephyr").json()["total"], 1)
         self.assertEqual(self.client.get("/v1/meetings?q=zephyr&archived=true").json()["total"], 0)
 
+    def test_meeting_detail_is_compact_but_full_transcription_has_timed_speaker_turns(self) -> None:
+        recording_id = self._recorded("Transcript detail hydration")
+        saved = self.services.transcriptions.save({
+            "text": "[00:04] Computer: Hello",
+            "segments": [{
+                "id": 0, "start": 4.0, "end": 6.0,
+                "text": "Hello", "track_id": "system",
+                "speaker_label": "Computer",
+            }],
+            "source_tracks": [{"id": "system", "label": "Computer"}],
+        }, recording_id=recording_id)
+        meeting = self.client.get(f"/v1/meetings/{recording_id}")
+        self.assertEqual(meeting.status_code, 200, meeting.text)
+        summary = meeting.json()["transcription"]
+        self.assertNotIn("segments", summary,
+                         "meeting core remains lightweight and loads instantly")
+        self.assertEqual(summary["text"], "[00:04] Computer: Hello")
+        full = self.client.get(f"/v1/transcriptions/{saved['id']}")
+        self.assertEqual(full.status_code, 200, full.text)
+        self.assertEqual(len(full.json()["segments"]), 1)
+        self.assertEqual(full.json()["segments"][0]["start"], 4.0)
+        self.assertEqual(full.json()["segments"][0]["track_id"], "system")
+
     def test_delete_is_irreversible_only_after_archive_and_purges_exports(self) -> None:
         recording_id = self._recorded("Remove meeting")
         saved = self.services.transcriptions.save(

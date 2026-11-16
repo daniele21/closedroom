@@ -15,13 +15,12 @@ from fastapi.staticfiles import StaticFiles
 from local_asr_server.analysis_jobs import AnalysisJobManager
 from local_asr_server.app_services import AppServices, install_compatibility_aliases
 from local_asr_server.app_identity import get_app_version
-from local_asr_server.audio_router import AudioRouter
 from local_asr_server.catalog import CatalogStore
 from local_asr_server.jobs import JobStore
 from local_asr_server.native_capture import NativeCaptureManager
 from local_asr_server.recordings import RecordingStore
 from local_asr_server.transcription_jobs import TranscriptionJobManager
-from local_asr_server.paths import get_brand_assets_dir, get_static_dir
+from local_asr_server.paths import APP_NAME, get_brand_assets_dir, get_static_dir
 from local_asr_server.runtime.resource_policy import ResourcePolicy, recording_has_active_capture
 from local_asr_server.runtime.service_manager import RuntimeServiceManager
 from local_asr_server.runtime.workload_arbiter import HeavyWorkloadArbiter
@@ -74,6 +73,20 @@ def create_app(
         if env_rec_dir:
             recordings_dir = Path(env_rec_dir)
 
+    # Validate before constructing a CatalogStore, JobStore, or RecordingStore.
+    # A direct uvicorn factory invocation must be unable to bypass the
+    # development-profile data boundary established by the CLI.
+    from local_asr_server.paths import is_development_profile
+    # load_settings is required by both the bundled app and development server.
+    # Importing it only in the branch below makes it an unbound local in
+    # production, preventing create_app() from reaching the HTTP startup.
+    from local_asr_server.settings import load_settings, validate_development_storage
+    if is_development_profile():
+        validate_development_storage(
+            load_settings(), recordings_dir=recordings_dir,
+            catalog_db=os.environ.get("CLOSEDROOM_CATALOG_DB"),
+        )
+
     app = FastAPI(
         title="ClosedRoom",
         version=get_app_version(),
@@ -104,12 +117,10 @@ def create_app(
     transcriptions_root = Path(
         transcriptions_module.load_settings()["transcriptions_dir"]
     ).expanduser().resolve()
-    if temp_root in transcriptions_root.parents or transcriptions_root == temp_root:
-        catalog_path = transcriptions_root / "closedroom.db"
-    elif recordings_dir is not None and temp_root in recordings_dir.expanduser().resolve().parents:
-        catalog_path = recordings_dir.expanduser().resolve() / "closedroom.db"
-    else:
-        catalog_path = CatalogStore.default_db_path()
+    catalog_path = CatalogStore.default_db_path(
+        recordings_dir=recordings_dir,
+        transcriptions_dir=transcriptions_root,
+    )
     app.state.app_log_file = configure_application_logging(fallback_dir=catalog_path.parent)
 
     catalog_store = CatalogStore(catalog_path)
@@ -121,7 +132,7 @@ def create_app(
         reason="Interrupted by server restart",
     )
     recording_store = RecordingStore(
-        recordings_dir or Path("~/Recordings/local-asr"),
+        recordings_dir or Path(load_settings()["recordings_dir"]).expanduser().resolve(),
         use_settings_dir=recordings_dir is None,
         catalog=catalog_store,
     )
@@ -154,7 +165,8 @@ def create_app(
         RESET = "\033[0m"
 
         # Show ClosedRoom Web UI URL
-        print(f"\n{BOLD}{GREEN}[★] ClosedRoom Web UI: {RESET}{BOLD}http://127.0.0.1:1236/{RESET}\n")
+        port = getattr(app.state, "port", os.environ.get("CLOSEDROOM_API_PORT", "1236"))
+        print(f"\n{BOLD}{GREEN}[★] ClosedRoom Web UI: {RESET}{BOLD}http://127.0.0.1:{port}/{RESET}\n")
 
         if llm_mode == "auto":
             # Managed local AI is intentionally cold at application startup.
@@ -202,9 +214,6 @@ def create_app(
         transcriptions=transcription_store,
     )
     install_compatibility_aliases(app, services)
-
-    # Clean up any orphan aggregate devices from previous runs/crashes
-    AudioRouter.cleanup_orphans()
 
     # Set up static files serving — resolves correctly in both dev and bundle.
     static_dir = get_static_dir()

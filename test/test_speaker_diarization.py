@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from local_asr_server.speaker_diarization import LocalSpeakerDiarizationService
+from local_asr_server.speaker_diarization import LocalSpeakerDiarizationService, NEMOTRON3_ENGINE
 
 
 class _Store:
@@ -88,6 +88,56 @@ class SpeakerDiarizationTests(unittest.TestCase):
                 force=True,
             )
         self.assertEqual(summary["status"], "completed")
+
+    def test_nemotron_routes_selected_preset_to_native_helper(self) -> None:
+        service = LocalSpeakerDiarizationService()
+        inputs = {"system": Path("/tmp/speaker-fixture.wav")}
+        settings = {
+            "speaker_diarization_engine": NEMOTRON3_ENGINE,
+            "speaker_diarization_nemotron_preset": "c128-split-w8a8",
+        }
+        with (
+            patch("local_asr_server.speaker_diarization.load_settings", return_value=settings),
+            patch.object(service, "_run_helper", return_value={"engine": NEMOTRON3_ENGINE, "tracks": {}}) as helper,
+        ):
+            result = service.diarize_paths(inputs)
+        self.assertEqual(result["engine"], NEMOTRON3_ENGINE)
+        helper.assert_called_once_with(inputs, engine=NEMOTRON3_ENGINE, preset="c128-split-w8a8")
+
+    def test_invalid_engine_fails_closed_without_inference(self) -> None:
+        service = LocalSpeakerDiarizationService()
+        with (
+            patch("local_asr_server.speaker_diarization.load_settings", return_value={}),
+            patch.object(service, "_run_helper") as helper,
+        ):
+            with self.assertRaisesRegex(ValueError, "Unsupported diarization engine"):
+                service.diarize_paths({"mic": Path("mic.wav")}, engine="cloud")
+            helper.assert_not_called()
+
+    def test_nemotron_assignment_uses_actual_engine_in_metadata(self) -> None:
+        result = {"segments": [{"start": 0.0, "end": 1.0, "text": "Ciao"}]}
+        assigned = LocalSpeakerDiarizationService.assign_segments(
+            result, "mic", [{"speaker": "0", "start": 0.0, "end": 1.0}],
+            0.25, engine=NEMOTRON3_ENGINE,
+        )
+        self.assertEqual(assigned, 1)
+        self.assertEqual(result["metadata"]["speaker_diarization"]["engine"], NEMOTRON3_ENGINE)
+
+    def test_selected_engine_failure_does_not_mutate_transcript(self) -> None:
+        store = _Store()
+        service = LocalSpeakerDiarizationService(runner=lambda _inputs: (_ for _ in ()).throw(RuntimeError("offline model unavailable")))
+        result = {"segments": [{"start": 0, "end": 1, "text": "Contenuto originale"}]}
+        with patch("local_asr_server.speaker_diarization.load_settings", return_value={
+            "speaker_diarization_enabled": True,
+            "speaker_diarization_engine": NEMOTRON3_ENGINE,
+        }):
+            summary = service.process(
+                store, "r1", [({"id": "system"}, Path("system.wav"))],
+                [{"track": {"id": "system"}, "result": result}],
+            )
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["engine"], NEMOTRON3_ENGINE)
+        self.assertNotIn("provider_speaker", result["segments"][0])
 
 
 if __name__ == "__main__":

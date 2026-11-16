@@ -16,8 +16,8 @@ if [ "$OS" = "Darwin" ]; then
         exit 1
     fi
 
-    echo "Installing system dependencies via Homebrew (ffmpeg, blackhole-2ch)..."
-    brew install ffmpeg blackhole-2ch
+    echo "Installing FFmpeg via Homebrew..."
+    brew install ffmpeg
     
     echo ""
     echo "============================================="

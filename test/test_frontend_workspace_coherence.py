@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -24,10 +25,50 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertNotIn('className="app-header', self.app)
         self.assertNotIn('className="app-nav', self.app)
 
+    def test_meetings_is_a_durable_destination_and_today_remains_reachable(self) -> None:
+        meeting_page = (ROOT / "frontend/src/pages/MeetingsPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("case 'meetings':", self.app)
+        self.assertIn("id === 'home' ? 'meetings' : item.id", self.app)
+        self.assertIn("label: t('nav.meetings')", self.app)
+        self.assertIn("<MeetingArchiveExplorer", meeting_page)
+        self.assertIn("navigateTo('home')", meeting_page)
+        self.assertIn("activePage === 'meetings'", self.app)
+
     def test_meeting_stays_a_child_of_today_in_navigation(self) -> None:
-        self.assertIn("activePage === 'home' || activePage === 'meeting'", self.app)
+        self.assertIn("const todayActive = activePage === 'home' || activePage === 'meetings' || (activePage === 'meeting' && !meetingFromProject)", self.app)
         self.assertIn("aria-current={item.active ? 'page' : undefined}", self.app)
         self.assertNotIn("{ id: 'meeting'", self.app)
+
+    def test_legacy_recording_details_resolve_to_meeting_without_intercepting_auto_start(self) -> None:
+        new_meeting_page = (ROOT / "frontend/src/pages/NewRecordingPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("legacyRecordingDetail = page === 'recording'", self.app)
+        self.assertIn("legacySavedRecording = pageName === 'recording'", self.app)
+        self.assertIn("!detail.startsWith('auto/')", self.app)
+        self.assertIn("window.history.replaceState(null, '', `#meeting/${detail}`)", self.app)
+        self.assertIn("navigateTo('meeting', recording.id);", new_meeting_page)
+        self.assertNotIn("const RecordingPage = lazy(", self.app)
+        self.assertNotIn("<RecordingPage", self.app)
+        self.assertFalse((ROOT / "frontend/src/pages/RecordingPage.tsx").exists())
+        self.assertIn("routeDetail?.startsWith('auto/')", self.app)
+
+    def test_removed_recording_page_has_no_frontend_consumers(self) -> None:
+        # Prevent reintroducing an alternate saved-recording detail entry point.
+        # NewRecordingPage is the dedicated capture surface, not this old page.
+        pattern = re.compile(r"\bRecordingPage\b")
+        for path in (ROOT / "frontend/src").rglob("*"):
+            if path.suffix not in {".ts", ".tsx"}:
+                continue
+            with self.subTest(source=str(path.relative_to(ROOT))):
+                self.assertIsNone(pattern.search(path.read_text(encoding="utf-8")))
+
+    def test_meeting_back_retains_project_origin(self) -> None:
+        meeting = (ROOT / "frontend/src/pages/MeetingDetailPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("meetingOriginRef", self.app)
+        self.assertIn("meetingFromProject", self.app)
+        self.assertIn("onBack={() => navigateTo(meetingOriginRef.current)}", self.app)
+        self.assertIn("onBack?: () => void", meeting)
+        self.assertIn("const goBack = () =>", meeting)
+        self.assertIn("onClick={() => goBack()}", meeting)
 
     def test_advanced_and_runtime_controls_are_utilities_not_primary_navigation(self) -> None:
         nav_start = self.app.index('const navItems = [')
@@ -40,6 +81,17 @@ class WorkspaceCoherenceContractTests(unittest.TestCase):
         self.assertNotIn("id: 'transcription'", nav_block)
         self.assertIn('workspace-runtime-status', self.app)
         self.assertIn('workspace-settings-trigger', self.app)
+
+    def test_activities_are_secondary_without_duplicating_job_ownership(self) -> None:
+        nav_start = self.app.index("const navItems = [")
+        nav_end = self.app.index("];", nav_start)
+        self.assertNotIn("id: 'activities'", self.app[nav_start:nav_end])
+        self.assertIn('data-tour="utility-activities"', self.app)
+        self.assertIn("navigateTo('activities')", self.app)
+        self.assertIn("activities.activeCount > 0", self.app)
+        self.assertIn("case 'activities':", self.app)
+        self.assertIn("workspace-activity-count", self.app)
+        self.assertIn(".workspace-activity-trigger", self.css)
 
     def test_shell_has_explicit_wide_compact_narrow_and_reduced_motion_behavior(self) -> None:
         self.assertIn('grid-template-columns: 236px minmax(0, 1fr)', self.css)

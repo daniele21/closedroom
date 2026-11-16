@@ -54,7 +54,7 @@ class PathTranscriptionAdapterContractTests(unittest.TestCase):
                 return_value=raw,
             ) as engine,
             patch(
-                "local_asr_server.routers.transcriptions._apply_initial_diarization",
+                "local_asr_server.services.transcription_application.SingleFileTranscriptionUseCase.apply_initial_diarization",
                 side_effect=lambda app, audio, payload, **kwargs: payload,
             ) as diarize,
             patch(
@@ -95,7 +95,7 @@ class PathTranscriptionAdapterContractTests(unittest.TestCase):
                 return_value=("local", "resolved-model", {}, {}),
             ),
             patch(
-                "local_asr_server.routers.transcriptions._apply_initial_diarization",
+                "local_asr_server.services.transcription_application.SingleFileTranscriptionUseCase.apply_initial_diarization",
                 side_effect=lambda app, audio, payload, **kwargs: payload,
             ),
             patch(
@@ -120,6 +120,77 @@ class PathTranscriptionAdapterContractTests(unittest.TestCase):
                 transcribe_path(self.request, TranscribePathRequest(file=str(self.audio)))
             self.assertEqual(failure.exception.status_code, 500)
             self.assertIn("engine-failure", failure.exception.detail)
+
+
+    def test_path_asr_cache_and_diarization_policy_remain_separate(self) -> None:
+        """A cached ASR result still receives diarization on each path request."""
+        store = Mock()
+        store.root = Path(self.tmp.name) / "transcripts"
+        store.save.return_value = {"id": "tx-1"}
+        result = {"text": "cached ASR", "segments": [], "stats": {}}
+        engine = Mock(return_value=result)
+
+        def diarize(_path, payload, *, provider, **_kwargs):
+            return {
+                **payload,
+                "stats": {
+                    **payload.get("stats", {}),
+                    "speaker_diarization": {"status": "completed", "provider": provider},
+                },
+            }
+
+        diarization = Mock(side_effect=diarize)
+        with (
+            patch("local_asr_server.routers.transcriptions.load_settings", return_value={}),
+            patch(
+                "local_asr_server.routers.transcriptions.TranscriptionService.resolve_asr",
+                return_value=("local", "model-a", {}, {}),
+            ),
+            patch(
+                "local_asr_server.routers.transcriptions.TranscriptionService.backend",
+                return_value="mlx",
+            ),
+            patch(
+                "local_asr_server.routers.transcriptions.TranscriptionService.payload_metadata",
+                return_value={},
+            ),
+            patch(
+                "local_asr_server.routers.transcriptions._transcribe_audio_file_with_cache",
+                engine,
+            ),
+            patch(
+                "local_asr_server.routers.transcriptions.get_services",
+                return_value=SimpleNamespace(transcriptions=store),
+            ),
+            patch(
+                "local_asr_server.services.transcription_application.get_services",
+                return_value=SimpleNamespace(
+                    diarization=SimpleNamespace(process_audio_payload=diarization)
+                ),
+            ),
+        ):
+            body = TranscribePathRequest(
+                file=str(self.audio),
+                diarization_provider="local",
+                response_format="verbose_json",
+            )
+            first = json.loads(transcribe_path(self.request, body).body)
+            second = json.loads(transcribe_path(self.request, body).body)
+            self.assertEqual(engine.call_count, 2)
+            self.assertEqual(diarization.call_count, 2)
+            self.assertEqual(first["stats"]["speaker_diarization"]["provider"], "local")
+            self.assertEqual(second["stats"]["speaker_diarization"]["provider"], "local")
+            self.assertEqual(result["stats"], {})
+
+            engine.return_value = {
+                "text": "already diarized",
+                "stats": {"speaker_diarization": {"status": "completed", "provider": "local"}},
+            }
+            third = json.loads(transcribe_path(self.request, body).body)
+            self.assertEqual(third["text"], "already diarized")
+            # Path rebuilding replaces ASR stats before diarization (current contract).
+            # An ASR-cache "completed" marker is therefore not authoritative here.
+            self.assertEqual(diarization.call_count, 3)
 
 
 if __name__ == "__main__":

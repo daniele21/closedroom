@@ -4,16 +4,27 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
+import subprocess
+import tempfile
 import threading
 import uuid
 import hashlib
 import time
+import wave
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from local_asr_server.catalog import CatalogStore
+from local_asr_server.recording_storage_policy import (
+    DEFAULT_RETENTION_DAYS, RETENTION_DAYS, assess_audio_cleanup,
+)
+from local_asr_server.paths import get_ffmpeg_path
+from local_asr_server.recording_audio_recovery import (
+    AudioRecoveryError, checkpoint_frame_count, has_checkpoints, recover_checkpoint_audio,
+)
 from local_asr_server.recording_screenshot_artifacts import (
     MAX_SCREENSHOT_BYTES,
     MAX_SCREENSHOT_PIXELS,
@@ -43,6 +54,7 @@ _INTERNAL_TRACK_FIELDS = {
     "_content_sha256_size",
     "_content_sha256_mtime_ns",
     "_content_sha256_inode",
+    "_recovered_audio_file",
 }
 
 
@@ -164,6 +176,14 @@ class RecordingStore:
         capture_mode: str = "legacy_mixed",
         capture_backend: str = "browser",
     ) -> dict[str, Any]:
+        # Freeze the retention preference when the meeting is created.
+        # The application does not yet enable automatic audio deletion.
+        retention_days = DEFAULT_RETENTION_DAYS
+        if self._use_settings_dir:
+            from local_asr_server.settings import load_settings
+            candidate = load_settings().get("audio_local_retention_days")
+            if type(candidate) is int and candidate in RETENTION_DAYS:
+                retention_days = candidate
         recording_id = str(uuid.uuid4())
         date_dir = datetime.now(timezone.utc).date().isoformat()
         session_dir = self.root / date_dir / recording_id
@@ -220,6 +240,7 @@ class RecordingStore:
             "note_count": 0,
             "note_manifest_version": NOTE_MANIFEST_VERSION,
             "note_revision": 0,
+            "audio_local_retention_days": retention_days,
         }
         for track in audio_tracks:
             self._track_part_path(session_dir, track).touch()
@@ -394,6 +415,35 @@ class RecordingStore:
             if not isinstance(events, list):
                 events = []
                 timeline["events"] = events
+            event_type = event.get("type")
+            if event_type in {"source_interrupted", "source_recovering", "source_unavailable", "source_recovered"}:
+                source = event.get("source")
+                if source not in {"mic", "system"}:
+                    raise RecordingConflict("Invalid recovery source")
+                # These are source-health transitions, never recording-wide errors.
+                states = timeline.setdefault("source_health", {})
+                new_state = event_type.removeprefix("source_")
+                if states.get(source) == new_state:
+                    return self.public_metadata(metadata)
+                states[source] = new_state
+                ready_uptime = timeline.get("recording_ready_uptime")
+                uptime = event.get("uptime")
+                if isinstance(uptime, (int, float)) and isinstance(ready_uptime, (int, float)):
+                    offset_ms = max(0, round((uptime - ready_uptime) * 1000))
+                    interruptions = timeline.setdefault("source_interruptions", [])
+                    if event_type == "source_interrupted":
+                        interruptions.append({"source": source, "start_ms": offset_ms, "end_ms": None})
+                    elif event_type == "source_recovered":
+                        for gap in reversed(interruptions):
+                            if gap["source"] == source and gap["end_ms"] is None:
+                                gap["end_ms"] = max(gap["start_ms"], offset_ms)
+                                break
+            elif event_type == "ready" and isinstance(event.get("recording_ready_uptime"), (int, float)):
+                timeline["recording_ready_uptime"] = event["recording_ready_uptime"]
+            # Compact repetitive meter events into the live state. They do not
+            # belong in durable timelines or catalog rewrites on every sample.
+            if event_type in {"volume", "health"}:
+                return self.public_metadata(metadata)
             events.append(event)
 
             if event.get("type") == "warning":
@@ -402,7 +452,7 @@ class RecordingStore:
                     warnings = []
                     metadata["warnings"] = warnings
                 warnings.append(event.get("message") or event.get("reason") or "capture_warning")
-            if event.get("type") == "error":
+            if event.get("type") in {"error", "capture_fatal"}:
                 metadata["capture_status"] = "error"
                 warnings = metadata.get("warnings")
                 if not isinstance(warnings, list):
@@ -951,26 +1001,15 @@ class RecordingStore:
         ]
         screenshots = self.list_screenshots(recording_id)
         for item in screenshots:
-            if not item.get("available"):
-                frames.append({
-                    "sequence": 1_000_000_000 + int(item.get("sequence") or 0),
-                    "timestamp": float(item.get("timestamp") or 0.0),
-                    "path": None,
-                    "evidence_source": "manual_screenshot",
-                    "capture_kind": "manual",
-                    "evidence_id": item.get("screenshot_id"),
-                    "screenshot_id": item.get("screenshot_id"),
-                    "sha256": item.get("sha256"),
-                    "display_id": item.get("display_id"),
-                    "display_title": item.get("display_title"),
-                    "available": False,
-                })
-                continue
+            available = bool(item.get("available"))
             frames.append({
                 "sequence": 1_000_000_000 + int(item.get("sequence") or 0),
                 "timestamp": float(item.get("timestamp") or 0.0),
-                "path": self.screenshot_asset_path(
-                    recording_id, str(item["screenshot_id"]), thumbnail=False,
+                "path": (
+                    self.screenshot_asset_path(
+                        recording_id, str(item["screenshot_id"]), thumbnail=False,
+                    )
+                    if available else None
                 ),
                 "evidence_source": "manual_screenshot",
                 "capture_kind": "manual",
@@ -979,7 +1018,7 @@ class RecordingStore:
                 "sha256": item.get("sha256"),
                 "display_id": item.get("display_id"),
                 "display_title": item.get("display_title"),
-                "available": True,
+                "available": available,
             })
         return sorted(
             frames,
@@ -1458,6 +1497,7 @@ class RecordingStore:
                 raise RecordingConflict(
                     f"Cannot stop recording in status {metadata['status']}"
                 )
+            self._recover_native_checkpoints(session_dir, metadata)
             # Allow empty recordings – the user may have stopped
             # before the first chunk interval elapsed.
 
@@ -1508,6 +1548,8 @@ class RecordingStore:
                 raise RecordingConflict(f"Cannot recover recording in status {metadata['status']}")
             if not self._has_recoverable_audio(session_dir, metadata):
                 raise RecordingConflict("Recording has no recoverable audio")
+
+            self._recover_native_checkpoints(session_dir, metadata)
 
             metadata["status"] = "recorded"
             metadata["partial"] = True
@@ -1781,6 +1823,24 @@ class RecordingStore:
                         # Never re-expose staged data. The next startup will finish it.
                         logger.exception("Deferred staged deletion cleanup: %s", path)
 
+    def interrupt_capture(self, recording_id: str) -> dict[str, Any]:
+        """Stop the capture lifecycle without discarding already committed data."""
+        with self._lock_for(recording_id):
+            session_dir, metadata = self._load(recording_id)
+            metadata = self._ensure_tracks(metadata)
+            if metadata["status"] not in {"recording", "finalizing"}:
+                return self.public_metadata(metadata)
+            has_audio = self._has_recoverable_audio(session_dir, metadata)
+            metadata["status"] = "recoverable" if has_audio else "interrupted"
+            metadata["capture_status"] = "stopped"
+            metadata["stopped_at"] = metadata.get("stopped_at") or _utc_now()
+            metadata["error"] = metadata.get("error") or "Native capture interrupted; session data preserved"
+            if not has_audio:
+                metadata["completed_at"] = _utc_now()
+            self._write_metadata(session_dir, metadata)
+            self._upsert_catalog(metadata)
+            return self.public_metadata(metadata)
+
     def discard(self, recording_id: str) -> None:
         with self._lock_for(recording_id):
             session_dir, metadata = self._load(recording_id)
@@ -1853,6 +1913,34 @@ class RecordingStore:
             result.append((track, audio_path))
         return result
 
+    def diarization_track(self, recording_id: str) -> tuple[dict[str, Any], Path]:
+        """Select a finalized local source for speaker diarization only.
+
+        Prefer the computer audio; an available mixed recording is a valid
+        fallback. An absent microphone must not block either source. This is
+        intentionally independent of transcribable_tracks(), whose stricter
+        multi-track contract belongs to the regular ASR workflow.
+        """
+        session_dir, metadata = self._load(recording_id)
+        if metadata["status"] in {"recording", "finalizing", "recoverable", "interrupted"}:
+            raise RecordingConflict("Finish the recording before diarizing speakers")
+        tracks = {track["id"]: track for track in self._ensure_tracks(metadata)["audio_tracks"]}
+        for track_id in ("system", "mixed"):
+            track = tracks.get(track_id)
+            if track is None or track.get("source") != track_id:
+                continue
+            path = self._track_audio_path(session_dir, track)
+            if path.is_symlink():
+                raise RecordingConflict("Diarization audio must not be a symlink")
+            try:
+                if path.is_file() and path.stat().st_size > 0:
+                    return track, path
+            except OSError as exc:
+                raise RecordingConflict("Diarization audio could not be inspected locally") from exc
+        raise RecordingConflict(
+            "No finalized system or mixed audio is available for speaker diarization"
+        )
+
     def track_content_sha256(self, recording_id: str, track_id: str) -> str:
         """Return a durable content hash for finalized audio, reusing it while stat identity matches."""
         with self._lock_for(recording_id):
@@ -1923,6 +2011,19 @@ class RecordingStore:
             session_dir, _ = self._load(recording_id)
             self._write_json_atomic(session_dir / "speaker-diarization.json", payload)
 
+    def read_speaker_diarization(self, recording_id: str) -> dict[str, Any] | None:
+        """Read the canonical local native timeline; never fetch remote media."""
+        with self._lock_for(recording_id):
+            session_dir, _ = self._load(recording_id)
+            path = session_dir / "speaker-diarization.json"
+            if not path.is_file():
+                return None
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return None
+            return data if isinstance(data, dict) else None
+
     def fail(self, recording_id: str, error: str) -> None:
         with self._lock_for(recording_id):
             session_dir, metadata = self._load(recording_id)
@@ -1954,7 +2055,7 @@ class RecordingStore:
         public = {
             key: value
             for key, value in metadata.items()
-            if key not in {"extension", "relative_dir", "audio_tracks"}
+            if key not in {"extension", "relative_dir", "audio_tracks", "_audio_cloud_proof"}
         } | {
             "audio_tracks": public_tracks,
             "audio_file": (
@@ -1966,6 +2067,17 @@ class RecordingStore:
         public["chunk_count"] = primary.get("chunk_count", public.get("chunk_count", 0))
         public["bytes_written"] = sum(track.get("bytes_written", 0) for track in metadata["audio_tracks"])
         public["mime_type"] = primary.get("mime_type") or public.get("mime_type")
+        # Inform the UI about the safety boundary without exposing bucket,
+        # object identifiers, digests or a false promise of automatic cleanup.
+        # The processing/lease owner cannot yet prove idle across runtimes:
+        # always fail closed on the execution and deletion capability gates.
+        public["audio_storage"] = assess_audio_cleanup(
+            metadata,
+            retention_days=metadata.get("audio_local_retention_days", DEFAULT_RETENTION_DAYS),
+            cleanup_enabled=False,
+            local_transcript_verified=(session_dir / "transcript.json").is_file(),
+            active_operations=True,
+        )
         return public
 
     def _load(self, recording_id: str) -> tuple[Path, dict[str, Any]]:
@@ -2015,10 +2127,125 @@ class RecordingStore:
         return session_dir / f"{self._track_file_stem(track['id'])}{track['extension']}.part"
 
     def _track_audio_path(self, session_dir: Path, track: dict[str, Any]) -> Path:
+        recovered = track.get("_recovered_audio_file")
+        if recovered is not None:
+            stem = re.escape(self._track_file_stem(track['id']))
+            if not isinstance(recovered, str) or not re.fullmatch(rf"{stem}\.recovered-[0-9a-f]{{64}}\.wav", recovered):
+                raise RecordingConflict("Invalid recovered audio file")
+            path = session_dir / recovered
+            if path.is_symlink():
+                raise RecordingConflict("Recovered audio must not be a symlink")
+            return path
         return session_dir / f"{self._track_file_stem(track['id'])}{track['extension']}"
 
     def _relative_track_audio_file(self, metadata: dict[str, Any], track: dict[str, Any]) -> str:
-        return f"{metadata['relative_dir']}/{self._track_file_stem(track['id'])}{track['extension']}"
+        name = self._track_audio_path(self._session_dir(metadata), track).name
+        return f"{metadata['relative_dir']}/{name}"
+
+    def _recover_native_checkpoints(self, session_dir: Path, metadata: dict[str, Any]) -> None:
+        if metadata.get('capture_backend') != 'native':
+            return
+        recovered_any = False
+        for track in metadata['audio_tracks']:
+            if track['id'] not in {'mic', 'system'}:
+                continue
+            try:
+                path = self._track_audio_path(session_dir, track)
+                horizon = checkpoint_frame_count(session_dir, track['id'])
+                complete_frames = self._complete_native_wav(path)
+                if complete_frames and horizon is not None and complete_frames >= horizon:
+                    continue
+                if not has_checkpoints(session_dir, track['id']):
+                    continue
+                recovered = recover_checkpoint_audio(session_dir, track['id'])
+                if recovered is not None:
+                    track['_recovered_audio_file'] = recovered.name
+                    recovered_any = True
+            except (AudioRecoveryError, OSError) as exc:
+                raise RecordingConflict('Native audio checkpoints could not be verified; original data preserved') from exc
+        if recovered_any:
+            metadata['partial'] = True
+            warnings = metadata.setdefault('warnings', [])
+            if 'native_audio_recovered_from_checkpoints' not in warnings:
+                warnings.append('native_audio_recovered_from_checkpoints')
+            changed_sources = {
+                gap.get("source") for gap in (metadata.get("timeline") or {}).get("source_interruptions", [])
+                if isinstance(gap, dict) and gap.get("source") in {"mic", "system"}
+            }
+            if changed_sources:
+                if 'native_audio_gaps_marked_with_silence_for_alignment' not in warnings:
+                    warnings.append('native_audio_gaps_marked_with_silence_for_alignment')
+                if metadata.get('capture_mode') == 'both':
+                    self._rebuild_native_mix_for_source_recovery(session_dir, metadata)
+        primary = self._primary_track(metadata)
+        if not self._complete_native_wav(self._track_audio_path(session_dir, primary)):
+            for source in ('system', 'mic'):
+                candidate = next((t for t in metadata['audio_tracks'] if t['id'] == source), None)
+                if candidate and self._complete_native_wav(self._track_audio_path(session_dir, candidate)):
+                    metadata['primary_track_id'] = source
+                    break
+
+    def _rebuild_native_mix_for_source_recovery(self, session_dir: Path, metadata: dict[str, Any]) -> None:
+        """Produce a new verified mixed derivative; never replace run-owned WAVs.
+
+        A microphone switch leaves the original mic.wav as a valid prefix and
+        the original recording.wav (if any) as an earlier mix. Recovered
+        checkpoints include an explicit gap interval; mixing must use the
+        aligned recovered source, not the stale prefix.
+        """
+        tracks = {t.get("id"): t for t in metadata["audio_tracks"]}
+        mic, system, mixed = tracks.get("mic"), tracks.get("system"), tracks.get("mixed")
+        if not (mic and system and mixed):
+            return
+        mic_path = self._track_audio_path(session_dir, mic)
+        system_path = self._track_audio_path(session_dir, system)
+        mic_frames = self._complete_native_wav(mic_path)
+        system_frames = self._complete_native_wav(system_path)
+        if not (mic_frames and system_frames):
+            return
+        output_fd, output_name = tempfile.mkstemp(prefix=".native-mix-", suffix=".wav", dir=session_dir)
+        os.close(output_fd)
+        temporary = Path(output_name)
+        try:
+            timeout = max(120.0, min(3600.0, max(mic_frames, system_frames) / 16000 * 0.5))
+            cmd = [
+                get_ffmpeg_path(), "-y", "-i", str(mic_path), "-i", str(system_path),
+                "-filter_complex", "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0",
+                "-ar", "16000", "-ac", "1", str(temporary),
+            ]
+            subprocess.run(cmd, capture_output=True, check=True, timeout=timeout)
+            if not self._complete_native_wav(temporary):
+                raise RecordingConflict("Recovered native mix is not a valid WAV")
+            with temporary.open("rb") as handle:
+                os.fsync(handle.fileno())
+            digest = _sha256_path(temporary)
+            target = session_dir / f"recording.recovered-{digest}.wav"
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                if target.is_symlink() or _sha256_path(target) != digest:
+                    raise RecordingConflict("Existing recovered mix differs")
+            mixed["_recovered_audio_file"] = target.name
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RecordingConflict("Unable to rebuild aligned native mixed audio") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _complete_native_wav(path: Path) -> int:
+        # A normally closed original needs no duplicate derivative. Check the
+        # final frame as well as the header before trusting an interrupted file.
+        if path.is_symlink():
+            return 0
+        try:
+            with wave.open(str(path), 'rb') as audio:
+                if audio.getnframes() > 0:
+                    audio.setpos(audio.getnframes() - 1)
+                    if len(audio.readframes(1)) == audio.getnchannels() * audio.getsampwidth():
+                        return audio.getnframes()
+        except (OSError, EOFError, wave.Error):
+            pass
+        return 0
 
     def _track_ids_for_mode(self, capture_mode: str) -> list[str]:
         if capture_mode == "both":
@@ -2218,6 +2445,12 @@ class RecordingStore:
 
     def _has_recoverable_audio(self, session_dir: Path, metadata: dict[str, Any]) -> bool:
         for track in metadata.get("audio_tracks", []):
+            if metadata.get('capture_backend') == 'native':
+                try:
+                    if has_checkpoints(session_dir, track['id']):
+                        return True
+                except (AudioRecoveryError, OSError):
+                    pass
             if track.get("bytes_written", 0) > 0 or track.get("chunk_count", 0) > 0:
                 return True
             for path in (

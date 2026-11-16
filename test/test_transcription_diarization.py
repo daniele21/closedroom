@@ -253,6 +253,14 @@ class TranscriptionDiarizationTests(unittest.TestCase):
             ["system:S1", "system:S2"],
         )
         self.assertNotIn("Manual old name", result["text"])
+        mic = next(row for row in result["speaker_attribution"]["mappings"]
+                   if row["speaker_cluster"] == "mic:S1")
+        self.assertEqual((mic["display_name"], mic["status"], mic["source"]),
+                         ("Tu", "accepted", "microphone_track"))
+        self.assertEqual(result["segments"][0]["speaker_name"], "Tu")
+        system = next(row for row in result["speaker_attribution"]["mappings"]
+                      if row["speaker_cluster"] == "system:S1")
+        self.assertEqual(system["status"], "unassigned")
         self.assertEqual(recordings.saved[0], "recording-id")
         self.assertEqual([Path(request.audio_path).name for request in provider.requests], ["system.wav"])
         self.assertEqual(

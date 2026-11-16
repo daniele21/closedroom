@@ -44,20 +44,28 @@ class FrontendDiagnosticContractTests(unittest.TestCase):
 
     def test_capture_and_overlay_fallbacks_have_persistent_ui_feedback(self) -> None:
         recorder = (ROOT / "frontend/src/hooks/useRecorder.ts").read_text(encoding="utf-8")
-        page = (ROOT / "frontend/src/pages/RecordingPage.tsx").read_text(encoding="utf-8")
+        page = (ROOT / "frontend/src/pages/NewRecordingPage.tsx").read_text(encoding="utf-8")
         self.assertIn("captureCapabilityFallbackNotice", recorder)
         self.assertIn("captureBrowserFallbackNotice", recorder)
         self.assertIn("overlayFallbackNotice", recorder)
         self.assertIn("recorder.fallbackNotice", page)
 
     def test_recording_exposes_visual_window_and_diarization_before_start(self) -> None:
-        page = (ROOT / "frontend/src/pages/RecordingPage.tsx").read_text(encoding="utf-8")
-        self.assertIn("speaker_diarization_enabled", page)
-        self.assertIn("visual_intelligence_enabled", page)
-        self.assertIn("recording.visualWindowLabel", page)
+        page = (ROOT / "frontend/src/pages/NewRecordingPage.tsx").read_text(encoding="utf-8")
+        # Capture selection remains explicit and off by default in New Meeting.
+        self.assertIn("const [showScreenContext, setShowScreenContext] = useState(false)", page)
+        self.assertIn("nativeCaptureReady && !recordingFlowLocked", page)
         self.assertIn("ApiClient.captureWindows()", page)
-        self.assertIn("recording.visualNeedsDiarization", page)
-        self.assertIn("recording.visualCaptureActive", page)
+        self.assertIn("visualWindowId ? Number(visualWindowId) : undefined", page)
+        self.assertIn("No frames are captured without an explicit selection.", page)
+        self.assertIn("No visual AI runs while recording.", page)
+
+        # Diarization and visual inference preferences now live in the
+        # post-capture transcription workflow, not the recording UI.
+        transcription = (ROOT / "frontend/src/pages/TranscriptionPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("settings.speaker_diarization_enabled ? 'local' : 'none'", transcription)
+        self.assertIn("setVisualIntelligenceEnabled(Boolean(settings.visual_intelligence_enabled))", transcription)
+        self.assertIn("visual_intelligence_enabled: visualIntelligenceEnabled", transcription)
 
         overlay = (ROOT / "frontend/src/pages/RecordingOverlayPage.tsx").read_text(encoding="utf-8")
         recorder = (ROOT / "frontend/src/hooks/useRecorder.ts").read_text(encoding="utf-8")

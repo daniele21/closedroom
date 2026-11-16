@@ -32,20 +32,27 @@ class MeetingDetectionFrontendContractTests(unittest.TestCase):
     def test_auto_route_is_distinct_from_opening_saved_recording(self):
         app = (ROOT / "frontend/src/App.tsx").read_text()
         self.assertIn("routeDetail?.startsWith('auto/')", app)
-        self.assertIn("autoStartToken={routeDetail.slice(5)}", app)
+        self.assertIn("!detail.startsWith('auto/')", app)
+        self.assertIn("legacySavedRecording ? 'meeting' : pageName", app)
+        self.assertIn("autoStartToken={routeDetail?.startsWith('auto/') ? routeDetail.slice(5) : undefined}", app)
 
     def test_native_only_request_fails_closed_without_fallback(self):
         hook = (ROOT / "frontend/src/hooks/useRecorder.ts").read_text()
-        self.assertIn("requireNative && !(capabilities?.default_backend === 'native'", hook)
+        self.assertIn("const nativeAvailable = capabilities?.default_backend === 'native'", hook)
+        self.assertIn("if (!nativeAvailable && (requireNative || mode !== 'mic_only'))", hook)
+        self.assertIn("nativeCaptureRequiredForComputerAudio", hook)
         self.assertIn("createCaptureReservation()", hook)
         self.assertIn("data.type === 'ready'", hook)
 
-    def test_opt_in_is_off_by_default_and_explicit_in_settings(self):
+    def test_detection_default_is_visible_and_setting_stays_reversible(self):
         page = (ROOT / "frontend/src/pages/SettingsPage.tsx").read_text()
         self.assertIn("data-settings-meeting-detection", page)
         self.assertIn("checked={meetingDetectionEnabled}", page)
+        self.assertIn("setMeetingDetectionEnabled] = useState(true)", page)
+        self.assertIn("notification_delivery?.state", page)
         self.assertIn("meeting_detection_enabled: meetingDetectionEnabled", page)
         self.assertIn("meetingDetectionEnabled && !meetingDetectionWasEnabled", page)
+        self.assertIn("handleMeetingNotificationPermission", page)
 
 
 if __name__ == "__main__":

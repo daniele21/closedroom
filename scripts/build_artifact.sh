@@ -63,15 +63,12 @@ rm -rf "$STAGING_APP"
 rm -f "$STAGING_DMG"
 mkdir -p "$ARTIFACT_DIR"
 
-# Build.sh invokes two compile helpers through `uv run --no-sync` and historically
-# called the user-facing setup-audio command when the audio-helper cache was cold.
-# Prepare a minimal no-dependency editable environment and compile the audio helper
-# directly so packaging never installs BlackHole or mutates system audio setup.
+# Build.sh compiles the native ScreenCaptureKit and diarization helpers.
+# Prepare the editable build environment without installing system audio drivers.
 if [[ ! -x .venv/bin/python ]]; then
-  uv venv .venv --python "${CLOSEDROOM_BUILD_PYTHON_VERSION:-3.10}"
+  uv venv .venv --python "${CLOSEDROOM_BUILD_PYTHON_VERSION:-3.12}"
 fi
 uv pip install --python .venv -e . --no-deps >/dev/null
-PYTHONPATH="$ROOT/src" python3 -c 'from local_asr_server.macos_audio_helper.compile import compile_helper; compile_helper(force=False)'
 
 build_args=()
 if $CREATE_DMG; then

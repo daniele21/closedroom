@@ -29,7 +29,14 @@ class MeetingAccessoryOwnershipTests(unittest.TestCase):
     def test_hook_invalidates_inflight_accessory_requests_on_context_change(self) -> None:
         self.assertIn("diagnosticsGenerationRef.current += 1", self.hook)
         self.assertIn("visualFramesGenerationRef.current += 1", self.hook)
-        self.assertIn("screenshotsGenerationRef.current += 1", self.hook)
+        # Each shared list-hook instance owns its generation and invalidation.
+        self.assertIn("const generationRef = useRef(0)", self.hook)
+        self.assertIn("if (generation !== generationRef.current) return", self.hook)
+        self.assertIn("generationRef.current += 1", self.hook)
+        self.assertIn("invalidateScreenshots()", self.hook)
+        self.assertIn("invalidateNotes()", self.hook)
+        self.assertIn("useMeetingItemList<RecordingScreenshot>", self.hook)
+        self.assertIn("useMeetingItemList<RecordingNote>", self.hook)
 
 
 if __name__ == "__main__":

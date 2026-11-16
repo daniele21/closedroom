@@ -20,6 +20,7 @@ import { ToastProvider, useToast } from './context/ToastContext';
 import { ApiClient } from './api/apiClient';
 import { HEALTH_CHECK_INTERVAL_MS } from './api/config';
 import DashboardPage from './pages/DashboardPage';
+import MeetingsPage from './pages/MeetingsPage';
 import NewRecordingPage from './pages/NewRecordingPage';
 import { Badge } from './components/ui/Badge';
 import { Button } from './components/ui/Button';
@@ -30,7 +31,6 @@ import { TOUR_STEPS, TourStepId, tourStepIndex } from './features/tour/tourSteps
 import './workspace.css';
 
 const ActivitiesPage = lazy(() => import('./pages/ActivitiesPage'));
-const RecordingPage = lazy(() => import('./pages/RecordingPage'));
 const TranscriptionPage = lazy(() => import('./pages/TranscriptionPage'));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
 const AnalysisPage = lazy(() => import('./pages/AnalysisPage'));
@@ -49,6 +49,7 @@ function MainApp() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [brandLogoFailed, setBrandLogoFailed] = useState(false);
   const [routeDetail, setRouteDetail] = useState<string | null>(null);
+  const meetingOriginRef = useRef<'home' | 'meetings' | 'projects'>('home');
   const [tourStep, setTourStep] = useState<TourStepId | null>(null);
   const [tourReturnHash, setTourReturnHash] = useState('');
   const moreTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -63,6 +64,7 @@ function MainApp() {
   const navigateTo = (page: string, detail: string | null = null) => {
     const pageRouteMap: Record<string, string> = {
       home: 'home',
+      meetings: 'meetings',
       recording: 'recording',
       transcription: 'transcription',
       projects: 'projects',
@@ -70,7 +72,13 @@ function MainApp() {
       settings: 'settings',
       meeting: 'meeting',
     };
-    const route = pageRouteMap[page] || page;
+    // Saved recordings are always reviewed in the canonical Meeting workspace.
+    // The auto/<token> route belongs to native meeting-start handoff.
+    const legacyRecordingDetail = page === 'recording' && detail !== null && !detail.startsWith('auto/');
+    const route = legacyRecordingDetail ? 'meeting' : (pageRouteMap[page] || page);
+    if (route === 'meeting' && activePage !== 'meeting') {
+      meetingOriginRef.current = activePage === 'projects' ? 'projects' : activePage === 'meetings' ? 'meetings' : 'home';
+    }
     window.location.hash = detail ? `${route}/${detail}` : route;
     if (tourStep === 'today-to-projects' && route === 'projects') {
       const nextStep = TOUR_STEPS[tourStepIndex(tourStep) + 1];
@@ -112,6 +120,7 @@ function MainApp() {
       const detail = parts.slice(1).join('/');
       const pageMap: Record<string, string> = {
         home: 'home',
+        meetings: 'meetings',
         record: 'recording',
         recording: 'recording',
         transcribe: 'transcription',
@@ -123,7 +132,12 @@ function MainApp() {
         activities: 'activities',
         meeting: 'meeting',
       };
-      setActivePage(pageMap[pageName] || 'home');
+      const legacySavedRecording = pageName === 'recording' && Boolean(detail) && !detail.startsWith('auto/');
+      if (legacySavedRecording) {
+        // Replace, do not add a duplicate history entry for old bookmarked URLs.
+        window.history.replaceState(null, '', `#meeting/${detail}`);
+      }
+      setActivePage(pageMap[legacySavedRecording ? 'meeting' : pageName] || 'home');
       setRouteDetail(detail || null);
       setMoreOpen(false);
     };
@@ -260,17 +274,24 @@ function MainApp() {
             onActivateDemo={!isDemoActive ? activateDemo : undefined}
           />
         );
+      case 'meetings':
+        return <MeetingsPage navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'activities':
         return <ActivitiesPage activities={activities} navigateTo={navigateTo} />;
       case 'meeting':
-        return <MeetingDetailPage recordingId={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
+        return <MeetingDetailPage
+          recordingId={routeDetail}
+          navigateTo={navigateTo}
+          onBack={() => navigateTo(meetingOriginRef.current)}
+          backLabel={meetingOriginRef.current === 'projects' ? t('nav.projects') : meetingOriginRef.current === 'meetings' ? t('nav.meetings') : t('nav.home')}
+          demoMode={isDemoActive}
+        />;
       case 'recording':
         if (isDemoActive) return <TourRecordingMock />;
-        return routeDetail?.startsWith('auto/')
-          ? <NewRecordingPage navigateTo={navigateTo} autoStartToken={routeDetail.slice(5)} />
-          : routeDetail
-            ? <RecordingPage detailId={routeDetail} navigateTo={navigateTo} />
-            : <NewRecordingPage navigateTo={navigateTo} />;
+        return <NewRecordingPage
+          navigateTo={navigateTo}
+          autoStartToken={routeDetail?.startsWith('auto/') ? routeDetail.slice(5) : undefined}
+        />;
       case 'transcription':
         return <TranscriptionPage detailPath={routeDetail} navigateTo={navigateTo} demoMode={isDemoActive} />;
       case 'projects':
@@ -298,11 +319,12 @@ function MainApp() {
     );
   }
 
-  const todayActive = activePage === 'home' || activePage === 'meeting';
+  const meetingFromProject = activePage === 'meeting' && meetingOriginRef.current === 'projects';
+  const todayActive = activePage === 'home' || activePage === 'meetings' || (activePage === 'meeting' && !meetingFromProject);
   const navItems = [
-    { id: 'home', label: t('nav.home'), icon: BarChart3, active: todayActive },
-    { id: 'projects', label: t('nav.projects'), icon: FolderKanban, active: activePage === 'projects' },
-    { id: 'activities', label: t('nav.activities'), icon: ListTodo, active: activePage === 'activities' },
+    { id: 'home', label: t('nav.meetings'), icon: BarChart3, active: todayActive },
+    { id: 'projects', label: t('nav.projects'), icon: FolderKanban, active: activePage === 'projects' || meetingFromProject },
+
   ];
 
   return (
@@ -362,7 +384,7 @@ function MainApp() {
                 key={item.id}
                 type="button"
                 data-tour={`nav-${item.id}`}
-                onClick={() => navigateTo(item.id)}
+                onClick={() => navigateTo(item.id === 'home' ? 'meetings' : item.id)}
                 className={`workspace-nav-item ${item.active ? 'is-active' : ''}`}
                 aria-current={item.active ? 'page' : undefined}
               >
@@ -385,6 +407,19 @@ function MainApp() {
           )}
 
           <div className="more-menu-container workspace-utility-wrap">
+            <button
+              type="button"
+              data-tour="utility-activities"
+              onClick={() => navigateTo('activities')}
+              className={`workspace-nav-item workspace-activity-trigger ${activePage === 'activities' ? 'is-active' : ''}`}
+              aria-label={t('nav.activities')}
+              aria-current={activePage === 'activities' ? 'page' : undefined}
+              title={t('nav.activities')}
+            >
+              <ListTodo className="h-[18px] w-[18px]" aria-hidden="true" />
+              <span className="workspace-activity-label">{t('nav.activities')}</span>
+              {activities.activeCount > 0 && <Badge className="workspace-activity-count">{activities.activeCount}</Badge>}
+            </button>
             <button
               ref={moreTriggerRef}
               type="button"

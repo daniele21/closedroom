@@ -23,9 +23,25 @@ class CliPortTests(unittest.TestCase):
         args = _build_parser().parse_args(["serve", "--reload"])
         self.assertEqual(_resolve_serve_port(args), 1237)
 
+    def test_source_development_uses_dedicated_port_without_reload(self) -> None:
+        args = _build_parser().parse_args(["serve"])
+        with patch.dict(os.environ, {"CLOSEDROOM_DEV_PROFILE": "1"}):
+            self.assertEqual(_resolve_serve_port(args), 1237)
+
+    def test_explicit_app_port_is_rejected_by_nondestructive_port_guard(self) -> None:
+        args = _build_parser().parse_args(["serve", "--port", "1236"])
+        with patch.dict(os.environ, {"CLOSEDROOM_DEV_PROFILE": "1"}):
+            self.assertEqual(_resolve_serve_port(args), 1236)
+        # The separate prepare_api_port contract rejects an occupied 1236.
+
+
     def test_explicit_port_overrides_reload_default(self) -> None:
         args = _build_parser().parse_args(["serve", "--reload", "--port", "1240"])
         self.assertEqual(_resolve_serve_port(args), 1240)
+
+    def test_obsolete_audio_setup_command_is_not_exposed(self) -> None:
+        with self.assertRaises(SystemExit):
+            _build_parser().parse_args(["setup-audio"])
 
     def test_recordings_directory_defaults_to_persisted_settings(self) -> None:
         args = _build_parser().parse_args(["serve"])
