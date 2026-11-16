@@ -2128,10 +2128,12 @@ try {
       heading: root?.querySelector('h4')?.textContent || '',
       summaryEnabled: Boolean(summary && !summary.disabled),
       deepEnabled: Boolean(deep && !deep.disabled),
+      sourcesAfterChoices: Boolean(root && document.querySelector('[data-meeting-notes-sources="true"]') &&
+        (root.compareDocumentPosition(document.querySelector('[data-meeting-notes-sources="true"]')) & Node.DOCUMENT_POSITION_FOLLOWING)),
     };
   `);
   if (!/Cosa vuoi ottenere|What would you like to get/.test(outcomeChoices.heading)
-    || !outcomeChoices.summaryEnabled || !outcomeChoices.deepEnabled) {
+    || !outcomeChoices.summaryEnabled || !outcomeChoices.deepEnabled || !outcomeChoices.sourcesAfterChoices) {
     throw new Error('Meeting analysis choices were not available after transcription: ' + JSON.stringify(outcomeChoices));
   }
   await checkpoint(browser, '27a-analysis-outcomes-visible');

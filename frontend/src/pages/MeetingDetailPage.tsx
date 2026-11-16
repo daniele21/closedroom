@@ -1036,6 +1036,27 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
       : (lang === 'it' ? 'Trascrivi e riassumi' : 'Transcribe and summarize');
   const transcriptActionLabel = lang === 'it' ? 'Trascrivi chiamata' : 'Transcribe call';
   const primaryIsTranscription = !meeting.transcription && !canResumePreparation;
+  // Empty Analysis is a task: show its outcome choice before optional source review.
+  const showAnalysisOutcomeFirst = activeTab === 'analysis' && !selectedRun && !isBusy;
+  const sourcesGallery = demoMode ? null : (
+        <MeetingSourcesGallery
+          lang={lang}
+          notes={notes}
+          screenshotsState={screenshotsState}
+          savedScreenshotCount={savedScreenshotCount}
+          showAllScreenshots={showAllScreenshots}
+          canExpandScreenshots={canExpandScreenshots}
+          hiddenScreenshotCount={hiddenScreenshotCount}
+          visibleKeyMoments={visibleKeyMoments}
+          keyMomentContexts={keyMomentContexts}
+          getVisualContext={(shot) => keyMomentVisualContext(shot, visualData)}
+          screenshotTimestampLabel={screenshotTimestampLabel}
+          onOpenScreenshot={openKeyMoment}
+          onSeek={handleTimestampClick}
+          onReloadScreenshots={() => void loadScreenshots()}
+          onToggleShowAll={() => setShowAllScreenshots((value) => !value)}
+        />
+  );
 
   const enrichmentBadge = (status?: string) => {
     if (status === 'completed') return <Badge variant="success">{t('meeting.enrichmentCompleted')}</Badge>;
@@ -1189,25 +1210,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
         )}
       </section>
 
-      {!demoMode && (
-        <MeetingSourcesGallery
-          lang={lang}
-          notes={notes}
-          screenshotsState={screenshotsState}
-          savedScreenshotCount={savedScreenshotCount}
-          showAllScreenshots={showAllScreenshots}
-          canExpandScreenshots={canExpandScreenshots}
-          hiddenScreenshotCount={hiddenScreenshotCount}
-          visibleKeyMoments={visibleKeyMoments}
-          keyMomentContexts={keyMomentContexts}
-          getVisualContext={(shot) => keyMomentVisualContext(shot, visualData)}
-          screenshotTimestampLabel={screenshotTimestampLabel}
-          onOpenScreenshot={openKeyMoment}
-          onSeek={handleTimestampClick}
-          onReloadScreenshots={() => void loadScreenshots()}
-          onToggleShowAll={() => setShowAllScreenshots((value) => !value)}
-        />
-      )}
+      {!showAnalysisOutcomeFirst && sourcesGallery}
 
       {outcomeStatus === 'completed_with_warnings' && (
         <section className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-xs text-text-secondary">
@@ -1246,7 +1249,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
       />
 
       <div className="flex flex-col gap-5 w-full">
-        {!isBusy && !hasCurrentNotes && (
+        {!isBusy && !hasCurrentNotes && !showAnalysisOutcomeFirst && (
           <section aria-labelledby="meeting-next-step" className="flex flex-col md:flex-row items-start md:items-center justify-between gap-5 py-5 border-y border-border-subtle" data-meeting-preparation="true">
             <div className="flex items-start gap-2.5 min-w-0">
               <Sparkles className="h-5 w-5 text-accent shrink-0 mt-0.5" aria-hidden="true" />
@@ -1900,6 +1903,7 @@ export default function MeetingDetailPage({ recordingId, navigateTo, onBack, bac
             />
           )}
         </main>
+        {showAnalysisOutcomeFirst && sourcesGallery}
       </div>
 
       <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
