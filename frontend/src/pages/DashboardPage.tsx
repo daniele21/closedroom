@@ -3,9 +3,9 @@
  * Main "Today" view — progressive disclosure layout.
  *
  * Information hierarchy:
- *   Level 1 (Hero)      — Period, search, summary links and guidance
- *   Level 2 (Spotlight) — Top 3 meetings and top 2 digest snippets
- *   Level 3 (On-demand) — Full lists, actions, decisions, risks and diagnostics
+ *   Level 1 (Task)      — Compact period/search controls and recent meetings
+ *   Level 2 (Disclosure) — Optional digest and derived insights
+ *   Level 3 (On-demand) — Full lists and technical diagnostics
  */
 
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,7 +19,6 @@ import {
   Mic,
   Search,
   ShieldAlert,
-  ShieldCheck,
   Sparkles,
   Target,
 } from 'lucide-react';
@@ -35,7 +34,6 @@ import { MeetingSearchDialog } from '../components/workspace/MeetingSearchDialog
 import {
   DigestPanel,
   EmptyState,
-  GuidanceCallout,
   MeetingCard,
   SectionHeader,
 } from '../components/workspace/MeetingWorkspace';
@@ -327,10 +325,9 @@ export default function DashboardPage({
       </nav>
       <section
         data-tour="today-summary"
-        className="premium-hero page-hero rounded-2xl p-5 sm:p-6"
+        className="rounded-xl border border-border-subtle bg-bg-surface px-4 py-3"
       >
-        <span className="hero-orbital-line" aria-hidden="true" />
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold uppercase text-accent">{rangeLabel}</span>
@@ -342,14 +339,14 @@ export default function DashboardPage({
                   ref={triggerRef}
                   type="button"
                   onClick={() => setIsDropdownOpen((open) => !open)}
-                  className="flex items-center gap-2 rounded-xl bg-transparent px-0 py-0 text-3xl font-bold text-text-primary outline-none transition-colors hover:text-accent focus-visible:ring-2 focus-visible:ring-border-focus sm:text-4xl"
+                  className="flex items-center gap-2 rounded-lg bg-transparent px-0 py-1 text-lg font-semibold text-text-primary outline-none transition-colors hover:text-accent focus-visible:ring-2 focus-visible:ring-border-focus sm:text-xl"
                   aria-haspopup="menu"
                   aria-expanded={isDropdownOpen}
                   aria-controls="dashboard-period-menu"
                   aria-label={lang === 'it' ? `Periodo: ${activeLabel}` : `Period: ${activeLabel}`}
                 >
                   <span>{activeLabel}</span>
-                  <ChevronDown className="h-6 w-6 shrink-0 text-text-muted" aria-hidden="true" />
+                  <ChevronDown className="h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />
                 </button>
                 {isDropdownOpen && dropdownCoords && createPortal(
                   <>
@@ -431,47 +428,12 @@ export default function DashboardPage({
                 </button>
               </Tooltip>
             </div>
-            <p className="mt-2 max-w-lg text-sm leading-relaxed text-text-secondary">{t('dashboard.subtitle')}</p>
-            {periodMeetings.length > 0 && (
-              <div className="mt-4 flex flex-wrap gap-2.5">
-                <button
-                  type="button"
-                  onClick={openLibrary}
-                  className="flex items-center gap-2 rounded-xl border border-border-subtle bg-bg-glass/40 px-3 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                >
-                  <FileAudio className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
-                  <span>
-                    <strong>{periodMeetings.length}</strong> {lang === 'it' ? 'Meeting nel periodo' : 'Meetings in period'}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => { setInsightDialogTab('actions'); setInsightDialogOpen(true); }}
-                  className="flex items-center gap-2 rounded-xl border border-border-subtle bg-bg-glass/40 px-3 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-border-focus hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                >
-                  <ListChecks className="h-3.5 w-3.5 text-success" aria-hidden="true" />
-                  <span>
-                    <strong>{actionItems.length}</strong> {lang === 'it' ? 'Azioni aperte' : 'Open actions'}
-                  </span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <GuidanceCallout
-              icon={ShieldCheck}
-              title={t('dashboard.heroGuidanceTitle')}
-              description={demoMode ? t('dashboard.demoReadonlyHint') : t('dashboard.heroGuidanceDesc')}
-              className="hidden xl:block max-w-sm"
-            />
           </div>
         </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,1fr)]">
-        <main className="flex min-w-0 flex-col gap-5">
+      <section className="flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4">
           <section className="surface-primary flex flex-col gap-3 rounded-2xl p-4 theme-audio" data-tour="today-meetings">
             <div className="flex items-center justify-between gap-3">
               <SectionHeader
@@ -533,11 +495,18 @@ export default function DashboardPage({
               </div>
             )}
           </section>
-        </main>
+        </div>
 
-        <aside className="flex flex-col gap-4">
-          <DigestPanel items={digestItems.slice(0, 2)} title={t('dashboard.digestTitle')} />
-        </aside>
+        {digestItems.length > 0 && (
+          <details data-today-digest="true" className="rounded-xl border border-border-subtle bg-bg-surface/40">
+            <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus">
+              {t('dashboard.digestTitle')} ({digestItems.length})
+            </summary>
+            <div className="px-3 pb-3">
+              <DigestPanel items={digestItems.slice(0, 2)} title={t('dashboard.digestTitle')} />
+            </div>
+          </details>
+        )}
       </section>
 
       {(periodMeetings.length > 0 || actionItems.length > 0 || decisions.length > 0 || risks.length > 0) && (
