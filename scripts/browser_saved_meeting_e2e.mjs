@@ -2178,6 +2178,19 @@ try {
     await sleep(100);
   }
   if (!confirmedSelf) throw new Error('speaker confirmation did not update the Voices state');
+  // Confirmed people have one name summary instead of another always-open edit form.
+  const collapsedConfirmedName = await browser.execute(`
+    const root = document.querySelector('[data-speaker-review-workspace]');
+    return Boolean(root?.querySelector('[data-speaker-confirmed-name="true"]') &&
+      root.querySelector('[data-speaker-rename-open="true"]') &&
+      !root.querySelector('input#speaker-review-name'));
+  `);
+  if (!collapsedConfirmedName) throw new Error('confirmed voice keeps an unnecessary open name form');
+  await browser.clickCss('[data-speaker-rename-open="true"]');
+  const explicitRename = await browser.execute(`
+    return Boolean(document.querySelector('[data-speaker-review-workspace] input#speaker-review-name'));
+  `);
+  if (!explicitRename) throw new Error('confirmed voice has no explicit accessible rename path');
   await browser.clickCss('#meeting-tab-transcript');
   let transcriptIdentity = false;
   for (let attempt = 0; attempt < 50; attempt += 1) {

@@ -70,6 +70,8 @@ export function SpeakerDiarizationEditor({
   const [action, setAction] = useState<'none' | 'merge' | 'exclude'>('none');
   const [mergeTarget, setMergeTarget] = useState('');
   const [showActions, setShowActions] = useState(false);
+  // Confirmed identity labels are read-only until the person explicitly chooses to rename.
+  const [renameOpen, setRenameOpen] = useState(false);
   const [listenError, setListenError] = useState('');
   const playback = useSpeakerReviewPlayback(meetingId, onPlaybackStart);
   const activeListenRequest = useRef<AbortController | null>(null);
@@ -178,6 +180,7 @@ export function SpeakerDiarizationEditor({
     setSampleIndex(0);
     setAction('none');
     setShowActions(false);
+    setRenameOpen(false);
     setMergeTarget('');
   }, [selected?.cluster, transcription.id]);
 
@@ -205,6 +208,7 @@ export function SpeakerDiarizationEditor({
         action: kind, cluster, ...options, expected_fingerprint: review.fingerprint,
       });
       if (kind === 'merge' && options.target) setSelectedCluster(options.target);
+      if (kind === 'rename') setRenameOpen(false);
       setAction('none');
       setReview(null); // new fingerprint is read from the canonical persisted owner
       onUpdated(response.transcription);
@@ -222,6 +226,8 @@ export function SpeakerDiarizationEditor({
     const next = editedName.trim();
     if (next && next !== selected.name && selected.status !== 'merged' && selected.status !== 'excluded') {
       void commit('rename', selected.cluster, { name: next });
+    } else if (selected.status === 'accepted') {
+      setRenameOpen(false);
     }
   };
 
@@ -468,6 +474,19 @@ export function SpeakerDiarizationEditor({
                 </p>}
               </div>
 
+              {selected.status === 'accepted' && !renameOpen ? (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2" data-speaker-confirmed-name="true">
+                  <p className="min-w-0 break-words text-sm text-text-secondary">
+                    {tr('Persona:', 'Person:')} <strong className="text-text-primary">{selected.name}</strong>
+                  </p>
+                  {canEdit && (
+                    <Button type="button" size="sm" variant="ghost" data-speaker-rename-open="true"
+                      onClick={() => setRenameOpen(true)}>
+                      {tr('Rinomina', 'Rename')}
+                    </Button>
+                  )}
+                </div>
+              ) : (
               <div className="mt-4">
                 <label className="mb-1 block text-xs font-medium text-text-secondary" htmlFor="speaker-review-name">
                   {tr('Nome della persona', 'Person name')}
@@ -490,6 +509,7 @@ export function SpeakerDiarizationEditor({
                         event.preventDefault();
                         skipBlurSaveRef.current = true;
                         setEditedName(selected.name);
+                        if (selected.status === 'accepted') setRenameOpen(false);
                         event.currentTarget.blur();
                       }
                     }}
@@ -500,6 +520,7 @@ export function SpeakerDiarizationEditor({
                   </span>
                 </div>
               </div>
+              )}
 
               {selected.status === 'unassigned' && !selected.sourceOnly && (
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-subtle bg-bg-surface p-3"
