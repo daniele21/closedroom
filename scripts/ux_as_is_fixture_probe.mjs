@@ -24,6 +24,10 @@ const selectedByJourney = {
     '01-today-recent-only', '02-archive-hit',
     '06-full-library-archived-view-restored',
   ]),
+  recording: new Set([
+    '01-ready-before-start', '02-waiting-for-ai', '03-recording-active',
+    '04-saved-and-ai-resumed', '06-recovery-actions',
+  ]),
   preparation: new Set([
     '01-primary-action', '02-preparation-in-progress',
     '07-notes-ready-default-view',
