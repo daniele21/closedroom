@@ -437,6 +437,9 @@ try {
     const brandImages = Array.from(document.querySelectorAll('.workspace-brand .brand-logo'));
     const brandImageLoaded = brandImages.some((image) => image.complete && image.naturalWidth > 0);
     const brandFallbackVisible = Boolean(document.querySelector('[data-brand-logo-fallback="true"]'));
+    const todayFilters = document.querySelector('[data-tour="today-summary"]');
+    const todayMeetings = document.querySelector('[data-tour="today-meetings"]');
+    const todayDigest = document.querySelector('[data-today-digest="true"]');
     return {
       page: document.querySelector('.workspace-content')?.getAttribute('data-workspace-page'),
       homeCurrent: home?.getAttribute('aria-current'),
@@ -447,6 +450,11 @@ try {
       railPosition: rail ? getComputedStyle(rail).position : '',
       brandImageLoaded,
       brandFallbackVisible,
+      todayMeetingsPresent: Boolean(todayMeetings),
+      todayCompactFilters: Boolean(todayFilters && todayFilters.getBoundingClientRect().height < 180),
+      todayDigestAfterMeetings: Boolean(todayMeetings && (!todayDigest ||
+        (todayMeetings.compareDocumentPosition(todayDigest) & Node.DOCUMENT_POSITION_FOLLOWING))),
+      todayDigestDisclosedOnlyOnDemand: !todayDigest || !todayDigest.open,
     };
   `);
   if (observations.wideHome.page !== 'home' || observations.wideHome.homeCurrent !== 'page') {
@@ -457,6 +465,10 @@ try {
   }
   if (!observations.wideHome.brandImageLoaded && !observations.wideHome.brandFallbackVisible) {
     throw new Error(`ClosedRoom brand mark is not visible: ${JSON.stringify(observations.wideHome)}`);
+  }
+  if (!observations.wideHome.todayMeetingsPresent || !observations.wideHome.todayCompactFilters
+    || !observations.wideHome.todayDigestAfterMeetings || !observations.wideHome.todayDigestDisclosedOnlyOnDemand) {
+    throw new Error(`Today must prioritize meeting retrieval ahead of derived digest: ${JSON.stringify(observations.wideHome)}`);
   }
   await checkpoint(browser, '01-wide-today');
 
