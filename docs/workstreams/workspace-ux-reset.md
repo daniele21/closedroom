@@ -71,6 +71,6 @@ Use repository selector `python3 scripts/select_validation_profile.py --base <ba
 
 ## Resume and durable closeout
 
-**Next:** UX2 profile /v1/projects 1/25/200 and preparation-job reads, UX1 archive scroll/focus, UX4 display-source/recovery polish, UX6 representative mic/speaker evidence, UX7 custom outcome and UX8/9 convergence. Existing stale #204 was superseded by #219 and closed. Source deliveries ≠ product success; latency, usability and physical Mac outcomes remain unmeasured.
+**As-is audit (16 Nov):** Synthetic Mac WebDriver FULL_MEDIA PASS, 101 DOM observations and 33 screenshot samples; [findings and limitations in #222](https://github.com/daniele21/closedroom/pull/222) (closed without merging probe). P1: saved Meeting vertical hierarchy/outcome below fold, Today hero/digest before meeting task, Voices action density, stacking toasts and recovery copy. P2: library/search distinction and compact focus. **Next:** correct P1 hierarchy before new presentation features; benchmark 1/25/200 Projects separately. Packaged WKWebView/TCC/VoiceOver/usability still unverified.
 
 At convergence update design/ux-contract.json, affected docs/features.md or bounded feature owner, docs/current-state.md and executable tests; update design/brand-kit.json only if approved tokens change. Remove temporary workstream after durable truth and deferred release obligations are transferred.
