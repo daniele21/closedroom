@@ -45,8 +45,6 @@ Primary rail: **Riunioni**, **Progetti**, persistent **Nuovo meeting**. Utilitie
 | UX8 BLOCKED | Semantic UI components + workspace.css/index.css: consistent controls/type/spacing, 1280/900/640 layouts, light/dark tokens, accessibility, restrained motion | UX1 + UX3 hierarchy |
 | UX9 BLOCKED | End-to-end UX convergence: critical journeys, performance, accessibility, source docs, exact-head validation and PR-to-dev integration | affected slices |
 
-**P1 (16 Nov, PR #223 draft):** task-first Today/Analysis and bounded notifications; browser ordering assertions added. Selected gates and FULL_MEDIA pending. Remaining P1: Voices density, recovery copy, Meeting controls and notification history.
-
 **Parallel execution:** UX2 backend, UX3 saved Meeting, UX4 overlay and UX1 shell may proceed on *disjoint files*. UX5 can start with NewRecordingPage after UX4 action contract is settled. UX6/UX7 may prepare child-only pieces in parallel, but only UX3 owns MeetingDetailPage until handoff. UX8 must not write shared CSS while UX1 does. Merge small coherent PRs early; no multi-agent edits on the same file.
 
 ## Required interaction states and recovery
