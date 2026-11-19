@@ -28,6 +28,15 @@ uv sync --all-extras --frozen --python 3.12
   pnpm exec tsc --noEmit
 )
 UV_CACHE_DIR=.cache/uv uv run --frozen --python 3.12 python -m unittest discover -s test -v
+
+# Isolated security spike, synthetic-only. These tests are deliberately
+# mandatory on the Mac runner: a green draft PR governance check does not run
+# the experiments directory. Do not upload private data or install globally.
+SECURE_SYNC_PY=(uv run --no-project --python 3.12 --with 'cryptography>=46,<47' --with 'keyring>=25,<26' -- python)
+UV_CACHE_DIR=.cache/uv "${SECURE_SYNC_PY[@]}" -m unittest discover -s experiments/secure_sync -p 'test_*.py' -v
+# Requires a real, unlocked login Keychain. Fails closed and only creates
+# randomized synthetic entries under ClosedRoom's dedicated test identity.
+UV_CACHE_DIR=.cache/uv "${SECURE_SYNC_PY[@]}" experiments/secure_sync/macos_keychain_probe.py
 source .github/ci/setup-browser.sh
 E2E_SOURCE_REVISION="$(git rev-parse HEAD)" node scripts/browser_meeting_ui_e2e.mjs
 echo "ClosedRoom Mac source and browser FULL_MEDIA checks passed"

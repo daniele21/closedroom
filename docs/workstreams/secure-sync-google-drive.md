@@ -58,6 +58,13 @@ Non-goals of first pilot: remotely transcribing, syncing audio/screenshots/model
 - **Fresh-device limitation**: an authenticated key + a genesis manifest does NOT prove remote freshness. Pairing/recovery must independently convey an authenticated latest trusted checkpoint. A provider may suppress all updates or delete objects, and local checkpoints can be lost on OS restore. Design recovery, independent backup and a single authoritative local writer before enabling Drive.
 - This slice is isolated; no OAuth/network, no automatic upload, no app wiring, no dependency/lockfile modification, no migration, no local eviction, no change to active storage mode. The signer is a software Ed25519 key stored in Keychain, not a Secure Enclave private key. Do not present this as sync-ready or Keychain-qualified.
 
+### Real-Mac validation request (2026-11-19)
+
+- `.github/ci/local-test.sh` runs the isolated crypto unit tests explicitly under a transient `uv --no-project` environment (`cryptography>=46,<47`, `keyring>=25,<26`), then invokes a real Keychain smoke. The product build/lockfile/runtime remain unmodified.
+- `experiments/secure_sync/macos_keychain_probe.py` uses a new random vault ID, a real macOS Keychain backend, an independent Python child process and authenticated challenge to prove both the AES vault key and Ed25519 owner identity can be read after process restart. It checks checkpoint persistence and deletes test-only Keychain entries afterward, failing if cleanup is incomplete.
+- The test proves only the runner's Keychain session, NOT packaged-app code signing/entitlements, screen prompts, external OAuth, independent Mac recovery or deployed multi-device sync. No meeting data or cloud credentials are used.
+- The central Mac request is issued only for a reviewed exact source commit by updating the versioned request in private `daniele21/local-runner-infra`; actual `local-ci/mac` status, not dispatch accepted, is the gate.
+
 ### Current checkpoint
 
 - Baseline checked: `dev` `de0d1809e5f33c6dcc9a43895d81d336c4f2ba62`; standalone GCS **preparation-only** in dev, no automatic cloud runtime. GCS experimental encrypted cold backup is **not** per-meeting sync.
