@@ -5,7 +5,7 @@ Isolated, offline-only format experiment. No Google OAuth, network traffic, uplo
 Run with the dependency available:
 
 ```sh
-python3 -m unittest discover -s experiments/secure_sync -v
+uv run --no-project --with cryptography --with keyring -- python -m unittest discover -s experiments/secure_sync -p 'test_*.py' -v
 ```
 
 Additional isolated components:
