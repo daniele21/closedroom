@@ -30,3 +30,32 @@ uv run --no-project --python 3.12 --with 'cryptography>=46,<47' --with 'keyring>
 ```
 
 The probe uses **synthetic temporary records only**, a second process and cleanup verification. Never use actual user credentials/vaults. Mac runner PASS is not installed-app Keychain/TCC proof.
+
+## Native packaged-app Keychain proof (GUI user opt-in)
+
+The `vault_keychain.py` experimental `keyring` adapter is NOT included in the
+product. To prove the **actual frozen app executable's own Security.framework
+context**, use the separate native Keychain diagnostic in
+`src/local_asr_server/macos_keychain_native.py`.
+
+From a clean checkout on an Apple Silicon Mac, using an interactive logged-in
+GUI Terminal:
+
+```bash
+python3 scripts/probe_packaged_keychain.py --build
+```
+
+This creates an **ad-hoc signed, exact-HEAD** .app under `dist/`; it does not
+install/replace `/Applications/ClosedRoom.app`. It checks source/manifest,
+bundle ID and code signature and calls the packaged
+`Contents/MacOS/ClosedRoom secure-sync-keychain-smoke`. That executable uses
+a separate synthetic Keychain service: 32 random key bytes, readback,
+same-signed-executable second-process HMAC challenge, cleanup and absence
+check. The only output is bounded PASS/failure status; no secrets, meeting
+data, server, Drive, OAuth or network.
+
+Without `--build`, reuses ONLY an exact-HEAD finalized app; `--app`
+accepts an explicit candidate only when it matches the checked-out SHA.
+Background GitHub Mac Keychain access still FAIL `-25308`; this is a
+different execution context and is not bypassed. An ad-hoc signature
+is NOT Apple Developer ID/notarization or installed-app entitlement evidence.
