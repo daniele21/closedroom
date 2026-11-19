@@ -23,7 +23,7 @@ Next step: review and adapt this format in the existing canonical TranscriptionS
 
 ## Source-owned real-Mac gate
 
-On the shared Mac validation lane, `.github/ci/local-test.sh` explicitly runs the `test_*.py` files with transient isolated Python dependencies, then runs:
+On the shared Mac validation lane, `.github/ci/local-test.sh` explicitly runs the `test_*.py` files with transient isolated Python dependencies. A genuine user GUI Keychain smoke is deliberately NOT run as a background CI step (the headless runner produced `errSecInteractionNotAllowed -25308`). It remains a separate real-environment requirement. The earlier exploratory direct invocation was:
 
 ```sh
 uv run --no-project --python 3.12 --with 'cryptography>=46,<47' --with 'keyring>=25,<26' -- python experiments/secure_sync/macos_keychain_probe.py

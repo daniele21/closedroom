@@ -85,6 +85,18 @@ class NativeKeychainAdapterTests(unittest.TestCase):
             with self.assertRaises(NativeKeychainError):
                 _SecurityAPI()
 
+    def test_background_ci_cannot_claim_gui_keychain_success(self) -> None:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        ci = (root / ".github" / "ci" / "local-test.sh").read_text(encoding="utf-8")
+        self.assertIn('test_*.py', ci)
+        self.assertIn("KEYCHAIN_REAL_ENVIRONMENT=NOT_RUN", ci)
+        self.assertIn("scripts/probe_packaged_keychain.py --build", ci)
+        self.assertNotIn(
+            '"${SECURE_SYNC_PY[@]}" experiments/secure_sync/macos_keychain_probe.py', ci,
+        )
+
 
 class SignedBundleDiagnosticTests(unittest.TestCase):
     def test_normal_app_and_unrelated_commands_are_not_intercepted(self) -> None:
