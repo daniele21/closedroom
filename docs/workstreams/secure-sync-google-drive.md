@@ -56,6 +56,13 @@ Non-goals of first pilot: remotely transcribing, syncing audio/screenshots/model
 - Isolated `vault_keychain.py`: fail-closed macOS Keychain-only prototype storing independent AES vault and **software** Ed25519 signing secrets, authenticated owner pin and checkpoint. Not hardware Secure Enclave. Synthetic unit tests cover restart, tampering, bad signer, key replacement/corruption, failures and replay.
 - Missing: genuine recovery materials, cross-process CAS, authenticated pairing, revocation/rotation, second-device trust anchor and verified backup. No OAuth, sync, migration, upload, local eviction, app integration or production cryptographic dependencies yet.
 
+### Mac result and failure classification — 2026-11-19
+
+- Source SHA `c14c8e16` ran on the central Mac runner ([run 44498140756](https://github.com/daniele21/local-runner-infra/actions/runs/44498140756)). **977 repository tests PASS; 17 isolated crypto/manifest/fake-Keychain tests PASS.**
+- **Real Keychain smoke FAIL** before storing the first synthetic secret. `keyring.backends.macOS.api.Error (-25308)` means `errSecInteractionNotAllowed`: current runner security context cannot permit the operation. Classify as an **environment/session authority** blocker pending an interactive user-login Keychain proof; do not relabel it a cryptographic regression or success.
+- Source commit `b4cfd627` fixes the independent repository-doc budget failure (3,125 > 3,000 estimated tokens); hosted governance checks now PASS. It has **not** passed exact-HEAD Mac validation; the earlier runner failure remains blocking for the Keychain gate.
+- Next discriminating action: verify Keychain operations in a trusted logged-in GUI-user/signed-app execution context, without exposing an unlock password to CI or silently substituting a file-based secret store. Preserve failure on inaccessible Keychain. Run again against exact candidate when correct environment exists.
+
 ### Current checkpoint
 
 - Source branch based on `dev@de0d1809`; GCS remains configuration-only. No active sync service.
