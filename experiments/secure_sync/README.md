@@ -13,7 +13,7 @@ Additional isolated components:
 - `vault_keychain.py`: explicit macOS Keychain-only prototype for vault and software Ed25519 signing secrets, an out-of-band owner key pin and a trusted local checkpoint. Fake Keychain tests do not demonstrate that a packaged Mac app can access the Keychain. The test injection is **not** a production option. No automatic initialization.
 - `test_vault_foundation.py`: key corruption, wrong signer, replay, fork, restart and no-fallback cases.
 
-No cross-process compare-and-swap, signed device grants, user recovery secret, real Mac/Keychain integration or provider-freshness guarantee exists. A clean device **must not accept Drive's purported current head as proof of freshness**. Do not activate upload or deletion.
+No production cross-process compare-and-swap, durable pairing grants, independently qualified recovery, or provider-freshness guarantee exists. A clean device **must not accept Drive's purported current head as proof of freshness**. Do not activate upload or deletion.
 
 The 32-byte secret is **test-only** in this experiment. Do not persist it in plaintext, pass it to telemetry, store it in Drive, or treat the local test fixture as a recovery-key protocol.
 
@@ -59,3 +59,35 @@ accepts an explicit candidate only when it matches the checked-out SHA.
 Background GitHub Mac Keychain access still FAIL `-25308`; this is a
 different execution context and is not bypassed. An ad-hoc signature
 is NOT Apple Developer ID/notarization or installed-app entitlement evidence.
+
+## SYNC-2 offline recovery and pairing proof (not production)
+
+- `recovery_capsule.py` encrypts the 256-bit vault key, **software**
+  Ed25519 owner private identity and the trusted manifest checkpoint with a
+  separate randomly generated, 256-bit `CR1-` recovery code. The code is
+  never put in the capsule, local settings, Drive or CI logs. Store the code
+  **independently**: possession of only a capsule or only a code is insufficient.
+  Uses HKDF-SHA256 on a high-entropy code + random salt, AES-256-GCM and
+  authenticated format/header. Arbitrary user passwords are NOT accepted.
+- `device_pairing.py` creates an expiring (5-minute) X25519 device request.
+  Owner approval must be explicit and preceded by comparing the exact
+  eight-digit request fingerprint shown by **both physical Macs** through a
+  separate user-trusted channel. Owner signs a **read-only** X25519/HKDF/
+  AES-GCM vault-key grant tied to the request, device and checkpoint. Receiver
+  requires an **independently authenticated owner public key**. The recipient
+  does not receive the owner signing private key.
+- `test_offline_trust.py` checks wrong recovery codes, stale/conflicting
+  checkpoints, mismatched owner, tamper, timeout, refusal, substitutions,
+  repeat grant use in one pending session and independently recovered owner
+  keys issuing a read-only grant. All objects remain in memory; no transport.
+
+**Security boundary:** this is protocol experimentation only. Manual SAS
+verification cannot be inferred from passing a string to the API; a real
+two-screen UX and authenticated owner-public bootstrap must be designed and
+tested. In-memory `PendingDevice.consumed` is NOT durable anti-replay or
+device authorization. Recovering the owner signing secret restores full owner
+authority; recovery material needs stronger UX, locked Keychain persistence,
+crash-safe transaction handling, loss/restore and key compromise reviews.
+A Drive provider could replay a previously valid encrypted recovery capsule:
+without an independent newer checkpoint a fresh Mac cannot detect staleness.
+Revocation/rotation does not yet exist. No second real Mac has been tested.
