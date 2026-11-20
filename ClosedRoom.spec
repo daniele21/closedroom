@@ -176,6 +176,8 @@ hidden_imports = [
     "local_asr_server.runtime.service_manager",
     "korgis_sdk",  # opt-in SDK is bundled; legacy analysis remains the default
     "local_asr_server.bundled_module_dispatch",
+    "local_asr_server.macos_keychain_native",
+    "local_asr_server.macos_keychain_probe",
     "local_asr_server.services",
     "local_asr_server.services.analysis_service",
     "local_asr_server.services.transcription_service",

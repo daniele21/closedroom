@@ -28,6 +28,18 @@ uv sync --all-extras --frozen --python 3.12
   pnpm exec tsc --noEmit
 )
 UV_CACHE_DIR=.cache/uv uv run --frozen --python 3.12 python -m unittest discover -s test -v
+
+# Isolated security spike, synthetic-only. These tests are deliberately
+# mandatory on the Mac runner: a green draft PR governance check does not run
+# the experiments directory. Do not upload private data or install globally.
+SECURE_SYNC_PY=(uv run --no-project --python 3.12 --with 'cryptography>=46,<47' --with 'keyring>=25,<26' -- python)
+UV_CACHE_DIR=.cache/uv "${SECURE_SYNC_PY[@]}" -m unittest discover -s experiments/secure_sync -p 'test_*.py' -v
+# REAL_ENVIRONMENT: Keychain calls require an interactive macOS GUI login session.
+# This shared background runner returned errSecInteractionNotAllowed (-25308)
+# twice, even after login Keychain unlock. The native installed/frozen app
+# validation is a SEPARATE blocking physical GUI-user gate, never inferred from
+# successful deterministic CI: scripts/probe_packaged_keychain.py --build.
+echo "KEYCHAIN_REAL_ENVIRONMENT=NOT_RUN context=background-runner (separate GUI gate required)"
 source .github/ci/setup-browser.sh
 E2E_SOURCE_REVISION="$(git rev-parse HEAD)" node scripts/browser_meeting_ui_e2e.mjs
 echo "ClosedRoom Mac source and browser FULL_MEDIA checks passed"
