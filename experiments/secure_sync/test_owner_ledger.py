@@ -275,5 +275,224 @@ class OfflineLedgerTests(unittest.TestCase):
             OwnerLedger(link, self.vault, self.pub, self.keys)
 
 
+    def _document_digest(self):
+        import hashlib
+        with sqlite3.connect(self.path) as db:
+            document = db.execute(
+                "SELECT document FROM state WHERE vault_id=?", (self.vault,),
+            ).fetchone()[0]
+        return hashlib.sha256(document).hexdigest()
+
+    def _interrupt_after_sql_commit(self):
+        self.backend.fail_anchor = True
+        pending = create_device_request(self.vault, now=NOW)
+        try:
+            with self.assertRaises(KeychainError):
+                self.ledger.authorize_and_record(
+                    pending.request, self.signer,
+                    manually_compared_code=comparison_code(pending.request, now=NOW),
+                    explicit_approval=True, now=NOW,
+                )
+        finally:
+            self.backend.fail_anchor = False
+        return pending, self._document_digest()
+
+    def test_exact_prepared_forward_step_recovers_only_with_owner_confirmation(self):
+        pending, successor_digest = self._interrupt_after_sql_commit()
+        self.assertIsNotNone(self.keys.read_ledger_prepare(self.vault))
+        with self.assertRaises(LedgerError):
+            self._new_ledger().read()
+        self.assertEqual(self._new_ledger().recover_prepared_transition(
+            self.signer, expected_new_digest=successor_digest,
+            explicit_confirmation=True,
+        ), "recovered")
+        self.assertIsNone(self.keys.read_ledger_prepare(self.vault))
+        state = self._new_ledger().read()
+        self.assertEqual(state["revision"], 1)
+        self.assertIn(json.loads(pending.request)["request_id"], state["used_request_ids"])
+        with self.assertRaises(LedgerError):
+            self._new_ledger().authorize_and_record(
+                pending.request, self.signer,
+                manually_compared_code=comparison_code(pending.request, now=NOW),
+                explicit_approval=True, now=NOW,
+            )
+        self.assertEqual(self._new_ledger().read()["revision"], 1)
+
+    def test_recovery_refuses_wrong_digest_absent_consent_and_wrong_signer(self):
+        from vault_manifest import generate_owner_signing_key
+        _, digest = self._interrupt_after_sql_commit()
+        for signer, expected, consent in (
+            (self.signer, digest, False),
+            (self.signer, "a" * 64, True),
+            (generate_owner_signing_key(), digest, True),
+        ):
+            with self.subTest(consent=consent, expected=expected), self.assertRaises(LedgerError):
+                self._new_ledger().recover_prepared_transition(
+                    signer, expected_new_digest=expected,
+                    explicit_confirmation=consent,
+                )
+        with self.assertRaises(LedgerError):
+            self._new_ledger().read()
+
+    def test_recovery_refuses_if_keychain_preparation_is_missing(self):
+        _, digest = self._interrupt_after_sql_commit()
+        self.backend.data.pop((SERVICE, self.vault + ":ledger-prepare"))
+        with self.assertRaisesRegex(LedgerError, "No independently Keychain-prepared"):
+            self._new_ledger().recover_prepared_transition(
+                self.signer, expected_new_digest=digest,
+                explicit_confirmation=True,
+            )
+        with self.assertRaises(LedgerError):
+            self._new_ledger().read()
+
+    def test_recovery_does_not_accept_rolled_back_old_database(self):
+        with sqlite3.connect(self.path) as db:
+            old_document = db.execute(
+                "SELECT document FROM state WHERE vault_id=?", (self.vault,),
+            ).fetchone()[0]
+        _, digest = self._interrupt_after_sql_commit()
+        # DB may have committed and THEN been restored from backup. As long
+        # as Keychain preparation remains, old == anchor cannot be assumed safe.
+        with sqlite3.connect(self.path) as db:
+            db.execute("UPDATE state SET document=? WHERE vault_id=?",
+                       (old_document, self.vault))
+        with self.assertRaisesRegex(LedgerError, "Unresolved Keychain prepared"):
+            self._new_ledger().read()
+        with self.assertRaisesRegex(LedgerError, "rolled back"):
+            self._new_ledger().recover_prepared_transition(
+                self.signer, expected_new_digest=digest,
+                explicit_confirmation=True,
+            )
+
+    def test_recovery_refuses_prepared_but_uncommitted_sqlite_state(self):
+        old_digest = self._document_digest()
+        self.ledger._stage_prepare(0, old_digest, 1, "b" * 64)
+        with self.assertRaises(LedgerError):
+            self._new_ledger().read()
+        with self.assertRaisesRegex(LedgerError, "rolled back"):
+            self._new_ledger().recover_prepared_transition(
+                self.signer, expected_new_digest="b" * 64,
+                explicit_confirmation=True,
+            )
+
+    def test_recovery_refuses_signed_alternate_successor_document(self):
+        _, digest = self._interrupt_after_sql_commit()
+        with sqlite3.connect(self.path) as db:
+            document = json.loads(db.execute(
+                "SELECT document FROM state WHERE vault_id=?", (self.vault,),
+            ).fetchone()[0])
+            state = document["state"]
+            state["devices"]["c" * 32] = {"status": "active", "epoch": 1}
+            forged_signed = self.ledger._signed(state, self.signer)
+            db.execute("UPDATE state SET document=? WHERE vault_id=?",
+                       (forged_signed, self.vault))
+        with self.assertRaisesRegex(LedgerError, "rolled back"):
+            self._new_ledger().recover_prepared_transition(
+                self.signer, expected_new_digest=digest,
+                explicit_confirmation=True,
+            )
+
+    def test_recovery_refuses_wrong_or_missing_epoch_secret(self):
+        _, digest = self._interrupt_after_sql_commit()
+        self.backend.data[(SERVICE, self.vault + ":master")] = base64.b64encode(
+            b"z" * 32,
+        ).decode()
+        with self.assertRaisesRegex(LedgerError, "epoch key"):
+            self._new_ledger().recover_prepared_transition(
+                self.signer, expected_new_digest=digest,
+                explicit_confirmation=True,
+            )
+        with self.assertRaises(LedgerError):
+            self._new_ledger().read()
+
+    def test_missing_preparation_cannot_invoke_recovery_on_healthy_ledger(self):
+        with self.assertRaisesRegex(LedgerError, "No independently Keychain-prepared"):
+            self._new_ledger().recover_prepared_transition(
+                self.signer, expected_new_digest="d" * 64,
+                explicit_confirmation=True,
+            )
+        self.assertEqual(self.ledger.read()["revision"], 0)
+
+    def test_corrupt_preparation_is_not_ignored_or_repaired(self):
+        self.backend.data[(SERVICE, self.vault + ":ledger-prepare")] = '{"from_revision":0}'
+        with self.assertRaisesRegex(LedgerError, "Corrupt Keychain prepared"):
+            self._new_ledger().read()
+        with self.assertRaises(LedgerError):
+            self._new_ledger().recover_prepared_transition(
+                self.signer, expected_new_digest="e" * 64,
+                explicit_confirmation=True,
+            )
+
+    def test_epoch_rotation_split_commit_can_recover_with_independent_secret(self):
+        pending, _ = self._approve()
+        self.backend.fail_anchor = True
+        try:
+            with self.assertRaises(KeychainError):
+                self.ledger.revoke_and_rotate(
+                    json.loads(pending.request)["device_id"],
+                    self.signer, self._advance(),
+                )
+        finally:
+            self.backend.fail_anchor = False
+        digest = self._document_digest()
+        with self.assertRaises(LedgerError):
+            self._new_ledger().read()
+        self.assertEqual(
+            self._new_ledger().recover_prepared_transition(
+                self.signer, expected_new_digest=digest,
+                explicit_confirmation=True,
+            ), "recovered",
+        )
+        self.assertEqual(self._new_ledger().read()["key_epoch"], 2)
+        self.assertEqual(
+            self._new_ledger().read()["devices"][json.loads(pending.request)["device_id"]]["status"],
+            "revoked",
+        )
+        self.assertNotEqual(self.keys.load_epoch_key(self.vault, 2), self.master)
+
+    def test_failed_cleanup_after_anchor_acceptance_requires_explicit_completion(self):
+        pending = create_device_request(self.vault, now=NOW)
+        original_clear = self.keys.clear_ledger_prepare
+        def fail_clear(vault_id):
+            raise KeychainError("Synthetic post-anchor cleanup failed")
+        self.keys.clear_ledger_prepare = fail_clear
+        try:
+            with self.assertRaises(KeychainError):
+                self.ledger.authorize_and_record(
+                    pending.request, self.signer,
+                    manually_compared_code=comparison_code(pending.request, now=NOW),
+                    explicit_approval=True, now=NOW,
+                )
+        finally:
+            self.keys.clear_ledger_prepare = original_clear
+        digest = self._document_digest()
+        with self.assertRaisesRegex(LedgerError, "Unresolved Keychain prepared"):
+            self._new_ledger().read()
+        self.assertEqual(self._new_ledger().recover_prepared_transition(
+            self.signer, expected_new_digest=digest,
+            explicit_confirmation=True,
+        ), "recovered")
+        self.assertEqual(self._new_ledger().read()["revision"], 1)
+
+    def test_prepared_transition_write_failure_before_commit_keeps_old_record(self):
+        old_digest = self._document_digest()
+        original = self.keys.write_ledger_prepare
+        def fail_prepare(vault_id, serialized):
+            raise KeychainError("Synthetic prepare write failure")
+        self.keys.write_ledger_prepare = fail_prepare
+        try:
+            pending = create_device_request(self.vault, now=NOW)
+            with self.assertRaises(KeychainError):
+                self.ledger.authorize_and_record(
+                    pending.request, self.signer,
+                    manually_compared_code=comparison_code(pending.request, now=NOW),
+                    explicit_approval=True, now=NOW,
+                )
+        finally:
+            self.keys.write_ledger_prepare = original
+        self.assertEqual(self._document_digest(), old_digest)
+        self.assertEqual(self._new_ledger().read()["revision"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,9 +5,10 @@ epoch keys remain in the macOS Keychain prototype; recording/catalog stores
 and installed ClosedRoom are not touched.
 
 SQLite transactions serialize writers using ONE canonical local database path.
-Keychain and SQLite cannot commit atomically. Any mid-commit disagreement
-intentionally freezes the ledger until a separately authenticated recovery
-workflow is designed. Never automatically repair by trusting either copy.
+Keychain and SQLite cannot commit atomically. A Keychain-held prepared digest
+must precede each SQLite update; an interrupted exact signed forward step can
+be explicitly completed by the owner, while ambiguity/rollback fails closed.
+This does not establish remote freshness or provide a production recovery UI.
 """
 from __future__ import annotations
 
@@ -234,11 +235,50 @@ class OwnerLedger:
             raise LedgerError("Signed ledger exceeds size budget")
         return document
 
-    def _checked(self, db: sqlite3.Connection) -> tuple[dict[str, Any], str]:
+    def _read_prepare(self) -> dict[str, Any] | None:
+        """Trusted in-Keychain intent, independent from the mutable SQLite row."""
+        raw = self.keys.read_ledger_prepare(self.vault_id)
+        if raw is None:
+            return None
+        if not isinstance(raw, str) or len(raw) > 512:
+            raise LedgerError("Corrupt Keychain prepared transition")
+        try:
+            prepared = _parse(raw.encode("ascii"))
+        except UnicodeEncodeError as exc:
+            raise LedgerError("Invalid Keychain prepared transition") from exc
+        if (not isinstance(prepared, dict)
+                or set(prepared) != {"vault_id", "from_revision", "from_digest",
+                                    "to_revision", "to_digest"}
+                or prepared["vault_id"] != self.vault_id
+                or type(prepared["from_revision"]) is not int
+                or prepared["from_revision"] < 0
+                or type(prepared["to_revision"]) is not int
+                or prepared["to_revision"] != prepared["from_revision"] + 1
+                or not _hex(prepared["from_digest"], 64)
+                or not _hex(prepared["to_digest"], 64)
+                or prepared["from_digest"] == prepared["to_digest"]):
+            raise LedgerError("Corrupt Keychain prepared transition")
+        return prepared
+
+    def _stage_prepare(
+        self, from_revision: int, from_digest: str,
+        to_revision: int, to_digest: str,
+    ) -> None:
+        prepared = {
+            "vault_id": self.vault_id,
+            "from_revision": from_revision, "from_digest": from_digest,
+            "to_revision": to_revision, "to_digest": to_digest,
+        }
+        serialized = _json(prepared).decode("ascii")
+        self.keys.write_ledger_prepare(self.vault_id, serialized)
+        if self._read_prepare() != prepared:
+            raise LedgerError("Prepared transition Keychain readback mismatch")
+
+    def _verified_record(self, db: sqlite3.Connection) -> tuple[dict[str, Any], str]:
+        """Verify signature and pinned owner, without trusting SQLite freshness."""
         row = db.execute("SELECT document FROM state WHERE vault_id = ?", (self.vault_id,)).fetchone()
-        anchor = self._read_anchor()
-        if row is None or anchor is None:
-            raise LedgerError("Missing ledger or trusted anchor: explicit recovery required")
+        if row is None:
+            raise LedgerError("Missing signed owner ledger: explicit recovery required")
         document = bytes(row[0])
         digest = hashlib.sha256(document).hexdigest()
         record = _parse(document)
@@ -255,14 +295,96 @@ class OwnerLedger:
             )
         except (ValueError, InvalidSignature, TypeError) as exc:
             raise LedgerError("Owner ledger signature does not verify") from exc
+        if not hmac.compare_digest(
+            self.keys.load_pinned_owner(self.vault_id), self.owner_public,
+        ):
+            raise LedgerError("Trusted owner pin mismatch")
+        return state, digest
+
+    def _checked(self, db: sqlite3.Connection) -> tuple[dict[str, Any], str]:
+        state, digest = self._verified_record(db)
+        anchor = self._read_anchor()
+        if anchor is None:
+            raise LedgerError("Missing ledger or trusted anchor: explicit recovery required")
         if anchor != {
             "vault_id": self.vault_id, "revision": state["revision"],
             "digest": digest,
         }:
             raise LedgerError("SQLite/Keychain high-water mismatch: frozen until recovery")
-        if not hmac.compare_digest(self.keys.load_pinned_owner(self.vault_id), self.owner_public):
-            raise LedgerError("Trusted owner pin mismatch")
+        # A prepared write may have stopped before SQLite COMMIT, after COMMIT,
+        # or during Keychain acknowledgement. Even a DB equal to the old anchor
+        # is ambiguous: it may have been rolled back after a real commit.
+        if self._read_prepare() is not None:
+            raise LedgerError("Unresolved Keychain prepared transition: explicit recovery required")
         return state, digest
+
+    def recover_prepared_transition(
+        self, owner_signer: Ed25519PrivateKey, *,
+        expected_new_digest: str, explicit_confirmation: bool,
+    ) -> str:
+        """Explicit local forward repair, NEVER trust or roll back SQLite alone.
+
+        A prepared transition written to Keychain *before* SQLite COMMIT binds
+        the old high-water anchor to the exact signed successor document.
+        The operator must independently confirm which candidate was intended.
+        No prepared record => no repair. A DB still at the old anchor could be
+        either uncommitted OR a malicious post-commit rollback: refuse both.
+        """
+        if (type(explicit_confirmation) is not bool or not explicit_confirmation
+                or not _hex(expected_new_digest, 64)
+                or not isinstance(owner_signer, Ed25519PrivateKey)
+                or not hmac.compare_digest(
+                    public_key_bytes(owner_signer), self.owner_public,
+                )):
+            raise LedgerError("Explicit authenticated owner recovery required")
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            state, digest = self._verified_record(db)
+            anchor = self._read_anchor()
+            prepared = self._read_prepare()
+            if anchor is None or prepared is None:
+                raise LedgerError("No independently Keychain-prepared transition")
+            if not hmac.compare_digest(prepared["to_digest"], expected_new_digest):
+                raise LedgerError("Wrong independently confirmed successor digest")
+            before = {
+                "vault_id": self.vault_id,
+                "revision": prepared["from_revision"],
+                "digest": prepared["from_digest"],
+            }
+            after = {
+                "vault_id": self.vault_id,
+                "revision": prepared["to_revision"],
+                "digest": prepared["to_digest"],
+            }
+            if not (state["revision"] == after["revision"]
+                    and hmac.compare_digest(digest, after["digest"])
+                    and state["previous"] == before["digest"]):
+                raise LedgerError("Prepared successor unavailable or rolled back: recovery refused")
+            # Detect missing, changed or unrelated secrets before asserting the
+            # new epoch. The Keychain is the separate trust/secret owner.
+            key = self.keys.load_epoch_key(self.vault_id, state["key_epoch"])
+            if not hmac.compare_digest(
+                hashlib.sha256(key).hexdigest(), state["key_sha256"],
+            ):
+                raise LedgerError("Trusted epoch key does not match signed successor")
+            if anchor == before:
+                self._write_anchor(after["revision"], after["digest"])
+            elif anchor != after:
+                raise LedgerError("Keychain high-water is not a prepared predecessor/successor")
+            # If clearing the pending mark fails, all future ordinary reads
+            # remain frozen until a subsequent explicit recovery invocation.
+            self.keys.clear_ledger_prepare(self.vault_id)
+            if self._read_prepare() is not None:
+                raise LedgerError("Keychain preparation cleanup failed")
+            db.commit()
+            return "recovered"
+        except BaseException:
+            if db.in_transaction:
+                db.rollback()
+            raise
+        finally:
+            db.close()
 
     def bootstrap(self, owner_signer: Ed25519PrivateKey, signed_genesis: bytes) -> None:
         """Initialize from a locally authenticated signed genesis only once."""
@@ -329,6 +451,10 @@ class OwnerLedger:
         new["previous"] = old_digest
         doc = self._signed(new, signer)
         digest = hashlib.sha256(doc).hexdigest()
+        # The independent Keychain preparation MUST precede SQLite COMMIT.
+        # On a crash, only this exact signed successor is eligible for explicit
+        # forward recovery. A rolled-back DB or missing intent remains blocked.
+        self._stage_prepare(old["revision"], old_digest, new["revision"], digest)
         result = db.execute(
             "UPDATE state SET document = ? WHERE vault_id = ? AND document = ?",
             (doc, self.vault_id, db.execute(
@@ -337,11 +463,13 @@ class OwnerLedger:
         )
         if result.rowcount != 1:
             raise LedgerError("Concurrent owner ledger update refused")
-        # COMMIT is durable before attempting the separate Keychain anchor.
-        # A crash/failure after this point leaves ledger frozen, NEVER silently
-        # succeeding or rolling back to an older trusted head.
         db.commit()
         self._write_anchor(new["revision"], digest)
+        # A failure here leaves the ledger frozen despite anchor == SQLite,
+        # until the owner explicitly proves and finishes the preparation.
+        self.keys.clear_ledger_prepare(self.vault_id)
+        if self._read_prepare() is not None:
+            raise LedgerError("Unresolved Keychain prepared transition")
 
     def authorize_and_record(
         self,

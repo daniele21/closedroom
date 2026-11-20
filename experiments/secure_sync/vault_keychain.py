@@ -195,3 +195,21 @@ class MacKeychainVaultKeys:
         if not isinstance(serialized, str) or len(serialized) > 256:
             raise KeychainError("Invalid ledger anchor")
         self._set(vault_id + ":ledger-anchor", serialized)
+
+    def read_ledger_prepare(self, vault_id: str) -> str | None:
+        """Keychain-owned prepared ledger digest; never sourced from SQLite."""
+        _validate_id(vault_id)
+        value = self._get(vault_id + ":ledger-prepare")
+        return None if value == "" else value
+
+    def write_ledger_prepare(self, vault_id: str, serialized: str) -> None:
+        """Durably stage the exact forward transition before SQLite commit."""
+        _validate_id(vault_id)
+        if not isinstance(serialized, str) or not 0 < len(serialized) <= 512:
+            raise KeychainError("Invalid ledger preparation")
+        self._set(vault_id + ":ledger-prepare", serialized)
+
+    def clear_ledger_prepare(self, vault_id: str) -> None:
+        """Explicitly clear only after the high-water anchor is verified."""
+        _validate_id(vault_id)
+        self._set(vault_id + ":ledger-prepare", "")

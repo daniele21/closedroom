@@ -115,8 +115,17 @@ signed registry document, schema, and exact Keychain high-water anchor.
   `needs_repair`. They require fresh authenticated grants. A revoked device
   may retain old ciphertext/plaintext; there is no remote erase.
 - Keychain write failure before SQL commit leaves old epoch current (possible
-  orphan secret); failure after SQL commit before the high-water write freezes
-  the vault. Crash recovery and cleanup need a separate manual protocol.
+  orphan secret). Each new SQLite update is now preceded by an **exact forward
+  intent in Keychain** binding the trusted old anchor to the new signed record.
+  Every unresolved intent freezes normal reads, including ambiguous attempts
+  where SQLite still equals the old anchor (possible attacker rollback).
+  `recover_prepared_transition(..., expected_new_digest=..., explicit_confirmation=True)`
+  is **manual and forward-only**: it authenticates the owner signer, pinned
+  owner and SQLite signature, compares the independent Keychain intent and
+  prior/current high-water, validates the new epoch key, and completes only the
+  exact one-step signed successor. Missing/tampered intent, old DB, wrong key
+  and owner mismatch never auto-heal. App UX and recovery of ambiguous or
+  orphaned state still require separate design.
 - The persistent ledger has no secret material and uses an **experimental**
   Keychain adapter / fake backend in unit tests. No installation into the
   production app, Developer ID signature, independent trusted head, actual
@@ -125,3 +134,11 @@ signed registry document, schema, and exact Keychain high-water anchor.
 
 Run the isolated `test_owner_ledger.py` suite via the existing
 `unittest discover -s experiments/secure_sync` Mac CI selector.
+
+The prepared Keychain record is **not** a user-held off-device recovery
+proof, does not ensure monotonic Keychain state under OS backup restore, and
+does not establish global/provider freshness. A bool/API digest argument
+cannot establish a genuine human approval or independently archived receipt:
+the app must introduce a reviewed confirmation boundary before enabling it.
+Crash during initial genesis bootstrap is still fail-closed and requires
+independent recovery; no automatic reset/repair was added.
