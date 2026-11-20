@@ -56,12 +56,10 @@ Non-goals of first pilot: remotely transcribing, syncing audio/screenshots/model
 - `vault_keychain.py`: local-only Keychain experiment for vault/owner identity and trusted checkpoints; not Secure Enclave or product integration.
 - `recovery_capsule.py`, `device_pairing.py`, `owner_ledger.py`: separate recovery material, X25519 read-only grants, SQLite serialized/signed registry with a Keychain high-water anchor, fresh independent future-epoch keys on revocation. All synthetic/offline; pairing UX, crash recovery, independent restore and provider freshness still unproven.
 
-### Validation — 2026-11-19/20
+### Physical Keychain proof and Mac evidence
 
-- Exact source `b8dfea6474eee488b2a99e754941aab91fb17648`: [self-hosted Mac run 44552089974](https://github.com/daniele21/local-runner-infra/actions/runs/44552089974) `local-ci/mac=success`; **987 Python tests PASS; 17 crypto tests PASS; browser FULL_MEDIA PASS**. `KEYCHAIN_REAL_ENVIRONMENT=NOT_RUN` is intentional in non-interactive CI.
-- Earlier attempts to access Keychain from a background runner failed `errSecInteractionNotAllowed (-25308)`, even with login Keychain unlocked. The same local synthetic `keyring` smoke passed interactively in Terminal, but without a supplied exact Git SHA; separate from bundle proof.
-- **Packaged ad-hoc GUI Keychain gate PASS (user-supplied terminal evidence, test run 2026-11-19):** source `b8dfea6474eee488b2a99e754941aab91fb17648`, finalized artifact manifest `dist/artifacts/macos-arm64-local-real-environment-app/local-20261119T161450Z-f0de04/build-manifest.json`. `scripts/probe_packaged_keychain.py --build` reported `bundle_id=com.closedroom.app`, `signing=ad-hoc`, `status=pass`, `independent_child=true`, `cleanup=true`, `installed_app_modified=false`, scope `packaged-GUI-Terminal-Keychain-only`. The script validates finalized artifact provenance/signature and executes the Security.framework probe from the frozen app binary. Evidence is supplied by the operator, not independently downloaded from the Mac.
-- **Gate qualified only for ad-hoc packaged diagnostic.** No Developer ID signing/notarization or installed-app workflow, no production vault key lifecycle, authenticated pairing, recovery, revocation, Google OAuth, Drive integration, upload or remote restoration has been proven.
+- [Mac #44552089974](https://github.com/daniele21/local-runner-infra/actions/runs/44552089974): 987 app tests, 17 security tests and browser FULL_MEDIA PASS on `b8dfea64`. Headless Keychain deliberately NOT_RUN (`-25308`).
+- **GUI-user ad-hoc packaged probe PASS** (operator log, exact `b8dfea6474eee488b2a99e754941aab91fb17648`, local artifact `local-20261119T161450Z-f0de04`): same signed binary's second-process read, cleanup and no installed-app modification. Not Developer ID/notarized or installed product functionality; no pairing or Drive proof.
 
 ### Current checkpoint
 
