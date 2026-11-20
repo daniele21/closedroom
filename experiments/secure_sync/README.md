@@ -142,3 +142,21 @@ cannot establish a genuine human approval or independently archived receipt:
 the app must introduce a reviewed confirmation boundary before enabling it.
 Crash during initial genesis bootstrap is still fail-closed and requires
 independent recovery; no automatic reset/repair was added.
+
+## Native bundle-backed vault probe (not user vault storage)
+
+The actual frozen macOS executable has a second diagnostic command,
+`secure-sync-native-vault-smoke`, based on `NativeVaultProbeBackend` in
+`src/local_asr_server/macos_keychain_native.py`. It uses a distinct fixed
+`com.closedroom.app.secure-sync-vault-probe.v1` service and bounded synthetic
+account names only. SecItemAdd creates a local device-only, unlocked-login
+Keychain record; SecItemUpdate modifies an existing record; a same-signed
+second process authenticates a challenge with the new key; a temporary
+prepared-intent record is cleared; cleanup is verified. Normal app startup
+and all meeting data remain untouched. Failures never fall back to files.
+
+`scripts/probe_packaged_keychain.py --build` now checks both the previous
+single-secret path and this new update/clear/readback path, on an exact-SHA
+signed test artifact. This does NOT prove the experimental `keyring` vault
+is wired to the product, nor Keychain rollback resistance, durable recovery,
+production consent, Developer ID/notarization or a second Mac.

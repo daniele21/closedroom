@@ -110,6 +110,32 @@ def main() -> int:
     }
     if answer != expected:
         raise RuntimeError("Invalid bundle Keychain evidence")
+    # The second command exercises the new experimental native provider:
+    # create, atomic item update, zero-length preparation, signed-binary
+    # child read and cleanup. Still only synthetic identifiers and secrets.
+    vault_proc = subprocess.run(
+        [str(executable), "secure-sync-native-vault-smoke"],
+        capture_output=True, text=True, timeout=45,
+    )
+    if vault_proc.returncode != 0:
+        raise RuntimeError(
+            "Packaged native-vault Keychain diagnostic failed; "
+            "use a logged-in macOS GUI session, not a headless runner."
+        )
+    try:
+        vault_answer = json.loads(vault_proc.stdout.strip())
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeError("Native-vault diagnostic returned invalid evidence") from exc
+    if vault_answer != {
+        "schema": "closedroom.native-vault-probe/v1",
+        "status": "pass",
+        "independent_child": True,
+        "updated_item": True,
+        "empty_preparation": True,
+        "cleanup": True,
+        "synthetic_only": True,
+    }:
+        raise RuntimeError("Native-vault diagnostic evidence mismatched")
     print(json.dumps({
         "status": "pass",
         "source_revision": revision,
@@ -119,6 +145,9 @@ def main() -> int:
         "independent_child": True,
         "cleanup": True,
         "installed_app_modified": False,
+        "native_vault_probe": True,
+        "updated_item": True,
+        "empty_preparation": True,
     }, sort_keys=True))
     return 0
 

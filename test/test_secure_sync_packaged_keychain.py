@@ -11,10 +11,13 @@ from unittest.mock import patch
 
 from local_asr_server.bundled_module_dispatch import dispatch_bundled_module
 from local_asr_server.macos_keychain_native import (
-    MacKeychain, NativeKeychainError, _SecurityAPI,
+    MacKeychain, NativeKeychainError, NativeVaultProbeBackend,
+    VAULT_PROBE_SERVICE, _SecurityAPI,
 )
 from local_asr_server.macos_keychain_probe import (
-    CHILD_COMMAND, COMMAND, dispatch_keychain_probe, run_synthetic_keychain_smoke,
+    CHILD_COMMAND, COMMAND, VAULT_COMMAND, VAULT_CHILD_COMMAND,
+    dispatch_keychain_probe, run_synthetic_keychain_smoke,
+    run_native_vault_backend_smoke,
 )
 
 
@@ -35,6 +38,11 @@ class FakeSecurity:
             raise NativeKeychainError("synthetic OSStatus")
         if account in self.data:
             raise NativeKeychainError("synthetic duplicate")
+        self.data[account] = secret
+
+    def update(self, account: str, secret: bytes) -> None:
+        if self.fail_write or account not in self.data:
+            raise NativeKeychainError("synthetic update error")
         self.data[account] = secret
 
     def delete(self, account: str) -> None:
@@ -98,6 +106,121 @@ class NativeKeychainAdapterTests(unittest.TestCase):
         )
 
 
+class NativeVaultProbeBackendTests(unittest.TestCase):
+    def test_create_update_read_clear_and_delete(self) -> None:
+        api = FakeSecurity()
+        store = NativeVaultProbeBackend(_test_api=api)
+        account = "a" * 32 + ":ledger-prepare"
+        self.assertIsNone(store.get_password(VAULT_PROBE_SERVICE, account))
+        store.set_password(VAULT_PROBE_SERVICE, account, "first")
+        store.set_password(VAULT_PROBE_SERVICE, account, "next")
+        self.assertEqual(store.get_password(VAULT_PROBE_SERVICE, account), "next")
+        store.set_password(VAULT_PROBE_SERVICE, account, "")
+        self.assertEqual(store.get_password(VAULT_PROBE_SERVICE, account), "")
+        store.delete_password(VAULT_PROBE_SERVICE, account)
+        self.assertIsNone(store.get_password(VAULT_PROBE_SERVICE, account))
+
+    def test_service_account_and_size_restrictions(self) -> None:
+        store = NativeVaultProbeBackend(_test_api=FakeSecurity())
+        for name in ("a" * 32, "../vault:master", "A" * 32 + ":master",
+                     "a" * 32 + ":unknown", "a" * 32 + ":epoch:01",
+                     "a" * 32 + ":epoch:1", "a" * 32 + ":epoch:1000000"):
+            with self.subTest(name=name), self.assertRaises(NativeKeychainError):
+                store.set_password(VAULT_PROBE_SERVICE, name, "x")
+        with self.assertRaises(NativeKeychainError):
+            store.set_password("com.closedroom.app.secure-sync.v1",
+                               "a" * 32 + ":master", "x")
+        with self.assertRaises(NativeKeychainError):
+            store.set_password(VAULT_PROBE_SERVICE, "a" * 32 + ":master", "x" * 5000)
+        store.set_password(VAULT_PROBE_SERVICE, "a" * 32 + ":epoch:2", "ok")
+        self.assertEqual(store.get_password(VAULT_PROBE_SERVICE,
+                                            "a" * 32 + ":epoch:2"), "ok")
+
+    def test_native_failure_corruption_and_nonmac_no_fallback(self) -> None:
+        api = FakeSecurity()
+        store = NativeVaultProbeBackend(_test_api=api)
+        account = "b" * 32 + ":master"
+        api.fail_write = True
+        with self.assertRaises(NativeKeychainError):
+            store.set_password(VAULT_PROBE_SERVICE, account, "new")
+        api.fail_write = False
+        api.data[account] = b"\xff"
+        with self.assertRaises(NativeKeychainError):
+            store.get_password(VAULT_PROBE_SERVICE, account)
+        api.data[account] = b"valid"
+        api.fail_write = True
+        with self.assertRaises(NativeKeychainError):
+            store.set_password(VAULT_PROBE_SERVICE, account, "new")
+        self.assertEqual(api.data[account], b"valid")
+        with patch("local_asr_server.macos_keychain_native.sys.platform", "linux"):
+            with self.assertRaises(NativeKeychainError):
+                NativeVaultProbeBackend()
+
+    def test_second_process_updated_secret_and_probe_cleanup(self) -> None:
+        api = FakeSecurity()
+        backend = NativeVaultProbeBackend(_test_api=api)
+        vault_id = "a" * 32
+        challenge = b"z" * 32
+        original = b"a" * 32
+        replacement = b"b" * 32
+
+        def fake_child(args: list[str], **_: object):
+            self.assertEqual(args[1:3], [VAULT_CHILD_COMMAND, vault_id + ":master"])
+            self.assertEqual(bytes.fromhex(args[3]), challenge)
+            stored = backend.get_password(VAULT_PROBE_SERVICE, vault_id + ":master")
+            proof = hmac.digest(base64.b64decode(stored), challenge, hashlib.sha256).hex()
+            return type("Child", (), {"returncode": 0, "stdout": proof})()
+
+        import base64
+        stdout = io.StringIO()
+        with (
+            patch("local_asr_server.macos_keychain_probe._require_bundle"),
+            patch("local_asr_server.macos_keychain_probe.NativeVaultProbeBackend",
+                  return_value=backend),
+            patch("local_asr_server.macos_keychain_probe.secrets.token_hex",
+                  return_value=vault_id),
+            patch("local_asr_server.macos_keychain_probe.secrets.token_bytes",
+                  side_effect=[original, replacement, challenge]),
+            patch("local_asr_server.macos_keychain_probe.subprocess.run",
+                  side_effect=fake_child),
+            contextlib.redirect_stdout(stdout),
+        ):
+            self.assertEqual(run_native_vault_backend_smoke(), 0)
+        self.assertEqual(json.loads(stdout.getvalue())["updated_item"], True)
+        self.assertEqual(api.data, {})
+        self.assertEqual(set(api.deleted), {
+            vault_id + ":master", vault_id + ":ledger-prepare",
+        })
+
+    def test_failed_child_probe_deletes_only_created_records(self) -> None:
+        api = FakeSecurity()
+        backend = NativeVaultProbeBackend(_test_api=api)
+        vault_id = "b" * 32
+        with (
+            patch("local_asr_server.macos_keychain_probe._require_bundle"),
+            patch("local_asr_server.macos_keychain_probe.NativeVaultProbeBackend",
+                  return_value=backend),
+            patch("local_asr_server.macos_keychain_probe.secrets.token_hex",
+                  return_value=vault_id),
+            patch("local_asr_server.macos_keychain_probe.subprocess.run",
+                  return_value=type("Child", (), {"returncode": 2, "stdout": ""})()),
+        ):
+            with self.assertRaises(NativeKeychainError):
+                run_native_vault_backend_smoke()
+        self.assertEqual(api.data, {})
+        api.data[vault_id + ":master"] = b"preexisting"
+        with (
+            patch("local_asr_server.macos_keychain_probe._require_bundle"),
+            patch("local_asr_server.macos_keychain_probe.NativeVaultProbeBackend",
+                  return_value=backend),
+            patch("local_asr_server.macos_keychain_probe.secrets.token_hex",
+                  return_value=vault_id),
+        ):
+            with self.assertRaises(NativeKeychainError):
+                run_native_vault_backend_smoke()
+        self.assertEqual(api.data[vault_id + ":master"], b"preexisting")
+
+
 class SignedBundleDiagnosticTests(unittest.TestCase):
     def test_normal_app_and_unrelated_commands_are_not_intercepted(self) -> None:
         self.assertFalse(dispatch_keychain_probe(["ClosedRoom"]))
@@ -112,6 +235,10 @@ class SignedBundleDiagnosticTests(unittest.TestCase):
             dispatch_bundled_module(["ClosedRoom", COMMAND, "extraneous"])
         with self.assertRaises(SystemExit):
             dispatch_bundled_module(["ClosedRoom", CHILD_COMMAND, "wrong"])
+        with self.assertRaises(SystemExit):
+            dispatch_bundled_module(["ClosedRoom", VAULT_COMMAND, "extraneous"])
+        with self.assertRaises(SystemExit):
+            dispatch_bundled_module(["ClosedRoom", VAULT_CHILD_COMMAND, "wrong"])
 
     def test_packaged_parent_second_process_challenge_and_cleanup(self) -> None:
         api = FakeSecurity()

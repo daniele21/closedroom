@@ -86,6 +86,7 @@ def dispatch_bundled_module(argv: Sequence[str] | None = None) -> bool:
     # Offline diagnostics from the actual frozen app binary. No Cocoa/server.
     if len(arguments) >= 2 and arguments[1] in (
         "secure-sync-keychain-smoke", "secure-sync-keychain-smoke-child",
+        "secure-sync-native-vault-smoke", "secure-sync-native-vault-smoke-child",
     ):
         from local_asr_server.macos_keychain_probe import dispatch_keychain_probe
         return dispatch_keychain_probe(arguments)

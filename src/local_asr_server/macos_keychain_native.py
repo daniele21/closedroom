@@ -12,6 +12,9 @@ from contextlib import contextmanager
 from typing import Iterator
 
 SERVICE = "com.closedroom.app.secure-sync-probe.v1"
+# Isolated experimental backend. Never stores user vault keys.
+VAULT_PROBE_SERVICE = "com.closedroom.app.secure-sync-vault-probe.v1"
+MAX_PROBE_PASSWORD_BYTES = 4096
 ITEM_NOT_FOUND = -25300
 DUPLICATE_ITEM = -25299
 SUCCESS = 0
@@ -33,7 +36,10 @@ def _account_ok(account: str) -> bool:
 class _SecurityAPI:
     """Low-level macOS Keychain bindings. All created CoreFoundation refs released."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, service: str = SERVICE) -> None:
+        if service not in (SERVICE, VAULT_PROBE_SERVICE):
+            raise NativeKeychainError("Unapproved Keychain service")
+        self.service = service
         if sys.platform != "darwin":
             raise NativeKeychainError("macOS Security.framework is required")
         cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
@@ -62,12 +68,15 @@ class _SecurityAPI:
         sec.SecItemCopyMatching.restype = ctypes.c_int32
         sec.SecItemDelete.argtypes = (ptr,)
         sec.SecItemDelete.restype = ctypes.c_int32
+        sec.SecItemUpdate.argtypes = (ptr, ptr)
+        sec.SecItemUpdate.restype = ctypes.c_int32
         self.cf, self.sec = cf, sec
         self._const = {
             k: ptr.in_dll(sec, k).value
             for k in ("kSecClass", "kSecClassGenericPassword", "kSecAttrService",
                       "kSecAttrAccount", "kSecValueData", "kSecReturnData",
-                      "kSecMatchLimit", "kSecMatchLimitOne")
+                      "kSecMatchLimit", "kSecMatchLimitOne",
+                      "kSecAttrAccessible", "kSecAttrAccessibleWhenUnlockedThisDeviceOnly")
         }
         self._true = ptr.in_dll(cf, "kCFBooleanTrue").value
 
@@ -81,7 +90,7 @@ class _SecurityAPI:
             if not q:
                 raise NativeKeychainError("Could not create Keychain query")
             created.append(q)
-            service = cf.CFStringCreateWithCString(None, SERVICE.encode("utf-8"), _UTF8)
+            service = cf.CFStringCreateWithCString(None, self.service.encode("utf-8"), _UTF8)
             acct = cf.CFStringCreateWithCString(None, account.encode("ascii"), _UTF8)
             if not service or not acct:
                 if service:
@@ -138,9 +147,37 @@ class _SecurityAPI:
 
     def add(self, account: str, secret: bytes) -> None:
         with self._query(account, data=secret) as query:
+            # Per-device, unlocked-login-only data. No sync or backup migration.
+            if self.service == VAULT_PROBE_SERVICE:
+                self.cf.CFDictionarySetValue(
+                    query, self._const["kSecAttrAccessible"],
+                    self._const["kSecAttrAccessibleWhenUnlockedThisDeviceOnly"],
+                )
             status = self.sec.SecItemAdd(query, None)
         if status != SUCCESS:
             raise NativeKeychainError(f"Keychain creation failed (OSStatus {status})")
+
+    def update(self, account: str, secret: bytes) -> None:
+        """Update only an existing Keychain item; never silently create."""
+        with self._query(account) as query:
+            # SecItemUpdate accepts only attributes to change.
+            attrs = self.cf.CFDictionaryCreateMutable(None, 0, None, None)
+            if not attrs:
+                raise NativeKeychainError("Unable to allocate Keychain update")
+            try:
+                source = ctypes.create_string_buffer(secret)
+                blob = self.cf.CFDataCreate(None, source, len(secret))
+                if not blob:
+                    raise NativeKeychainError("Unable to encode Keychain update")
+                try:
+                    self.cf.CFDictionarySetValue(attrs, self._const["kSecValueData"], blob)
+                    status = self.sec.SecItemUpdate(query, attrs)
+                finally:
+                    self.cf.CFRelease(blob)
+            finally:
+                self.cf.CFRelease(attrs)
+        if status != SUCCESS:
+            raise NativeKeychainError(f"Keychain update failed (OSStatus {status})")
 
     def delete(self, account: str) -> None:
         with self._query(account) as query:
@@ -173,3 +210,71 @@ class MacKeychain:
         if not _account_ok(account):
             raise NativeKeychainError("Invalid Keychain account")
         self._api.delete(account)
+
+
+def _vault_probe_account(account: str) -> bool:
+    """Allow only explicit synthetic hex IDs and a bounded known field suffix."""
+    if not isinstance(account, str) or ":" not in account:
+        return False
+    vault_id, suffix = account.split(":", 1)
+    if not _account_ok(vault_id):
+        return False
+    if suffix in ("master", "owner-signing", "owner-pin", "checkpoint",
+                  "ledger-anchor", "ledger-prepare"):
+        return True
+    if suffix.startswith("epoch:"):
+        value = suffix[6:]
+        return bool(value and value.isascii() and value.isdecimal()
+                    and str(int(value)) == value and 2 <= int(value) <= 999999)
+    return False
+
+
+class NativeVaultProbeBackend:
+    """Test-only Keychain provider matching the isolated vault backend protocol.
+
+    This does NOT authorize a vault, store real user keys or initialize sync.
+    Only fixed VAULT_PROBE_SERVICE is accessible; no plaintext/file fallback.
+    """
+
+    def __init__(self, *, _test_api: object | None = None) -> None:
+        self._api = _SecurityAPI(service=VAULT_PROBE_SERVICE) if _test_api is None else _test_api
+
+    @staticmethod
+    def _check(service: str, account: str) -> None:
+        if service != VAULT_PROBE_SERVICE or not _vault_probe_account(account):
+            raise NativeKeychainError("Unapproved native vault probe account")
+
+    def get_password(self, service: str, account: str) -> str | None:
+        self._check(service, account)
+        raw = self._api.get(account)
+        if raw is None:
+            return None
+        if not isinstance(raw, bytes) or len(raw) > MAX_PROBE_PASSWORD_BYTES:
+            raise NativeKeychainError("Invalid Keychain probe data")
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise NativeKeychainError("Invalid Keychain probe encoding") from exc
+
+    def set_password(self, service: str, account: str, password: str) -> None:
+        self._check(service, account)
+        if not isinstance(password, str):
+            raise NativeKeychainError("Invalid probe input")
+        raw = password.encode("utf-8")
+        if len(raw) > MAX_PROBE_PASSWORD_BYTES:
+            raise NativeKeychainError("Probe input too long")
+        # The Keychain update is atomic per record, not a cross-record CAS.
+        # No claim is made about multi-record vault state consistency.
+        old = self._api.get(account)
+        if old is None:
+            self._api.add(account, raw)
+        else:
+            self._api.update(account, raw)
+        if self._api.get(account) != raw:
+            raise NativeKeychainError("Keychain probe readback failed")
+
+    def delete_password(self, service: str, account: str) -> None:
+        self._check(service, account)
+        self._api.delete(account)
+        if self._api.get(account) is not None:
+            raise NativeKeychainError("Keychain probe deletion unverified")
