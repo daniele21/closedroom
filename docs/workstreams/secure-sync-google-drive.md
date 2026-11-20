@@ -50,11 +50,11 @@ Non-goals of first pilot: remotely transcribing, syncing audio/screenshots/model
 | SYNC-5 | Integrated Settings/Meeting status, complete privacy copy, accessible UX and correct cleanup | BLOCKED on SYNC-4 | Automated E2E FULL_MEDIA; WKWebView/Keychain target Mac; security/recovery audit |
 | SYNC-6 | Consider mobile companion/read-write editing **only after** the above is verified | BLOCKED | Product evidence and conflict-management design |
 
-### Offline proof extension (2026-11-19)
+### Security prototype boundary
 
-- Isolated `vault_manifest.py`: Ed25519 owner-signed chain, opaque ciphertext references, contiguous revisions/epochs, pinned owner, fork and replay detection against a trusted checkpoint. A fresh device cannot prove remote freshness from Drive alone.
-- Isolated `vault_keychain.py`: fail-closed macOS Keychain-only prototype storing independent AES vault and **software** Ed25519 signing secrets, authenticated owner pin and checkpoint. Not hardware Secure Enclave. Synthetic unit tests cover restart, tampering, bad signer, key replacement/corruption, failures and replay.
-- Missing: genuine recovery materials, cross-process CAS, authenticated pairing, revocation/rotation, second-device trust anchor and verified backup. No OAuth, sync, migration, upload, local eviction, app integration or production cryptographic dependencies yet.
+- `vault_manifest.py`: Ed25519 owner-signed head, contiguous epochs, checkpoint and encrypted-object digest verification. A new Mac cannot infer freshness from Drive.
+- `vault_keychain.py`: local-only Keychain experiment for vault/owner identity and trusted checkpoints; not Secure Enclave or product integration.
+- `recovery_capsule.py`, `device_pairing.py`, `owner_ledger.py`: separate recovery material, X25519 read-only grants, SQLite serialized/signed registry with a Keychain high-water anchor, fresh independent future-epoch keys on revocation. All synthetic/offline; pairing UX, crash recovery, independent restore and provider freshness still unproven.
 
 ### Validation — 2026-11-19/20
 
