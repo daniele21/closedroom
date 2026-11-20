@@ -12,6 +12,7 @@ import json
 import os
 import platform
 import plistlib
+import re
 import subprocess
 from pathlib import Path
 
@@ -118,9 +119,20 @@ def main() -> int:
         capture_output=True, text=True, timeout=45,
     )
     if vault_proc.returncode != 0:
+        # Never emit raw child stdout/stderr: secrets, paths or OS details
+        # may appear in unexpected tracebacks. Only allowlist an operation
+        # and a bounded OSStatus from the native Keychain exception.
+        matches = re.findall(
+            r"Keychain (creation|read|update|cleanup) failed "
+            r"\(OSStatus (-?\d{1,7})\)",
+            vault_proc.stderr[-20000:],
+        )
+        operation, status = matches[-1] if matches else ("unknown", "unavailable")
         raise RuntimeError(
-            "Packaged native-vault Keychain diagnostic failed; "
-            "use a logged-in macOS GUI session, not a headless runner."
+            "Packaged native-vault Keychain diagnostic failed: "
+            f"phase={operation}, osstatus={status}, "
+            f"returncode={vault_proc.returncode}. "
+            "No fallback or permission change was attempted."
         )
     try:
         vault_answer = json.loads(vault_proc.stdout.strip())

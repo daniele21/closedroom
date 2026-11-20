@@ -76,9 +76,23 @@ class _SecurityAPI:
             for k in ("kSecClass", "kSecClassGenericPassword", "kSecAttrService",
                       "kSecAttrAccount", "kSecValueData", "kSecReturnData",
                       "kSecMatchLimit", "kSecMatchLimitOne",
-                      "kSecAttrAccessible", "kSecAttrAccessibleWhenUnlockedThisDeviceOnly")
+                      "kSecAttrAccessible", "kSecAttrAccessibleWhenUnlockedThisDeviceOnly",
+                      "kSecUseDataProtectionKeychain")
         }
         self._true = ptr.in_dll(cf, "kCFBooleanTrue").value
+
+    def _configure_query(self, query: int) -> None:
+        """Select macOS Data Protection Keychain for every vault probe CRUD.
+
+        kSecAttrAccessible* is defined for macOS only with
+        kSecUseDataProtectionKeychain=true (not iCloud sync). The SAME
+        qualifier is required for add, copy, update and delete. Never
+        retry against the legacy login Keychain if access is denied.
+        """
+        if self.service == VAULT_PROBE_SERVICE:
+            self.cf.CFDictionarySetValue(
+                query, self._const["kSecUseDataProtectionKeychain"], self._true,
+            )
 
     @contextmanager
     def _query(self, account: str, data: bytes | None = None, *,
@@ -105,6 +119,7 @@ class _SecurityAPI:
                 ("kSecAttrAccount", acct),
             ):
                 cf.CFDictionarySetValue(q, self._const[key], value)
+            self._configure_query(q)
             if data is not None:
                 # CFDataCreate copies bytes; the transient C buffer is never logged.
                 source = ctypes.create_string_buffer(data)

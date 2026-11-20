@@ -160,3 +160,21 @@ single-secret path and this new update/clear/readback path, on an exact-SHA
 signed test artifact. This does NOT prove the experimental `keyring` vault
 is wired to the product, nor Keychain rollback resistance, durable recovery,
 production consent, Developer ID/notarization or a second Mac.
+
+### Data Protection Keychain compatibility (macOS)
+
+A real GUI-user ad-hoc signed packaged run on 2026-11-20 created the app
+artifact but failed the **new** native-vault diagnostic; the basic prior
+probe had already passed. The previous wrapper incorrectly recommended
+the login session without surfacing the OSStatus, so root cause was not
+diagnosed by that output alone.
+
+Apple requires `kSecUseDataProtectionKeychain=true` for any macOS
+`kSecAttrAccessibleWhenUnlockedThisDeviceOnly` item. The native probe now
+uses that flag for **all** create/read/update/delete queries under its
+isolated synthetic service; never uses `kSecAttrSynchronizable` (iCloud),
+never removes ThisDeviceOnly and never silently retries against the
+legacy login Keychain. The driver reports only a bounded operation and
+OSStatus on failure. Pending new exact-HEAD GUI Terminal verification;
+ad-hoc signing/entitlements may still be insufficient, and this must be
+treated as a separate real-environment gate rather than an automated PASS.

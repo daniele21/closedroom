@@ -124,22 +124,23 @@ def run_native_vault_backend_smoke() -> int:
     account = vault_id + ":master"
     prepare_account = vault_id + ":ledger-prepare"
     backend = NativeVaultProbeBackend()
-    created: list[str] = []
+    cleanup_allowed = False
     error: BaseException | None = None
     cleaned = False
     try:
         if (backend.get_password(VAULT_PROBE_SERVICE, account) is not None
                 or backend.get_password(VAULT_PROBE_SERVICE, prepare_account) is not None):
             raise NativeKeychainError("Random native vault probe identity collision")
+        # Own both randomly selected synthetic accounts from here onwards.
+        # Always attempt cleanup, including ambiguous failed add/readback.
+        cleanup_allowed = True
         old = secrets.token_bytes(32)
         latest = secrets.token_bytes(32)
         backend.set_password(VAULT_PROBE_SERVICE, account, base64.b64encode(old).decode("ascii"))
-        created.append(account)
         backend.set_password(VAULT_PROBE_SERVICE, account, base64.b64encode(latest).decode("ascii"))
         if backend.get_password(VAULT_PROBE_SERVICE, account) != base64.b64encode(latest).decode("ascii"):
             raise NativeKeychainError("Native vault overwrite not readable")
         backend.set_password(VAULT_PROBE_SERVICE, prepare_account, "pending")
-        created.append(prepare_account)
         backend.set_password(VAULT_PROBE_SERVICE, prepare_account, "")
         if backend.get_password(VAULT_PROBE_SERVICE, prepare_account) != "":
             raise NativeKeychainError("Native vault preparation clear failed")
@@ -159,15 +160,20 @@ def run_native_vault_backend_smoke() -> int:
     except BaseException as exc:
         error = exc
     finally:
-        try:
-            for item in reversed(created):
-                backend.delete_password(VAULT_PROBE_SERVICE, item)
-            cleaned = (
-                backend.get_password(VAULT_PROBE_SERVICE, account) is None
-                and backend.get_password(VAULT_PROBE_SERVICE, prepare_account) is None
-            )
-        except Exception:
-            cleaned = False
+        if cleanup_allowed:
+            try:
+                # Cleanup even if write raised *after* creating the item.
+                # Do not touch an account if either preflight check collided.
+                for item in (prepare_account, account):
+                    backend.delete_password(VAULT_PROBE_SERVICE, item)
+                cleaned = (
+                    backend.get_password(VAULT_PROBE_SERVICE, account) is None
+                    and backend.get_password(VAULT_PROBE_SERVICE, prepare_account) is None
+                )
+            except Exception:
+                cleaned = False
+        else:
+            cleaned = error is not None
     if not cleaned:
         raise NativeKeychainError("Native vault probe cleanup could not be verified") from error
     if error is not None:

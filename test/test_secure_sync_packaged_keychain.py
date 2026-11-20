@@ -26,6 +26,7 @@ class FakeSecurity:
         self.data: dict[str, bytes] = {}
         self.fail_read = False
         self.fail_write = False
+        self.fail_after_add = False
         self.deleted: list[str] = []
 
     def get(self, account: str) -> bytes | None:
@@ -39,6 +40,8 @@ class FakeSecurity:
         if account in self.data:
             raise NativeKeychainError("synthetic duplicate")
         self.data[account] = secret
+        if self.fail_after_add:
+            raise NativeKeychainError("Synthetic post-add readback failure")
 
     def update(self, account: str, secret: bytes) -> None:
         if self.fail_write or account not in self.data:
@@ -104,6 +107,44 @@ class NativeKeychainAdapterTests(unittest.TestCase):
         self.assertNotIn(
             '"${SECURE_SYNC_PY[@]}" experiments/secure_sync/macos_keychain_probe.py', ci,
         )
+
+
+class DataProtectionKeychainContractTests(unittest.TestCase):
+    def test_protected_probe_selects_data_protection_on_every_query(self) -> None:
+        """The qualifier is shared by get/add/update/delete via _query."""
+        class FakeCF:
+            def __init__(self):
+                self.calls = []
+
+            def CFDictionarySetValue(self, query, key, value):
+                self.calls.append((query, key, value))
+
+        vault = _SecurityAPI.__new__(_SecurityAPI)
+        vault.service = VAULT_PROBE_SERVICE
+        vault.cf = FakeCF()
+        vault._const = {"kSecUseDataProtectionKeychain": "DPK"}
+        vault._true = True
+        vault._configure_query("test-query")
+        self.assertEqual(vault.cf.calls, [("test-query", "DPK", True)])
+
+        legacy = _SecurityAPI.__new__(_SecurityAPI)
+        legacy.service = "com.closedroom.app.secure-sync-probe.v1"
+        legacy.cf = FakeCF()
+        legacy._const = vault._const
+        legacy._true = True
+        legacy._configure_query("legacy-query")
+        self.assertEqual(legacy.cf.calls, [])
+
+    def test_query_and_crud_share_protected_selector_with_no_fallback(self) -> None:
+        import inspect
+        from local_asr_server.macos_keychain_native import _SecurityAPI
+        source = inspect.getsource(_SecurityAPI)
+        self.assertIn('"kSecUseDataProtectionKeychain"', source)
+        self.assertIn('"kSecAttrAccessibleWhenUnlockedThisDeviceOnly"', source)
+        self.assertIn("self._configure_query(q)", source)
+        for operation in ("get", "add", "update", "delete"):
+            self.assertIn(f"def {operation}(", source)
+        self.assertNotIn("kSecAttrSynchronizable", source)
 
 
 class NativeVaultProbeBackendTests(unittest.TestCase):
@@ -191,6 +232,23 @@ class NativeVaultProbeBackendTests(unittest.TestCase):
         self.assertEqual(set(api.deleted), {
             vault_id + ":master", vault_id + ":ledger-prepare",
         })
+
+    def test_partial_add_failure_cleans_own_synthetic_item(self) -> None:
+        api = FakeSecurity()
+        api.fail_after_add = True
+        backend = NativeVaultProbeBackend(_test_api=api)
+        vault_id = "d" * 32
+        with (
+            patch("local_asr_server.macos_keychain_probe._require_bundle"),
+            patch("local_asr_server.macos_keychain_probe.NativeVaultProbeBackend",
+                  return_value=backend),
+            patch("local_asr_server.macos_keychain_probe.secrets.token_hex",
+                  return_value=vault_id),
+        ):
+            with self.assertRaises(NativeKeychainError):
+                run_native_vault_backend_smoke()
+        self.assertEqual(api.data, {})
+        self.assertIn(vault_id + ":master", api.deleted)
 
     def test_failed_child_probe_deletes_only_created_records(self) -> None:
         api = FakeSecurity()
