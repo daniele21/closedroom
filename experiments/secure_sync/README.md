@@ -91,3 +91,37 @@ crash-safe transaction handling, loss/restore and key compromise reviews.
 A Drive provider could replay a previously valid encrypted recovery capsule:
 without an independent newer checkpoint a fresh Mac cannot detect staleness.
 Revocation/rotation does not yet exist. No second real Mac has been tested.
+
+## SYNC-2 durable owner ledger and future-key revocation (offline experiment)
+
+`owner_ledger.py` extends the existing experimental `vault_keychain.py`
+with a **public, Ed25519-signed device/epoch registry** in a mode-0600 SQLite
+file (FULL-synchronous `BEGIN IMMEDIATE` serialized writes). A separate
+high-water digest/revision lives in the macOS Keychain, NOT in that SQLite DB.
+Every read/operation verifies the owner's independently pinned public key,
+signed registry document, schema, and exact Keychain high-water anchor.
+
+- A changed/rolled-back/vanished DB or Keychain anchor **fails closed**.
+  SQLite and Keychain cannot commit atomically; a crash between DB commit
+  and anchor update deliberately freezes reads. No silent repair from either
+  untrusted side, no automatic data loss or remote fallback.
+- Owner enrollment grants are issued only after the existing human-approval
+  protocol, consume a request ID **durably** and record device/epoch status.
+  Writers must share the canonical database path to get SQLite serialization.
+  This does NOT replace trusted cross-device pairing UI or provider trust.
+- Signed manifest epoch must advance exactly once for revocation. The owner
+  creates a fresh random, independent 256-bit epoch key *in Keychain before*
+  advancing the ledger; the target becomes `revoked` and surviving devices
+  `needs_repair`. They require fresh authenticated grants. A revoked device
+  may retain old ciphertext/plaintext; there is no remote erase.
+- Keychain write failure before SQL commit leaves old epoch current (possible
+  orphan secret); failure after SQL commit before the high-water write freezes
+  the vault. Crash recovery and cleanup need a separate manual protocol.
+- The persistent ledger has no secret material and uses an **experimental**
+  Keychain adapter / fake backend in unit tests. No installation into the
+  production app, Developer ID signature, independent trusted head, actual
+  physical device provisioning, persisted recipient-side consumed grants,
+  two-phase cloud publish, Google Drive or automatic rollout.
+
+Run the isolated `test_owner_ledger.py` suite via the existing
+`unittest discover -s experiments/secure_sync` Mac CI selector.

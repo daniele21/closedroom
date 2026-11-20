@@ -160,3 +160,38 @@ class MacKeychainVaultKeys:
             if self.load_checkpoint(vault_id) != accepted:
                 raise KeychainError("Checkpoint readback mismatch")
         return accepted
+
+    def load_pinned_owner(self, vault_id: str) -> bytes:
+        """Authenticated owner pin, never silently accepted from remote data."""
+        _validate_id(vault_id)
+        return self._load_secret(vault_id + ":owner-pin")
+
+    def load_epoch_key(self, vault_id: str, epoch: int) -> bytes:
+        """Read an explicit independent epoch key. No derivation from old key."""
+        _validate_id(vault_id)
+        if type(epoch) is not int or epoch < 1:
+            raise KeychainError("Invalid key epoch")
+        if epoch == 1:
+            return self.load(vault_id)
+        return self._load_secret(vault_id + f":epoch:{epoch}")
+
+    def create_epoch_key(self, vault_id: str, epoch: int, secret: bytes) -> None:
+        """Fail on duplicate; caller owns process-wide SQLite serialization."""
+        _validate_id(vault_id)
+        if type(epoch) is not int or epoch < 2 or not isinstance(secret, bytes) or len(secret) != 32:
+            raise KeychainError("Invalid new epoch secret")
+        self._create_secret(vault_id + f":epoch:{epoch}", secret)
+        if not secrets.compare_digest(self.load_epoch_key(vault_id, epoch), secret):
+            raise KeychainError("Epoch secret readback mismatch")
+
+    def read_ledger_anchor(self, vault_id: str) -> str | None:
+        """Opaque small trusted anchor, parsed and checked by owner_ledger."""
+        _validate_id(vault_id)
+        return self._get(vault_id + ":ledger-anchor")
+
+    def write_ledger_anchor(self, vault_id: str, serialized: str) -> None:
+        """No file fallback; ambiguity on failed write freezes ledger reads."""
+        _validate_id(vault_id)
+        if not isinstance(serialized, str) or len(serialized) > 256:
+            raise KeychainError("Invalid ledger anchor")
+        self._set(vault_id + ":ledger-anchor", serialized)
