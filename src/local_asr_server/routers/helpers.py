@@ -160,6 +160,16 @@ def _build_projects(app: FastAPI) -> dict:
     else:
         recording_runs = None
         transcription_runs = None
+    grouped_preparation_reader = getattr(services.transcription_jobs, "list_grouped", None)
+    preparation_jobs_by_recording = (
+        grouped_preparation_reader(
+            job_type="meeting_preparation",
+            scope_type="recording",
+            scope_ids=[recording["id"] for recording in recordings],
+            limit=50,
+        )
+        if callable(grouped_preparation_reader) else None
+    )
     projects: dict[str, dict] = {}
     unassigned_name = "Senza progetto"
     for recording in recordings:
@@ -186,11 +196,15 @@ def _build_projects(app: FastAPI) -> dict:
             existing = {run["id"] for run in runs}
             runs.extend(run for run in matched_transcription_runs if run["id"] not in existing)
         current_runs = _current_analysis_runs(runs, transcription)
-        preparation_jobs = services.transcription_jobs.list(
-            job_type="meeting_preparation",
-            scope_type="recording",
-            scope_id=recording["id"],
-            limit=50,
+        preparation_jobs = (
+            preparation_jobs_by_recording.get(recording["id"], [])
+            if preparation_jobs_by_recording is not None else
+            services.transcription_jobs.list(
+                job_type="meeting_preparation",
+                scope_type="recording",
+                scope_id=recording["id"],
+                limit=50,
+            )
         )
         canonical_runs = expand_analysis_runs(
             project_speaker_source_validity(

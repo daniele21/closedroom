@@ -164,6 +164,40 @@ class TranscriptionJobManager:
             )
         ]
 
+    def list_grouped(
+        self,
+        *,
+        job_type: str,
+        scope_type: str,
+        scope_ids: list[str],
+        limit: int = 50,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """One canonical projection for persisted or currently managed jobs."""
+        ids = list(dict.fromkeys(scope_id for scope_id in scope_ids if scope_id))
+        selected_ids = set(ids)
+        bounded = max(1, min(limit, 500))
+        if self._store is not None:
+            return {
+                scope_id: [self._stored_public(job) for job in jobs]
+                for scope_id, jobs in self._store.list_jobs_grouped(
+                    job_type=job_type, scope_type=scope_type,
+                    scope_ids=ids, limit=bounded,
+                ).items()
+            }
+        with self._lock:
+            snapshot = list(self._jobs.values())
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for job in sorted(snapshot, key=lambda item: item.created_at, reverse=True):
+            if job.job_type != job_type or job.scope_type != scope_type:
+                continue
+            scope_id = job.scope_id or job.recording_id
+            if scope_id not in selected_ids:
+                continue
+            group = grouped.setdefault(scope_id, [])
+            if len(group) < bounded:
+                group.append(job.public())
+        return grouped
+
     def cancel(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
             job = self._jobs.get(job_id)

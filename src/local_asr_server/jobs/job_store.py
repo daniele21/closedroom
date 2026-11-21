@@ -409,6 +409,40 @@ class JobStore:
             ).fetchall()
         return [self._row_to_job(row) for row in rows]
 
+    def list_jobs_grouped(
+        self,
+        *,
+        job_type: str,
+        scope_type: str,
+        scope_ids: list[str],
+        limit: int = 50,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Same per-scope newest-job query as list_jobs, in bounded batches."""
+        ids = list(dict.fromkeys(scope_id for scope_id in scope_ids if scope_id))
+        per_scope = max(1, min(limit, 500))
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for start in range(0, len(ids), 400):
+            batch = ids[start:start + 400]
+            placeholders = ", ".join("?" for _ in batch)
+            with self.connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT * FROM (
+                        SELECT jobs.*, ROW_NUMBER() OVER (
+                            PARTITION BY scope_id ORDER BY created_at DESC
+                        ) AS source_rank
+                        FROM jobs
+                        WHERE type = ? AND scope_type = ?
+                          AND scope_id IN ({placeholders})
+                    ) WHERE source_rank <= ?
+                    ORDER BY scope_id, created_at DESC
+                    """,
+                    [job_type, scope_type, *batch, per_scope],
+                ).fetchall()
+            for row in rows:
+                grouped.setdefault(row["scope_id"], []).append(self._row_to_job(row))
+        return grouped
+
     def activity_summaries(self, *, recent_limit: int = 30) -> list[dict[str, Any]]:
         """All unfinished work plus bounded history, without meeting content."""
         terminal = sorted(TERMINAL_JOB_STATUSES)
