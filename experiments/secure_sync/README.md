@@ -38,27 +38,23 @@ product. To prove the **actual frozen app executable's own Security.framework
 context**, use the separate native Keychain diagnostic in
 `src/local_asr_server/macos_keychain_native.py`.
 
-From a clean checkout on an Apple Silicon Mac, using an interactive logged-in
-GUI Terminal:
+From a clean checkout on Apple Silicon, using a logged-in GUI Terminal, use
+the explicitly scoped local-development command (replace the placeholder with
+the fingerprint from `security find-identity -v -p codesigning`):
 
-```bash
-python3 scripts/probe_packaged_keychain.py --build
+```sh
+python3 scripts/probe_packaged_keychain.py --backend local-development --sign-identity <certificate-fingerprint> --build
 ```
 
-This creates an **ad-hoc signed, exact-HEAD** .app under `dist/`; it does not
-install/replace `/Applications/ClosedRoom.app`. It checks source/manifest,
-bundle ID and code signature and calls the packaged
-`Contents/MacOS/ClosedRoom secure-sync-keychain-smoke`. That executable uses
-a separate synthetic Keychain service: 32 random key bytes, readback,
-same-signed-executable second-process HMAC challenge, cleanup and absence
-check. The only output is bounded PASS/failure status; no secrets, meeting
-data, server, Drive, OAuth or network.
-
-Without `--build`, reuses ONLY an exact-HEAD finalized app; `--app`
-accepts an explicit candidate only when it matches the checked-out SHA.
-Background GitHub Mac Keychain access still FAIL `-25308`; this is a
-different execution context and is not bypassed. An ad-hoc signature
-is NOT Apple Developer ID/notarization or installed-app entitlement evidence.
+This creates a separate exact-HEAD **identified** artifact in dist, never
+installs or replaces ClosedRoom.app, and validates the actual signing
+certificate. For a retry with the same finalized artifact, specify `--app`
+instead of `--build`, keeping the same backend and identity. The original
+basic single-secret probe remains part of the command. The historical ad-hoc
+basic probe passed, but ad-hoc is no longer accepted for full vault
+qualification. The default Data Protection Keychain mode requires an
+explicitly provisioned exact-source `--app`; the wrapper refuses to build
+another ad-hoc candidate. See the backend boundaries below.
 
 ## SYNC-2 offline recovery and pairing proof (not production)
 
@@ -155,9 +151,8 @@ second process authenticates a challenge with the new key; a temporary
 prepared-intent record is cleared; cleanup is verified. Normal app startup
 and all meeting data remain untouched. Failures never fall back to files.
 
-`scripts/probe_packaged_keychain.py --build` now checks both the previous
-single-secret path and this new update/clear/readback path, on an exact-SHA
-signed test artifact. This does NOT prove the experimental `keyring` vault
+The diagnostic wrapper checks the previous single-secret path and the selected
+update/clear/readback path on an exact-source signed test artifact. This does NOT prove the experimental `keyring` vault
 is wired to the product, nor Keychain rollback resistance, durable recovery,
 production consent, Developer ID/notarization or a second Mac.
 
