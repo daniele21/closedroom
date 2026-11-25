@@ -404,5 +404,63 @@ class SignedBundleDiagnosticTests(unittest.TestCase):
         self.assertEqual(api.deleted, [])
 
 
+class PackagedLocalSigningPolicyTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        from pathlib import Path
+        scripts = Path(__file__).resolve().parents[1] / "scripts"
+        spec = importlib.util.spec_from_file_location(
+            "keychain_probe_driver_test", scripts / "probe_packaged_keychain.py",
+        )
+        cls.driver = importlib.util.module_from_spec(spec)
+        with patch.object(sys, "path", [str(scripts), *sys.path]):
+            spec.loader.exec_module(cls.driver)
+
+    def test_missing_identity_refused_before_signing_or_build(self):
+        with patch.object(self.driver.subprocess, "run") as run:
+            for value in (None, "-", "ClosedRoom Local Development", "a"*39):
+                with self.assertRaises(RuntimeError):
+                    self.driver.validate_signing_identity(value)
+            run.assert_not_called()
+
+    def test_exact_local_identity_inventory_checked(self):
+        from types import SimpleNamespace
+        with patch.object(self.driver.subprocess, "run", return_value=SimpleNamespace(
+            stdout='  1) ' + "A"*40 + ' "Local Dev"\n  1 valid identities found\n',
+        )) as run:
+            self.driver.validate_signing_identity("a"*40)
+            with self.assertRaisesRegex(RuntimeError, "unavailable"):
+                self.driver.validate_signing_identity("b"*40)
+            self.assertEqual(run.call_args.args[0], ["security", "find-identity", "-v", "-p", "codesigning"])
+
+    def test_actual_leaf_certificate_must_match_selected_identity(self):
+        from pathlib import Path
+        data = b"synthetic public certificate bytes"
+        fingerprint = hashlib.sha1(data).hexdigest()
+        def extract(args, **kwargs):
+            self.assertEqual(args[:3], ["codesign", "-d", "--extract-certificates"])
+            Path(args[3] + "0").write_bytes(data)
+        with patch.object(self.driver.subprocess, "run", side_effect=extract):
+            self.driver.validate_signing_identity(fingerprint, Path("/fake.app"))
+            with self.assertRaisesRegex(RuntimeError, "does not match"):
+                self.driver.validate_signing_identity("c"*40, Path("/fake.app"))
+
+    def test_dpk_does_not_rebuild_ad_hoc(self):
+        from types import SimpleNamespace
+        args = SimpleNamespace(root=".", app=None, build=True,
+                               backend="data-protection", sign_identity=None)
+        with (
+            patch.object(self.driver, "parse_args", return_value=args),
+            patch.object(self.driver.platform, "system", return_value="Darwin"),
+            patch.object(self.driver.platform, "machine", return_value="arm64"),
+            patch.object(self.driver.subprocess, "run", return_value=SimpleNamespace(stdout="a"*40)) as run,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Data Protection Keychain build blocked"):
+                self.driver.main()
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[0], ["git", "rev-parse", "HEAD"])
+
+
 if __name__ == "__main__":
     unittest.main()
