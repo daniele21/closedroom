@@ -83,6 +83,14 @@ def dispatch_bundled_module(argv: Sequence[str] | None = None) -> bool:
     """
 
     arguments = list(sys.argv if argv is None else argv)
+    # Offline diagnostics from the actual frozen app binary. No Cocoa/server.
+    if len(arguments) >= 2 and arguments[1] in (
+        "secure-sync-keychain-smoke", "secure-sync-keychain-smoke-child",
+        "secure-sync-native-vault-smoke", "secure-sync-native-vault-smoke-child",
+        "secure-sync-local-vault-smoke", "secure-sync-local-vault-smoke-child",
+    ):
+        from local_asr_server.macos_keychain_probe import dispatch_keychain_probe
+        return dispatch_keychain_probe(arguments)
     if len(arguments) >= 2 and arguments[1] == BUNDLE_RUNTIME_SMOKE_COMMAND:
         _run_bundle_runtime_smoke()
         return True
