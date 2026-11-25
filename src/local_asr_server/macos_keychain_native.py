@@ -14,6 +14,7 @@ from typing import Iterator
 SERVICE = "com.closedroom.app.secure-sync-probe.v1"
 # Isolated experimental backend. Never stores user vault keys.
 VAULT_PROBE_SERVICE = "com.closedroom.app.secure-sync-vault-probe.v1"
+LOCAL_VAULT_PROBE_SERVICE = "com.closedroom.app.secure-sync-local-development-probe.v1"
 MAX_PROBE_PASSWORD_BYTES = 4096
 ITEM_NOT_FOUND = -25300
 DUPLICATE_ITEM = -25299
@@ -37,7 +38,7 @@ class _SecurityAPI:
     """Low-level macOS Keychain bindings. All created CoreFoundation refs released."""
 
     def __init__(self, *, service: str = SERVICE) -> None:
-        if service not in (SERVICE, VAULT_PROBE_SERVICE):
+        if service not in (SERVICE, VAULT_PROBE_SERVICE, LOCAL_VAULT_PROBE_SERVICE):
             raise NativeKeychainError("Unapproved Keychain service")
         self.service = service
         if sys.platform != "darwin":
@@ -80,6 +81,14 @@ class _SecurityAPI:
                       "kSecUseDataProtectionKeychain")
         }
         self._true = ptr.in_dll(cf, "kCFBooleanTrue").value
+        if service == LOCAL_VAULT_PROBE_SERVICE:
+            # Diagnostic-only process: never let an ACL denial become an
+            # interactive approval or silently broaden the trusted-app list.
+            sec.SecKeychainSetUserInteractionAllowed.argtypes = (ctypes.c_ubyte,)
+            sec.SecKeychainSetUserInteractionAllowed.restype = ctypes.c_int32
+            status = sec.SecKeychainSetUserInteractionAllowed(0)
+            if status != SUCCESS:
+                raise NativeKeychainError(f"Keychain interaction policy failed (OSStatus {status})")
 
     def _configure_query(self, query: int) -> None:
         """Select macOS Data Protection Keychain for every vault probe CRUD.
@@ -239,7 +248,7 @@ def _vault_probe_account(account: str) -> bool:
         return True
     if suffix.startswith("epoch:"):
         value = suffix[6:]
-        return bool(value and value.isascii() and value.isdecimal()
+        return bool(1 <= len(value) <= 6 and value.isascii() and value.isdecimal()
                     and str(int(value)) == value and 2 <= int(value) <= 999999)
     return False
 
@@ -248,15 +257,18 @@ class NativeVaultProbeBackend:
     """Test-only Keychain provider matching the isolated vault backend protocol.
 
     This does NOT authorize a vault, store real user keys or initialize sync.
-    Only fixed VAULT_PROBE_SERVICE is accessible; no plaintext/file fallback.
+    Only the explicitly selected synthetic service is accessible; no fallback.
     """
 
-    def __init__(self, *, _test_api: object | None = None) -> None:
-        self._api = _SecurityAPI(service=VAULT_PROBE_SERVICE) if _test_api is None else _test_api
+    def __init__(self, *, local_development: bool = False, _test_api: object | None = None) -> None:
+        # Explicit selection only. File-based Keychain uses the OS default
+        # creator-app ACL, not DPK entitlements. No fallback and no production
+        # claims about ThisDeviceOnly, backup migration or rollback.
+        self.service = LOCAL_VAULT_PROBE_SERVICE if local_development else VAULT_PROBE_SERVICE
+        self._api = _SecurityAPI(service=self.service) if _test_api is None else _test_api
 
-    @staticmethod
-    def _check(service: str, account: str) -> None:
-        if service != VAULT_PROBE_SERVICE or not _vault_probe_account(account):
+    def _check(self, service: str, account: str) -> None:
+        if service != self.service or not _vault_probe_account(account):
             raise NativeKeychainError("Unapproved native vault probe account")
 
     def get_password(self, service: str, account: str) -> str | None:

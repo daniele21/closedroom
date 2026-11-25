@@ -8,12 +8,15 @@ entries from the signed bundle binary, removed within that same diagnostic.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
 import plistlib
 import re
+import secrets
 import subprocess
+import tempfile
 from pathlib import Path
 
 import local_real_environment_policy as artifact_policy
@@ -23,7 +26,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--app", help="Explicit exact-HEAD finalized .app; never use a random installed copy")
-    parser.add_argument("--build", action="store_true", help="Build a new ad-hoc signed exact-HEAD bundle in dist (not install)")
+    parser.add_argument("--build", action="store_true", help="Build a separate identified local-development artifact (not install)")
+    parser.add_argument("--backend", choices=("data-protection", "local-development"), default="data-protection")
+    parser.add_argument("--sign-identity", help="Explicit 40-hex SHA-1 fingerprint of local code-signing certificate")
     return parser.parse_args()
 
 
@@ -52,6 +57,33 @@ def validate_artifact(root: Path, app: Path, revision: str) -> tuple[Path, str]:
     return exe, signing
 
 
+def validate_signing_identity(fingerprint: str, app: Path | None = None) -> None:
+    """Verify selected local identity, and the actual signed leaf if given."""
+    if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9A-Fa-f]{40}", fingerprint):
+        raise RuntimeError("Specify an exact 40-hex --sign-identity certificate fingerprint")
+    fingerprint = fingerprint.upper()
+    if app is None:
+        found = subprocess.run(
+            ["security", "find-identity", "-v", "-p", "codesigning"],
+            capture_output=True, text=True, check=True, timeout=15,
+        )
+        identities = re.findall(r"(?m)^\s*\d+\)\s+([0-9A-Fa-f]{40})\s", found.stdout)
+        if fingerprint not in [value.upper() for value in identities]:
+            raise RuntimeError("Selected signing identity is unavailable; no build attempted")
+        return
+    # Export ONLY the public certificate chain to a disposable directory.
+    # Do not infer certificate identity merely from the build manifest.
+    with tempfile.TemporaryDirectory(prefix="closedroom-signature-check-") as tmp:
+        prefix = str(Path(tmp) / "cert")
+        subprocess.run(
+            ["codesign", "-d", "--extract-certificates", prefix, str(app)],
+            capture_output=True, check=True, timeout=30,
+        )
+        leaf = Path(prefix + "0")
+        if not leaf.is_file() or hashlib.sha1(leaf.read_bytes()).hexdigest().upper() != fingerprint:
+            raise RuntimeError("Actual bundle signing certificate does not match selected identity")
+
+
 def main() -> int:
     args = parse_args()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
@@ -61,6 +93,14 @@ def main() -> int:
         ["git", "rev-parse", "HEAD"], cwd=root,
         capture_output=True, text=True, check=True, timeout=10,
     ).stdout.strip()
+    local = args.backend == "local-development"
+    if local:
+        validate_signing_identity(args.sign_identity)
+    elif args.build:
+        raise RuntimeError("Data Protection Keychain build blocked: use an explicitly provisioned --app; no ad-hoc retry")
+    elif args.sign_identity:
+        raise RuntimeError("--sign-identity is only for explicit local-development diagnostics")
+    built_app = None
     if args.build:
         if args.app:
             raise RuntimeError("--app and --build are mutually exclusive")
@@ -71,23 +111,33 @@ def main() -> int:
         if dirty.strip():
             raise RuntimeError("Checkout is not clean; refusing to build a dirty candidate")
         env = os.environ.copy()
-        env.pop("CLOSEDROOM_SIGN_IDENTITY", None)
-        env["CLOSEDROOM_BUILD_CHANNEL"] = "local-real-environment"
+        env["CLOSEDROOM_SIGN_IDENTITY"] = args.sign_identity.upper()
+        env["CLOSEDROOM_BUILD_CHANNEL"] = "local-keychain-development"
+        env["CLOSEDROOM_BUILD_ID"] = "keychain-" + secrets.token_hex(12)
+        env["CLOSEDROOM_SOURCE_REVISION"] = revision
+        # Separate artifact lineage, avoids pruning other qualification builds.
+        artifact_dir = root / "dist" / "artifacts" / "macos-arm64-local-keychain-development-app" / env["CLOSEDROOM_BUILD_ID"]
         # Creates an immutable finalized artifact. Never --install.
         subprocess.run(
             ["bash", "scripts/build_artifact.sh", "--no-dmg"],
             cwd=root, env=env, check=True, timeout=3600,
         )
-        # Generated frontend cleanup is owned by the existing local suite.
-        # This command does not auto-restore/overwrite tracked source files.
+        manifest = artifact_policy.read_json(artifact_dir / "build-manifest.json")
+        app_name = ((manifest.get("artifacts") or {}).get("app") or {}).get("path")
+        if not isinstance(app_name, str) or Path(app_name).name != app_name or not app_name.endswith(".app"):
+            raise RuntimeError("Identified build did not finalize an app")
+        built_app = artifact_dir / app_name
     if args.app:
         app = Path(args.app).expanduser().resolve()
+    elif built_app is not None:
+        app = built_app
     else:
-        found = artifact_policy.find_exact_local_app(root, revision)
-        if found is None:
-            raise RuntimeError("No exact-HEAD finalized app. Rerun with --build.")
-        app = found[0]
+        raise RuntimeError("Specify --app with an exact finalized candidate, or --backend local-development --build")
     executable, signing = validate_artifact(root, app, revision)
+    if signing != "identified":
+        raise RuntimeError("Identified signature required; ad-hoc is not qualifying evidence")
+    if local:
+        validate_signing_identity(args.sign_identity, app)
     proc = subprocess.run(
         [str(executable), "secure-sync-keychain-smoke"],
         capture_output=True, text=True, timeout=45,
@@ -115,7 +165,7 @@ def main() -> int:
     # create, atomic item update, zero-length preparation, signed-binary
     # child read and cleanup. Still only synthetic identifiers and secrets.
     vault_proc = subprocess.run(
-        [str(executable), "secure-sync-native-vault-smoke"],
+        [str(executable), "secure-sync-local-vault-smoke" if local else "secure-sync-native-vault-smoke"],
         capture_output=True, text=True, timeout=45,
     )
     if vault_proc.returncode != 0:
@@ -123,7 +173,7 @@ def main() -> int:
         # may appear in unexpected tracebacks. Only allowlist an operation
         # and a bounded OSStatus from the native Keychain exception.
         matches = re.findall(
-            r"Keychain (creation|read|update|cleanup) failed "
+            r"Keychain (creation|read|update|cleanup|interaction policy) failed "
             r"\(OSStatus (-?\d{1,7})\)",
             vault_proc.stderr[-20000:],
         )
@@ -139,7 +189,7 @@ def main() -> int:
     except (json.JSONDecodeError, ValueError) as exc:
         raise RuntimeError("Native-vault diagnostic returned invalid evidence") from exc
     if vault_answer != {
-        "schema": "closedroom.native-vault-probe/v1",
+        "schema": ("closedroom.local-development-vault-probe/v1" if local else "closedroom.native-vault-probe/v1"),
         "status": "pass",
         "independent_child": True,
         "updated_item": True,
@@ -158,6 +208,9 @@ def main() -> int:
         "cleanup": True,
         "installed_app_modified": False,
         "native_vault_probe": True,
+        "backend": args.backend,
+        "data_protection_probe_pass": not local,
+        "cross_build_acl_verified": False,
         "updated_item": True,
         "empty_preparation": True,
     }, sort_keys=True))

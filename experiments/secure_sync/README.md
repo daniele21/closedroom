@@ -178,3 +178,7 @@ legacy login Keychain. The driver reports only a bounded operation and
 OSStatus on failure. Pending new exact-HEAD GUI Terminal verification;
 ad-hoc signing/entitlements may still be insufficient, and this must be
 treated as a separate real-environment gate rather than an automated PASS.
+
+### Explicit local-development Keychain path
+
+DPK returned -34018 in the real ad-hoc app and no Apple-authorized signing identity is visible. For synthetic development only, explicitly use `--backend local-development --sign-identity <40-hex certificate fingerprint> --build`. It builds a separate identified artifact, validates the actual public leaf certificate, and uses a separate file-based Keychain service via Security.framework. macOS creates a default creator-app ACL; the diagnostic disables Keychain user interaction so an ACL denial is not converted to approval. No DPK fallback, no actual vault keys, no installation. The file-based Keychain does not establish ThisDeviceOnly or anti-rollback semantics. Same-binary second-process read is not cross-build ACL proof: independent rebuilt-artifact and unauthorized-reader evidence remain required before any development vault usage; DPK production gate remains failed/blocked. See Apple TN3137 and https://developer.apple.com/forums/thread/115425.

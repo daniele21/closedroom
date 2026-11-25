@@ -15,12 +15,15 @@ import sys
 
 from local_asr_server.macos_keychain_native import (
     MacKeychain, NativeKeychainError, NativeVaultProbeBackend, VAULT_PROBE_SERVICE,
+    LOCAL_VAULT_PROBE_SERVICE,
 )
 
 COMMAND = "secure-sync-keychain-smoke"
 CHILD_COMMAND = "secure-sync-keychain-smoke-child"
 VAULT_COMMAND = "secure-sync-native-vault-smoke"
 VAULT_CHILD_COMMAND = "secure-sync-native-vault-smoke-child"
+LOCAL_COMMAND = "secure-sync-local-vault-smoke"
+LOCAL_CHILD_COMMAND = "secure-sync-local-vault-smoke-child"
 
 
 def _require_bundle() -> None:
@@ -98,13 +101,14 @@ def run_synthetic_keychain_smoke() -> int:
     return 0
 
 
-def _vault_child(account: str, challenge_hex: str) -> int:
+def _vault_child(account: str, challenge_hex: str, *, local_development: bool = False) -> int:
     _require_bundle()
     if (len(challenge_hex) != 64
             or any(ch not in "0123456789abcdef" for ch in challenge_hex)):
         raise NativeKeychainError("Invalid synthetic challenge")
-    backend = NativeVaultProbeBackend()
-    stored = backend.get_password(VAULT_PROBE_SERVICE, account)
+    backend = NativeVaultProbeBackend(local_development=True) if local_development else NativeVaultProbeBackend()
+    service = LOCAL_VAULT_PROBE_SERVICE if local_development else VAULT_PROBE_SERVICE
+    stored = backend.get_password(service, account)
     if stored is None:
         raise NativeKeychainError("Native vault probe inaccessible from child")
     try:
@@ -117,36 +121,38 @@ def _vault_child(account: str, challenge_hex: str) -> int:
     return 0
 
 
-def run_native_vault_backend_smoke() -> int:
+def run_native_vault_backend_smoke(*, local_development: bool = False) -> int:
     """Run a no-meeting-data set/update/read/clear/delete roundtrip as app."""
     _require_bundle()
     vault_id = secrets.token_hex(16)
     account = vault_id + ":master"
     prepare_account = vault_id + ":ledger-prepare"
-    backend = NativeVaultProbeBackend()
+    backend = NativeVaultProbeBackend(local_development=True) if local_development else NativeVaultProbeBackend()
+    service = LOCAL_VAULT_PROBE_SERVICE if local_development else VAULT_PROBE_SERVICE
+    child_command = LOCAL_CHILD_COMMAND if local_development else VAULT_CHILD_COMMAND
     cleanup_allowed = False
     error: BaseException | None = None
     cleaned = False
     try:
-        if (backend.get_password(VAULT_PROBE_SERVICE, account) is not None
-                or backend.get_password(VAULT_PROBE_SERVICE, prepare_account) is not None):
+        if (backend.get_password(service, account) is not None
+                or backend.get_password(service, prepare_account) is not None):
             raise NativeKeychainError("Random native vault probe identity collision")
         # Own both randomly selected synthetic accounts from here onwards.
         # Always attempt cleanup, including ambiguous failed add/readback.
         cleanup_allowed = True
         old = secrets.token_bytes(32)
         latest = secrets.token_bytes(32)
-        backend.set_password(VAULT_PROBE_SERVICE, account, base64.b64encode(old).decode("ascii"))
-        backend.set_password(VAULT_PROBE_SERVICE, account, base64.b64encode(latest).decode("ascii"))
-        if backend.get_password(VAULT_PROBE_SERVICE, account) != base64.b64encode(latest).decode("ascii"):
+        backend.set_password(service, account, base64.b64encode(old).decode("ascii"))
+        backend.set_password(service, account, base64.b64encode(latest).decode("ascii"))
+        if backend.get_password(service, account) != base64.b64encode(latest).decode("ascii"):
             raise NativeKeychainError("Native vault overwrite not readable")
-        backend.set_password(VAULT_PROBE_SERVICE, prepare_account, "pending")
-        backend.set_password(VAULT_PROBE_SERVICE, prepare_account, "")
-        if backend.get_password(VAULT_PROBE_SERVICE, prepare_account) != "":
+        backend.set_password(service, prepare_account, "pending")
+        backend.set_password(service, prepare_account, "")
+        if backend.get_password(service, prepare_account) != "":
             raise NativeKeychainError("Native vault preparation clear failed")
         challenge = secrets.token_bytes(32)
         proc = subprocess.run(
-            [sys.executable, VAULT_CHILD_COMMAND, account, challenge.hex()],
+            [sys.executable, child_command, account, challenge.hex()],
             capture_output=True, text=True, timeout=25, check=False,
         )
         if proc.returncode != 0:
@@ -165,10 +171,10 @@ def run_native_vault_backend_smoke() -> int:
                 # Cleanup even if write raised *after* creating the item.
                 # Do not touch an account if either preflight check collided.
                 for item in (prepare_account, account):
-                    backend.delete_password(VAULT_PROBE_SERVICE, item)
+                    backend.delete_password(service, item)
                 cleaned = (
-                    backend.get_password(VAULT_PROBE_SERVICE, account) is None
-                    and backend.get_password(VAULT_PROBE_SERVICE, prepare_account) is None
+                    backend.get_password(service, account) is None
+                    and backend.get_password(service, prepare_account) is None
                 )
             except Exception:
                 cleaned = False
@@ -179,7 +185,8 @@ def run_native_vault_backend_smoke() -> int:
     if error is not None:
         raise NativeKeychainError("Native vault Keychain probe failed") from error
     print(json.dumps({
-        "schema": "closedroom.native-vault-probe/v1",
+        "schema": ("closedroom.local-development-vault-probe/v1" if local_development
+                   else "closedroom.native-vault-probe/v1"),
         "status": "pass",
         "independent_child": True,
         "updated_item": True,
@@ -194,6 +201,7 @@ def dispatch_keychain_probe(argv: list[str]) -> bool:
     """Recognize only diagnostic commands; reject malformed invocations."""
     if len(argv) < 2 or argv[1] not in (
         COMMAND, CHILD_COMMAND, VAULT_COMMAND, VAULT_CHILD_COMMAND,
+        LOCAL_COMMAND, LOCAL_CHILD_COMMAND,
     ):
         return False
     if len(argv) == 2 and argv[1] == COMMAND:
@@ -204,6 +212,10 @@ def dispatch_keychain_probe(argv: list[str]) -> bool:
         run_native_vault_backend_smoke()
     elif len(argv) == 4 and argv[1] == VAULT_CHILD_COMMAND:
         _vault_child(argv[2], argv[3])
+    elif len(argv) == 2 and argv[1] == LOCAL_COMMAND:
+        run_native_vault_backend_smoke(local_development=True)
+    elif len(argv) == 4 and argv[1] == LOCAL_CHILD_COMMAND:
+        _vault_child(argv[2], argv[3], local_development=True)
     else:
         raise SystemExit("Invalid packaged Keychain diagnostic arguments")
     return True
